@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "robotiq2f85-tactile"
+version = "0.1.0"
+description = "MuJoCo Robotiq 2F-85 指尖触觉传感器资产与生成工具"
+readme = "README.md"
+requires-python = ">=3.10"
+
+[project.optional-dependencies]
+sim = ["mujoco>=3.1"]
+
+[dependency-groups]
+dev = ["pytest>=7.0", "ruff>=0.15"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+src = ["scripts", "tests"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
