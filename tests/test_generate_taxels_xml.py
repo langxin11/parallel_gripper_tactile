@@ -37,3 +37,33 @@ def test_generated_xml_is_well_formed(tmp_path: Path) -> None:
     ET.indent(tree, space="  ")
     tree.write(output, encoding="utf-8", xml_declaration=True)
     assert ET.parse(output).getroot().get("model") == "robotiq_2f85_taxels"
+
+
+def test_taxel_report_sensor_names_follow_row_major_order() -> None:
+    """读数报告脚本应按左右各自从 00 到 22 的行优先顺序映射传感器。"""
+    report_path = Path(__file__).resolve().parents[1] / "scripts/report_taxels.py"
+    spec = importlib.util.spec_from_file_location("report_taxels", report_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    assert module.TAXEL_SENSOR_NAMES == (
+        "left_taxel_force_00",
+        "left_taxel_force_01",
+        "left_taxel_force_02",
+        "left_taxel_force_10",
+        "left_taxel_force_11",
+        "left_taxel_force_12",
+        "left_taxel_force_20",
+        "left_taxel_force_21",
+        "left_taxel_force_22",
+        "right_taxel_force_00",
+        "right_taxel_force_01",
+        "right_taxel_force_02",
+        "right_taxel_force_10",
+        "right_taxel_force_11",
+        "right_taxel_force_12",
+        "right_taxel_force_20",
+        "right_taxel_force_21",
+        "right_taxel_force_22",
+    )
