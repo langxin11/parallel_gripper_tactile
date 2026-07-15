@@ -42,7 +42,8 @@ uv run --extra sim --extra viz scripts/run_touch_grid_demo.py
 在 viewer 中开启 `Sites` 与 `Contact points` 显示，即可检查 taxel 的局部坐标朝向、球形
 接触体位置及接触点。`report_taxels.py` 的输出顺序与 XML 的 `00` 到 `22` 行优先命名一致。
 `cube_grasp.xml` 固定夹爪为水平方向，并关闭重力以避免物块在闭合前掉落；它用于验证触觉接触，
-不是抬升或滑移实验场景。
+不是抬升或滑移实验场景。场景包含世界 ``z=0`` 的水平地面；夹爪根节点绕 X 轴旋转 90°，
+使指长轴沿世界 Y 轴、两指的触觉法向沿世界 ±X。
 
 ## 接触模型
 

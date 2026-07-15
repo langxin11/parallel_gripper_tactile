@@ -81,6 +81,10 @@ def test_cube_grasp_scene_places_cube_between_taxel_pads() -> None:
     assert root.find(".//body[@name='target_cube']") is not None
     assert root.find(".//freejoint[@name='target_cube_free_joint']") is not None
     assert root.find(".//key[@name='closed']").get("ctrl") == "220"
+    assert root.find(".//geom[@name='ground']") is not None
+    base = root.find(".//body[@name='base']")
+    assert base is not None
+    assert base.get("quat") == "0.70710678 0.70710678 0 0"
 
 
 def test_touch_grid_model_creates_two_32_by_32_collision_pads() -> None:
