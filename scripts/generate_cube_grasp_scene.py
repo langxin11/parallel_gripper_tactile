@@ -44,6 +44,30 @@ def build_cube_grasp_tree(gripper_xml: Path) -> ET.ElementTree:
     option.set("timestep", "0.002")
     option.set("integrator", "implicitfast")
 
+    asset = root.find("asset")
+    if asset is None:
+        raise ValueError("夹爪资产缺少 asset 节点。")
+    ET.SubElement(
+        asset,
+        "texture",
+        name="ground_checker",
+        type="2d",
+        builtin="checker",
+        rgb1="0.12 0.15 0.18",
+        rgb2="0.48 0.52 0.56",
+        width="512",
+        height="512",
+    )
+    ET.SubElement(
+        asset,
+        "material",
+        name="ground_checker",
+        texture="ground_checker",
+        texuniform="true",
+        texrepeat="16 16",
+        reflectance="0.15",
+    )
+
     worldbody = root.find("worldbody")
     if worldbody is None:
         raise ValueError("夹爪资产缺少 worldbody 节点。")
@@ -58,8 +82,8 @@ def build_cube_grasp_tree(gripper_xml: Path) -> ET.ElementTree:
         "geom",
         name="ground",
         type="plane",
-        size="1 1 0.05",
-        rgba="0.18 0.22 0.26 1",
+        size="0 0 0.05",
+        material="ground_checker",
         friction="0.9 0.02 0.001",
     )
     ET.SubElement(worldbody, "light", pos="0 -0.3 0.5", directional="true", dir="0 0.5 -1")

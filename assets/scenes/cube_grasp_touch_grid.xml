@@ -18,6 +18,8 @@
     <mesh file="spring_link.stl" />
     <mesh file="follower.stl" />
     <mesh file="tongue.stl" />
+    <texture name="ground_checker" type="2d" builtin="checker" rgb1="0.12 0.15 0.18" rgb2="0.48 0.52 0.56" width="512" height="512" />
+    <material name="ground_checker" texture="ground_checker" texuniform="true" texrepeat="16 16" reflectance="0.15" />
   </asset>
   <default>
     <default class="2f85">
@@ -2162,7 +2164,7 @@
         </body>
       </body>
     </body>
-    <geom name="ground" type="plane" size="1 1 0.05" rgba="0.18 0.22 0.26 1" friction="0.9 0.02 0.001" />
+    <geom name="ground" type="plane" size="0 0 0.05" material="ground_checker" friction="0.9 0.02 0.001" />
     <light pos="0 -0.3 0.5" directional="true" dir="0 0.5 -1" />
     <camera name="grasp_overview" pos="0.28 -0.35 0.22" xyaxes="0.78 0.62 0  -0.30 0.38 0.87" />
     <body name="target_cube" pos="0 -0.155 0.08">
