@@ -7,11 +7,13 @@
 - `assets/robotiq_2f85/2f85.xml`：未修改的基础夹爪模型。
 - `scripts/generate_taxels_xml.py`：从基础模型生成带 18 个离散 taxel 的派生 MJCF。
 - `assets/robotiq_2f85/2f85_taxels.xml`：生成结果；不可手工编辑。
+- `assets/robotiq_2f85/2f85_touch_grid.xml`：每侧 32×32、三通道的 `touch_grid` 版本。
 - `assets/scenes/cube_grasp.xml`：水平夹爪闭合抓取居中正方体的生成场景。
 - `scripts/check_mjcf.py`：使用 MuJoCo 编译资产的验证工具。
 - `scripts/view_taxels.py`：在 MuJoCo viewer 中目视检查两侧 taxel 的位置与尺寸。
 - `scripts/report_taxels.py`：将传感器读数按左右两个 3×3 网格输出。
 - `scripts/run_cube_grasp_demo.py`：闭合夹爪并打印两侧 taxel 合力。
+- `scripts/run_touch_grid_demo.py`：用 OpenCV 将切向力画为箭头、法向压力画为绿→红颜色。
 
 这里的默认实现是每个指尖 3×3 球形 taxel。每个 taxel 用一个球形接触 geom 与一个局部坐标系对齐的 `force` sensor 表示；此外，每侧还提供 `*_pad_force` 和 `*_pad_torque`。
 
@@ -21,12 +23,15 @@
 
 ```bash
 uv run scripts/generate_taxels_xml.py
+uv run scripts/generate_touch_grid_xml.py
 uv run scripts/generate_cube_grasp_scene.py
+uv run scripts/generate_cube_grasp_scene.py --gripper-xml assets/robotiq_2f85/2f85_touch_grid.xml --output-xml assets/scenes/cube_grasp_touch_grid.xml
 uv run pytest
 uv run --extra sim scripts/check_mjcf.py
 uv run --extra sim scripts/view_taxels.py
 uv run --extra sim scripts/report_taxels.py
 uv run --extra sim scripts/run_cube_grasp_demo.py --viewer
+uv run --extra sim --extra viz scripts/run_touch_grid_demo.py
 ```
 
 在 viewer 中开启 `Sites` 与 `Contact points` 显示，即可检查 taxel 的局部坐标朝向、球形

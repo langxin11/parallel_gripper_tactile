@@ -81,3 +81,17 @@ def test_cube_grasp_scene_places_cube_between_taxel_pads() -> None:
     assert root.find(".//body[@name='target_cube']") is not None
     assert root.find(".//freejoint[@name='target_cube_free_joint']") is not None
     assert root.find(".//key[@name='closed']").get("ctrl") == "220"
+
+
+def test_touch_grid_model_creates_two_32_by_32_collision_pads() -> None:
+    """touch_grid 版本应为左右指腹各生成 1024 个碰撞单元和一个插件传感器。"""
+    script_path = Path(__file__).resolve().parents[1] / "scripts/generate_touch_grid_xml.py"
+    spec = importlib.util.spec_from_file_location("generate_touch_grid_xml", script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    root = module.build_touch_grid_tree(module.DEFAULT_BASE_XML).getroot()
+    cells = root.findall(".//geom[@name]")
+    assert len([cell for cell in cells if "_touch_cell_" in cell.get("name", "")]) == 2048
+    assert len(root.findall("./sensor/plugin")) == 2
