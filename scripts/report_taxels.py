@@ -47,7 +47,8 @@ def read_taxel_forces(xml_path: Path) -> dict[str, list[float]]:
     forces: dict[str, list[float]] = {"left": [], "right": []}
     for name in TAXEL_SENSOR_NAMES:
         side = name.split("_", maxsplit=1)[0]
-        forces[side].append(float(data.sensor(name).data[0]))
+        # taxel site 的局部 z 轴对齐指尖法向；压缩在该坐标系中为负，向用户输出正值。
+        forces[side].append(-float(data.sensor(name).data[2]))
     return forces
 
 

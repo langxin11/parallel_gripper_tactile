@@ -42,6 +42,12 @@ PAD_TOP_EDGE_Z = 0.148125
 MIDDLE_ROW_TO_TOP_EDGE = 0.012
 TAXEL_RADIUS = 0.0028
 TAXEL_SITE_QUAT = "1 0 -1 0"
+# 该参数组实现的是“软化的刚体接触”：允许约毫米级的接触过渡，
+# 但不表示硅胶几何发生真实形变。
+SOFT_CONTACT_KWARGS = {
+    "solimp": "0.90 0.95 0.002",
+    "solref": "0.015 1",
+}
 
 
 def _format_xyz(x: float, y: float, z: float) -> str:
@@ -87,10 +93,9 @@ def _append_taxels(pad: ET.Element, side: str) -> None:
             size=f"{TAXEL_RADIUS:.4f}",
             mass="1e-6",
             friction="0.7 0.03 0.01",
-            solimp="0.95 0.99 0.001",
-            solref="0.004 1",
             priority="2",
             rgba=color,
+            **SOFT_CONTACT_KWARGS,
         )
         ET.SubElement(
             body,

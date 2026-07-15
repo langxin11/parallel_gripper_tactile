@@ -1,7 +1,7 @@
 <?xml version='1.0' encoding='utf-8'?>
-<mujoco model="robotiq_2f85_taxels">
-  <compiler angle="radian" meshdir="assets" autolimits="true" />
-  <option cone="elliptic" impratio="10" />
+<mujoco model="robotiq_2f85_cube_grasp">
+  <compiler angle="radian" meshdir="../robotiq_2f85/assets" autolimits="true" />
+  <option cone="elliptic" impratio="10" gravity="0 0 0" timestep="0.002" integrator="implicitfast" />
   <size njmax="128" nconmax="256" />
   <asset>
     <material name="metal" rgba="0.58 0.58 0.58 1" />
@@ -187,6 +187,12 @@
         </body>
       </body>
     </body>
+    <light pos="0 -0.3 0.5" directional="true" dir="0 0.5 -1" />
+    <camera name="grasp_overview" pos="0.24 -0.28 0.23" xyaxes="0.76 0.65 0  -0.36 0.42 0.83" />
+    <body name="target_cube" pos="0 0 0.155">
+      <freejoint name="target_cube_free_joint" />
+      <geom name="target_cube_geom" type="box" size="0.015 0.015 0.015" mass="0.03" friction="0.8 0.02 0.001" solimp="0.90 0.95 0.002" solref="0.015 1" rgba="0.95 0.55 0.1 1" />
+    </body>
   </worldbody>
   <contact>
     <exclude body1="base" body2="left_driver" />
@@ -234,4 +240,8 @@
     <force name="right_pad_force" site="right_pad_ft_site" />
     <torque name="right_pad_torque" site="right_pad_ft_site" />
   </sensor>
+  <keyframe>
+    <key name="open" ctrl="0" />
+    <key name="closed" ctrl="220" />
+  </keyframe>
 </mujoco>

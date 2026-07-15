@@ -21,7 +21,7 @@ def main() -> None:
     except ModuleNotFoundError as error:
         raise ModuleNotFoundError("请以 `uv run --extra sim` 运行此脚本。") from error
 
-    default_xml = Path(__file__).resolve().parents[1] / "assets/robotiq_2f85/2f85_taxels.xml"
+    default_xml = Path(__file__).resolve().parents[1] / "assets/scenes/cube_grasp.xml"
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "xml", nargs="?", type=Path, default=default_xml, help="待显示的 MJCF 文件。"

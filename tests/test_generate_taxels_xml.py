@@ -67,3 +67,17 @@ def test_taxel_report_sensor_names_follow_row_major_order() -> None:
         "right_taxel_force_21",
         "right_taxel_force_22",
     )
+
+
+def test_cube_grasp_scene_places_cube_between_taxel_pads() -> None:
+    """闭合抓取场景应包含两个指尖中间的自由正方体和闭合 keyframe。"""
+    scene_path = Path(__file__).resolve().parents[1] / "scripts/generate_cube_grasp_scene.py"
+    spec = importlib.util.spec_from_file_location("generate_cube_grasp_scene", scene_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    root = module.build_cube_grasp_tree(module.DEFAULT_GRIPPER_XML).getroot()
+    assert root.find(".//body[@name='target_cube']") is not None
+    assert root.find(".//freejoint[@name='target_cube_free_joint']") is not None
+    assert root.find(".//key[@name='closed']").get("ctrl") == "220"
