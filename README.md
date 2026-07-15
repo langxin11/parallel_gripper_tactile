@@ -36,6 +36,8 @@ uv run --extra sim --extra viz scripts/run_touch_grid_demo.py
 
 两个闭合演示默认以实时速度启动 MuJoCo viewer。自动化验证或无图形环境可传入
 `--no-viewer`；`run_touch_grid_demo.py` 另可传入 `--no-window` 关闭 OpenCV 面板。
+默认是手动控制模式：在 viewer 的 **Control** 面板中调节 `fingers_actuator`，即可边闭合
+边查看 taxel 或 OpenCV 触觉图。使用 `--auto-close` 才会按预设轨迹自动闭合。
 
 在 viewer 中开启 `Sites` 与 `Contact points` 显示，即可检查 taxel 的局部坐标朝向、球形
 接触体位置及接触点。`report_taxels.py` 的输出顺序与 XML 的 `00` 到 `22` 行优先命名一致。

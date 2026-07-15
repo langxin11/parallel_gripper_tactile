@@ -32,7 +32,12 @@ def _read_tactile(data, name: str):
 
 
 def main() -> None:
-    """执行闭合抓取并实时显示左右触觉图；按 Esc 可提前退出。"""
+    """实时运行手动抓取，并显示左右触觉图。
+
+    默认由 MuJoCo viewer 的控制滑块直接写入 ``fingers_actuator``；本脚本不覆盖
+    ``data.ctrl``，因此可在闭合过程中观察 OpenCV 触觉图。传入 ``--auto-close``
+    时才执行预设的自动闭合轨迹。
+    """
     try:
         import cv2
         import mujoco
@@ -47,7 +52,10 @@ def main() -> None:
         "--no-window", action="store_true", help="不打开 OpenCV 窗口，适用于自动验证。"
     )
     parser.add_argument("--no-viewer", action="store_true", help="不打开 MuJoCo 交互式 viewer。")
+    parser.add_argument("--auto-close", action="store_true", help="按预设轨迹自动闭合夹爪。")
     args = parser.parse_args()
+    if args.no_viewer and not args.auto_close:
+        parser.error("手动模式需要 MuJoCo viewer；无界面运行请同时传入 --auto-close。")
     model = mujoco.MjModel.from_xml_path(str(args.scene))
     data = mujoco.MjData(model)
     viewer = None
@@ -60,8 +68,10 @@ def main() -> None:
             model, mujoco.mjtObj.mjOBJ_CAMERA, "grasp_overview"
         )
     try:
-        for step in range(args.steps):
-            data.ctrl[0] = 220 * min(1.0, step / max(1, args.steps // 3))
+        step = 0
+        while viewer is None or viewer.is_running():
+            if args.auto_close:
+                data.ctrl[0] = 220 * min(1.0, step / max(1, args.steps // 3))
             mujoco.mj_step(model, data)
             if not args.no_window and step % 5 == 0:
                 cv2.imshow("touch_left", tactile_to_bgr(_read_tactile(data, "touch_left")))
@@ -71,6 +81,9 @@ def main() -> None:
             if viewer is not None:
                 viewer.sync()
                 time.sleep(model.opt.timestep)
+            step += 1
+            if args.auto_close and step >= args.steps:
+                break
     finally:
         if viewer is not None:
             viewer.close()

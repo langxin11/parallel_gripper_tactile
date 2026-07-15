@@ -17,10 +17,11 @@ def _taxel_force_sum(data, side: str) -> float:
 
 
 def main() -> None:
-    """运行闭合抓取演示，并默认打开实时 MuJoCo viewer。
+    """运行手动抓取演示，并默认打开实时 MuJoCo viewer。
 
-    物块初始位于两个指尖之间，夹爪控制量从零匀速增长至指定值。
-    场景关闭重力，以隔离接触模型和 taxel 映射验证。
+    物块初始位于两个指尖之间。默认由 viewer 控制滑块直接控制夹爪；
+    ``--auto-close`` 才会让夹爪按预设轨迹闭合。场景关闭重力，以隔离
+    接触模型和 taxel 映射验证。
     """
     try:
         import mujoco
@@ -35,7 +36,10 @@ def main() -> None:
         "--close-control", type=float, default=220, help="最终夹爪控制量，范围 0~255。"
     )
     parser.add_argument("--no-viewer", action="store_true", help="不打开 MuJoCo 交互式 viewer。")
+    parser.add_argument("--auto-close", action="store_true", help="按预设轨迹自动闭合夹爪。")
     args = parser.parse_args()
+    if args.no_viewer and not args.auto_close:
+        parser.error("手动模式需要 MuJoCo viewer；无界面运行请同时传入 --auto-close。")
 
     model = mujoco.MjModel.from_xml_path(str(args.scene))
     data = mujoco.MjData(model)
@@ -50,8 +54,10 @@ def main() -> None:
         )
 
     try:
-        for step in range(args.steps):
-            data.ctrl[0] = args.close_control * min(1.0, step / max(1, args.steps // 3))
+        step = 0
+        while viewer is None or viewer.is_running():
+            if args.auto_close:
+                data.ctrl[0] = args.close_control * min(1.0, step / max(1, args.steps // 3))
             mujoco.mj_step(model, data)
             if step % 100 == 0 or step == args.steps - 1:
                 print(
@@ -62,6 +68,9 @@ def main() -> None:
             if viewer is not None:
                 viewer.sync()
                 time.sleep(model.opt.timestep)
+            step += 1
+            if args.auto_close and step >= args.steps:
+                break
     finally:
         if viewer is not None:
             viewer.close()
