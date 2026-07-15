@@ -30,9 +30,12 @@ uv run pytest
 uv run --extra sim scripts/check_mjcf.py
 uv run --extra sim scripts/view_taxels.py
 uv run --extra sim scripts/report_taxels.py
-uv run --extra sim scripts/run_cube_grasp_demo.py --viewer
+uv run --extra sim scripts/run_cube_grasp_demo.py
 uv run --extra sim --extra viz scripts/run_touch_grid_demo.py
 ```
+
+两个闭合演示默认以实时速度启动 MuJoCo viewer。自动化验证或无图形环境可传入
+`--no-viewer`；`run_touch_grid_demo.py` 另可传入 `--no-window` 关闭 OpenCV 面板。
 
 在 viewer 中开启 `Sites` 与 `Contact points` 显示，即可检查 taxel 的局部坐标朝向、球形
 接触体位置及接触点。`report_taxels.py` 的输出顺序与 XML 的 `00` 到 `22` 行优先命名一致。

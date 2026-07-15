@@ -17,7 +17,7 @@ def _taxel_force_sum(data, side: str) -> float:
 
 
 def main() -> None:
-    """运行闭合抓取演示，可选打开 MuJoCo viewer。
+    """运行闭合抓取演示，并默认打开实时 MuJoCo viewer。
 
     物块初始位于两个指尖之间，夹爪控制量从零匀速增长至指定值。
     场景关闭重力，以隔离接触模型和 taxel 映射验证。
@@ -34,13 +34,13 @@ def main() -> None:
     parser.add_argument(
         "--close-control", type=float, default=220, help="最终夹爪控制量，范围 0~255。"
     )
-    parser.add_argument("--viewer", action="store_true", help="打开 MuJoCo 交互式 viewer。")
+    parser.add_argument("--no-viewer", action="store_true", help="不打开 MuJoCo 交互式 viewer。")
     args = parser.parse_args()
 
     model = mujoco.MjModel.from_xml_path(str(args.scene))
     data = mujoco.MjData(model)
     viewer = None
-    if args.viewer:
+    if not args.no_viewer:
         import mujoco.viewer
 
         viewer = mujoco.viewer.launch_passive(model, data, show_left_ui=True, show_right_ui=True)

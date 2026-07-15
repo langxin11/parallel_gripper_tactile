@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import time
 from pathlib import Path
 
 
@@ -45,17 +46,34 @@ def main() -> None:
     parser.add_argument(
         "--no-window", action="store_true", help="不打开 OpenCV 窗口，适用于自动验证。"
     )
+    parser.add_argument("--no-viewer", action="store_true", help="不打开 MuJoCo 交互式 viewer。")
     args = parser.parse_args()
     model = mujoco.MjModel.from_xml_path(str(args.scene))
     data = mujoco.MjData(model)
-    for step in range(args.steps):
-        data.ctrl[0] = 220 * min(1.0, step / max(1, args.steps // 3))
-        mujoco.mj_step(model, data)
-        if not args.no_window and step % 5 == 0:
-            cv2.imshow("touch_left", tactile_to_bgr(_read_tactile(data, "touch_left")))
-            cv2.imshow("touch_right", tactile_to_bgr(_read_tactile(data, "touch_right")))
-            if cv2.waitKey(1) == 27:
-                break
+    viewer = None
+    if not args.no_viewer:
+        import mujoco.viewer
+
+        viewer = mujoco.viewer.launch_passive(model, data, show_left_ui=True, show_right_ui=True)
+        viewer.cam.type = mujoco.mjtCamera.mjCAMERA_FIXED
+        viewer.cam.fixedcamid = mujoco.mj_name2id(
+            model, mujoco.mjtObj.mjOBJ_CAMERA, "grasp_overview"
+        )
+    try:
+        for step in range(args.steps):
+            data.ctrl[0] = 220 * min(1.0, step / max(1, args.steps // 3))
+            mujoco.mj_step(model, data)
+            if not args.no_window and step % 5 == 0:
+                cv2.imshow("touch_left", tactile_to_bgr(_read_tactile(data, "touch_left")))
+                cv2.imshow("touch_right", tactile_to_bgr(_read_tactile(data, "touch_right")))
+                if cv2.waitKey(1) == 27:
+                    break
+            if viewer is not None:
+                viewer.sync()
+                time.sleep(model.opt.timestep)
+    finally:
+        if viewer is not None:
+            viewer.close()
     if not args.no_window:
         cv2.destroyAllWindows()
     left = _read_tactile(data, "touch_left")
