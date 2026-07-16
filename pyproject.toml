@@ -9,8 +9,10 @@ description = "MuJoCo Robotiq 2F-85 指尖触觉传感器资产与生成工具"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+    "matplotlib>=3.8",
     "mujoco>=3.1",
     "opencv-python>=4.9",
+    "SciencePlots>=2.0",
 ]
 
 [dependency-groups]

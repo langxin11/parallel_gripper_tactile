@@ -2,7 +2,10 @@
 <mujoco model="robotiq_2f85_cube_grasp">
   <compiler angle="radian" meshdir="../robotiq_2f85/assets" autolimits="true" />
   <option cone="elliptic" impratio="10" gravity="0 0 -9.81" timestep="0.002" integrator="implicitfast" />
-  <size njmax="128" nconmax="256" />
+  <extension>
+    <plugin plugin="mujoco.sensor.touch_grid" />
+  </extension>
+  <size memory="128M" />
   <asset>
     <material name="metal" rgba="0.58 0.58 0.58 1" />
     <material name="silicone" rgba="0.1882 0.1882 0.1882 1" />
@@ -81,45 +84,16 @@
           <geom class="collision" pos="0.0509079 -0.10392 -0.0091" quat="1 -1 0 0" type="mesh" mesh="follower" />
           <geom class="collision" pos="0.0509079 -0.10392 -0.0091" quat="1 -1 0 0" type="mesh" mesh="tongue" />
           <body name="left_pad" pos="-0.0377897 -0.103916 -0.0091" quat="1 -1 0 0">
-            <geom class="pad_box1" name="left_pad1" />
-            <geom class="pad_box2" name="left_pad2" />
-            <body name="left_taxel_body_00" pos="0.0453 -0.0070 0.1291">
-              <geom name="left_taxel_geom_00" type="sphere" size="0.0028" mass="1e-6" friction="0.7 0.03 0.01" priority="2" rgba="0 1 0 0.45" solimp="0.90 0.95 0.002" solref="0.015 1" />
-              <site name="left_taxel_site_00" size="0.0008" quat="1 0 -1 0" rgba="0 1 0 0.45" />
-            </body>
-            <body name="left_taxel_body_01" pos="0.0453 0.0000 0.1291">
-              <geom name="left_taxel_geom_01" type="sphere" size="0.0028" mass="1e-6" friction="0.7 0.03 0.01" priority="2" rgba="0 1 0 0.45" solimp="0.90 0.95 0.002" solref="0.015 1" />
-              <site name="left_taxel_site_01" size="0.0008" quat="1 0 -1 0" rgba="0 1 0 0.45" />
-            </body>
-            <body name="left_taxel_body_02" pos="0.0453 0.0070 0.1291">
-              <geom name="left_taxel_geom_02" type="sphere" size="0.0028" mass="1e-6" friction="0.7 0.03 0.01" priority="2" rgba="0 1 0 0.45" solimp="0.90 0.95 0.002" solref="0.015 1" />
-              <site name="left_taxel_site_02" size="0.0008" quat="1 0 -1 0" rgba="0 1 0 0.45" />
-            </body>
-            <body name="left_taxel_body_10" pos="0.0453 -0.0070 0.1361">
-              <geom name="left_taxel_geom_10" type="sphere" size="0.0028" mass="1e-6" friction="0.7 0.03 0.01" priority="2" rgba="0 1 0 0.45" solimp="0.90 0.95 0.002" solref="0.015 1" />
-              <site name="left_taxel_site_10" size="0.0008" quat="1 0 -1 0" rgba="0 1 0 0.45" />
-            </body>
-            <body name="left_taxel_body_11" pos="0.0453 0.0000 0.1361">
-              <geom name="left_taxel_geom_11" type="sphere" size="0.0028" mass="1e-6" friction="0.7 0.03 0.01" priority="2" rgba="0 1 0 0.45" solimp="0.90 0.95 0.002" solref="0.015 1" />
-              <site name="left_taxel_site_11" size="0.0008" quat="1 0 -1 0" rgba="0 1 0 0.45" />
-            </body>
-            <body name="left_taxel_body_12" pos="0.0453 0.0070 0.1361">
-              <geom name="left_taxel_geom_12" type="sphere" size="0.0028" mass="1e-6" friction="0.7 0.03 0.01" priority="2" rgba="0 1 0 0.45" solimp="0.90 0.95 0.002" solref="0.015 1" />
-              <site name="left_taxel_site_12" size="0.0008" quat="1 0 -1 0" rgba="0 1 0 0.45" />
-            </body>
-            <body name="left_taxel_body_20" pos="0.0453 -0.0070 0.1431">
-              <geom name="left_taxel_geom_20" type="sphere" size="0.0028" mass="1e-6" friction="0.7 0.03 0.01" priority="2" rgba="0 1 0 0.45" solimp="0.90 0.95 0.002" solref="0.015 1" />
-              <site name="left_taxel_site_20" size="0.0008" quat="1 0 -1 0" rgba="0 1 0 0.45" />
-            </body>
-            <body name="left_taxel_body_21" pos="0.0453 0.0000 0.1431">
-              <geom name="left_taxel_geom_21" type="sphere" size="0.0028" mass="1e-6" friction="0.7 0.03 0.01" priority="2" rgba="0 1 0 0.45" solimp="0.90 0.95 0.002" solref="0.015 1" />
-              <site name="left_taxel_site_21" size="0.0008" quat="1 0 -1 0" rgba="0 1 0 0.45" />
-            </body>
-            <body name="left_taxel_body_22" pos="0.0453 0.0070 0.1431">
-              <geom name="left_taxel_geom_22" type="sphere" size="0.0028" mass="1e-6" friction="0.7 0.03 0.01" priority="2" rgba="0 1 0 0.45" solimp="0.90 0.95 0.002" solref="0.015 1" />
-              <site name="left_taxel_site_22" size="0.0008" quat="1 0 -1 0" rgba="0 1 0 0.45" />
-            </body>
-            <site name="left_pad_ft_site" pos="0.0433 0.0000 0.1361" quat="1 0 -1 0" size="0.003" rgba="1 0 0 0.5" />
+            <geom name="left_touch_cell_00_00" type="box" pos="0.043258 -0.007333 0.116875" size="0.002000 0.003667 0.006250" mass="1e-6" friction="0.7 0.03 0.01" solimp="0.90 0.95 0.002" solref="0.015 1" rgba="0.2 0.2 0.2 1" />
+            <geom name="left_touch_cell_00_01" type="box" pos="0.043258 0.000000 0.116875" size="0.002000 0.003667 0.006250" mass="1e-6" friction="0.7 0.03 0.01" solimp="0.90 0.95 0.002" solref="0.015 1" rgba="0.2 0.2 0.2 1" />
+            <geom name="left_touch_cell_00_02" type="box" pos="0.043258 0.007333 0.116875" size="0.002000 0.003667 0.006250" mass="1e-6" friction="0.7 0.03 0.01" solimp="0.90 0.95 0.002" solref="0.015 1" rgba="0.2 0.2 0.2 1" />
+            <geom name="left_touch_cell_01_00" type="box" pos="0.043258 -0.007333 0.129375" size="0.002000 0.003667 0.006250" mass="1e-6" friction="0.7 0.03 0.01" solimp="0.90 0.95 0.002" solref="0.015 1" rgba="0.2 0.2 0.2 1" />
+            <geom name="left_touch_cell_01_01" type="box" pos="0.043258 0.000000 0.129375" size="0.002000 0.003667 0.006250" mass="1e-6" friction="0.7 0.03 0.01" solimp="0.90 0.95 0.002" solref="0.015 1" rgba="0.2 0.2 0.2 1" />
+            <geom name="left_touch_cell_01_02" type="box" pos="0.043258 0.007333 0.129375" size="0.002000 0.003667 0.006250" mass="1e-6" friction="0.7 0.03 0.01" solimp="0.90 0.95 0.002" solref="0.015 1" rgba="0.2 0.2 0.2 1" />
+            <geom name="left_touch_cell_02_00" type="box" pos="0.043258 -0.007333 0.141875" size="0.002000 0.003667 0.006250" mass="1e-6" friction="0.7 0.03 0.01" solimp="0.90 0.95 0.002" solref="0.015 1" rgba="0.2 0.2 0.2 1" />
+            <geom name="left_touch_cell_02_01" type="box" pos="0.043258 0.000000 0.141875" size="0.002000 0.003667 0.006250" mass="1e-6" friction="0.7 0.03 0.01" solimp="0.90 0.95 0.002" solref="0.015 1" rgba="0.2 0.2 0.2 1" />
+            <geom name="left_touch_cell_02_02" type="box" pos="0.043258 0.007333 0.141875" size="0.002000 0.003667 0.006250" mass="1e-6" friction="0.7 0.03 0.01" solimp="0.90 0.95 0.002" solref="0.015 1" rgba="0.2 0.2 0.2 1" />
+            <site name="touch_left" pos="0.043258 0 0.129375" quat="1 0 -1 0" size="0.001" rgba="0 0 0 0" />
           </body>
         </body>
       </body>
@@ -147,45 +121,16 @@
           <geom class="collision" pos="0.0509079 -0.10392 -0.0091" quat="1 -1 0 0" mesh="tongue" />
           <geom class="collision" pos="0.0509079 -0.10392 -0.0091" quat="1 -1 0 0" mesh="follower" />
           <body name="right_pad" pos="-0.0377897 -0.103916 -0.0091" quat="1 -1 0 0">
-            <geom class="pad_box1" name="right_pad1" />
-            <geom class="pad_box2" name="right_pad2" />
-            <body name="right_taxel_body_00" pos="0.0453 -0.0070 0.1291">
-              <geom name="right_taxel_geom_00" type="sphere" size="0.0028" mass="1e-6" friction="0.7 0.03 0.01" priority="2" rgba="0 0 1 0.45" solimp="0.90 0.95 0.002" solref="0.015 1" />
-              <site name="right_taxel_site_00" size="0.0008" quat="1 0 -1 0" rgba="0 0 1 0.45" />
-            </body>
-            <body name="right_taxel_body_01" pos="0.0453 0.0000 0.1291">
-              <geom name="right_taxel_geom_01" type="sphere" size="0.0028" mass="1e-6" friction="0.7 0.03 0.01" priority="2" rgba="0 0 1 0.45" solimp="0.90 0.95 0.002" solref="0.015 1" />
-              <site name="right_taxel_site_01" size="0.0008" quat="1 0 -1 0" rgba="0 0 1 0.45" />
-            </body>
-            <body name="right_taxel_body_02" pos="0.0453 0.0070 0.1291">
-              <geom name="right_taxel_geom_02" type="sphere" size="0.0028" mass="1e-6" friction="0.7 0.03 0.01" priority="2" rgba="0 0 1 0.45" solimp="0.90 0.95 0.002" solref="0.015 1" />
-              <site name="right_taxel_site_02" size="0.0008" quat="1 0 -1 0" rgba="0 0 1 0.45" />
-            </body>
-            <body name="right_taxel_body_10" pos="0.0453 -0.0070 0.1361">
-              <geom name="right_taxel_geom_10" type="sphere" size="0.0028" mass="1e-6" friction="0.7 0.03 0.01" priority="2" rgba="0 0 1 0.45" solimp="0.90 0.95 0.002" solref="0.015 1" />
-              <site name="right_taxel_site_10" size="0.0008" quat="1 0 -1 0" rgba="0 0 1 0.45" />
-            </body>
-            <body name="right_taxel_body_11" pos="0.0453 0.0000 0.1361">
-              <geom name="right_taxel_geom_11" type="sphere" size="0.0028" mass="1e-6" friction="0.7 0.03 0.01" priority="2" rgba="0 0 1 0.45" solimp="0.90 0.95 0.002" solref="0.015 1" />
-              <site name="right_taxel_site_11" size="0.0008" quat="1 0 -1 0" rgba="0 0 1 0.45" />
-            </body>
-            <body name="right_taxel_body_12" pos="0.0453 0.0070 0.1361">
-              <geom name="right_taxel_geom_12" type="sphere" size="0.0028" mass="1e-6" friction="0.7 0.03 0.01" priority="2" rgba="0 0 1 0.45" solimp="0.90 0.95 0.002" solref="0.015 1" />
-              <site name="right_taxel_site_12" size="0.0008" quat="1 0 -1 0" rgba="0 0 1 0.45" />
-            </body>
-            <body name="right_taxel_body_20" pos="0.0453 -0.0070 0.1431">
-              <geom name="right_taxel_geom_20" type="sphere" size="0.0028" mass="1e-6" friction="0.7 0.03 0.01" priority="2" rgba="0 0 1 0.45" solimp="0.90 0.95 0.002" solref="0.015 1" />
-              <site name="right_taxel_site_20" size="0.0008" quat="1 0 -1 0" rgba="0 0 1 0.45" />
-            </body>
-            <body name="right_taxel_body_21" pos="0.0453 0.0000 0.1431">
-              <geom name="right_taxel_geom_21" type="sphere" size="0.0028" mass="1e-6" friction="0.7 0.03 0.01" priority="2" rgba="0 0 1 0.45" solimp="0.90 0.95 0.002" solref="0.015 1" />
-              <site name="right_taxel_site_21" size="0.0008" quat="1 0 -1 0" rgba="0 0 1 0.45" />
-            </body>
-            <body name="right_taxel_body_22" pos="0.0453 0.0070 0.1431">
-              <geom name="right_taxel_geom_22" type="sphere" size="0.0028" mass="1e-6" friction="0.7 0.03 0.01" priority="2" rgba="0 0 1 0.45" solimp="0.90 0.95 0.002" solref="0.015 1" />
-              <site name="right_taxel_site_22" size="0.0008" quat="1 0 -1 0" rgba="0 0 1 0.45" />
-            </body>
-            <site name="right_pad_ft_site" pos="0.0433 0.0000 0.1361" quat="1 0 -1 0" size="0.003" rgba="1 0 0 0.5" />
+            <geom name="right_touch_cell_00_00" type="box" pos="0.043258 -0.007333 0.116875" size="0.002000 0.003667 0.006250" mass="1e-6" friction="0.7 0.03 0.01" solimp="0.90 0.95 0.002" solref="0.015 1" rgba="0.2 0.2 0.2 1" />
+            <geom name="right_touch_cell_00_01" type="box" pos="0.043258 0.000000 0.116875" size="0.002000 0.003667 0.006250" mass="1e-6" friction="0.7 0.03 0.01" solimp="0.90 0.95 0.002" solref="0.015 1" rgba="0.2 0.2 0.2 1" />
+            <geom name="right_touch_cell_00_02" type="box" pos="0.043258 0.007333 0.116875" size="0.002000 0.003667 0.006250" mass="1e-6" friction="0.7 0.03 0.01" solimp="0.90 0.95 0.002" solref="0.015 1" rgba="0.2 0.2 0.2 1" />
+            <geom name="right_touch_cell_01_00" type="box" pos="0.043258 -0.007333 0.129375" size="0.002000 0.003667 0.006250" mass="1e-6" friction="0.7 0.03 0.01" solimp="0.90 0.95 0.002" solref="0.015 1" rgba="0.2 0.2 0.2 1" />
+            <geom name="right_touch_cell_01_01" type="box" pos="0.043258 0.000000 0.129375" size="0.002000 0.003667 0.006250" mass="1e-6" friction="0.7 0.03 0.01" solimp="0.90 0.95 0.002" solref="0.015 1" rgba="0.2 0.2 0.2 1" />
+            <geom name="right_touch_cell_01_02" type="box" pos="0.043258 0.007333 0.129375" size="0.002000 0.003667 0.006250" mass="1e-6" friction="0.7 0.03 0.01" solimp="0.90 0.95 0.002" solref="0.015 1" rgba="0.2 0.2 0.2 1" />
+            <geom name="right_touch_cell_02_00" type="box" pos="0.043258 -0.007333 0.141875" size="0.002000 0.003667 0.006250" mass="1e-6" friction="0.7 0.03 0.01" solimp="0.90 0.95 0.002" solref="0.015 1" rgba="0.2 0.2 0.2 1" />
+            <geom name="right_touch_cell_02_01" type="box" pos="0.043258 0.000000 0.141875" size="0.002000 0.003667 0.006250" mass="1e-6" friction="0.7 0.03 0.01" solimp="0.90 0.95 0.002" solref="0.015 1" rgba="0.2 0.2 0.2 1" />
+            <geom name="right_touch_cell_02_02" type="box" pos="0.043258 0.007333 0.141875" size="0.002000 0.003667 0.006250" mass="1e-6" friction="0.7 0.03 0.01" solimp="0.90 0.95 0.002" solref="0.015 1" rgba="0.2 0.2 0.2 1" />
+            <site name="touch_right" pos="0.043258 0 0.129375" quat="1 0 -1 0" size="0.001" rgba="0 0 0 0" />
           </body>
         </body>
       </body>
@@ -222,28 +167,18 @@
     <general class="2f85" name="fingers_actuator" tendon="split" forcerange="-5 5" ctrlrange="0 255" gainprm="0.3137255 0 0" biasprm="0 -100 -10" />
   </actuator>
   <sensor>
-    <force name="left_taxel_force_00" site="left_taxel_site_00" />
-    <force name="left_taxel_force_01" site="left_taxel_site_01" />
-    <force name="left_taxel_force_02" site="left_taxel_site_02" />
-    <force name="left_taxel_force_10" site="left_taxel_site_10" />
-    <force name="left_taxel_force_11" site="left_taxel_site_11" />
-    <force name="left_taxel_force_12" site="left_taxel_site_12" />
-    <force name="left_taxel_force_20" site="left_taxel_site_20" />
-    <force name="left_taxel_force_21" site="left_taxel_site_21" />
-    <force name="left_taxel_force_22" site="left_taxel_site_22" />
-    <force name="left_pad_force" site="left_pad_ft_site" />
-    <torque name="left_pad_torque" site="left_pad_ft_site" />
-    <force name="right_taxel_force_00" site="right_taxel_site_00" />
-    <force name="right_taxel_force_01" site="right_taxel_site_01" />
-    <force name="right_taxel_force_02" site="right_taxel_site_02" />
-    <force name="right_taxel_force_10" site="right_taxel_site_10" />
-    <force name="right_taxel_force_11" site="right_taxel_site_11" />
-    <force name="right_taxel_force_12" site="right_taxel_site_12" />
-    <force name="right_taxel_force_20" site="right_taxel_site_20" />
-    <force name="right_taxel_force_21" site="right_taxel_site_21" />
-    <force name="right_taxel_force_22" site="right_taxel_site_22" />
-    <force name="right_pad_force" site="right_pad_ft_site" />
-    <torque name="right_pad_torque" site="right_pad_ft_site" />
+    <plugin name="touch_left" plugin="mujoco.sensor.touch_grid" objtype="site" objname="touch_left">
+      <config key="size" value="3 3" />
+      <config key="fov" value="23 38" />
+      <config key="gamma" value="0" />
+      <config key="nchannel" value="3" />
+    </plugin>
+    <plugin name="touch_right" plugin="mujoco.sensor.touch_grid" objtype="site" objname="touch_right">
+      <config key="size" value="3 3" />
+      <config key="fov" value="23 38" />
+      <config key="gamma" value="0" />
+      <config key="nchannel" value="3" />
+    </plugin>
   </sensor>
   <keyframe>
     <key name="open" ctrl="0" />

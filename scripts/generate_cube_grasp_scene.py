@@ -68,14 +68,20 @@ def build_cube_grasp_tree(gripper_xml: Path) -> ET.ElementTree:
         width="512",
         height="512",
     )
-    # 单张正方形星空纹理会被 MuJoCo 用于天空盒的六个面，避免为场景加入
-    # 任何具有碰撞体的背景几何。
+    # MuJoCo 内置渐变天空盒叠加固定种子的随机白点，不需要外部纹理文件，
+    # 且不会为场景加入任何具有碰撞体的背景几何。
     ET.SubElement(
         asset,
         "texture",
         name="starfield_skybox",
         type="skybox",
-        file="starfield.png",
+        builtin="gradient",
+        rgb1="0.03 0.10 0.18",
+        rgb2="0.18 0.32 0.45",
+        width="512",
+        mark="random",
+        markrgb="1 1 1",
+        random="0.008",
     )
     ET.SubElement(
         asset,

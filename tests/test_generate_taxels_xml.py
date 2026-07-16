@@ -89,7 +89,9 @@ def test_cube_grasp_scene_places_cube_between_taxel_pads() -> None:
     starfield = root.find("./asset/texture[@name='starfield_skybox']")
     assert starfield is not None
     assert starfield.get("type") == "skybox"
-    assert starfield.get("file") == "starfield.png"
+    assert starfield.get("builtin") == "gradient"
+    assert starfield.get("mark") == "random"
+    assert starfield.get("random") == "0.008"
     base = root.find(".//body[@name='base']")
     assert base is not None
     assert base.get("quat") == "0.70710678 0.70710678 0 0"
@@ -107,3 +109,20 @@ def test_touch_grid_model_creates_two_32_by_32_collision_pads() -> None:
     cells = root.findall(".//geom[@name]")
     assert len([cell for cell in cells if "_touch_cell_" in cell.get("name", "")]) == 2048
     assert len(root.findall("./sensor/plugin")) == 2
+
+
+def test_touch_grid_model_supports_three_by_three_resolution() -> None:
+    """生成器应支持低分辨率的 3×3 三通道触觉网格。"""
+    script_path = Path(__file__).resolve().parents[1] / "scripts/generate_touch_grid_xml.py"
+    spec = importlib.util.spec_from_file_location("generate_touch_grid_3x3", script_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    root = module.build_touch_grid_tree(module.DEFAULT_BASE_XML, rows=3, cols=3).getroot()
+    cells = root.findall(".//geom[@name]")
+    assert len([cell for cell in cells if "_touch_cell_" in cell.get("name", "")]) == 18
+    assert [config.get("value") for config in root.findall("./sensor/plugin/config[@key='size']")] == [
+        "3 3",
+        "3 3",
+    ]

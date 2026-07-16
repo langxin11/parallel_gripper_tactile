@@ -90,6 +90,8 @@ def _append_taxels(pad: ET.Element, side: str) -> None:
     """在单侧 pad 下添加球形接触体、力传感 site 与 pad 力矩 site。"""
     color = "0 1 0 0.45" if side == "left" else "0 0 1 0.45"
     for index, pos in _iter_taxel_layout(TAXEL_GRID):
+        # 独立 taxel 子 body 让 force sensor 测得它传递给 pad 父 body 的
+        # 相互作用力，而非 pad 整体外力；向量在下方 site 局部系中表达。
         body = ET.SubElement(pad, "body", name=f"{side}_taxel_body_{index}", pos=pos)
         ET.SubElement(
             body,
@@ -149,6 +151,8 @@ def build_taxel_tree(base_xml: Path) -> ET.ElementTree:
     for side in ("left", "right"):
         _append_taxels(_find_pad_body(root, side), side)
         for index, _ in _iter_taxel_layout(TAXEL_GRID):
+            # 输出方向是 taxel 子 body -> pad 父 body；本资产的 site +Z 指向
+            # 表面外侧，因此压缩载荷的原始 z 分量为负，正压力应取 -Fz。
             ET.SubElement(
                 sensor,
                 "force",
