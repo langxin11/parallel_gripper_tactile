@@ -24,10 +24,26 @@ PAD_HALF_X = 0.002
 PAD_HALF_Y = 0.011
 PAD_MIN_Z = 0.110625
 PAD_MAX_Z = 0.148125
+# touch_grid 以 site 为球坐标原点，并只累计落在 FOV 内的接触。参考实现将
+# site 放在接触面后约 42.6 mm 处。参考项目使用半角 14° × 23°；按当前
+# 22 mm × 37.5 mm pad 的精确边界计算至少需要 14.48° × 23.75°。本项目
+# site 局部 X 对应 pad 长边、局部 Y 对应短边，因此转换并向外取整为
+# 24° × 15°，避免边缘 box-box 接触点被静默丢弃。site 若留在 pad 中心，
+# 到表面仅 2 mm，大部分接触会落到 FOV 外而被静默丢弃。
+TOUCH_SITE_TO_SURFACE_DISTANCE = 0.0426
+TOUCH_SITE_X = PAD_X + PAD_HALF_X - TOUCH_SITE_TO_SURFACE_DISTANCE
+TOUCH_GRID_FOV_DEGREES = "24 15"
+REFERENCE_CONTACT_KWARGS = {
+    "mass": "0",
+    "friction": "0.7",
+    "solimp": "0.95 0.99 0.001",
+    "solref": "0.004 1",
+    "priority": "1",
+}
 
 
 def _append_touch_grid(pad: ET.Element, side: str, rows: int, cols: int) -> None:
-    """将一侧 pad 替换为指定分辨率的接触单元及一个 touch_grid site。"""
+    """按参考实现的接触参数生成碰撞网格与后置 touch_grid site。"""
     for geom in list(pad.findall("geom")):
         pad.remove(geom)
     cell_half_y = PAD_HALF_Y / cols
@@ -43,17 +59,15 @@ def _append_touch_grid(pad: ET.Element, side: str, rows: int, cols: int) -> None
                 type="box",
                 pos=f"{PAD_X:.6f} {y:.6f} {z:.6f}",
                 size=f"{PAD_HALF_X:.6f} {cell_half_y:.6f} {cell_half_z:.6f}",
-                mass="1e-6",
-                friction="0.7 0.03 0.01",
-                solimp="0.90 0.95 0.002",
-                solref="0.015 1",
                 rgba="0.2 0.2 0.2 1",
+                **REFERENCE_CONTACT_KWARGS,
             )
     ET.SubElement(
         pad,
         "site",
         name=f"touch_{side}",
-        pos=f"{PAD_X:.6f} 0 {(PAD_MIN_Z + PAD_MAX_Z) / 2:.6f}",
+        # 局部 +X 指向 pad 表面外侧；将 site 后移以让 FOV 覆盖整个平面。
+        pos=f"{TOUCH_SITE_X:.6f} 0 {(PAD_MIN_Z + PAD_MAX_Z) / 2:.6f}",
         quat="1 0 -1 0",
         size="0.001",
         rgba="0 0 0 0",
@@ -102,7 +116,7 @@ def build_touch_grid_tree(
             objname=f"touch_{side}",
         )
         ET.SubElement(plugin, "config", key="size", value=f"{cols} {rows}")
-        ET.SubElement(plugin, "config", key="fov", value="23 38")
+        ET.SubElement(plugin, "config", key="fov", value=TOUCH_GRID_FOV_DEGREES)
         ET.SubElement(plugin, "config", key="gamma", value="0")
         ET.SubElement(plugin, "config", key="nchannel", value="3")
     root.append(sensor)

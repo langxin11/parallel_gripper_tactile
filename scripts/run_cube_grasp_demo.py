@@ -43,6 +43,15 @@ def _taxel_force_vector(data, side: str, sensor_name) -> tuple[float, float, flo
     )
 
 
+def _taxel_surface_force_vector(data, side: str, sensor_name) -> tuple[float, float, float]:
+    """返回物体施加给 taxel 表面的力，压缩时局部 Fz 为正。
+
+    MuJoCo force sensor 的原始方向是 taxel 子 body -> pad 父 body；依据
+    牛顿第三定律整体取反，得到 taxel 子 body 实际受到的表面载荷。
+    """
+    return tuple(-value for value in _taxel_force_vector(data, side, sensor_name))
+
+
 def main() -> None:
     """运行手动抓取演示，并默认打开实时 MuJoCo viewer。
 
@@ -112,8 +121,8 @@ def main() -> None:
                         step,
                         data.time,
                         float(data.ctrl[0]),
-                        _taxel_force_vector(data, "left", sensor_name),
-                        _taxel_force_vector(data, "right", sensor_name),
+                        _taxel_surface_force_vector(data, "left", sensor_name),
+                        _taxel_surface_force_vector(data, "right", sensor_name),
                     )
                     if step % 100 == 0 or step == args.steps - 1:
                         print(
@@ -136,8 +145,8 @@ def main() -> None:
                     step,
                     data.time,
                     float(data.ctrl[0]),
-                    _taxel_force_vector(data, "left", sensor_name),
-                    _taxel_force_vector(data, "right", sensor_name),
+                    _taxel_surface_force_vector(data, "left", sensor_name),
+                    _taxel_surface_force_vector(data, "right", sensor_name),
                 )
                 if step % 100 == 0 or step == args.steps - 1:
                     print(

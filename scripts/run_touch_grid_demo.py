@@ -63,6 +63,20 @@ def _read_tactile(data, name: str, shape: tuple[int, int]):
     return data.sensor(name).data.reshape((3, *shape))[[1, 2, 0]]
 
 
+def _normal_pressure_sum(tactile) -> float:
+    """汇总 touch_grid 的正法向压力，单位为 N。"""
+    return float(tactile[2].sum())
+
+
+def _print_status(step: int, control: float, left, right) -> None:
+    """使用与离散 taxel 演示一致的终端进度格式。"""
+    print(
+        f"step={step:4d} ctrl={control:6.1f} "
+        f"left={_normal_pressure_sum(left):8.3f} N "
+        f"right={_normal_pressure_sum(right):8.3f} N"
+    )
+
+
 def main() -> None:
     """实时运行手动抓取，并显示左右触觉图。
 
@@ -134,6 +148,13 @@ def main() -> None:
                         _read_tactile(data, left_sensor, left_shape).sum(axis=(1, 2)),
                         _read_tactile(data, right_sensor, right_shape).sum(axis=(1, 2)),
                     )
+                    if step % 100 == 0 or step == args.steps - 1:
+                        _print_status(
+                            step,
+                            float(data.ctrl[0]),
+                            _read_tactile(data, left_sensor, left_shape),
+                            _read_tactile(data, right_sensor, right_shape),
+                        )
                     step += 1
                     if args.auto_close and step >= args.steps:
                         break
@@ -157,6 +178,13 @@ def main() -> None:
                     _read_tactile(data, left_sensor, left_shape).sum(axis=(1, 2)),
                     _read_tactile(data, right_sensor, right_shape).sum(axis=(1, 2)),
                 )
+                if step % 100 == 0 or step == args.steps - 1:
+                    _print_status(
+                        step,
+                        float(data.ctrl[0]),
+                        _read_tactile(data, left_sensor, left_shape),
+                        _read_tactile(data, right_sensor, right_shape),
+                    )
                 if not args.no_window and step % 5 == 0:
                     cv2.imshow("touch_left", tactile_to_bgr(_read_tactile(data, left_sensor, left_shape)))
                     cv2.imshow("touch_right", tactile_to_bgr(_read_tactile(data, right_sensor, right_shape)))
@@ -172,9 +200,6 @@ def main() -> None:
             viewer.close()
     if not args.no_window:
         cv2.destroyAllWindows()
-    left = _read_tactile(data, left_sensor, left_shape)
-    right = _read_tactile(data, right_sensor, right_shape)
-    print(f"left pressure sum={left[2].sum():.3f}, right pressure sum={right[2].sum():.3f}")
 
 
 if __name__ == "__main__":

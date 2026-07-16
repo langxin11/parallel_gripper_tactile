@@ -113,12 +113,17 @@ def test_runtime_grasp_scene_compiles_taxel_and_touch_grid_assets() -> None:
     assert mujoco.mj_name2id(taxel_model, mujoco.mjtObj.mjOBJ_BODY, "cube/target_cube") >= 0
     assert mujoco.mj_name2id(taxel_model, mujoco.mjtObj.mjOBJ_KEY, "closed") >= 0
 
+    box_model = module.build_grasp_spec(asset_dir / "2f85_taxels_box.xml").compile()
+    assert mujoco.mj_name2id(
+        box_model, mujoco.mjtObj.mjOBJ_SENSOR, "gripper/left_taxel_force_00"
+    ) >= 0
+
     grid_model = module.build_grasp_spec(asset_dir / "2f85_touch_grid_3x3.xml").compile()
     assert mujoco.mj_name2id(grid_model, mujoco.mjtObj.mjOBJ_SENSOR, "gripper/touch_left") >= 0
 
 
 def test_touch_grid_model_creates_two_32_by_32_collision_pads() -> None:
-    """touch_grid 版本应为左右指腹各生成 1024 个碰撞单元和一个插件传感器。"""
+    """touch_grid 应复现参考网格的碰撞参数及覆盖整个 pad 的 FOV 几何。"""
     script_path = Path(__file__).resolve().parents[1] / "scripts/generate_touch_grid_xml.py"
     spec = importlib.util.spec_from_file_location("generate_touch_grid_xml", script_path)
     assert spec is not None and spec.loader is not None
@@ -129,6 +134,18 @@ def test_touch_grid_model_creates_two_32_by_32_collision_pads() -> None:
     cells = root.findall(".//geom[@name]")
     assert len([cell for cell in cells if "_touch_cell_" in cell.get("name", "")]) == 2048
     assert len(root.findall("./sensor/plugin")) == 2
+    left_cell = root.find(".//geom[@name='left_touch_cell_00_00']")
+    assert left_cell is not None
+    assert {key: left_cell.get(key) for key in module.REFERENCE_CONTACT_KWARGS} == (
+        module.REFERENCE_CONTACT_KWARGS
+    )
+    left_site = root.find(".//site[@name='touch_left']")
+    assert left_site is not None
+    assert abs(float(left_site.get("pos").split()[0]) - module.TOUCH_SITE_X) < 1e-9
+    assert [config.get("value") for config in root.findall("./sensor/plugin/config[@key='fov']")] == [
+        module.TOUCH_GRID_FOV_DEGREES,
+        module.TOUCH_GRID_FOV_DEGREES,
+    ]
 
 
 def test_touch_grid_model_supports_three_by_three_resolution() -> None:
@@ -146,3 +163,37 @@ def test_touch_grid_model_supports_three_by_three_resolution() -> None:
         "3 3",
         "3 3",
     ]
+
+
+def test_box_taxels_match_three_by_three_touch_grid_collision_geometry() -> None:
+    """公平比较资产的平面、分块和接触参数必须逐项相同。"""
+    taxel = _load_generator()
+    touch_path = Path(__file__).resolve().parents[1] / "scripts/generate_touch_grid_xml.py"
+    spec = importlib.util.spec_from_file_location("generate_touch_grid_for_comparison", touch_path)
+    assert spec is not None and spec.loader is not None
+    touch = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = touch
+    spec.loader.exec_module(touch)
+
+    taxel_root = taxel.build_taxel_tree(taxel.DEFAULT_BASE_XML, shape="box").getroot()
+    grid_root = touch.build_touch_grid_tree(touch.DEFAULT_BASE_XML, rows=3, cols=3).getroot()
+    assert taxel_root.get("model") == "robotiq_2f85_box_taxels"
+    assert len(
+        [sensor for sensor in taxel_root.findall("./sensor/force") if "_taxel_force_" in sensor.get("name", "")]
+    ) == 18
+
+    attributes = ("type", "size", "mass", "friction", "solimp", "solref", "priority")
+    for side in ("left", "right"):
+        pad = taxel_root.find(f".//body[@name='{side}_pad']")
+        assert pad is not None and not pad.findall("geom")
+        for row in range(3):
+            for col in range(3):
+                index = f"{row}{col}"
+                body = taxel_root.find(f".//body[@name='{side}_taxel_body_{index}']")
+                box = taxel_root.find(f".//geom[@name='{side}_taxel_geom_{index}']")
+                grid = grid_root.find(f".//geom[@name='{side}_touch_cell_{row:02d}_{col:02d}']")
+                assert body is not None and box is not None and grid is not None
+                assert body.get("pos") == grid.get("pos")
+                assert {name: box.get(name) for name in attributes} == {
+                    name: grid.get(name) for name in attributes
+                }

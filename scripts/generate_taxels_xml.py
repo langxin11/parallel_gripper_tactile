@@ -3,6 +3,7 @@
 常见用法::
 
     uv run scripts/generate_taxels_xml.py
+    uv run scripts/generate_taxels_xml.py --shape box
     uv run scripts/generate_taxels_xml.py --output-xml /tmp/2f85_taxels.xml
 """
 
@@ -17,6 +18,7 @@ from typing import Iterable
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BASE_XML = REPOSITORY_ROOT / "assets" / "robotiq_2f85" / "2f85.xml"
 DEFAULT_OUTPUT_XML = REPOSITORY_ROOT / "assets" / "robotiq_2f85" / "2f85_taxels.xml"
+DEFAULT_BOX_OUTPUT_XML = REPOSITORY_ROOT / "assets" / "robotiq_2f85" / "2f85_taxels_box.xml"
 
 
 @dataclass(frozen=True, slots=True)
@@ -48,11 +50,26 @@ PAD_TOP_EDGE_Z = 0.148125
 MIDDLE_ROW_TO_TOP_EDGE = 0.012
 TAXEL_RADIUS = 0.0028
 TAXEL_SITE_QUAT = "1 0 -1 0"
+PAD_X = 0.043258
+PAD_HALF_X = 0.002
+PAD_HALF_Y = 0.011
+PAD_MIN_Z = 0.110625
+PAD_MAX_Z = 0.148125
+BOX_ROWS = 3
+BOX_COLS = 3
 # 该参数组实现的是“软化的刚体接触”：允许约毫米级的接触过渡，
 # 但不表示硅胶几何发生真实形变。
 SOFT_CONTACT_KWARGS = {
     "solimp": "0.90 0.95 0.002",
     "solref": "0.015 1",
+}
+# 公平比较用 box taxel 与参考 touch_grid 使用相同的平面、摩擦和接触参数。
+BOX_CONTACT_KWARGS = {
+    "mass": "0",
+    "friction": "0.7",
+    "solimp": "0.95 0.99 0.001",
+    "solref": "0.004 1",
+    "priority": "1",
 }
 
 
@@ -86,7 +103,7 @@ def _find_pad_body(root: ET.Element, side: str) -> ET.Element:
     return pad
 
 
-def _append_taxels(pad: ET.Element, side: str) -> None:
+def _append_sphere_taxels(pad: ET.Element, side: str) -> None:
     """在单侧 pad 下添加球形接触体、力传感 site 与 pad 力矩 site。"""
     color = "0 1 0 0.45" if side == "left" else "0 0 1 0.45"
     for index, pos in _iter_taxel_layout(TAXEL_GRID):
@@ -124,7 +141,53 @@ def _append_taxels(pad: ET.Element, side: str) -> None:
     )
 
 
-def build_taxel_tree(base_xml: Path) -> ET.ElementTree:
+def _append_box_taxels(pad: ET.Element, side: str) -> None:
+    """用与 3×3 touch_grid 完全相同的平面网格替换单侧 pad。"""
+    for geom in list(pad.findall("geom")):
+        pad.remove(geom)
+    color = "0 1 0 0.45" if side == "left" else "0 0 1 0.45"
+    cell_half_y = PAD_HALF_Y / BOX_COLS
+    cell_half_z = (PAD_MAX_Z - PAD_MIN_Z) / (2 * BOX_ROWS)
+    for row in range(BOX_ROWS):
+        z = PAD_MIN_Z + (2 * row + 1) * cell_half_z
+        for col in range(BOX_COLS):
+            y = -PAD_HALF_Y + (2 * col + 1) * cell_half_y
+            index = f"{row}{col}"
+            body = ET.SubElement(
+                pad,
+                "body",
+                name=f"{side}_taxel_body_{index}",
+                pos=f"{PAD_X:.6f} {y:.6f} {z:.6f}",
+            )
+            ET.SubElement(
+                body,
+                "geom",
+                name=f"{side}_taxel_geom_{index}",
+                type="box",
+                size=f"{PAD_HALF_X:.6f} {cell_half_y:.6f} {cell_half_z:.6f}",
+                rgba=color,
+                **BOX_CONTACT_KWARGS,
+            )
+            ET.SubElement(
+                body,
+                "site",
+                name=f"{side}_taxel_site_{index}",
+                size="0.0008",
+                quat=TAXEL_SITE_QUAT,
+                rgba=color,
+            )
+    ET.SubElement(
+        pad,
+        "site",
+        name=f"{side}_pad_ft_site",
+        pos=_format_xyz(PAD_X, 0, (PAD_MIN_Z + PAD_MAX_Z) / 2),
+        quat=TAXEL_SITE_QUAT,
+        size="0.003",
+        rgba="1 0 0 0.5",
+    )
+
+
+def build_taxel_tree(base_xml: Path, shape: str = "sphere") -> ET.ElementTree:
     """从基础 MJCF 构建含 18 个法向力 taxel 的 XML 树。
 
     Args:
@@ -133,9 +196,11 @@ def build_taxel_tree(base_xml: Path) -> ET.ElementTree:
     Returns:
         添加了左右 pad taxel 和传感器定义的 MJCF 树。
     """
+    if shape not in {"sphere", "box"}:
+        raise ValueError("taxel shape 必须是 sphere 或 box。")
     tree = ET.parse(base_xml)
     root = tree.getroot()
-    root.set("model", "robotiq_2f85_taxels")
+    root.set("model", "robotiq_2f85_taxels" if shape == "sphere" else "robotiq_2f85_box_taxels")
     size = root.find("size")
     if size is None:
         option = root.find("option")
@@ -149,8 +214,14 @@ def build_taxel_tree(base_xml: Path) -> ET.ElementTree:
 
     sensor = ET.Element("sensor")
     for side in ("left", "right"):
-        _append_taxels(_find_pad_body(root, side), side)
-        for index, _ in _iter_taxel_layout(TAXEL_GRID):
+        pad = _find_pad_body(root, side)
+        if shape == "sphere":
+            _append_sphere_taxels(pad, side)
+            indices = [index for index, _ in _iter_taxel_layout(TAXEL_GRID)]
+        else:
+            _append_box_taxels(pad, side)
+            indices = [f"{row}{col}" for row in range(BOX_ROWS) for col in range(BOX_COLS)]
+        for index in indices:
             # 输出方向是 taxel 子 body -> pad 父 body；本资产的 site +Z 指向
             # 表面外侧，因此压缩载荷的原始 z 分量为负，正压力应取 -Fz。
             ET.SubElement(
@@ -169,13 +240,17 @@ def main() -> None:
     """生成 XML，并输出生成文件位置。"""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-xml", type=Path, default=DEFAULT_BASE_XML)
-    parser.add_argument("--output-xml", type=Path, default=DEFAULT_OUTPUT_XML)
+    parser.add_argument("--shape", choices=("sphere", "box"), default="sphere")
+    parser.add_argument("--output-xml", type=Path)
     args = parser.parse_args()
-    tree = build_taxel_tree(args.base_xml)
+    output_xml = args.output_xml or (
+        DEFAULT_BOX_OUTPUT_XML if args.shape == "box" else DEFAULT_OUTPUT_XML
+    )
+    tree = build_taxel_tree(args.base_xml, args.shape)
     ET.indent(tree, space="  ")
-    args.output_xml.parent.mkdir(parents=True, exist_ok=True)
-    tree.write(args.output_xml, encoding="utf-8", xml_declaration=True)
-    print(f"已生成 {args.output_xml}")
+    output_xml.parent.mkdir(parents=True, exist_ok=True)
+    tree.write(output_xml, encoding="utf-8", xml_declaration=True)
+    print(f"已生成 {output_xml}")
 
 
 if __name__ == "__main__":

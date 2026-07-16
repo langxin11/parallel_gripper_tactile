@@ -52,4 +52,5 @@ uv run scripts/run_touch_grid_demo.py \
 - `assets/scenes/grasp_world.xml`：默认抓取环境。天空盒和地面纹理由 MuJoCo 程序化生成。
 - `assets/objects/target_cube.xml`：默认的自由方块。
 
-生成得到的 `2f85_taxels.xml` 不应手工编辑；应修改生成脚本后重新生成。
+生成得到的 `2f85_taxels.xml` 与 `2f85_taxels_box.xml` 不应手工编辑；应修改生成脚本后重新生成。
+球形版本保留为默认触觉近似；平面 box 版本用于和 3×3 touch-grid 做同几何 A/B 比较。

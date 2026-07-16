@@ -8,11 +8,11 @@ from pathlib import Path
 
 
 class ForceCsvRecorder:
-    """将控制量及左右三维传递力记录为可直接绘图的 CSV。
+    """将控制量及左右触觉表面受力记录为可直接绘图的 CSV。
 
-    taxel 演示记录的是 taxel 子 body 传给 pad 父 body 的力；touch_grid 演示
-    记录的是各格点力的总和。二者均在各自 touch site 的局部坐标系中表达，
-    不应直接视为“pad 受到的全部外力”。
+    两个演示都使用“物体施加给触觉表面”的公共方向，压缩时局部 Fz 为正。
+    taxel 演示在调用记录器前对原始 force sensor 向量整体取反；touch_grid
+    记录各格点表面力之和。二者均在各自 site 局部坐标系中表达。
     """
 
     fieldnames = (

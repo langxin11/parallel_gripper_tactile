@@ -7,6 +7,7 @@
 - `assets/robotiq_2f85/2f85.xml`：未修改的基础夹爪模型。
 - `scripts/generate_taxels_xml.py`：从基础模型生成带 18 个离散 taxel 的派生 MJCF。
 - `assets/robotiq_2f85/2f85_taxels.xml`：生成结果；不可手工编辑。
+- `assets/robotiq_2f85/2f85_taxels_box.xml`：用于公平对比的 3×3 平面 box taxel。
 - `assets/robotiq_2f85/2f85_touch_grid.xml`：每侧 32×32、三通道的 `touch_grid` 版本；生成器也支持自定义分辨率。
 - `assets/scenes/grasp_world.xml`：抓取环境（地面、薄板、相机与程序化星空）。
 - `assets/objects/target_cube.xml`：可自由运动的方块实体。
@@ -25,6 +26,7 @@
 
 ```bash
 uv run scripts/generate_taxels_xml.py
+uv run scripts/generate_taxels_xml.py --shape box
 uv run scripts/generate_touch_grid_xml.py
 uv run scripts/generate_touch_grid_xml.py --rows 3 --cols 3 \
   --output-xml assets/robotiq_2f85/2f85_touch_grid_3x3.xml
@@ -36,6 +38,7 @@ uv run scripts/run_cube_grasp_demo.py
 uv run scripts/run_touch_grid_demo.py
 uv run scripts/run_touch_grid_demo.py \
   --gripper-xml assets/robotiq_2f85/2f85_touch_grid_3x3.xml
+uv run scripts/compare_tactile_models.py
 ```
 
 详细用法、记录和绘图命令见 [常用工作流](docs/workflows.md)。场景资产如何运行时拼接、
