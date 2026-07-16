@@ -4,8 +4,9 @@
 
     uv run scripts/run_cube_grasp_demo.py
     uv run scripts/run_cube_grasp_demo.py --auto-close
-    uv run scripts/run_cube_grasp_demo.py --auto-close --no-viewer
+    uv run scripts/run_cube_grasp_demo.py --auto-close --no-viewer --no-rerun
     uv run scripts/run_cube_grasp_demo.py --render-fps 30
+    uv run scripts/run_cube_grasp_demo.py --auto-close --record-rrd outputs/taxel.rrd
 """
 
 from __future__ import annotations
@@ -14,8 +15,10 @@ import argparse
 import time
 from pathlib import Path
 
+import numpy as np
+
 from grasp_scene import DEFAULT_GRIPPER_XML, gripper_name_in_model, load_grasp_model
-from recording import ForceCsvRecorder
+from recording import ForceCsvRecorder, RerunTactileLogger, TactileFrame
 
 
 def _taxel_force_sum(data, side: str, sensor_name) -> float:
@@ -43,13 +46,28 @@ def _taxel_force_vector(data, side: str, sensor_name) -> tuple[float, float, flo
     )
 
 
+def _taxel_surface_force_grid(data, side: str, sensor_name) -> np.ndarray:
+    """返回一侧 ``(3, 3, 3)`` 的 xyz×row×column 表面受力网格。
+
+    MuJoCo force sensor 测量 taxel 子 body 传给 pad 父 body 的力；这里依据
+    牛顿第三定律对完整向量取反，使返回值表示物体施加给 taxel 表面的力。
+    """
+    tactile = np.empty((3, 3, 3), dtype=np.float64)
+    for row in range(3):
+        for column in range(3):
+            tactile[:, row, column] = -data.sensor(
+                sensor_name(f"{side}_taxel_force_{row}{column}")
+            ).data
+    return tactile
+
+
 def _taxel_surface_force_vector(data, side: str, sensor_name) -> tuple[float, float, float]:
     """返回物体施加给 taxel 表面的力，压缩时局部 Fz 为正。
 
     MuJoCo force sensor 的原始方向是 taxel 子 body -> pad 父 body；依据
     牛顿第三定律整体取反，得到 taxel 子 body 实际受到的表面载荷。
     """
-    return tuple(-value for value in _taxel_force_vector(data, side, sensor_name))
+    return tuple(_taxel_surface_force_grid(data, side, sensor_name).sum(axis=(1, 2)))
 
 
 def main() -> None:
@@ -76,6 +94,9 @@ def main() -> None:
     parser.add_argument("--render-fps", type=float, default=60.0, help="目标 viewer 帧率，默认 60 FPS。")
     parser.add_argument("--record-csv", type=Path, help="将控制量和左右三维力写入 CSV。")
     parser.add_argument("--record-every", type=int, default=1, help="每隔多少物理步记录一次。")
+    parser.add_argument("--no-rerun", action="store_true", help="不启动实时 Rerun 触觉仪表盘。")
+    parser.add_argument("--record-rrd", type=Path, help="将完整触觉网格写入 Rerun RRD。")
+    parser.add_argument("--rerun-hz", type=float, default=100.0, help="Rerun 采样频率，默认 100 Hz。")
     args = parser.parse_args()
     if args.no_viewer and not args.auto_close:
         parser.error("手动模式需要 MuJoCo viewer；无界面运行请同时传入 --auto-close。")
@@ -83,13 +104,36 @@ def main() -> None:
         parser.error("--render-fps 必须为正数。")
     if args.record_every <= 0:
         parser.error("--record-every 必须为正整数。")
+    if args.rerun_hz <= 0:
+        parser.error("--rerun-hz 必须为正数。")
 
     model = load_grasp_model(args.scene, args.gripper_xml)
+    physics_hz = 1.0 / model.opt.timestep
+    if args.rerun_hz > physics_hz:
+        parser.error(f"--rerun-hz 不能超过 MuJoCo 物理频率 {physics_hz:g} Hz。")
 
     def sensor_name(name: str) -> str:
         return gripper_name_in_model(mujoco, model, name)
+
     data = mujoco.MjData(model)
     recorder = ForceCsvRecorder(args.record_csv, args.record_every)
+    rerun_logger = RerunTactileLogger(
+        "robotiq2f85_taxel_grasp",
+        live=not args.no_rerun,
+        path=args.record_rrd,
+        hz=args.rerun_hz,
+        pressure_max=15.0,
+    )
+
+    def sample_frame(step: int) -> TactileFrame:
+        return TactileFrame(
+            step=step,
+            time_s=data.time,
+            control=float(data.ctrl[0]),
+            left=_taxel_surface_force_grid(data, "left", sensor_name),
+            right=_taxel_surface_force_grid(data, "right", sensor_name),
+        )
+
     viewer = None
     if not args.no_viewer:
         import mujoco.viewer
@@ -117,18 +161,14 @@ def main() -> None:
                             1.0, step / max(1, args.steps // 3)
                         )
                     mujoco.mj_step(model, data)
-                    recorder.record(
-                        step,
-                        data.time,
-                        float(data.ctrl[0]),
-                        _taxel_surface_force_vector(data, "left", sensor_name),
-                        _taxel_surface_force_vector(data, "right", sensor_name),
-                    )
+                    frame = sample_frame(step)
+                    recorder.record(frame)
+                    rerun_logger.record(frame)
                     if step % 100 == 0 or step == args.steps - 1:
                         print(
                             f"step={step:4d} ctrl={data.ctrl[0]:6.1f} "
-                            f"left={_taxel_force_sum(data, 'left', sensor_name):8.3f} N "
-                            f"right={_taxel_force_sum(data, 'right', sensor_name):8.3f} N"
+                            f"left={frame.left_force[2]:8.3f} N "
+                            f"right={frame.right_force[2]:8.3f} N"
                         )
                     step += 1
                     if args.auto_close and step >= args.steps:
@@ -141,24 +181,21 @@ def main() -> None:
             else:
                 data.ctrl[0] = args.close_control * min(1.0, step / max(1, args.steps // 3))
                 mujoco.mj_step(model, data)
-                recorder.record(
-                    step,
-                    data.time,
-                    float(data.ctrl[0]),
-                    _taxel_surface_force_vector(data, "left", sensor_name),
-                    _taxel_surface_force_vector(data, "right", sensor_name),
-                )
+                frame = sample_frame(step)
+                recorder.record(frame)
+                rerun_logger.record(frame)
                 if step % 100 == 0 or step == args.steps - 1:
                     print(
                         f"step={step:4d} ctrl={data.ctrl[0]:6.1f} "
-                        f"left={_taxel_force_sum(data, 'left', sensor_name):8.3f} N "
-                        f"right={_taxel_force_sum(data, 'right', sensor_name):8.3f} N"
+                        f"left={frame.left_force[2]:8.3f} N "
+                        f"right={frame.right_force[2]:8.3f} N"
                     )
                 step += 1
                 if step >= args.steps:
                     break
     finally:
         recorder.close()
+        rerun_logger.close()
         # 用户手动关闭窗口时 viewer 已请求退出；避免对已经销毁的 GLFW
         # 上下文再次调用 close，从而触发退出阶段的 GLFW 警告。
         if viewer is not None and viewer.is_running():
