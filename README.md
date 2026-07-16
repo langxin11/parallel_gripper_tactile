@@ -39,6 +39,7 @@ uv run scripts/run_touch_grid_demo.py
 uv run scripts/run_touch_grid_demo.py \
   --gripper-xml assets/robotiq_2f85/2f85_touch_grid_3x3.xml
 uv run scripts/compare_tactile_models.py
+uv run scripts/compare_tactile_models.py --disturbance
 ```
 
 详细用法、记录和绘图命令见 [常用工作流](docs/workflows.md)。场景资产如何运行时拼接、

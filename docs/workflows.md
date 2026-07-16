@@ -82,8 +82,34 @@ uv run scripts/compare_tactile_models.py \
   --record-every 5 \
   --output-csv outputs/tactile_model_comparison.csv \
   --output-plot outputs/tactile_model_comparison.png
+
+# 抓稳后撤去支撑，并施加默认 5 N、2 Hz、1 s 的世界 Y 向正弦扰动
+uv run scripts/compare_tactile_models.py --disturbance \
+  --record-every 5 \
+  --output-csv outputs/tactile_disturbance_comparison.csv \
+  --output-plot outputs/tactile_disturbance_comparison.png
 ```
 
 比较固定使用 3×3 平面 box taxel 与 3×3 touch-grid：二者具有相同的 pad 外形、碰撞分块、
 接触参数、物体初态和闭合轨迹。联合 CSV 保留左右三维力，曲线图叠加正法向压力。终端报告最后
 20% 仿真的稳态均值、峰值和对称相对误差；默认任一侧稳态误差超过 10% 即返回失败。
+
+`--disturbance` 启用固定时序的切向稳定性实验：闭合 1.0 s、带支撑稳定 0.5 s、关闭支撑板碰撞、
+无支撑稳定 0.5 s、扰动 1.0 s、恢复 0.5 s。外力通过 `xfrc_applied` 施加在方块质心，方向固定为
+世界坐标系 +Y；`--steps` 在该模式下不生效，步数由总时长和物理 `timestep` 自动决定。常用调节项为：
+
+```bash
+uv run scripts/compare_tactile_models.py --disturbance \
+  --disturbance-force 5 \
+  --disturbance-frequency 2 \
+  --disturbance-duration 1 \
+  --support-settle-duration 0.5 \
+  --release-settle-duration 0.5 \
+  --recovery-duration 0.5 \
+  --slip-threshold 0.002
+```
+
+扰动 CSV 在原有局部三维力之外增加阶段、世界系外力、左右世界系力、世界系合力以及方块位姿和
+速度。图中同时显示控制量、外力、局部切向力、世界 Y 合力和方块在世界 YZ 切平面内的位移。
+终端用两种模型世界 Y 合力的 NRMSE 衡量响应一致性，并以扰动开始时的位置为基准计算扰动及
+恢复阶段的最大切向位移和速度；默认位移超过 2 mm 判为滑移。
