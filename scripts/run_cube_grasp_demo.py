@@ -1,4 +1,11 @@
-"""闭合 Robotiq 2F-85 抓取居中正方体，并输出两侧 taxel 力。"""
+"""闭合 Robotiq 2F-85 抓取正方体，并输出两侧 taxel 力。
+
+常见用法::
+
+    uv run scripts/run_cube_grasp_demo.py
+    uv run scripts/run_cube_grasp_demo.py --auto-close
+    uv run scripts/run_cube_grasp_demo.py --auto-close --no-viewer
+"""
 
 from __future__ import annotations
 
@@ -20,13 +27,13 @@ def main() -> None:
     """运行手动抓取演示，并默认打开实时 MuJoCo viewer。
 
     物块初始位于两个指尖之间。默认由 viewer 控制滑块直接控制夹爪；
-    ``--auto-close`` 才会让夹爪按预设轨迹闭合。场景关闭重力，以隔离
-    接触模型和 taxel 映射验证。
+    ``--auto-close`` 才会让夹爪按预设轨迹闭合。默认视角是可用鼠标旋转、
+    平移和缩放的自由相机；物块由下方薄板承托并受重力作用。
     """
     try:
         import mujoco
     except ModuleNotFoundError as error:
-        raise ModuleNotFoundError("请以 `uv run --extra sim` 运行此脚本。") from error
+        raise ModuleNotFoundError("请先使用 `uv sync` 安装项目依赖。") from error
 
     default_scene = Path(__file__).resolve().parents[1] / "assets/scenes/cube_grasp.xml"
     parser = argparse.ArgumentParser(description=__doc__)
@@ -48,10 +55,11 @@ def main() -> None:
         import mujoco.viewer
 
         viewer = mujoco.viewer.launch_passive(model, data, show_left_ui=True, show_right_ui=True)
-        viewer.cam.type = mujoco.mjtCamera.mjCAMERA_FIXED
-        viewer.cam.fixedcamid = mujoco.mj_name2id(
-            model, mujoco.mjtObj.mjOBJ_CAMERA, "grasp_overview"
-        )
+        viewer.cam.type = mujoco.mjtCamera.mjCAMERA_FREE
+        viewer.cam.lookat[:] = (0.0, -0.12, 0.07)
+        viewer.cam.distance = 0.38
+        viewer.cam.azimuth = 135
+        viewer.cam.elevation = -25
 
     try:
         step = 0
@@ -72,7 +80,9 @@ def main() -> None:
             if args.auto_close and step >= args.steps:
                 break
     finally:
-        if viewer is not None:
+        # 用户手动关闭窗口时 viewer 已请求退出；避免对已经销毁的 GLFW
+        # 上下文再次调用 close，从而触发退出阶段的 GLFW 警告。
+        if viewer is not None and viewer.is_running():
             viewer.close()
 
 

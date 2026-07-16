@@ -1,4 +1,10 @@
-"""从基础 2F-85 MJCF 生成使用 MuJoCo ``touch_grid`` 插件的触觉资产。"""
+"""从基础 2F-85 MJCF 生成使用 MuJoCo ``touch_grid`` 插件的触觉资产。
+
+常见用法::
+
+    uv run scripts/generate_touch_grid_xml.py
+    uv run scripts/generate_touch_grid_xml.py --output-xml /tmp/2f85_touch_grid.xml
+"""
 
 from __future__ import annotations
 

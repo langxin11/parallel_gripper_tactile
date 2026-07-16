@@ -1,4 +1,10 @@
-"""在 MuJoCo 原生 viewer 中检查 Robotiq 2F-85 指尖 taxel 布局。"""
+"""在 MuJoCo 原生 viewer 中检查 Robotiq 2F-85 指尖 taxel 布局。
+
+常见用法::
+
+    uv run scripts/view_taxels.py
+    uv run scripts/view_taxels.py assets/scenes/cube_grasp.xml
+"""
 
 from __future__ import annotations
 
@@ -13,13 +19,13 @@ def main() -> None:
         无。
 
     Raises:
-        ModuleNotFoundError: 未安装 ``sim`` 可选依赖时抛出。
+        ModuleNotFoundError: 未安装项目依赖时抛出。
     """
     try:
         import mujoco
         import mujoco.viewer
     except ModuleNotFoundError as error:
-        raise ModuleNotFoundError("请以 `uv run --extra sim` 运行此脚本。") from error
+        raise ModuleNotFoundError("请先使用 `uv sync` 安装项目依赖。") from error
 
     default_xml = Path(__file__).resolve().parents[1] / "assets/scenes/cube_grasp.xml"
     parser = argparse.ArgumentParser(description=__doc__)

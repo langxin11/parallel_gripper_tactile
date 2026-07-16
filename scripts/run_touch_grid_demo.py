@@ -1,4 +1,11 @@
-"""闭合抓取方块，并以 OpenCV 显示两侧 touch_grid 的切向力与压力。"""
+"""闭合抓取方块，并以 OpenCV 显示两侧 touch_grid 的切向力与压力。
+
+常见用法::
+
+    uv run scripts/run_touch_grid_demo.py
+    uv run scripts/run_touch_grid_demo.py --auto-close
+    uv run scripts/run_touch_grid_demo.py --auto-close --no-viewer --no-window
+"""
 
 from __future__ import annotations
 
@@ -36,13 +43,14 @@ def main() -> None:
 
     默认由 MuJoCo viewer 的控制滑块直接写入 ``fingers_actuator``；本脚本不覆盖
     ``data.ctrl``，因此可在闭合过程中观察 OpenCV 触觉图。传入 ``--auto-close``
-    时才执行预设的自动闭合轨迹。
+    时才执行预设的自动闭合轨迹。MuJoCo viewer 使用自由相机，支持鼠标
+    旋转、平移和缩放场景。
     """
     try:
         import cv2
         import mujoco
     except ModuleNotFoundError as error:
-        raise ModuleNotFoundError("请以 `uv run --extra sim --extra viz` 运行此脚本。") from error
+        raise ModuleNotFoundError("请先使用 `uv sync` 安装项目依赖。") from error
 
     default_scene = Path(__file__).resolve().parents[1] / "assets/scenes/cube_grasp_touch_grid.xml"
     parser = argparse.ArgumentParser(description=__doc__)
@@ -63,10 +71,11 @@ def main() -> None:
         import mujoco.viewer
 
         viewer = mujoco.viewer.launch_passive(model, data, show_left_ui=True, show_right_ui=True)
-        viewer.cam.type = mujoco.mjtCamera.mjCAMERA_FIXED
-        viewer.cam.fixedcamid = mujoco.mj_name2id(
-            model, mujoco.mjtObj.mjOBJ_CAMERA, "grasp_overview"
-        )
+        viewer.cam.type = mujoco.mjtCamera.mjCAMERA_FREE
+        viewer.cam.lookat[:] = (0.0, -0.12, 0.07)
+        viewer.cam.distance = 0.38
+        viewer.cam.azimuth = 135
+        viewer.cam.elevation = -25
     try:
         step = 0
         while viewer is None or viewer.is_running():
@@ -85,7 +94,8 @@ def main() -> None:
             if args.auto_close and step >= args.steps:
                 break
     finally:
-        if viewer is not None:
+        # 用户手动关闭窗口时 viewer 已请求退出；避免重复清理 GLFW 上下文。
+        if viewer is not None and viewer.is_running():
             viewer.close()
     if not args.no_window:
         cv2.destroyAllWindows()

@@ -1,4 +1,10 @@
-"""从基础 Robotiq 2F-85 MJCF 生成带离散触觉 taxel 的派生资产。"""
+"""从基础 Robotiq 2F-85 MJCF 生成带离散触觉 taxel 的派生资产。
+
+常见用法::
+
+    uv run scripts/generate_taxels_xml.py
+    uv run scripts/generate_taxels_xml.py --output-xml /tmp/2f85_taxels.xml
+"""
 
 from __future__ import annotations
 

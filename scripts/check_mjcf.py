@@ -1,4 +1,10 @@
-"""编译 MJCF 资产，验证其可被 MuJoCo 加载。"""
+"""编译 MJCF 资产，验证其可被 MuJoCo 加载。
+
+常见用法::
+
+    uv run scripts/check_mjcf.py
+    uv run scripts/check_mjcf.py assets/scenes/cube_grasp.xml
+"""
 
 from __future__ import annotations
 
@@ -10,12 +16,12 @@ def main() -> None:
     """编译指定 MJCF，输出模型维度。
 
     Raises:
-        ModuleNotFoundError: 未安装 ``sim`` 可选依赖时抛出。
+        ModuleNotFoundError: 未安装项目依赖时抛出。
     """
     try:
         import mujoco
     except ModuleNotFoundError as error:
-        raise ModuleNotFoundError("请以 `uv run --extra sim` 运行此脚本。") from error
+        raise ModuleNotFoundError("请先使用 `uv sync` 安装项目依赖。") from error
 
     default_xml = Path(__file__).resolve().parents[1] / "assets/robotiq_2f85/2f85_taxels.xml"
     parser = argparse.ArgumentParser(description=__doc__)

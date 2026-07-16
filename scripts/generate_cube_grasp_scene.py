@@ -1,4 +1,10 @@
-"""从 taxel 夹爪资产生成水平夹爪闭合抓取正方体的 MuJoCo 场景。"""
+"""从 taxel 夹爪资产生成带重力和物块支撑板的抓取场景。
+
+常见用法::
+
+    uv run scripts/generate_cube_grasp_scene.py
+    uv run scripts/generate_cube_grasp_scene.py --gripper-xml assets/robotiq_2f85/2f85_touch_grid.xml --output-xml assets/scenes/cube_grasp_touch_grid.xml
+"""
 
 from __future__ import annotations
 
@@ -15,13 +21,17 @@ DEFAULT_OUTPUT_XML = REPOSITORY_ROOT / "assets" / "scenes" / "cube_grasp.xml"
 _HORIZONTAL_GRIPPER_POS = "0 0 0.08"
 _HORIZONTAL_GRIPPER_QUAT = "0.70710678 0.70710678 0 0"
 _CUBE_POS = "0 -0.155 0.08"
+# 方块半边长 15 mm，薄板顶面恰好位于其底面 z=0.065 m；该板固定在世界中，
+# 只在夹爪闭合前承受重力，避免把地面抬高到干涉夹爪的位置。
+_SUPPORT_PLATE_POS = "0 -0.155 0.0625"
+_SUPPORT_PLATE_SIZE = "0.025 0.025 0.0025"
 
 
 def build_cube_grasp_tree(gripper_xml: Path) -> ET.ElementTree:
     """构建夹爪水平、方块居中的带地面闭合抓取场景。
 
-    无重力用于隔离触觉接触参数，避免物块在闭合前从两指之间掉落。
-    后续若研究抬升或滑移，应基于此场景添加机械臂、支撑面与重力。
+    使用默认重力。正方体下方的固定薄板在夹爪闭合前承托物体，使其不会
+    下落；这保留了重力对抓取接触与传感器读数的影响，同时保持物块可被夹取。
 
     Args:
         gripper_xml: 已含 taxel 的 Robotiq 2F-85 MJCF 文件。
@@ -40,7 +50,7 @@ def build_cube_grasp_tree(gripper_xml: Path) -> ET.ElementTree:
     option = root.find("option")
     if option is None:
         raise ValueError("夹爪资产缺少 option 节点。")
-    option.set("gravity", "0 0 0")
+    option.set("gravity", "0 0 -9.81")
     option.set("timestep", "0.002")
     option.set("integrator", "implicitfast")
 
@@ -57,6 +67,15 @@ def build_cube_grasp_tree(gripper_xml: Path) -> ET.ElementTree:
         rgb2="0.48 0.52 0.56",
         width="512",
         height="512",
+    )
+    # 单张正方形星空纹理会被 MuJoCo 用于天空盒的六个面，避免为场景加入
+    # 任何具有碰撞体的背景几何。
+    ET.SubElement(
+        asset,
+        "texture",
+        name="starfield_skybox",
+        type="skybox",
+        file="starfield.png",
     )
     ET.SubElement(
         asset,
@@ -85,6 +104,18 @@ def build_cube_grasp_tree(gripper_xml: Path) -> ET.ElementTree:
         size="0 0 0.05",
         material="ground_checker",
         friction="0.9 0.02 0.001",
+    )
+    ET.SubElement(
+        worldbody,
+        "geom",
+        name="target_cube_support_plate",
+        type="box",
+        pos=_SUPPORT_PLATE_POS,
+        size=_SUPPORT_PLATE_SIZE,
+        friction="0.9 0.02 0.001",
+        solimp="0.90 0.95 0.002",
+        solref="0.015 1",
+        rgba="0.20 0.28 0.36 1",
     )
     ET.SubElement(worldbody, "light", pos="0 -0.3 0.5", directional="true", dir="0 0.5 -1")
     ET.SubElement(

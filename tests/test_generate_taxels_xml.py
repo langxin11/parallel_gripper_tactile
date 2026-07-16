@@ -70,7 +70,7 @@ def test_taxel_report_sensor_names_follow_row_major_order() -> None:
 
 
 def test_cube_grasp_scene_places_cube_between_taxel_pads() -> None:
-    """闭合抓取场景应包含两个指尖中间的自由正方体和闭合 keyframe。"""
+    """抓取场景应包含自由方块、重力和闭合前承托方块的薄板。"""
     scene_path = Path(__file__).resolve().parents[1] / "scripts/generate_cube_grasp_scene.py"
     spec = importlib.util.spec_from_file_location("generate_cube_grasp_scene", scene_path)
     assert spec is not None and spec.loader is not None
@@ -82,6 +82,14 @@ def test_cube_grasp_scene_places_cube_between_taxel_pads() -> None:
     assert root.find(".//freejoint[@name='target_cube_free_joint']") is not None
     assert root.find(".//key[@name='closed']").get("ctrl") == "220"
     assert root.find(".//geom[@name='ground']") is not None
+    support_plate = root.find(".//geom[@name='target_cube_support_plate']")
+    assert support_plate is not None
+    assert support_plate.get("type") == "box"
+    assert root.find("option").get("gravity") == "0 0 -9.81"
+    starfield = root.find("./asset/texture[@name='starfield_skybox']")
+    assert starfield is not None
+    assert starfield.get("type") == "skybox"
+    assert starfield.get("file") == "starfield.png"
     base = root.find(".//body[@name='base']")
     assert base is not None
     assert base.get("quat") == "0.70710678 0.70710678 0 0"

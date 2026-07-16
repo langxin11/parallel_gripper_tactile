@@ -1,4 +1,10 @@
-"""以左右 3×3 网格格式输出 Robotiq 2F-85 taxel 力传感器读数。"""
+"""以左右 3×3 网格格式输出 Robotiq 2F-85 taxel 力传感器读数。
+
+常见用法::
+
+    uv run scripts/report_taxels.py
+    uv run scripts/report_taxels.py assets/scenes/cube_grasp.xml
+"""
 
 from __future__ import annotations
 
@@ -34,12 +40,12 @@ def read_taxel_forces(xml_path: Path) -> dict[str, list[float]]:
         以 ``left`` 和 ``right`` 为键的两个 3×3 力值列表。
 
     Raises:
-        ModuleNotFoundError: 未安装 ``sim`` 可选依赖时抛出。
+        ModuleNotFoundError: 未安装项目依赖时抛出。
     """
     try:
         import mujoco
     except ModuleNotFoundError as error:
-        raise ModuleNotFoundError("请以 `uv run --extra sim` 运行此脚本。") from error
+        raise ModuleNotFoundError("请先使用 `uv sync` 安装项目依赖。") from error
 
     model = mujoco.MjModel.from_xml_path(str(xml_path))
     data = mujoco.MjData(model)
