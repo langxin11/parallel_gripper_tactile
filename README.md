@@ -27,11 +27,11 @@ uv run scripts/generate_touch_grid_xml.py
 uv run scripts/generate_cube_grasp_scene.py
 uv run scripts/generate_cube_grasp_scene.py --gripper-xml assets/robotiq_2f85/2f85_touch_grid.xml --output-xml assets/scenes/cube_grasp_touch_grid.xml
 uv run pytest
-uv run --extra sim scripts/check_mjcf.py
-uv run --extra sim scripts/view_taxels.py
-uv run --extra sim scripts/report_taxels.py
-uv run --extra sim scripts/run_cube_grasp_demo.py
-uv run --extra sim --extra viz scripts/run_touch_grid_demo.py
+uv run scripts/check_mjcf.py
+uv run scripts/view_taxels.py
+uv run scripts/report_taxels.py
+uv run scripts/run_cube_grasp_demo.py
+uv run scripts/run_touch_grid_demo.py
 ```
 
 两个闭合演示默认以实时速度启动 MuJoCo viewer。自动化验证或无图形环境可传入

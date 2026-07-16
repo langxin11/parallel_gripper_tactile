@@ -7,11 +7,11 @@ name = "robotiq2f85-tactile"
 version = "0.1.0"
 description = "MuJoCo Robotiq 2F-85 指尖触觉传感器资产与生成工具"
 readme = "README.md"
-requires-python = ">=3.10"
-
-[project.optional-dependencies]
-sim = ["mujoco>=3.1"]
-viz = ["opencv-python>=4.9"]
+requires-python = ">=3.12"
+dependencies = [
+    "mujoco>=3.1",
+    "opencv-python>=4.9",
+]
 
 [dependency-groups]
 dev = ["pytest>=7.0", "ruff>=0.15"]
@@ -21,7 +21,7 @@ testpaths = ["tests"]
 addopts = "-q"
 
 [tool.ruff]
-target-version = "py310"
+target-version = "py312"
 line-length = 100
 src = ["scripts", "tests"]
 
