@@ -4,8 +4,11 @@ from __future__ import annotations
 
 import csv
 import importlib.util
+import math
 import sys
 from pathlib import Path
+
+import numpy as np
 
 
 def _load_comparison():
@@ -49,8 +52,111 @@ def test_comparison_csv_uses_common_positive_pressure_convention(tmp_path: Path)
     assert rows[-1]["touch_grid_right_fz"] == "11"
 
 
+def test_disturbance_protocol_phases_and_waveform() -> None:
+    comparison = _load_comparison()
+    protocol = comparison.DisturbanceProtocol()
+    assert protocol.release_time == 1.5
+    assert protocol.disturbance_start == 2.0
+    assert protocol.disturbance_end == 3.0
+    assert protocol.total_duration == 3.5
+    assert protocol.phase_at(0.5) == "close"
+    assert protocol.phase_at(1.25) == "support_settle"
+    assert protocol.phase_at(1.75) == "release_settle"
+    assert protocol.phase_at(2.25) == "disturbance"
+    assert protocol.phase_at(3.25) == "recovery"
+    assert abs(protocol.force_y_at(2.125) - 5.0) < 1e-12
+    assert abs(protocol.force_y_at(2.375) + 5.0) < 1e-12
+    assert protocol.force_y_at(1.999) == 0.0
+    assert protocol.force_y_at(3.0) == 0.0
+
+
+def test_release_disables_support_and_applies_world_y_force() -> None:
+    comparison = _load_comparison()
+    protocol = comparison.DisturbanceProtocol()
+
+    class Model:
+        geom_contype = np.array([1], dtype=int)
+        geom_conaffinity = np.array([1], dtype=int)
+
+    class Data:
+        time = 2.125
+        ctrl = np.zeros(1)
+        xfrc_applied = np.ones((2, 6))
+
+    phase, applied = comparison._prepare_disturbance_step(
+        Model(), Data(), protocol, 220.0, support_geom_id=0, cube_body_id=1
+    )
+    assert phase == "disturbance"
+    assert Model.geom_contype[0] == 0
+    assert Model.geom_conaffinity[0] == 0
+    assert np.allclose(Data.xfrc_applied[1], [0, 5, 0, 0, 0, 0])
+    assert applied == (0.0, 5.0, 0.0)
+
+
+def test_local_force_rotation_uses_site_frame() -> None:
+    comparison = _load_comparison()
+    rotation = (0.0, -1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0)
+    assert comparison._rotate_local_to_world(rotation, (2.0, 3.0, 4.0)) == (
+        -3.0,
+        2.0,
+        4.0,
+    )
+
+
+def _disturbance_trace(comparison, total_world_y, y_positions):
+    count = len(total_world_y)
+    zeros = [(0.0, 0.0, 0.0)] * count
+    return comparison.ForceTrace(
+        time_s=[0.1 * index for index in range(count)],
+        control=[220.0] * count,
+        left=zeros.copy(),
+        right=zeros.copy(),
+        phase=["disturbance"] * (count - 1) + ["recovery"],
+        applied_force_world=zeros.copy(),
+        left_world=[(0.0, value / 2.0, 0.0) for value in total_world_y],
+        right_world=[(0.0, value / 2.0, 0.0) for value in total_world_y],
+        cube_position_world=[(0.0, value, 0.0) for value in y_positions],
+        cube_velocity_world=[(0.0, value, 0.0) for value in y_positions],
+    )
+
+
+def test_disturbance_summary_compares_world_response_and_slip() -> None:
+    comparison = _load_comparison()
+    box = _disturbance_trace(comparison, [1.0, 2.0, 0.0], [0.0, 0.001, 0.003])
+    grid = _disturbance_trace(comparison, [1.1, 1.8, 0.0], [0.0, 0.0005, 0.001])
+    summary = comparison.summarize_disturbance(box, grid, slip_threshold_m=0.002)
+    expected_nrmse = math.sqrt((0.1**2 + 0.2**2) / 2) / 2.0
+    assert abs(summary.response_nrmse - expected_nrmse) < 1e-12
+    assert summary.box_slipped
+    assert not summary.grid_slipped
+
+
+def test_disturbance_csv_contains_world_force_and_cube_motion(tmp_path: Path) -> None:
+    comparison = _load_comparison()
+    box = _disturbance_trace(comparison, [1.0, 2.0], [0.0, 0.001])
+    grid = _disturbance_trace(comparison, [1.1, 1.9], [0.0, 0.001])
+    output = tmp_path / "disturbance.csv"
+    comparison.write_comparison_csv(output, box, grid)
+    with output.open(newline="", encoding="utf-8") as file:
+        row = next(csv.DictReader(file))
+    assert row["phase"] == "disturbance"
+    assert "applied_world_fy" in row
+    assert row["box_taxel_total_world_fy"] == "1.0"
+    assert "touch_grid_cube_vy" in row
+
+
 def test_box_taxel_and_touch_grid_steady_forces_agree() -> None:
     comparison = _load_comparison()
     box, grid = comparison.run_comparison(steps=600)
     assert comparison.summarize_side(box.left, grid.left).relative_error <= 0.10
     assert comparison.summarize_side(box.right, grid.right).relative_error <= 0.10
+
+
+def test_default_disturbance_responses_agree_without_slip() -> None:
+    comparison = _load_comparison()
+    protocol = comparison.DisturbanceProtocol()
+    box, grid = comparison.run_comparison(protocol=protocol)
+    summary = comparison.summarize_disturbance(box, grid, protocol.slip_threshold_m)
+    assert summary.response_nrmse <= 0.10
+    assert not summary.box_slipped
+    assert not summary.grid_slipped
