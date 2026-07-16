@@ -15,8 +15,8 @@
 - `scripts/check_mjcf.py`：使用 MuJoCo 编译资产的验证工具。
 - `scripts/view_taxels.py`：在 MuJoCo viewer 中目视检查两侧 taxel 的位置与尺寸。
 - `scripts/report_taxels.py`：将传感器读数按左右两个 3×3 网格输出。
-- `scripts/run_cube_grasp_demo.py`：闭合夹爪并打印两侧 taxel 合力。
-- `scripts/run_touch_grid_demo.py`：用 OpenCV 将切向力画为箭头、法向压力画为绿→红颜色。
+- `scripts/run_cube_grasp_demo.py`：闭合夹爪，并用 Rerun 显示两侧 3×3 taxel 与合力曲线。
+- `scripts/run_touch_grid_demo.py`：用 Rerun 显示完整 touch-grid 压力、切向力与合力曲线。
 
 这里的默认实现是每个指尖 3×3 球形 taxel。每个 taxel 用一个球形接触 geom 与一个局部坐标系对齐的 `force` sensor 表示；此外，每侧还提供 `*_pad_force` 和 `*_pad_torque`。
 
@@ -38,6 +38,9 @@ uv run scripts/run_cube_grasp_demo.py
 uv run scripts/run_touch_grid_demo.py
 uv run scripts/run_touch_grid_demo.py \
   --gripper-xml assets/robotiq_2f85/2f85_touch_grid_3x3.xml
+uv run scripts/run_cube_grasp_demo.py --auto-close \
+  --record-rrd outputs/taxel.rrd
+uv run rerun outputs/taxel.rrd
 uv run scripts/compare_tactile_models.py
 uv run scripts/compare_tactile_models.py --disturbance
 ```

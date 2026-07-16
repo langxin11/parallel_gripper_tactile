@@ -26,22 +26,26 @@ uv run scripts/run_cube_grasp_demo.py --auto-close
 uv run scripts/run_touch_grid_demo.py --auto-close
 
 # 无图形环境
-uv run scripts/run_cube_grasp_demo.py --auto-close --no-viewer
-uv run scripts/run_touch_grid_demo.py --auto-close --no-viewer --no-window
+uv run scripts/run_cube_grasp_demo.py --auto-close --no-viewer --no-rerun
+uv run scripts/run_touch_grid_demo.py --auto-close --no-viewer --no-rerun
 ```
 
 不传 `--auto-close` 时，可在 MuJoCo viewer 的 **Control** 面板调节 `fingers_actuator`。
-两个演示可用 `--render-fps` 控制渲染刷新率。
+两个演示默认还会启动 Rerun 触觉仪表盘：左压力、右压力、左切向和右切向四个等宽、等高空间
+视图紧凑排列在同一行；压力图保持传感器原始分辨率，切向箭头最多聚合为 8×8，并用网格线标出
+各显示区域。合力与控制量按仿真时间绘制。
+`--no-rerun` 只关闭 Rerun，不影响 MuJoCo viewer；
+`--render-fps` 控制 MuJoCo 渲染刷新率。
 
 ## 记录与绘图
 
 记录钩子在每个物理步可采样控制量和左右合力；`--record-every` 指定每隔多少物理步写一行：
 
 ```bash
-uv run scripts/run_cube_grasp_demo.py --auto-close --no-viewer \
+uv run scripts/run_cube_grasp_demo.py --auto-close --no-viewer --no-rerun \
   --record-csv outputs/taxel_forces.csv --record-every 5
 
-uv run scripts/run_touch_grid_demo.py --auto-close --no-viewer --no-window \
+uv run scripts/run_touch_grid_demo.py --auto-close --no-viewer --no-rerun \
   --record-csv outputs/touch_grid_forces.csv --record-every 5
 
 uv run scripts/plot_forces.py outputs/taxel_forces.csv
@@ -52,6 +56,27 @@ uv run scripts/plot_forces.py outputs/touch_grid_forces.csv \
 CSV 包含 `step`、`time_s`、`control` 及左右的 `fx/fy/fz`。taxel 与 touch-grid 都统一记录
 “物体施加给触觉表面”的力，在各自 site 局部坐标系中表达，压缩时 `Fz > 0`。绘图脚本使用
 SciencePlots 的 `science` 和 `no-latex` 风格，不要求安装 TeX。
+
+Rerun 的 `.rrd` 会保存左右完整三通道触觉网格、显示用箭头、合力与控制量；只有显式传入
+`--record-rrd` 才会落盘。`--rerun-hz` 按仿真时间控制采样频率，默认 100 Hz；频率不随场景
+`timestep` 改变，且不能超过 MuJoCo 物理频率：
+
+```bash
+# 实时观察并同时保存
+uv run scripts/run_touch_grid_demo.py --auto-close \
+  --record-rrd outputs/touch_grid.rrd
+
+# 不启动任何窗口，仅生成 CSV 和 RRD
+uv run scripts/run_cube_grasp_demo.py --auto-close --no-viewer --no-rerun \
+  --record-csv outputs/taxel_forces.csv \
+  --record-rrd outputs/taxel.rrd
+
+# 回放
+uv run rerun outputs/taxel.rrd
+```
+
+即使传入 `--no-rerun`，`--record-rrd` 仍会使用文件 sink 正常记录。CSV 继续作为稳定、紧凑的
+合力数据格式；网格级回放使用 RRD。
 
 ## 切换触觉模型或场景
 

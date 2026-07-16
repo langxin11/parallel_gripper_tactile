@@ -12,6 +12,8 @@ target_cube.xml     实体：可自由运动的方块
 
 `scripts/grasp_scene.py` 是组合的唯一入口。默认的交互脚本
 `view_taxels.py`、`run_cube_grasp_demo.py` 和 `run_touch_grid_demo.py` 都通过它加载模型。
+两个抓取演示再将读数整理为统一的 `(3, rows, cols)` 触觉帧，交给
+`scripts/recording.py` 同时驱动 CSV 与 Rerun 输出。
 
 ## attach 与命名
 
@@ -49,6 +51,7 @@ uv run scripts/run_touch_grid_demo.py \
 - `assets/robotiq_2f85/2f85.xml`：上游的基础夹爪；不修改。
 - `scripts/generate_taxels_xml.py`：生成 3×3 离散 taxel 的派生夹爪。
 - `scripts/generate_touch_grid_xml.py`：生成 `touch_grid` 派生夹爪，可设置网格分辨率。
+- `scripts/recording.py`：统一触觉帧、CSV 合力记录以及 Rerun 实时/回放输出。
 - `assets/scenes/grasp_world.xml`：默认抓取环境。天空盒和地面纹理由 MuJoCo 程序化生成。
 - `assets/objects/target_cube.xml`：默认的自由方块。
 
