@@ -3,7 +3,7 @@
 常见用法::
 
     uv run scripts/view_taxels.py
-    uv run scripts/view_taxels.py assets/scenes/cube_grasp.xml
+    uv run scripts/view_taxels.py --gripper-xml assets/robotiq_2f85/2f85_taxels.xml
     uv run scripts/view_taxels.py --no-site-frames
     uv run scripts/view_taxels.py --no-physics
     uv run scripts/view_taxels.py --render-fps 30
@@ -17,7 +17,7 @@ import time
 
 
 def main() -> None:
-    """加载派生 MJCF，并实时渲染带 taxel site 标架的交互式 viewer。
+    """加载运行时组合场景，并实时渲染带 taxel site 标架的交互式 viewer。
 
     Args:
         无。
@@ -31,11 +31,14 @@ def main() -> None:
     except ModuleNotFoundError as error:
         raise ModuleNotFoundError("请先使用 `uv sync` 安装项目依赖。") from error
 
-    default_xml = Path(__file__).resolve().parents[1] / "assets/scenes/cube_grasp.xml"
+    from grasp_scene import DEFAULT_GRIPPER_XML, load_grasp_model
+
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "xml", nargs="?", type=Path, default=default_xml, help="待显示的 MJCF 文件。"
+        "xml", nargs="?", type=Path, help="待显示的完整 MJCF 文件（覆盖运行时 attach）。"
     )
+    parser.add_argument("--scene", type=Path, help="完整 MJCF 文件（与位置参数二选一）。")
+    parser.add_argument("--gripper-xml", type=Path, default=DEFAULT_GRIPPER_XML)
     parser.add_argument(
         "--no-site-frames",
         action="store_true",
@@ -53,10 +56,12 @@ def main() -> None:
         help="目标渲染帧率，默认 60 FPS。",
     )
     args = parser.parse_args()
+    if args.xml is not None and args.scene is not None:
+        parser.error("位置参数 xml 与 --scene 不能同时使用。")
     if args.render_fps <= 0:
         parser.error("--render-fps 必须为正数。")
 
-    model = mujoco.MjModel.from_xml_path(str(args.xml))
+    model = load_grasp_model(args.scene or args.xml, args.gripper_xml)
     data = mujoco.MjData(model)
     mujoco.mj_forward(model, data)
     with mujoco.viewer.launch_passive(

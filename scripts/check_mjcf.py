@@ -3,7 +3,7 @@
 常见用法::
 
     uv run scripts/check_mjcf.py
-    uv run scripts/check_mjcf.py assets/scenes/cube_grasp.xml
+    uv run scripts/check_mjcf.py assets/robotiq_2f85/2f85_touch_grid.xml
 """
 
 from __future__ import annotations

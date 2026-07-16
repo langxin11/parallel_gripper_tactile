@@ -14,19 +14,20 @@ import argparse
 import time
 from pathlib import Path
 
+from grasp_scene import DEFAULT_GRIPPER_XML, gripper_name_in_model, load_grasp_model
 from recording import ForceCsvRecorder
 
 
-def _taxel_force_sum(data, side: str) -> float:
+def _taxel_force_sum(data, side: str, sensor_name) -> float:
     """汇总一侧 3×3 taxel 的法向力读数。"""
     return sum(
-        -float(data.sensor(f"{side}_taxel_force_{row}{column}").data[2])
+        -float(data.sensor(sensor_name(f"{side}_taxel_force_{row}{column}")).data[2])
         for row in range(3)
         for column in range(3)
     )
 
 
-def _taxel_force_vector(data, side: str) -> tuple[float, float, float]:
+def _taxel_force_vector(data, side: str, sensor_name) -> tuple[float, float, float]:
     """汇总一侧 taxel 子 body 传给 pad 父 body 的三维力。
 
     向量在各 taxel site 局部系中表达。site +Z 指向表面外侧，因此压缩载荷
@@ -34,7 +35,7 @@ def _taxel_force_vector(data, side: str) -> tuple[float, float, float]:
     """
     return tuple(
         sum(
-            float(data.sensor(f"{side}_taxel_force_{row}{column}").data[axis])
+            float(data.sensor(sensor_name(f"{side}_taxel_force_{row}{column}")).data[axis])
             for row in range(3)
             for column in range(3)
         )
@@ -54,9 +55,9 @@ def main() -> None:
     except ModuleNotFoundError as error:
         raise ModuleNotFoundError("请先使用 `uv sync` 安装项目依赖。") from error
 
-    default_scene = Path(__file__).resolve().parents[1] / "assets/scenes/cube_grasp.xml"
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scene", type=Path, default=default_scene)
+    parser.add_argument("--scene", type=Path, help="加载外部完整 MJCF，而非运行时 attach 场景。")
+    parser.add_argument("--gripper-xml", type=Path, default=DEFAULT_GRIPPER_XML)
     parser.add_argument("--steps", type=int, default=1500, help="仿真步数。")
     parser.add_argument(
         "--close-control", type=float, default=220, help="最终夹爪控制量，范围 0~255。"
@@ -74,7 +75,10 @@ def main() -> None:
     if args.record_every <= 0:
         parser.error("--record-every 必须为正整数。")
 
-    model = mujoco.MjModel.from_xml_path(str(args.scene))
+    model = load_grasp_model(args.scene, args.gripper_xml)
+
+    def sensor_name(name: str) -> str:
+        return gripper_name_in_model(mujoco, model, name)
     data = mujoco.MjData(model)
     recorder = ForceCsvRecorder(args.record_csv, args.record_every)
     viewer = None
@@ -108,14 +112,14 @@ def main() -> None:
                         step,
                         data.time,
                         float(data.ctrl[0]),
-                        _taxel_force_vector(data, "left"),
-                        _taxel_force_vector(data, "right"),
+                        _taxel_force_vector(data, "left", sensor_name),
+                        _taxel_force_vector(data, "right", sensor_name),
                     )
                     if step % 100 == 0 or step == args.steps - 1:
                         print(
                             f"step={step:4d} ctrl={data.ctrl[0]:6.1f} "
-                            f"left={_taxel_force_sum(data, 'left'):8.3f} N "
-                            f"right={_taxel_force_sum(data, 'right'):8.3f} N"
+                            f"left={_taxel_force_sum(data, 'left', sensor_name):8.3f} N "
+                            f"right={_taxel_force_sum(data, 'right', sensor_name):8.3f} N"
                         )
                     step += 1
                     if args.auto_close and step >= args.steps:
@@ -132,14 +136,14 @@ def main() -> None:
                     step,
                     data.time,
                     float(data.ctrl[0]),
-                    _taxel_force_vector(data, "left"),
-                    _taxel_force_vector(data, "right"),
+                    _taxel_force_vector(data, "left", sensor_name),
+                    _taxel_force_vector(data, "right", sensor_name),
                 )
                 if step % 100 == 0 or step == args.steps - 1:
                     print(
                         f"step={step:4d} ctrl={data.ctrl[0]:6.1f} "
-                        f"left={_taxel_force_sum(data, 'left'):8.3f} N "
-                        f"right={_taxel_force_sum(data, 'right'):8.3f} N"
+                        f"left={_taxel_force_sum(data, 'left', sensor_name):8.3f} N "
+                        f"right={_taxel_force_sum(data, 'right', sensor_name):8.3f} N"
                     )
                 step += 1
                 if step >= args.steps:

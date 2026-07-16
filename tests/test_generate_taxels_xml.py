@@ -69,18 +69,15 @@ def test_taxel_report_sensor_names_follow_row_major_order() -> None:
     )
 
 
-def test_cube_grasp_scene_places_cube_between_taxel_pads() -> None:
-    """抓取场景应包含自由方块、重力和闭合前承托方块的薄板。"""
-    scene_path = Path(__file__).resolve().parents[1] / "scripts/generate_cube_grasp_scene.py"
-    spec = importlib.util.spec_from_file_location("generate_cube_grasp_scene", scene_path)
+def test_runtime_grasp_scene_attaches_cube_and_preserves_world_setup() -> None:
+    """运行时场景应挂接自由方块，并保留重力、薄板和程序化天空盒。"""
+    scene_path = Path(__file__).resolve().parents[1] / "scripts/grasp_scene.py"
+    spec = importlib.util.spec_from_file_location("grasp_scene", scene_path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
-    root = module.build_cube_grasp_tree(module.DEFAULT_GRIPPER_XML).getroot()
-    assert root.find(".//body[@name='target_cube']") is not None
-    assert root.find(".//freejoint[@name='target_cube_free_joint']") is not None
-    assert root.find(".//key[@name='closed']").get("ctrl") == "220"
+    root = ET.parse(module.GRASP_WORLD_XML).getroot()
     assert root.find(".//geom[@name='ground']") is not None
     support_plate = root.find(".//geom[@name='target_cube_support_plate']")
     assert support_plate is not None
@@ -92,9 +89,32 @@ def test_cube_grasp_scene_places_cube_between_taxel_pads() -> None:
     assert starfield.get("builtin") == "gradient"
     assert starfield.get("mark") == "random"
     assert starfield.get("random") == "0.008"
-    base = root.find(".//body[@name='base']")
-    assert base is not None
-    assert base.get("quat") == "0.70710678 0.70710678 0 0"
+    cube_root = ET.parse(module.TARGET_CUBE_XML).getroot()
+    assert cube_root.find(".//body[@name='target_cube']") is not None
+    assert cube_root.find(".//freejoint[@name='target_cube_free_joint']") is not None
+
+
+def test_runtime_grasp_scene_compiles_taxel_and_touch_grid_assets() -> None:
+    """attach 后应保留实体前缀，并支持默认及低分辨率触觉资产。"""
+    import mujoco
+
+    scene_path = Path(__file__).resolve().parents[1] / "scripts/grasp_scene.py"
+    spec = importlib.util.spec_from_file_location("grasp_scene_compilation", scene_path)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = module
+    spec.loader.exec_module(module)
+    asset_dir = Path(__file__).resolve().parents[1] / "assets/robotiq_2f85"
+
+    taxel_model = module.build_grasp_spec(asset_dir / "2f85_taxels.xml").compile()
+    assert mujoco.mj_name2id(
+        taxel_model, mujoco.mjtObj.mjOBJ_SENSOR, "gripper/left_taxel_force_00"
+    ) >= 0
+    assert mujoco.mj_name2id(taxel_model, mujoco.mjtObj.mjOBJ_BODY, "cube/target_cube") >= 0
+    assert mujoco.mj_name2id(taxel_model, mujoco.mjtObj.mjOBJ_KEY, "closed") >= 0
+
+    grid_model = module.build_grasp_spec(asset_dir / "2f85_touch_grid_3x3.xml").compile()
+    assert mujoco.mj_name2id(grid_model, mujoco.mjtObj.mjOBJ_SENSOR, "gripper/touch_left") >= 0
 
 
 def test_touch_grid_model_creates_two_32_by_32_collision_pads() -> None:

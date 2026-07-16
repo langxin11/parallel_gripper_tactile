@@ -1,0 +1,10 @@
+<mujoco model="target_cube">
+  <worldbody>
+    <body name="target_cube">
+      <freejoint name="target_cube_free_joint"/>
+      <geom name="target_cube_geom" type="box" size="0.015 0.015 0.015" mass="0.03"
+            friction="0.8 0.02 0.001" solimp="0.90 0.95 0.002" solref="0.015 1"
+            rgba="0.95 0.55 0.1 1"/>
+    </body>
+  </worldbody>
+</mujoco>

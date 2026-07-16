@@ -3,7 +3,7 @@
 常见用法::
 
     uv run scripts/report_taxels.py
-    uv run scripts/report_taxels.py assets/scenes/cube_grasp.xml
+    uv run scripts/report_taxels.py assets/robotiq_2f85/2f85_taxels.xml
 """
 
 from __future__ import annotations

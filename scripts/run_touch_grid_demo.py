@@ -14,6 +14,7 @@ import argparse
 import time
 from pathlib import Path
 
+from grasp_scene import DEFAULT_TOUCH_GRID_XML, gripper_name_in_model, load_grasp_model
 from recording import ForceCsvRecorder
 
 
@@ -76,9 +77,9 @@ def main() -> None:
     except ModuleNotFoundError as error:
         raise ModuleNotFoundError("请先使用 `uv sync` 安装项目依赖。") from error
 
-    default_scene = Path(__file__).resolve().parents[1] / "assets/scenes/cube_grasp_touch_grid.xml"
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--scene", type=Path, default=default_scene)
+    parser.add_argument("--scene", type=Path, help="加载外部完整 MJCF，而非运行时 attach 场景。")
+    parser.add_argument("--gripper-xml", type=Path, default=DEFAULT_TOUCH_GRID_XML)
     parser.add_argument("--steps", type=int, default=1500)
     parser.add_argument(
         "--no-window", action="store_true", help="不打开 OpenCV 窗口，适用于自动验证。"
@@ -95,11 +96,13 @@ def main() -> None:
         parser.error("--render-fps 必须为正数。")
     if args.record_every <= 0:
         parser.error("--record-every 必须为正整数。")
-    model = mujoco.MjModel.from_xml_path(str(args.scene))
+    model = load_grasp_model(args.scene, args.gripper_xml)
     data = mujoco.MjData(model)
     recorder = ForceCsvRecorder(args.record_csv, args.record_every)
-    left_shape = _touch_grid_shape(mujoco, model, "touch_left")
-    right_shape = _touch_grid_shape(mujoco, model, "touch_right")
+    left_sensor = gripper_name_in_model(mujoco, model, "touch_left")
+    right_sensor = gripper_name_in_model(mujoco, model, "touch_right")
+    left_shape = _touch_grid_shape(mujoco, model, left_sensor)
+    right_shape = _touch_grid_shape(mujoco, model, right_sensor)
     viewer = None
     if not args.no_viewer:
         import mujoco.viewer
@@ -128,16 +131,16 @@ def main() -> None:
                         step,
                         data.time,
                         float(data.ctrl[0]),
-                        _read_tactile(data, "touch_left", left_shape).sum(axis=(1, 2)),
-                        _read_tactile(data, "touch_right", right_shape).sum(axis=(1, 2)),
+                        _read_tactile(data, left_sensor, left_shape).sum(axis=(1, 2)),
+                        _read_tactile(data, right_sensor, right_shape).sum(axis=(1, 2)),
                     )
                     step += 1
                     if args.auto_close and step >= args.steps:
                         break
                 viewer.sync()
                 if not args.no_window:
-                    cv2.imshow("touch_left", tactile_to_bgr(_read_tactile(data, "touch_left", left_shape)))
-                    cv2.imshow("touch_right", tactile_to_bgr(_read_tactile(data, "touch_right", right_shape)))
+                    cv2.imshow("touch_left", tactile_to_bgr(_read_tactile(data, left_sensor, left_shape)))
+                    cv2.imshow("touch_right", tactile_to_bgr(_read_tactile(data, right_sensor, right_shape)))
                     if cv2.waitKey(1) == 27:
                         break
                 if args.auto_close and step >= args.steps:
@@ -151,12 +154,12 @@ def main() -> None:
                     step,
                     data.time,
                     float(data.ctrl[0]),
-                    _read_tactile(data, "touch_left", left_shape).sum(axis=(1, 2)),
-                    _read_tactile(data, "touch_right", right_shape).sum(axis=(1, 2)),
+                    _read_tactile(data, left_sensor, left_shape).sum(axis=(1, 2)),
+                    _read_tactile(data, right_sensor, right_shape).sum(axis=(1, 2)),
                 )
                 if not args.no_window and step % 5 == 0:
-                    cv2.imshow("touch_left", tactile_to_bgr(_read_tactile(data, "touch_left", left_shape)))
-                    cv2.imshow("touch_right", tactile_to_bgr(_read_tactile(data, "touch_right", right_shape)))
+                    cv2.imshow("touch_left", tactile_to_bgr(_read_tactile(data, left_sensor, left_shape)))
+                    cv2.imshow("touch_right", tactile_to_bgr(_read_tactile(data, right_sensor, right_shape)))
                     if cv2.waitKey(1) == 27:
                         break
                 step += 1
@@ -169,8 +172,8 @@ def main() -> None:
             viewer.close()
     if not args.no_window:
         cv2.destroyAllWindows()
-    left = _read_tactile(data, "touch_left", left_shape)
-    right = _read_tactile(data, "touch_right", right_shape)
+    left = _read_tactile(data, left_sensor, left_shape)
+    right = _read_tactile(data, right_sensor, right_shape)
     print(f"left pressure sum={left[2].sum():.3f}, right pressure sum={right[2].sum():.3f}")
 
 
