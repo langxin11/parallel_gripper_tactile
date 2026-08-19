@@ -8,6 +8,7 @@
   <size memory="134217728"/>
 
   <visual>
+    <global offwidth="1920" offheight="1080"/>
     <headlight ambient="0.25 0.25 0.25" diffuse="0.7 0.7 0.7" specular="0.2 0.2 0.2"/>
   </visual>
 

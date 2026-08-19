@@ -50,11 +50,11 @@ def plot_forces(values: dict[str, list[float]], output: Path, show: bool = False
     except ModuleNotFoundError as error:
         raise ModuleNotFoundError("请先使用 `uv sync` 安装项目依赖。") from error
 
-    # no-latex 保留 science 排版，同时避免在未安装 TeX 的开发环境中失败。
-    plt.style.use(["science", "no-latex"])
+    # ieee: IEEE 风格 Times 衬线+网格；no-latex: 不依赖 TeX 发行版。
+    plt.style.use(["science", "ieee", "no-latex"])
     time_s = values["time_s"]
     figure, (control_axis, left_axis, right_axis) = plt.subplots(
-        3, 1, figsize=(7.0, 6.5), sharex=True, layout="constrained"
+        3, 1, figsize=(7.16, 6.5), sharex=True, layout="constrained"
     )
     control_axis.plot(time_s, values["control"], color="black", label="control")
     control_axis.set_ylabel("Control")
@@ -72,7 +72,7 @@ def plot_forces(values: dict[str, list[float]], output: Path, show: bool = False
 
     right_axis.set_xlabel("Simulation time (s)")
     output.parent.mkdir(parents=True, exist_ok=True)
-    figure.savefig(output, dpi=300)
+    figure.savefig(output, dpi=600)
     print(f"已保存 {output}")
     if show:
         plt.show()

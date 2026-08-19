@@ -554,12 +554,12 @@ def plot_comparison(path: Path, box: ForceTrace, grid: ForceTrace) -> None:
     except ModuleNotFoundError as error:
         raise ModuleNotFoundError("请先使用 `uv sync` 安装项目依赖。") from error
 
-    plt.style.use(["science", "no-latex"])
+    plt.style.use(["science", "ieee", "no-latex"])
     if box.phase:
         _plot_disturbance_comparison(plt, path, box, grid)
         return
     figure, (control_axis, left_axis, right_axis) = plt.subplots(
-        3, 1, figsize=(7.0, 6.5), sharex=True, layout="constrained"
+        3, 1, figsize=(7.16, 6.5), sharex=True, layout="constrained"
     )
     control_axis.plot(box.time_s, box.control, color="black", label="control")
     control_axis.set_ylabel("Control")
@@ -584,13 +584,13 @@ def plot_comparison(path: Path, box: ForceTrace, grid: ForceTrace) -> None:
         axis.legend(frameon=False)
     right_axis.set_xlabel("Simulation time (s)")
     path.parent.mkdir(parents=True, exist_ok=True)
-    figure.savefig(path, dpi=300)
+    figure.savefig(path, dpi=600)
     plt.close(figure)
 
 
 def _plot_disturbance_comparison(plt, path: Path, box: ForceTrace, grid: ForceTrace) -> None:
     figure, axes = plt.subplots(
-        5, 1, figsize=(7.2, 9.0), sharex=True, layout="constrained"
+        5, 1, figsize=(7.16, 9.0), sharex=True, layout="constrained"
     )
     control_axis, applied_axis, local_axis, world_axis, displacement_axis = axes
     control_axis.plot(box.time_s, box.control, color="black", label="control")
@@ -662,7 +662,7 @@ def _plot_disturbance_comparison(plt, path: Path, box: ForceTrace, grid: ForceTr
             transform=control_axis.get_xaxis_transform(),
         )
     path.parent.mkdir(parents=True, exist_ok=True)
-    figure.savefig(path, dpi=300)
+    figure.savefig(path, dpi=600)
     plt.close(figure)
 
 
