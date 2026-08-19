@@ -104,7 +104,7 @@ def test_runtime_grasp_scene_compiles_taxel_and_touch_grid_assets() -> None:
     module = importlib.util.module_from_spec(spec)
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
-    asset_dir = Path(__file__).resolve().parents[1] / "assets/robotiq_2f85"
+    asset_dir = Path(__file__).resolve().parents[1] / "assets/grippers/robotiq_2f85"
 
     taxel_model = module.build_grasp_spec(asset_dir / "2f85_taxels.xml").compile()
     assert mujoco.mj_name2id(

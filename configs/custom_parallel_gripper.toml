@@ -1,0 +1,20 @@
+name = "custom_parallel_gripper"
+
+[model]
+path = "assets/grippers/custom_parallel_gripper/parallel_gripper.xml"
+
+[control]
+actuator = "gripper_drive"
+open = -0.05
+closed = 1.85
+
+[mount]
+pos = [0.0, 0.0, 0.08]
+quat = [1.0, 0.0, 0.0, 0.0]
+
+[tactile]
+mode = "contact_geom"
+rows = 3
+cols = 3
+left_prefix = "left_taxel_geom_"
+right_prefix = "right_taxel_geom_"

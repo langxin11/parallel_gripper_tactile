@@ -3,7 +3,7 @@
 常见用法::
 
     uv run scripts/report_taxels.py
-    uv run scripts/report_taxels.py assets/robotiq_2f85/2f85_taxels.xml
+    uv run scripts/report_taxels.py assets/grippers/robotiq_2f85/2f85_taxels.xml
 """
 
 from __future__ import annotations
@@ -60,7 +60,7 @@ def read_taxel_forces(xml_path: Path) -> dict[str, list[float]]:
 
 def main() -> None:
     """读取模型初始状态，并以两块 3×3 表格输出 taxel 力。"""
-    default_xml = Path(__file__).resolve().parents[1] / "assets/robotiq_2f85/2f85_taxels.xml"
+    default_xml = Path(__file__).resolve().parents[1] / "assets/grippers/robotiq_2f85/2f85_taxels.xml"
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "xml", nargs="?", type=Path, default=default_xml, help="待读取的 MJCF 文件。"

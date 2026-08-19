@@ -16,9 +16,10 @@ from pathlib import Path
 from typing import Iterable
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_BASE_XML = REPOSITORY_ROOT / "assets" / "robotiq_2f85" / "2f85.xml"
-DEFAULT_OUTPUT_XML = REPOSITORY_ROOT / "assets" / "robotiq_2f85" / "2f85_taxels.xml"
-DEFAULT_BOX_OUTPUT_XML = REPOSITORY_ROOT / "assets" / "robotiq_2f85" / "2f85_taxels_box.xml"
+ROBOTIQ_ASSET_DIR = REPOSITORY_ROOT / "assets" / "grippers" / "robotiq_2f85"
+DEFAULT_BASE_XML = ROBOTIQ_ASSET_DIR / "2f85.xml"
+DEFAULT_OUTPUT_XML = ROBOTIQ_ASSET_DIR / "2f85_taxels.xml"
+DEFAULT_BOX_OUTPUT_XML = ROBOTIQ_ASSET_DIR / "2f85_taxels_box.xml"
 
 
 @dataclass(frozen=True, slots=True)

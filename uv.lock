@@ -442,6 +442,39 @@ wheels = [
 ]
 
 [[package]]
+name = "parallel-gripper-tactile"
+version = "0.2.0"
+source = { editable = "." }
+dependencies = [
+    { name = "matplotlib" },
+    { name = "mujoco" },
+    { name = "numpy" },
+    { name = "rerun-sdk" },
+    { name = "scienceplots" },
+]
+
+[package.dev-dependencies]
+dev = [
+    { name = "pytest" },
+    { name = "ruff" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "matplotlib", specifier = ">=3.8" },
+    { name = "mujoco", specifier = ">=3.1" },
+    { name = "numpy", specifier = ">=2.0" },
+    { name = "rerun-sdk", specifier = ">=0.34,<0.35" },
+    { name = "scienceplots", specifier = ">=2.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=7.0" },
+    { name = "ruff", specifier = ">=0.15" },
+]
+
+[[package]]
 name = "pillow"
 version = "12.3.0"
 source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
@@ -657,39 +690,6 @@ wheels = [
     { url = "https://pypi.tuna.tsinghua.edu.cn/packages/24/f7/c2e5097f0138a3c4d70e2fe1c24781fac9aec351324c2ea5b15f4d6971b8/rerun_sdk-0.34.1-cp310-abi3-manylinux_2_28_aarch64.whl", hash = "sha256:57585f9c77af6d8a5ee0342bd79b87431b632bf7158e9b8dd4756d6ccd7b7feb", size = 142889929, upload-time = "2026-07-07T17:43:20.293Z" },
     { url = "https://pypi.tuna.tsinghua.edu.cn/packages/18/fa/f87899a8c0cc36901d32069072340b894654fa6f3b3a2a74913565c3661a/rerun_sdk-0.34.1-cp310-abi3-manylinux_2_28_x86_64.whl", hash = "sha256:60c35adb49f04bd64bf1a426b59f61aeee8312fa7cc2624878b43186e817b2d4", size = 147505605, upload-time = "2026-07-07T17:43:25.397Z" },
     { url = "https://pypi.tuna.tsinghua.edu.cn/packages/f1/3a/07125af48ef024c573acadf1bfedd406bcc838ffa1af0d7b20bd79895267/rerun_sdk-0.34.1-cp310-abi3-win_amd64.whl", hash = "sha256:3448b34d385994a32caaa4e3ffd42b69069ab7791382d8936089e4928ca24cd6", size = 126554967, upload-time = "2026-07-07T17:43:30.61Z" },
-]
-
-[[package]]
-name = "robotiq2f85-tactile"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "matplotlib" },
-    { name = "mujoco" },
-    { name = "numpy" },
-    { name = "rerun-sdk" },
-    { name = "scienceplots" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pytest" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "matplotlib", specifier = ">=3.8" },
-    { name = "mujoco", specifier = ">=3.1" },
-    { name = "numpy", specifier = ">=2.0" },
-    { name = "rerun-sdk", specifier = ">=0.34,<0.35" },
-    { name = "scienceplots", specifier = ">=2.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pytest", specifier = ">=7.0" },
-    { name = "ruff", specifier = ">=0.15" },
 ]
 
 [[package]]

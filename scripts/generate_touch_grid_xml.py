@@ -5,7 +5,7 @@
     uv run scripts/generate_touch_grid_xml.py
     uv run scripts/generate_touch_grid_xml.py --output-xml /tmp/2f85_touch_grid.xml
     uv run scripts/generate_touch_grid_xml.py --rows 3 --cols 3 \\
-        --output-xml assets/robotiq_2f85/2f85_touch_grid_3x3.xml
+        --output-xml assets/grippers/robotiq_2f85/2f85_touch_grid_3x3.xml
 """
 
 from __future__ import annotations
@@ -15,8 +15,8 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_BASE_XML = REPOSITORY_ROOT / "assets/robotiq_2f85/2f85.xml"
-DEFAULT_OUTPUT_XML = REPOSITORY_ROOT / "assets/robotiq_2f85/2f85_touch_grid.xml"
+DEFAULT_BASE_XML = REPOSITORY_ROOT / "assets/grippers/robotiq_2f85/2f85.xml"
+DEFAULT_OUTPUT_XML = REPOSITORY_ROOT / "assets/grippers/robotiq_2f85/2f85_touch_grid.xml"
 DEFAULT_GRID_ROWS = 32
 DEFAULT_GRID_COLS = 32
 PAD_X = 0.043258

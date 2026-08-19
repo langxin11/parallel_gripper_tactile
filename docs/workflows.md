@@ -83,7 +83,7 @@ uv run rerun outputs/taxel.rrd
 ```bash
 # 使用 3×3 touch_grid 资产
 uv run scripts/run_touch_grid_demo.py \
-  --gripper-xml assets/robotiq_2f85/2f85_touch_grid_3x3.xml
+  --gripper-xml assets/grippers/robotiq_2f85/2f85_touch_grid_3x3.xml
 
 # 使用完整的外部 MJCF，跳过默认运行时场景组合
 uv run scripts/run_cube_grasp_demo.py --scene path/to/complete_scene.xml
@@ -97,9 +97,9 @@ uv run scripts/run_cube_grasp_demo.py --scene path/to/complete_scene.xml
 ```bash
 # 单独查看或运行 box taxel
 uv run scripts/view_taxels.py \
-  --gripper-xml assets/robotiq_2f85/2f85_taxels_box.xml
+  --gripper-xml assets/grippers/robotiq_2f85/2f85_taxels_box.xml
 uv run scripts/run_cube_grasp_demo.py --auto-close \
-  --gripper-xml assets/robotiq_2f85/2f85_taxels_box.xml
+  --gripper-xml assets/grippers/robotiq_2f85/2f85_taxels_box.xml
 
 # 自动运行同条件 A/B 比较
 uv run scripts/compare_tactile_models.py

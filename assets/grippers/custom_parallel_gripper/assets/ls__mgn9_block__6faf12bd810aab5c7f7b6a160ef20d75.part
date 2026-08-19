@@ -1,0 +1,14 @@
+{
+    "configuration": "Length=0.15+meter;List_sb2ToxmKhgtLtw=Default;List_tk8V9T2NS0vxMR=MGN9;center_dist=0.005+meter",
+    "documentId": "e4977a812e173d148f67faf6",
+    "documentMicroversion": "113359903de35e618b147b49",
+    "documentVersion": "68925aa05c1441e7de22f499",
+    "elementId": "a9ba881afe47275c1f81ae9f",
+    "fullConfiguration": "Length=0.15+meter;List_sb2ToxmKhgtLtw=Default;List_tk8V9T2NS0vxMR=MGN9;center_dist=0.005+meter",
+    "id": "Mv82gbRAmnMa7V6+3",
+    "isStandardContent": false,
+    "name": "[LS] MGN9 Block <2>",
+    "partId": "JRD",
+    "suppressed": false,
+    "type": "Part"
+}

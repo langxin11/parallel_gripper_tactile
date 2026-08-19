@@ -27,8 +27,8 @@ from pathlib import Path
 import numpy as np
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_BOX_TAXEL_XML = REPOSITORY_ROOT / "assets/robotiq_2f85/2f85_taxels_box.xml"
-DEFAULT_TOUCH_GRID_XML = REPOSITORY_ROOT / "assets/robotiq_2f85/2f85_touch_grid_3x3.xml"
+DEFAULT_BOX_TAXEL_XML = REPOSITORY_ROOT / "assets/grippers/robotiq_2f85/2f85_taxels_box.xml"
+DEFAULT_TOUCH_GRID_XML = REPOSITORY_ROOT / "assets/grippers/robotiq_2f85/2f85_touch_grid_3x3.xml"
 DEFAULT_OUTPUT = REPOSITORY_ROOT / "outputs/tactile_disturbance_simulation.mp4"
 SUPPORT_GEOM_NAME = "target_cube_support_plate"
 CUBE_BODY_NAME = "cube/target_cube"

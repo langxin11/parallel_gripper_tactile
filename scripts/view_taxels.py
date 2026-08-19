@@ -3,7 +3,7 @@
 常见用法::
 
     uv run scripts/view_taxels.py
-    uv run scripts/view_taxels.py --gripper-xml assets/robotiq_2f85/2f85_taxels.xml
+    uv run scripts/view_taxels.py --gripper-xml assets/grippers/robotiq_2f85/2f85_taxels.xml
     uv run scripts/view_taxels.py --no-site-frames
     uv run scripts/view_taxels.py --no-physics
     uv run scripts/view_taxels.py --render-fps 30

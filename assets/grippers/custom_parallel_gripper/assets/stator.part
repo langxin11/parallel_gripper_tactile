@@ -1,0 +1,13 @@
+{
+    "configuration": "default",
+    "documentId": "ee6a871f9e00fc227503180b",
+    "documentMicroversion": "8199b54966f00d9410be50a9",
+    "elementId": "722c7e155092cd92fcfd05e4",
+    "fullConfiguration": "default",
+    "id": "MhdH0oEpPOuIik1q3",
+    "isStandardContent": false,
+    "name": "stator <1>",
+    "partId": "JHD",
+    "suppressed": false,
+    "type": "Part"
+}

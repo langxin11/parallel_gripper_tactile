@@ -21,8 +21,8 @@ from run_touch_grid_demo import _read_tactile, _touch_grid_shape
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_BOX_TAXEL_XML = REPOSITORY_ROOT / "assets/robotiq_2f85/2f85_taxels_box.xml"
-DEFAULT_TOUCH_GRID_XML = REPOSITORY_ROOT / "assets/robotiq_2f85/2f85_touch_grid_3x3.xml"
+DEFAULT_BOX_TAXEL_XML = REPOSITORY_ROOT / "assets/grippers/robotiq_2f85/2f85_taxels_box.xml"
+DEFAULT_TOUCH_GRID_XML = REPOSITORY_ROOT / "assets/grippers/robotiq_2f85/2f85_touch_grid_3x3.xml"
 DEFAULT_OUTPUT_CSV = REPOSITORY_ROOT / "outputs/tactile_model_comparison.csv"
 SUPPORT_GEOM_NAME = "target_cube_support_plate"
 CUBE_BODY_NAME = "cube/target_cube"

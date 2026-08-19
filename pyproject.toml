@@ -2,13 +2,13 @@
 requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-py-modules = []
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [project]
-name = "robotiq2f85-tactile"
-version = "0.1.0"
-description = "MuJoCo Robotiq 2F-85 指尖触觉传感器资产与生成工具"
+name = "parallel-gripper-tactile"
+version = "0.2.0"
+description = "MuJoCo 平行夹爪指尖触觉仿真、资产与实验工具"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -18,6 +18,9 @@ dependencies = [
     "rerun-sdk>=0.34,<0.35",
     "SciencePlots>=2.0",
 ]
+
+[project.scripts]
+pgt-check = "parallel_gripper_tactile.cli:check"
 
 [dependency-groups]
 dev = ["pytest>=7.0", "ruff>=0.15"]
@@ -29,7 +32,7 @@ addopts = "-q"
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-src = ["scripts", "tests"]
+src = ["src", "scripts", "tests"]
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F"]

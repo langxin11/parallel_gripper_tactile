@@ -1,56 +1,76 @@
-# Robotiq 2F-85 Tactile
+# 平行夹爪指尖触觉仿真
 
-独立维护 MuJoCo 中为 Robotiq 2F-85 两个指尖添加触觉传感器的最小资产仓库。
+面向 MuJoCo 的多平行夹爪触觉资产与实验工具。项目同时保留 Robotiq 2F-85
+参考模型和自研曲柄滑块平行夹爪，并通过类型化 profile 统一模型路径、执行器、
+控制范围、安装位姿与触觉阵列命名。
 
-## 内容与边界
-
-- `assets/robotiq_2f85/2f85.xml`：未修改的基础夹爪模型。
-- `scripts/generate_taxels_xml.py`：从基础模型生成带 18 个离散 taxel 的派生 MJCF。
-- `assets/robotiq_2f85/2f85_taxels.xml`：生成结果；不可手工编辑。
-- `assets/robotiq_2f85/2f85_taxels_box.xml`：用于公平对比的 3×3 平面 box taxel。
-- `assets/robotiq_2f85/2f85_touch_grid.xml`：每侧 32×32、三通道的 `touch_grid` 版本；生成器也支持自定义分辨率。
-- `assets/scenes/grasp_world.xml`：抓取环境（地面、薄板、相机与程序化星空）。
-- `assets/objects/target_cube.xml`：可自由运动的方块实体。
-- `scripts/grasp_scene.py`：使用 `MjSpec.attach()` 在运行时组合环境、夹爪和方块。
-- `scripts/check_mjcf.py`：使用 MuJoCo 编译资产的验证工具。
-- `scripts/view_taxels.py`：在 MuJoCo viewer 中目视检查两侧 taxel 的位置与尺寸。
-- `scripts/report_taxels.py`：将传感器读数按左右两个 3×3 网格输出。
-- `scripts/run_cube_grasp_demo.py`：闭合夹爪，并用 Rerun 显示两侧 3×3 taxel 与合力曲线。
-- `scripts/run_touch_grid_demo.py`：用 Rerun 显示完整 touch-grid 压力、切向力与合力曲线。
-
-这里的默认实现是每个指尖 3×3 球形 taxel。每个 taxel 用一个球形接触 geom 与一个局部坐标系对齐的 `force` sensor 表示；此外，每侧还提供 `*_pad_force` 和 `*_pad_torque`。
-
-不包含抓取策略、强化学习环境、真实触觉相机驱动或 Shadow Hand 专用的观测包装代码。
-
-## 使用
+## 快速开始
 
 ```bash
-uv run scripts/generate_taxels_xml.py
-uv run scripts/generate_taxels_xml.py --shape box
-uv run scripts/generate_touch_grid_xml.py
-uv run scripts/generate_touch_grid_xml.py --rows 3 --cols 3 \
-  --output-xml assets/robotiq_2f85/2f85_touch_grid_3x3.xml
+uv sync --all-groups
+uv run pgt-check configs/robotiq_2f85.toml
+uv run pgt-check configs/custom_parallel_gripper.toml
 uv run pytest
-uv run scripts/check_mjcf.py
-uv run scripts/view_taxels.py
-uv run scripts/report_taxels.py
-uv run scripts/run_cube_grasp_demo.py
-uv run scripts/run_touch_grid_demo.py
-uv run scripts/run_touch_grid_demo.py \
-  --gripper-xml assets/robotiq_2f85/2f85_touch_grid_3x3.xml
-uv run scripts/run_cube_grasp_demo.py --auto-close \
-  --record-rrd outputs/taxel.rrd
-uv run rerun outputs/taxel.rrd
-uv run scripts/compare_tactile_models.py
-uv run scripts/compare_tactile_models.py --disturbance
 ```
 
-详细用法、记录和绘图命令见 [常用工作流](docs/workflows.md)。场景资产如何运行时拼接、
-名称前缀如何变化见 [项目结构](docs/architecture.md)。关于 taxel / touch_grid 的坐标系、
-力的作用对象和 `Fz` 符号，见 [触觉读数约定](docs/tactile-conventions.md)。
+查看自研夹爪：
 
-## 设计参数
+```bash
+uv run -m mujoco.viewer \
+  --mjcf assets/grippers/custom_parallel_gripper/scene.xml
+```
 
-默认 taxel 使用 `solimp="0.90 0.95 0.002"` 和 `solref="0.015 1"`。生成脚本的关键参数为
-`TAXEL_GRID`、`TAXEL_RADIUS` 与 `MIDDLE_ROW_TO_TOP_EDGE`，均在 `left_pad` 与 `right_pad`
-局部坐标系下定义，单位为米。
+现有 Robotiq taxel、touch-grid、抓取、扰动、Rerun 和视频脚本继续可用：
+
+```bash
+uv run scripts/run_cube_grasp_demo.py --auto-close
+uv run scripts/run_touch_grid_demo.py --auto-close
+uv run scripts/compare_tactile_models.py --disturbance
+uv run scripts/record_disturbance_video.py
+```
+
+## 支持的夹爪
+
+| Profile | 执行器 | 触觉表示 | 状态 |
+| --- | --- | --- | --- |
+| `robotiq_2f85.toml` | `fingers_actuator` | 3×3 force taxel | 参考基线 |
+| `custom_parallel_gripper.toml` | `gripper_drive` | 左右各 3×3 Pillars 接触 geom | 接入中 |
+
+自研夹爪的 18 个 Pillars STL 就是实际触觉测量位置和唯一主动碰撞几何，按每侧
+滑块局部坐标命名为 `left/right_taxel_geom_00` 到 `22`。它们不是叠加在指尖上的
+近似球体。
+
+## 项目结构
+
+```text
+assets/
+  grippers/
+    custom_parallel_gripper/   Onshape 导出的自研夹爪与 STL
+    robotiq_2f85/              Robotiq 参考资产
+  objects/                     被抓物体
+  scenes/                      公共实验场景
+configs/                       夹爪 profile
+src/parallel_gripper_tactile/  可复用核心库与验证 CLI
+scripts/                       生成、演示、记录和迁移工具
+tests/                         模型契约与数值工具测试
+docs/                          架构、触觉约定和工作流
+```
+
+新夹爪应通过 profile 接入，不应在公共脚本中新增 `data.ctrl[0]`、固定控制范围或
+特定模型路径。详细设计见[项目架构](docs/architecture.md)。
+
+## Onshape 模型维护
+
+自研夹爪的源模型仍由 Onshape 维护。重新导出后不要直接覆盖经过验证的资产；先导出
+到临时目录，再运行：
+
+```bash
+uv run scripts/prepare_onshape_export.py RAW.xml PREPARED.xml
+uv run pgt-check configs/custom_parallel_gripper.toml
+```
+
+完整的配合命名、质量、闭环、碰撞、力矩与导出升级清单见
+[Onshape 导出与升级建议](docs/onshape-export-upgrade.md)。
+
+Robotiq 触觉模型的坐标系和符号约定见[触觉读数约定](docs/tactile-conventions.md)，
+常用实验命令见[工作流](docs/workflows.md)。
