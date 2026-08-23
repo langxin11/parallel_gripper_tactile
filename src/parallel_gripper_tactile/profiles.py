@@ -22,9 +22,7 @@ class TactileLayout:
         if side not in {"left", "right"}:
             raise ValueError("side must be 'left' or 'right'")
         prefix = self.left_prefix if side == "left" else self.right_prefix
-        return tuple(
-            f"{prefix}{row}{col}" for row in range(self.rows) for col in range(self.cols)
-        )
+        return tuple(f"{prefix}{row}{col}" for row in range(self.rows) for col in range(self.cols))
 
 
 @dataclass(frozen=True, slots=True)
@@ -47,13 +45,28 @@ def _float_tuple(values: list[object], length: int, field: str) -> tuple[float, 
     return tuple(float(value) for value in values)
 
 
+def _find_repository_root(profile_path: Path) -> Path:
+    """Walk upward from the profile to the directory containing ``assets``.
+
+    Falls back to the profile's grandparent, preserving the historical
+    ``configs/<profile>.toml`` layout for repositories without an ``assets``
+    directory at the expected level.
+    """
+    for parent in profile_path.parents:
+        if (parent / "assets").is_dir():
+            return parent
+    return profile_path.parents[1]
+
+
 def load_profile(path: str | Path, *, repository_root: str | Path | None = None) -> GripperProfile:
     """Load a TOML profile and resolve its MJCF path against the repository root."""
     profile_path = Path(path).resolve()
     with profile_path.open("rb") as stream:
         raw = tomllib.load(stream)
 
-    root = Path(repository_root).resolve() if repository_root else profile_path.parents[1]
+    root = (
+        Path(repository_root).resolve() if repository_root else _find_repository_root(profile_path)
+    )
     model_path = (root / raw["model"]["path"]).resolve()
     if not model_path.is_file():
         raise FileNotFoundError(f"gripper MJCF does not exist: {model_path}")
