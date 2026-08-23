@@ -78,17 +78,19 @@ def test_runtime_grasp_scene_attaches_cube_and_preserves_world_setup() -> None:
     sys.modules[spec.name] = module
     spec.loader.exec_module(module)
     root = ET.parse(module.GRASP_WORLD_XML).getroot()
-    assert root.find(".//geom[@name='ground']") is not None
+    floor = root.find(".//geom[@name='floor']")
+    assert floor is not None
+    assert floor.get("material") == "groundplane"
     support_plate = root.find(".//geom[@name='target_cube_support_plate']")
     assert support_plate is not None
     assert support_plate.get("type") == "box"
     assert root.find("option").get("gravity") == "0 0 -9.81"
-    starfield = root.find("./asset/texture[@name='starfield_skybox']")
-    assert starfield is not None
-    assert starfield.get("type") == "skybox"
-    assert starfield.get("builtin") == "gradient"
-    assert starfield.get("mark") == "random"
-    assert starfield.get("random") == "0.008"
+    skybox = root.find("./asset/texture[@name='skybox']")
+    assert skybox is not None
+    assert skybox.get("type") == "skybox"
+    assert skybox.get("builtin") == "gradient"
+    assert skybox.get("rgb1") == "0.3 0.5 0.7"
+    assert skybox.get("rgb2") == "0 0 0"
     cube_root = ET.parse(module.TARGET_CUBE_XML).getroot()
     assert cube_root.find(".//body[@name='target_cube']") is not None
     assert cube_root.find(".//freejoint[@name='target_cube_free_joint']") is not None
@@ -107,16 +109,17 @@ def test_runtime_grasp_scene_compiles_taxel_and_touch_grid_assets() -> None:
     asset_dir = Path(__file__).resolve().parents[1] / "assets/grippers/robotiq_2f85"
 
     taxel_model = module.build_grasp_spec(asset_dir / "2f85_taxels.xml").compile()
-    assert mujoco.mj_name2id(
-        taxel_model, mujoco.mjtObj.mjOBJ_SENSOR, "gripper/left_taxel_force_00"
-    ) >= 0
+    assert (
+        mujoco.mj_name2id(taxel_model, mujoco.mjtObj.mjOBJ_SENSOR, "gripper/left_taxel_force_00")
+        >= 0
+    )
     assert mujoco.mj_name2id(taxel_model, mujoco.mjtObj.mjOBJ_BODY, "cube/target_cube") >= 0
     assert mujoco.mj_name2id(taxel_model, mujoco.mjtObj.mjOBJ_KEY, "closed") >= 0
 
     box_model = module.build_grasp_spec(asset_dir / "2f85_taxels_box.xml").compile()
-    assert mujoco.mj_name2id(
-        box_model, mujoco.mjtObj.mjOBJ_SENSOR, "gripper/left_taxel_force_00"
-    ) >= 0
+    assert (
+        mujoco.mj_name2id(box_model, mujoco.mjtObj.mjOBJ_SENSOR, "gripper/left_taxel_force_00") >= 0
+    )
 
     grid_model = module.build_grasp_spec(asset_dir / "2f85_touch_grid_3x3.xml").compile()
     assert mujoco.mj_name2id(grid_model, mujoco.mjtObj.mjOBJ_SENSOR, "gripper/touch_left") >= 0
@@ -142,7 +145,9 @@ def test_touch_grid_model_creates_two_32_by_32_collision_pads() -> None:
     left_site = root.find(".//site[@name='touch_left']")
     assert left_site is not None
     assert abs(float(left_site.get("pos").split()[0]) - module.TOUCH_SITE_X) < 1e-9
-    assert [config.get("value") for config in root.findall("./sensor/plugin/config[@key='fov']")] == [
+    assert [
+        config.get("value") for config in root.findall("./sensor/plugin/config[@key='fov']")
+    ] == [
         module.TOUCH_GRID_FOV_DEGREES,
         module.TOUCH_GRID_FOV_DEGREES,
     ]
@@ -159,7 +164,9 @@ def test_touch_grid_model_supports_three_by_three_resolution() -> None:
     root = module.build_touch_grid_tree(module.DEFAULT_BASE_XML, rows=3, cols=3).getroot()
     cells = root.findall(".//geom[@name]")
     assert len([cell for cell in cells if "_touch_cell_" in cell.get("name", "")]) == 18
-    assert [config.get("value") for config in root.findall("./sensor/plugin/config[@key='size']")] == [
+    assert [
+        config.get("value") for config in root.findall("./sensor/plugin/config[@key='size']")
+    ] == [
         "3 3",
         "3 3",
     ]
@@ -178,9 +185,16 @@ def test_box_taxels_match_three_by_three_touch_grid_collision_geometry() -> None
     taxel_root = taxel.build_taxel_tree(taxel.DEFAULT_BASE_XML, shape="box").getroot()
     grid_root = touch.build_touch_grid_tree(touch.DEFAULT_BASE_XML, rows=3, cols=3).getroot()
     assert taxel_root.get("model") == "robotiq_2f85_box_taxels"
-    assert len(
-        [sensor for sensor in taxel_root.findall("./sensor/force") if "_taxel_force_" in sensor.get("name", "")]
-    ) == 18
+    assert (
+        len(
+            [
+                sensor
+                for sensor in taxel_root.findall("./sensor/force")
+                if "_taxel_force_" in sensor.get("name", "")
+            ]
+        )
+        == 18
+    )
 
     attributes = ("type", "size", "mass", "friction", "solimp", "solref", "priority")
     for side in ("left", "right"):

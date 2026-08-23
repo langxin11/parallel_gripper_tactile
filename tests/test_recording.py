@@ -28,6 +28,7 @@ def _frame(module, step: int = 0):
 
 
 def test_tactile_frame_validates_grid_and_sums_full_force() -> None:
+    """触觉帧校验网格形状并汇总完整合力。"""
     module = _load_recording()
     frame = _frame(module)
     np.testing.assert_allclose(frame.left_force, frame.left.sum(axis=(1, 2)))
@@ -37,6 +38,7 @@ def test_tactile_frame_validates_grid_and_sums_full_force() -> None:
 
 
 def test_force_csv_recorder_writes_downsampled_samples(tmp_path: Path) -> None:
+    """CSV 记录器按间隔降采样写入。"""
     module = _load_recording()
     output = tmp_path / "forces.csv"
     recorder = module.ForceCsvRecorder(output, every=2)
@@ -54,6 +56,7 @@ def test_force_csv_recorder_writes_downsampled_samples(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize(("shape", "display_shape"), [((3, 3), (3, 3)), ((32, 32), (8, 8))])
 def test_aggregate_shear_preserves_force(shape, display_shape) -> None:
+    """剪切聚合保持力的总量守恒。"""
     module = _load_recording()
     rows, cols = shape
     tactile = np.arange(3 * rows * cols, dtype=float).reshape(3, rows, cols)
@@ -64,6 +67,7 @@ def test_aggregate_shear_preserves_force(shape, display_shape) -> None:
 
 
 def test_shear_grid_lines_bound_each_display_cell() -> None:
+    """剪切网格线包围每个显示单元。"""
     module = _load_recording()
     lines = module._shear_grid_lines(3, 4)
     assert len(lines) == 9
@@ -72,9 +76,51 @@ def test_shear_grid_lines_bound_each_display_cell() -> None:
     np.testing.assert_allclose(lines[-1], ((-0.5, 2.5), (3.5, 2.5)))
 
 
+def test_run_demo_loop_headless_steps_and_records(tmp_path: Path) -> None:
+    """无 viewer 模式应恰好推进 steps 步，并按间隔记录 CSV。"""
+    module = _load_recording()
+    import importlib.util
+
+    import mujoco
+
+    scene_path = Path(__file__).resolve().parents[1] / "scripts/grasp_scene.py"
+    spec = importlib.util.spec_from_file_location("grasp_scene_for_loop", scene_path)
+    assert spec is not None and spec.loader is not None
+    scene = importlib.util.module_from_spec(spec)
+    sys.modules[spec.name] = scene
+    spec.loader.exec_module(scene)
+
+    model = scene.load_grasp_model(None, scene.DEFAULT_GRIPPER_XML)
+    data = mujoco.MjData(model)
+    steps = 8
+    recorder = module.ForceCsvRecorder(tmp_path / "loop_forces.csv", every=2)
+    logger = module.RerunTactileLogger("loop_test", live=False, path=None, hz=100)
+    zeros = np.zeros((3, 3, 3), dtype=np.float64)
+    module.run_demo_loop(
+        model=model,
+        data=data,
+        steps=steps,
+        auto_close=True,
+        no_viewer=True,
+        render_fps=60.0,
+        control_at=lambda step: 220.0 * min(1.0, step / max(1, steps // 3)),
+        sample_frame=lambda step: module.TactileFrame(
+            step, data.time, float(data.ctrl[0]), zeros, zeros
+        ),
+        recorder=recorder,
+        rerun_logger=logger,
+    )
+    with (tmp_path / "loop_forces.csv").open(newline="", encoding="utf-8") as file:
+        rows = list(csv.DictReader(file))
+    assert len(rows) == 4  # every=2 下记录 0, 2, 4, 6 四步。
+    assert rows[-1]["step"] == "6"
+    assert float(rows[-1]["control"]) > 0.0
+
+
 def test_rerun_logger_uses_simulation_timelines_and_full_tensors(
     tmp_path: Path, monkeypatch
 ) -> None:
+    """Rerun 记录器使用仿真时间线并输出完整张量。"""
     module = _load_recording()
     import rerun as rr
 
@@ -141,9 +187,7 @@ def test_rerun_logger_uses_simulation_timelines_and_full_tensors(
     for step in range(51):
         logger.record(_frame(module, step=step))
     logged_steps = [
-        value["sequence"]
-        for timeline, value in fake_recording.times
-        if timeline == "step"
+        value["sequence"] for timeline, value in fake_recording.times if timeline == "step"
     ]
     assert logged_steps == [0, 9, 17, 25, 34, 42, 50]
     logger.close()

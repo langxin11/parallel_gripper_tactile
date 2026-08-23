@@ -18,6 +18,7 @@ def _load_plotter():
 
 
 def test_read_force_csv_parses_recorder_columns(tmp_path: Path) -> None:
+    """按记录器列结构解析力曲线 CSV。"""
     csv_path = tmp_path / "forces.csv"
     csv_path.write_text(
         "step,time_s,control,left_fx,left_fy,left_fz,right_fx,right_fy,right_fz\n"

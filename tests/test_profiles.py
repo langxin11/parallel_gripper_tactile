@@ -1,3 +1,5 @@
+"""验证 profile 加载、编译契约与行优先命名约定。"""
+
 from pathlib import Path
 
 import pytest
@@ -19,6 +21,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_profiles_compile_and_satisfy_contract(
     profile_name: str, actuator: str, channels: int
 ) -> None:
+    """两个 profile 均可编译且满足触觉通道契约。"""
     profile = load_profile(ROOT / "configs" / profile_name)
     report = validate_profile(profile)
     assert report.actuator == actuator
@@ -26,6 +29,7 @@ def test_profiles_compile_and_satisfy_contract(
 
 
 def test_tactile_names_are_row_major() -> None:
+    """taxel 命名按行优先（00..22）排列。"""
     profile = load_profile(ROOT / "configs" / "custom_parallel_gripper.toml")
     assert profile.tactile.names("left") == (
         "left_taxel_geom_00",
