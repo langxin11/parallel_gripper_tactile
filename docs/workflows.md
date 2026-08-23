@@ -43,14 +43,14 @@ uv run scripts/run_touch_grid_demo.py --auto-close --no-viewer --no-rerun
 
 ```bash
 uv run scripts/run_cube_grasp_demo.py --auto-close --no-viewer --no-rerun \
-  --record-csv outputs/taxel_forces.csv --record-every 5
+  --record-csv outputs/robotiq/taxel_demo/taxel_forces.csv --record-every 5
 
 uv run scripts/run_touch_grid_demo.py --auto-close --no-viewer --no-rerun \
-  --record-csv outputs/touch_grid_forces.csv --record-every 5
+  --record-csv outputs/robotiq/touch_grid_demo/touch_grid_forces.csv --record-every 5
 
-uv run scripts/plot_forces.py outputs/taxel_forces.csv
-uv run scripts/plot_forces.py outputs/touch_grid_forces.csv \
-  --output outputs/touch_grid_forces.pdf
+uv run scripts/plot_forces.py outputs/robotiq/taxel_demo/taxel_forces.csv
+uv run scripts/plot_forces.py outputs/robotiq/touch_grid_demo/touch_grid_forces.csv \
+  --output outputs/robotiq/touch_grid_demo/touch_grid_forces.pdf
 ```
 
 CSV 包含 `step`、`time_s`、`control` 及左右的 `fx/fy/fz`。taxel 与 touch-grid 都统一记录
@@ -64,15 +64,15 @@ Rerun 的 `.rrd` 会保存左右完整三通道触觉网格、显示用箭头、
 ```bash
 # 实时观察并同时保存
 uv run scripts/run_touch_grid_demo.py --auto-close \
-  --record-rrd outputs/touch_grid.rrd
+  --record-rrd outputs/robotiq/touch_grid_demo/touch_grid.rrd
 
 # 不启动任何窗口，仅生成 CSV 和 RRD
 uv run scripts/run_cube_grasp_demo.py --auto-close --no-viewer --no-rerun \
-  --record-csv outputs/taxel_forces.csv \
-  --record-rrd outputs/taxel.rrd
+  --record-csv outputs/robotiq/taxel_demo/taxel_forces.csv \
+  --record-rrd outputs/robotiq/taxel_demo/taxel.rrd
 
 # 回放
-uv run rerun outputs/taxel.rrd
+uv run rerun outputs/robotiq/taxel_demo/taxel.rrd
 ```
 
 即使传入 `--no-rerun`，`--record-rrd` 仍会使用文件 sink 正常记录。CSV 继续作为稳定、紧凑的
@@ -92,6 +92,44 @@ uv run scripts/run_cube_grasp_demo.py --scene path/to/complete_scene.xml
 更多关于运行时组合和名称前缀见 [项目结构](architecture.md)；传感器力方向与坐标系见
 [触觉读数约定](tactile-conventions.md)。
 
+## 自研夹爪：水平无支撑保持与滑移验收
+
+首先可用交互式查看器确认 `mount` 安装姿态。查看器显示世界系和各刚体坐标轴，且使用与
+验收相同的运行时组合场景：
+
+```bash
+uv run scripts/view_custom_grasp_scene.py
+uv run scripts/view_custom_grasp_scene.py --closed
+uv run scripts/view_custom_grasp_scene.py --frame body
+```
+
+```bash
+uv run scripts/run_custom_grasp_validation.py \
+  --output-csv outputs/custom_gripper/validation/custom_gripper_grasp.csv \
+  --output-plot outputs/custom_gripper/validation/custom_gripper_grasp.png
+```
+
+该场景复用 Robotiq 扰动协议：夹爪局部 X 与局部 Z 均位于地面平面。按自研夹爪实际指尖
+几何，测试块尺寸为 `6 × 25 × 25 mm`，因此 YZ 实际接触面为 `25 × 25 mm`（大于 `24 × 24 mm`）。
+方块在 world Z 方向由薄板临时承托。闭合并稳定后，
+程序关闭支撑板碰撞；首先在 `0.5 s` 的无外力阶段验收静态保持，再对方块质心施加 world Y
+方向 `5 N、2 Hz、1.0 s` 正弦力，并观察恢复。两项都以 world YZ 接触面内位移 `<= 2 mm` 为默认
+门限。`base` 在此仅被固定到 profile mount frame，保留
+它作为未来 FR3 转接法兰的机械接口。
+
+当前 B1 导出资产能通过零外力基线（无支撑保持），但默认 `5 N` 扰动会触发接触失稳，命令会以
+非零状态退出并明确标记 `FAIL`；该结果应作为后续接触参数、Pillar 表面和驱动/机构刚度调优的
+基线，而不是被视为已通过的抗滑移能力。
+
+同一场景也可录制 MP4。视频含阶段、仿真时间和世界 Y 向外力叠加；扰动阶段另外以红色箭头显示
+该外力。默认 `5 N` 版本会在数值失稳前截断并返回失败，稳定基线可使用零外力：
+
+```bash
+uv run scripts/record_custom_grasp_video.py \
+  --force 0 \
+  --output outputs/custom_gripper/disturbance_video/custom_gripper_zero_disturbance.mp4
+```
+
 ## 公平比较 box taxel 与 touch_grid
 
 ```bash
@@ -105,14 +143,14 @@ uv run scripts/run_cube_grasp_demo.py --auto-close \
 uv run scripts/compare_tactile_models.py
 uv run scripts/compare_tactile_models.py \
   --record-every 5 \
-  --output-csv outputs/tactile_model_comparison.csv \
-  --output-plot outputs/tactile_model_comparison.png
+  --output-csv outputs/robotiq/comparison/tactile_model_comparison.csv \
+  --output-plot outputs/robotiq/comparison/tactile_model_comparison.png
 
 # 抓稳后撤去支撑，并施加默认 5 N、2 Hz、1 s 的世界 Y 向正弦扰动
 uv run scripts/compare_tactile_models.py --disturbance \
   --record-every 5 \
-  --output-csv outputs/tactile_disturbance_comparison.csv \
-  --output-plot outputs/tactile_disturbance_comparison.png
+  --output-csv outputs/robotiq/comparison/tactile_disturbance_comparison.csv \
+  --output-plot outputs/robotiq/comparison/tactile_disturbance_comparison.png
 ```
 
 比较固定使用 3×3 平面 box taxel 与 3×3 touch-grid：二者具有相同的 pad 外形、碰撞分块、
@@ -129,7 +167,7 @@ uv run scripts/compare_tactile_models.py --disturbance \
   --disturbance-frequency 2 \
   --disturbance-duration 1 \
   --support-settle-duration 0.5 \
-  --release-settle-duration 0.5 \
+  --hold-duration 0.5 \
   --recovery-duration 0.5 \
   --slip-threshold 0.002
 ```

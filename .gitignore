@@ -5,3 +5,7 @@ __pycache__/
 *.egg-info/
 
 outputs/
+MUJOCO_LOG.TXT
+
+# onshape-to-robot 中间缓存（可再生成，不入库）
+robot.pkl
