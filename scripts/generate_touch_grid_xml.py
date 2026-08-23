@@ -1,4 +1,4 @@
-"""从基础 2F-85 MJCF 生成使用 MuJoCo ``touch_grid`` 插件的触觉资产。
+r"""从基础 2F-85 MJCF 生成使用 MuJoCo ``touch_grid`` 插件的触觉资产。
 
 常见用法::
 
@@ -81,6 +81,8 @@ def build_touch_grid_tree(
 
     Args:
         base_xml: 未添加触觉结构的 Robotiq 2F-85 MJCF 文件。
+        rows: 网格行数（沿指尖高度方向）。
+        cols: 网格列数（沿指尖宽度方向）。
 
     Returns:
         含碰撞网格、site 与 ``touch_grid`` 插件传感器的 MJCF 树。

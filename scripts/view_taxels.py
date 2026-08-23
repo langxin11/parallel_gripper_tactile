@@ -64,9 +64,7 @@ def main() -> None:
     model = load_grasp_model(args.scene or args.xml, args.gripper_xml)
     data = mujoco.MjData(model)
     mujoco.mj_forward(model, data)
-    with mujoco.viewer.launch_passive(
-        model, data, show_left_ui=True, show_right_ui=True
-    ) as viewer:
+    with mujoco.viewer.launch_passive(model, data, show_left_ui=True, show_right_ui=True) as viewer:
         if not args.no_site_frames:
             # mjFRAME_SITE 在每个 site 处绘制局部 XYZ 标架；force/torque sensor
             # 的读数正是在其绑定 site 的局部坐标系中表达。

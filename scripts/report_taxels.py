@@ -31,7 +31,10 @@ def _format_grid(values: Iterable[float]) -> str:
 
 
 def read_taxel_forces(xml_path: Path) -> dict[str, list[float]]:
-    """加载 MJCF 并读取当前仿真状态的 18 个 taxel 力。
+    """加载 MJCF 并读取模型初始状态（仅 ``mj_forward``，不推进仿真）的 18 个 taxel 力。
+
+    初始状态通常没有接触，读数因此恒为零；本函数用于检查传感器命名与
+    坐标系接线，而非采集有载荷的读数。
 
     Args:
         xml_path: 含 taxel 力传感器的 MJCF 文件。
@@ -59,8 +62,10 @@ def read_taxel_forces(xml_path: Path) -> dict[str, list[float]]:
 
 
 def main() -> None:
-    """读取模型初始状态，并以两块 3×3 表格输出 taxel 力。"""
-    default_xml = Path(__file__).resolve().parents[1] / "assets/grippers/robotiq_2f85/2f85_taxels.xml"
+    """读取模型初始状态下的 taxel 力，并以两块 3×3 表格输出。"""
+    default_xml = (
+        Path(__file__).resolve().parents[1] / "assets/grippers/robotiq_2f85/2f85_taxels.xml"
+    )
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
         "xml", nargs="?", type=Path, default=default_xml, help="待读取的 MJCF 文件。"

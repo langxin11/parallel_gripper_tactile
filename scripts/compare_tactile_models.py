@@ -3,7 +3,7 @@
 常见用法::
 
     uv run scripts/compare_tactile_models.py
-    uv run scripts/compare_tactile_models.py --output-csv outputs/comparison.csv
+    uv run scripts/compare_tactile_models.py --output-csv outputs/robotiq/comparison/comparison.csv
 """
 
 from __future__ import annotations
@@ -16,6 +16,7 @@ from pathlib import Path
 from statistics import fmean
 
 from grasp_scene import gripper_name_in_model, load_grasp_model, prefixed_gripper_name
+from parallel_gripper_tactile import DisturbanceProtocol
 from run_cube_grasp_demo import _taxel_surface_force_vector
 from run_touch_grid_demo import _read_tactile, _touch_grid_shape
 
@@ -23,80 +24,13 @@ from run_touch_grid_demo import _read_tactile, _touch_grid_shape
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_BOX_TAXEL_XML = REPOSITORY_ROOT / "assets/grippers/robotiq_2f85/2f85_taxels_box.xml"
 DEFAULT_TOUCH_GRID_XML = REPOSITORY_ROOT / "assets/grippers/robotiq_2f85/2f85_touch_grid_3x3.xml"
-DEFAULT_OUTPUT_CSV = REPOSITORY_ROOT / "outputs/tactile_model_comparison.csv"
+DEFAULT_OUTPUT_CSV = REPOSITORY_ROOT / "outputs/robotiq/comparison/tactile_model_comparison.csv"
 SUPPORT_GEOM_NAME = "target_cube_support_plate"
 CUBE_BODY_NAME = "cube/target_cube"
 CUBE_JOINT_NAME = "cube/target_cube_free_joint"
 
 
 Vector3 = tuple[float, float, float]
-
-
-@dataclass(frozen=True, slots=True)
-class DisturbanceProtocol:
-    """抓稳、撤去支撑、施加切向正弦力并观察恢复的实验协议。"""
-
-    close_duration: float = 1.0
-    support_settle_duration: float = 0.5
-    release_settle_duration: float = 0.5
-    disturbance_duration: float = 1.0
-    recovery_duration: float = 0.5
-    force_n: float = 5.0
-    frequency_hz: float = 2.0
-    slip_threshold_m: float = 0.002
-
-    def __post_init__(self) -> None:
-        positive = {
-            "close_duration": self.close_duration,
-            "disturbance_duration": self.disturbance_duration,
-            "frequency_hz": self.frequency_hz,
-            "slip_threshold_m": self.slip_threshold_m,
-        }
-        nonnegative = {
-            "support_settle_duration": self.support_settle_duration,
-            "release_settle_duration": self.release_settle_duration,
-            "recovery_duration": self.recovery_duration,
-            "force_n": self.force_n,
-        }
-        for name, value in positive.items():
-            if value <= 0:
-                raise ValueError(f"{name} 必须为正数。")
-        for name, value in nonnegative.items():
-            if value < 0:
-                raise ValueError(f"{name} 不得为负数。")
-
-    @property
-    def release_time(self) -> float:
-        return self.close_duration + self.support_settle_duration
-
-    @property
-    def disturbance_start(self) -> float:
-        return self.release_time + self.release_settle_duration
-
-    @property
-    def disturbance_end(self) -> float:
-        return self.disturbance_start + self.disturbance_duration
-
-    @property
-    def total_duration(self) -> float:
-        return self.disturbance_end + self.recovery_duration
-
-    def phase_at(self, time_s: float) -> str:
-        if time_s < self.close_duration:
-            return "close"
-        if time_s < self.release_time:
-            return "support_settle"
-        if time_s < self.disturbance_start:
-            return "release_settle"
-        if time_s < self.disturbance_end:
-            return "disturbance"
-        return "recovery"
-
-    def force_y_at(self, time_s: float) -> float:
-        if not self.disturbance_start <= time_s < self.disturbance_end:
-            return 0.0
-        elapsed = time_s - self.disturbance_start
-        return self.force_n * math.sin(2.0 * math.pi * self.frequency_hz * elapsed)
 
 
 @dataclass(slots=True)
@@ -140,6 +74,7 @@ class DisturbanceSummary:
 
 
 def _close_control(step: int, steps: int, close_control: float) -> float:
+    """返回闭合阶段第 ``step`` 步的控制量：前 1/3 步数线性爬升到目标值。"""
     return close_control * min(1.0, step / max(1, steps // 3))
 
 
@@ -152,6 +87,7 @@ def _rotate_local_to_world(site_xmat, force: Vector3) -> Vector3:
 
 
 def _object_id(mujoco, model, object_type, name: str) -> int:
+    """按名称解析 MuJoCo 对象 id，缺失时抛出异常。"""
     object_id = mujoco.mj_name2id(model, object_type, name)
     if object_id < 0:
         raise ValueError(f"模型中缺少 {name!r}。")
@@ -159,6 +95,7 @@ def _object_id(mujoco, model, object_type, name: str) -> int:
 
 
 def _gripper_object_name(mujoco, model, object_type, name: str) -> str:
+    """返回 attach 前缀后的对象名；不存在时回退到未加前缀的名字。"""
     prefixed = prefixed_gripper_name(name)
     if mujoco.mj_name2id(model, object_type, prefixed) >= 0:
         return prefixed
@@ -173,27 +110,6 @@ def _disturbance_handles(mujoco, model, left_site_name: str, right_site_name: st
         _object_id(mujoco, model, mujoco.mjtObj.mjOBJ_SITE, left_site_name),
         _object_id(mujoco, model, mujoco.mjtObj.mjOBJ_SITE, right_site_name),
     )
-
-
-def _prepare_disturbance_step(
-    model,
-    data,
-    protocol: DisturbanceProtocol,
-    close_control: float,
-    support_geom_id: int,
-    cube_body_id: int,
-) -> tuple[str, Vector3]:
-    """设置本步控制、支撑碰撞状态以及施加在方块质心的世界系外力。"""
-    time_s = float(data.time)
-    data.ctrl[0] = close_control * min(1.0, time_s / protocol.close_duration)
-    phase = protocol.phase_at(time_s)
-    if time_s >= protocol.release_time:
-        model.geom_contype[support_geom_id] = 0
-        model.geom_conaffinity[support_geom_id] = 0
-    data.xfrc_applied[cube_body_id] = 0.0
-    applied = (0.0, protocol.force_y_at(time_s), 0.0)
-    data.xfrc_applied[cube_body_id, :3] = applied
-    return phase, applied
 
 
 def _append_disturbance_sample(
@@ -211,12 +127,8 @@ def _append_disturbance_sample(
 ) -> None:
     trace.phase.append(phase)
     trace.applied_force_world.append(applied)
-    trace.left_world.append(
-        _rotate_local_to_world(data.site_xmat[left_site_id], left_force)
-    )
-    trace.right_world.append(
-        _rotate_local_to_world(data.site_xmat[right_site_id], right_force)
-    )
+    trace.left_world.append(_rotate_local_to_world(data.site_xmat[left_site_id], left_force))
+    trace.right_world.append(_rotate_local_to_world(data.site_xmat[right_site_id], right_force))
     trace.cube_position_world.append(tuple(float(value) for value in data.xpos[cube_body_id]))
     dof_address = int(model.jnt_dofadr[cube_joint_id])
     trace.cube_velocity_world.append(
@@ -243,20 +155,22 @@ def _run_box_taxels(
         handles = _disturbance_handles(
             mujoco,
             model,
-            _gripper_object_name(
-                mujoco, model, mujoco.mjtObj.mjOBJ_SITE, "left_taxel_site_00"
-            ),
-            _gripper_object_name(
-                mujoco, model, mujoco.mjtObj.mjOBJ_SITE, "right_taxel_site_00"
-            ),
+            _gripper_object_name(mujoco, model, mujoco.mjtObj.mjOBJ_SITE, "left_taxel_site_00"),
+            _gripper_object_name(mujoco, model, mujoco.mjtObj.mjOBJ_SITE, "right_taxel_site_00"),
         )
     for step in range(steps):
         if protocol is None:
             data.ctrl[0] = _close_control(step, steps, close_control)
         else:
-            support_id, cube_id, _, _, _ = handles
-            phase, applied = _prepare_disturbance_step(
-                model, data, protocol, close_control, support_id, cube_id
+            support_id, cube_id, joint_id, left_site_id, right_site_id = handles
+            phase = protocol.phase_at(float(data.time))
+            applied = protocol.step(
+                model,
+                data,
+                actuator_id=0,
+                close_control=close_control,
+                support_geom_id=support_id,
+                cube_body_id=cube_id,
             )
         mujoco.mj_step(model, data)
         left = _taxel_surface_force_vector(data, "left", sensor_name)
@@ -266,7 +180,6 @@ def _run_box_taxels(
         trace.left.append(left)
         trace.right.append(right)
         if protocol is not None:
-            support_id, cube_id, joint_id, left_site_id, right_site_id = handles
             _append_disturbance_sample(
                 model,
                 data,
@@ -310,9 +223,15 @@ def _run_touch_grid(
         if protocol is None:
             data.ctrl[0] = _close_control(step, steps, close_control)
         else:
-            support_id, cube_id, _, _, _ = handles
-            phase, applied = _prepare_disturbance_step(
-                model, data, protocol, close_control, support_id, cube_id
+            support_id, cube_id, joint_id, left_site_id, right_site_id = handles
+            phase = protocol.phase_at(float(data.time))
+            applied = protocol.step(
+                model,
+                data,
+                actuator_id=0,
+                close_control=close_control,
+                support_geom_id=support_id,
+                cube_body_id=cube_id,
             )
         mujoco.mj_step(model, data)
         left = _read_tactile(data, left_sensor, left_shape).sum(axis=(1, 2))
@@ -324,7 +243,6 @@ def _run_touch_grid(
         trace.left.append(left_force)
         trace.right.append(right_force)
         if protocol is not None:
-            support_id, cube_id, joint_id, left_site_id, right_site_id = handles
             _append_disturbance_sample(
                 model,
                 data,
@@ -395,6 +313,7 @@ def summarize_side(
 
 
 def _total_world_component(trace: ForceTrace, index: int, axis: int) -> float:
+    """返回第 ``index`` 步左右指尖在世界系 ``axis`` 轴上的合力。"""
     return trace.left_world[index][axis] + trace.right_world[index][axis]
 
 
@@ -410,17 +329,16 @@ def summarize_disturbance(
     """比较扰动阶段的世界 Y 合力，并计算方块在世界 YZ 平面的滑移。"""
     if not box.phase or len(box.phase) != len(grid.phase):
         raise ValueError("需要两个模型长度一致的扰动轨迹。")
-    disturbance_indices = [
-        index for index, phase in enumerate(box.phase) if phase == "disturbance"
-    ]
+    disturbance_indices = [index for index, phase in enumerate(box.phase) if phase == "disturbance"]
     if not disturbance_indices:
         raise ValueError("轨迹中没有 disturbance 阶段。")
     response_box = [_total_world_component(box, index, 1) for index in disturbance_indices]
-    response_grid = [
-        _total_world_component(grid, index, 1) for index in disturbance_indices
-    ]
+    response_grid = [_total_world_component(grid, index, 1) for index in disturbance_indices]
     rms_error = math.sqrt(
-        fmean((box_value - grid_value) ** 2 for box_value, grid_value in zip(response_box, response_grid))
+        fmean(
+            (box_value - grid_value) ** 2
+            for box_value, grid_value in zip(response_box, response_grid)
+        )
     )
     response_scale = max(
         max(abs(value) for value in response_box),
@@ -429,9 +347,7 @@ def summarize_disturbance(
     )
 
     evaluation_indices = [
-        index
-        for index, phase in enumerate(box.phase)
-        if phase in {"disturbance", "recovery"}
+        index for index, phase in enumerate(box.phase) if phase in {"disturbance", "recovery"}
     ]
     first = disturbance_indices[0]
     box_reference = box.cube_position_world[first]
@@ -445,15 +361,11 @@ def summarize_disturbance(
         for index in evaluation_indices
     ]
     box_speeds = [
-        math.hypot(
-            box.cube_velocity_world[index][1], box.cube_velocity_world[index][2]
-        )
+        math.hypot(box.cube_velocity_world[index][1], box.cube_velocity_world[index][2])
         for index in evaluation_indices
     ]
     grid_speeds = [
-        math.hypot(
-            grid.cube_velocity_world[index][1], grid.cube_velocity_world[index][2]
-        )
+        math.hypot(grid.cube_velocity_world[index][1], grid.cube_velocity_world[index][2])
         for index in evaluation_indices
     ]
     box_max_displacement = max(box_displacements)
@@ -495,15 +407,10 @@ def write_comparison_csv(
             )
         if disturbance:
             for side in ("left", "right"):
-                fieldnames.extend(
-                    f"{model_name}_{side}_world_f{axis}" for axis in ("x", "y", "z")
-                )
+                fieldnames.extend(f"{model_name}_{side}_world_f{axis}" for axis in ("x", "y", "z"))
+            fieldnames.extend(f"{model_name}_total_world_f{axis}" for axis in ("x", "y", "z"))
             fieldnames.extend(
-                f"{model_name}_total_world_f{axis}" for axis in ("x", "y", "z")
-            )
-            fieldnames.extend(
-                f"{model_name}_cube_{axis}"
-                for axis in ("x", "y", "z", "vx", "vy", "vz")
+                f"{model_name}_cube_{axis}" for axis in ("x", "y", "z", "vx", "vy", "vz")
             )
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", newline="", encoding="utf-8") as file:
@@ -589,9 +496,7 @@ def plot_comparison(path: Path, box: ForceTrace, grid: ForceTrace) -> None:
 
 
 def _plot_disturbance_comparison(plt, path: Path, box: ForceTrace, grid: ForceTrace) -> None:
-    figure, axes = plt.subplots(
-        5, 1, figsize=(7.16, 9.0), sharex=True, layout="constrained"
-    )
+    figure, axes = plt.subplots(5, 1, figsize=(7.16, 9.0), sharex=True, layout="constrained")
     control_axis, applied_axis, local_axis, world_axis, displacement_axis = axes
     control_axis.plot(box.time_s, box.control, color="black", label="control")
     control_axis.set_ylabel("Control")
@@ -615,10 +520,7 @@ def _plot_disturbance_comparison(plt, path: Path, box: ForceTrace, grid: ForceTr
             )
         world_axis.plot(
             trace.time_s,
-            [
-                _total_world_component(trace, index, 1)
-                for index in range(len(trace.time_s))
-            ],
+            [_total_world_component(trace, index, 1) for index in range(len(trace.time_s))],
             linestyle=linestyle,
             label=f"{model_name} total Fy",
         )
@@ -640,9 +542,7 @@ def _plot_disturbance_comparison(plt, path: Path, box: ForceTrace, grid: ForceTr
     for axis in axes:
         axis.legend(frameon=False, ncol=2)
     transitions = [
-        index
-        for index in range(1, len(box.phase))
-        if box.phase[index] != box.phase[index - 1]
+        index for index in range(1, len(box.phase)) if box.phase[index] != box.phase[index - 1]
     ]
     for axis in axes:
         for index in transitions:
@@ -704,9 +604,7 @@ def _print_disturbance_summary(
             f"{speed:9.4f} m/s   {'YES' if slipped else 'no'}"
         )
     passed = (
-        summary.response_nrmse <= tolerance
-        and not summary.box_slipped
-        and not summary.grid_slipped
+        summary.response_nrmse <= tolerance and not summary.box_slipped and not summary.grid_slipped
     )
     print(
         f"disturbance result: {'PASS' if passed else 'FAIL'} "
@@ -735,7 +633,9 @@ def main() -> int:
     parser.add_argument("--disturbance-frequency", type=float, default=2.0, metavar="HZ")
     parser.add_argument("--disturbance-duration", type=float, default=1.0, metavar="S")
     parser.add_argument("--support-settle-duration", type=float, default=0.5, metavar="S")
-    parser.add_argument("--release-settle-duration", type=float, default=0.5, metavar="S")
+    parser.add_argument(
+        "--hold-duration", type=float, default=0.5, metavar="S", help="撤去支撑后的无支撑保持时长"
+    )
     parser.add_argument("--recovery-duration", type=float, default=0.5, metavar="S")
     parser.add_argument("--slip-threshold", type=float, default=0.002, metavar="M")
     args = parser.parse_args()
@@ -751,7 +651,7 @@ def main() -> int:
         try:
             protocol = DisturbanceProtocol(
                 support_settle_duration=args.support_settle_duration,
-                release_settle_duration=args.release_settle_duration,
+                hold_duration=args.hold_duration,
                 disturbance_duration=args.disturbance_duration,
                 recovery_duration=args.recovery_duration,
                 force_n=args.disturbance_force,
@@ -774,9 +674,7 @@ def main() -> int:
     if protocol is not None:
         disturbance = summarize_disturbance(box, grid, protocol.slip_threshold_m)
         passed = (
-            _print_disturbance_summary(
-                disturbance, args.tolerance, protocol.slip_threshold_m
-            )
+            _print_disturbance_summary(disturbance, args.tolerance, protocol.slip_threshold_m)
             and passed
         )
     return 0 if passed else 1

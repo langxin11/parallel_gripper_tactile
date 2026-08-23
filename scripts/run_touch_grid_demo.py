@@ -6,17 +6,16 @@
     uv run scripts/run_touch_grid_demo.py --auto-close
     uv run scripts/run_touch_grid_demo.py --auto-close --no-viewer --no-rerun
     uv run scripts/run_touch_grid_demo.py --render-fps 30
-    uv run scripts/run_touch_grid_demo.py --auto-close --record-rrd outputs/touch_grid.rrd
+    uv run scripts/run_touch_grid_demo.py --auto-close --record-rrd outputs/robotiq/touch_grid_demo/touch_grid.rrd
 """
 
 from __future__ import annotations
 
 import argparse
-import time
 from pathlib import Path
 
 from grasp_scene import DEFAULT_TOUCH_GRID_XML, gripper_name_in_model, load_grasp_model
-from recording import ForceCsvRecorder, RerunTactileLogger, TactileFrame
+from recording import ForceCsvRecorder, RerunTactileLogger, TactileFrame, run_demo_loop
 
 
 def _touch_grid_shape(mujoco, model, name: str) -> tuple[int, int]:
@@ -45,20 +44,6 @@ def _read_tactile(data, name: str, shape: tuple[int, int]):
     return data.sensor(name).data.reshape((3, *shape))[[1, 2, 0]]
 
 
-def _normal_pressure_sum(tactile) -> float:
-    """汇总 touch_grid 的正法向压力，单位为 N。"""
-    return float(tactile[2].sum())
-
-
-def _print_status(step: int, control: float, left, right) -> None:
-    """使用与离散 taxel 演示一致的终端进度格式。"""
-    print(
-        f"step={step:4d} ctrl={control:6.1f} "
-        f"left={_normal_pressure_sum(left):8.3f} N "
-        f"right={_normal_pressure_sum(right):8.3f} N"
-    )
-
-
 def main() -> None:
     """实时运行手动抓取，并显示左右触觉图。
 
@@ -76,14 +61,21 @@ def main() -> None:
     parser.add_argument("--scene", type=Path, help="加载外部完整 MJCF，而非运行时 attach 场景。")
     parser.add_argument("--gripper-xml", type=Path, default=DEFAULT_TOUCH_GRID_XML)
     parser.add_argument("--steps", type=int, default=1500)
+    parser.add_argument(
+        "--close-control", type=float, default=220, help="最终夹爪控制量，范围 0~255。"
+    )
     parser.add_argument("--no-viewer", action="store_true", help="不打开 MuJoCo 交互式 viewer。")
     parser.add_argument("--auto-close", action="store_true", help="按预设轨迹自动闭合夹爪。")
-    parser.add_argument("--render-fps", type=float, default=60.0, help="目标 viewer 帧率，默认 60 FPS。")
+    parser.add_argument(
+        "--render-fps", type=float, default=60.0, help="目标 viewer 帧率，默认 60 FPS。"
+    )
     parser.add_argument("--record-csv", type=Path, help="将控制量和左右三维力写入 CSV。")
     parser.add_argument("--record-every", type=int, default=1, help="每隔多少物理步记录一次。")
     parser.add_argument("--no-rerun", action="store_true", help="不启动实时 Rerun 触觉仪表盘。")
     parser.add_argument("--record-rrd", type=Path, help="将完整触觉网格写入 Rerun RRD。")
-    parser.add_argument("--rerun-hz", type=float, default=100.0, help="Rerun 采样频率，默认 100 Hz。")
+    parser.add_argument(
+        "--rerun-hz", type=float, default=100.0, help="Rerun 采样频率，默认 100 Hz。"
+    )
     args = parser.parse_args()
     if args.no_viewer and not args.auto_close:
         parser.error("手动模式需要 MuJoCo viewer；无界面运行请同时传入 --auto-close。")
@@ -119,60 +111,21 @@ def main() -> None:
             right=_read_tactile(data, right_sensor, right_shape),
         )
 
-    viewer = None
-    if not args.no_viewer:
-        import mujoco.viewer
+    def control_at(step: int) -> float:
+        return args.close_control * min(1.0, step / max(1, args.steps // 3))
 
-        viewer = mujoco.viewer.launch_passive(model, data, show_left_ui=True, show_right_ui=True)
-        viewer.cam.type = mujoco.mjtCamera.mjCAMERA_FREE
-        viewer.cam.lookat[:] = (0.0, -0.12, 0.07)
-        viewer.cam.distance = 0.38
-        viewer.cam.azimuth = 135
-        viewer.cam.elevation = -25
-    try:
-        step = 0
-        wall_start = time.monotonic()
-        simulation_start = data.time
-        render_period = 1.0 / args.render_fps
-        next_render_time = wall_start
-        while viewer is None or viewer.is_running():
-            if viewer is not None:
-                # 渲染与物理步解耦：降低 FPS 不会降低仿真时间或物理精度。
-                target_simulation_time = simulation_start + (time.monotonic() - wall_start)
-                while data.time < target_simulation_time:
-                    if args.auto_close:
-                        data.ctrl[0] = 220 * min(1.0, step / max(1, args.steps // 3))
-                    mujoco.mj_step(model, data)
-                    frame = sample_frame(step)
-                    recorder.record(frame)
-                    rerun_logger.record(frame)
-                    if step % 100 == 0 or step == args.steps - 1:
-                        _print_status(step, frame.control, frame.left, frame.right)
-                    step += 1
-                    if args.auto_close and step >= args.steps:
-                        break
-                viewer.sync()
-                if args.auto_close and step >= args.steps:
-                    break
-                next_render_time += render_period
-                time.sleep(max(0.0, next_render_time - time.monotonic()))
-            else:
-                data.ctrl[0] = 220 * min(1.0, step / max(1, args.steps // 3))
-                mujoco.mj_step(model, data)
-                frame = sample_frame(step)
-                recorder.record(frame)
-                rerun_logger.record(frame)
-                if step % 100 == 0 or step == args.steps - 1:
-                    _print_status(step, frame.control, frame.left, frame.right)
-                step += 1
-                if step >= args.steps:
-                    break
-    finally:
-        recorder.close()
-        rerun_logger.close()
-        # 用户手动关闭窗口时 viewer 已请求退出；避免重复清理 GLFW 上下文。
-        if viewer is not None and viewer.is_running():
-            viewer.close()
+    run_demo_loop(
+        model=model,
+        data=data,
+        steps=args.steps,
+        auto_close=args.auto_close,
+        no_viewer=args.no_viewer,
+        render_fps=args.render_fps,
+        control_at=control_at,
+        sample_frame=sample_frame,
+        recorder=recorder,
+        rerun_logger=rerun_logger,
+    )
 
 
 if __name__ == "__main__":

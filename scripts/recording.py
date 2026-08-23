@@ -1,11 +1,14 @@
-"""触觉仿真步骤的统一采样、CSV 记录与 Rerun 可视化。"""
+"""触觉仿真步骤的统一采样、CSV 记录、Rerun 可视化与演示驱动循环。"""
 
 from __future__ import annotations
 
 import csv
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
+import time
 
+import mujoco
 import numpy as np
 
 
@@ -25,6 +28,7 @@ class TactileFrame:
     right: np.ndarray
 
     def __post_init__(self) -> None:
+        """归一化并校验左右触觉网格形状。"""
         object.__setattr__(self, "left", _force_grid(self.left, "left"))
         object.__setattr__(self, "right", _force_grid(self.right, "right"))
 
@@ -44,6 +48,94 @@ def _force_grid(values, side: str) -> np.ndarray:
     if grid.ndim != 3 or grid.shape[0] != 3 or 0 in grid.shape[1:]:
         raise ValueError(f"{side} 触觉数据必须具有 (3, rows, cols) 形状。")
     return grid
+
+
+def run_demo_loop(
+    *,
+    model: mujoco.MjModel,
+    data: mujoco.MjData,
+    steps: int,
+    auto_close: bool,
+    no_viewer: bool,
+    render_fps: float,
+    control_at: Callable[[int], float],
+    sample_frame: Callable[[int], TactileFrame],
+    recorder: ForceCsvRecorder,
+    rerun_logger: RerunTactileLogger,
+) -> None:
+    """运行抓取演示主循环：viewer 节流、物理推进、采样与记录。
+
+    渲染与物理步解耦：降低 FPS 不会降低仿真时间或物理精度。手动模式
+    （``auto_close=False``）下控制量由 viewer 滑块写入 ``data.ctrl``，
+    循环不覆盖它；自动闭合模式下每步调用 ``control_at`` 计算控制量。
+    每步依次调用 ``sample_frame`` 采样、``recorder`` 与 ``rerun_logger``
+    记录，循环结束后统一清理三者。
+    """
+    viewer = None
+    if not no_viewer:
+        # 用 from-import 避免在函数内绑定局部名 mujoco，遮蔽模块级导入。
+        from mujoco import viewer as mujoco_viewer
+
+        viewer = mujoco_viewer.launch_passive(model, data, show_left_ui=True, show_right_ui=True)
+        viewer.cam.type = mujoco.mjtCamera.mjCAMERA_FREE
+        viewer.cam.lookat[:] = (0.0, -0.12, 0.07)
+        viewer.cam.distance = 0.38
+        viewer.cam.azimuth = 135
+        viewer.cam.elevation = -25
+
+    try:
+        step = 0
+        wall_start = time.monotonic()
+        simulation_start = data.time
+        render_period = 1.0 / render_fps
+        next_render_time = wall_start
+        while viewer is None or viewer.is_running():
+            if viewer is not None:
+                target_simulation_time = simulation_start + (time.monotonic() - wall_start)
+                while data.time < target_simulation_time:
+                    if auto_close:
+                        data.ctrl[0] = control_at(step)
+                    mujoco.mj_step(model, data)
+                    frame = sample_frame(step)
+                    recorder.record(frame)
+                    rerun_logger.record(frame)
+                    if step % 100 == 0 or step == steps - 1:
+                        print(
+                            f"step={step:4d} ctrl={data.ctrl[0]:6.1f} "
+                            f"left={frame.left_force[2]:8.3f} N "
+                            f"right={frame.right_force[2]:8.3f} N"
+                        )
+                    step += 1
+                    if auto_close and step >= steps:
+                        break
+                viewer.sync()
+                if auto_close and step >= steps:
+                    break
+                next_render_time += render_period
+                time.sleep(max(0.0, next_render_time - time.monotonic()))
+            else:
+                if auto_close:
+                    data.ctrl[0] = control_at(step)
+                mujoco.mj_step(model, data)
+                frame = sample_frame(step)
+                recorder.record(frame)
+                rerun_logger.record(frame)
+                if step % 100 == 0 or step == steps - 1:
+                    print(
+                        f"step={step:4d} ctrl={data.ctrl[0]:6.1f} "
+                        f"left={frame.left_force[2]:8.3f} N "
+                        f"right={frame.right_force[2]:8.3f} N"
+                    )
+                step += 1
+                if step >= steps:
+                    break
+    finally:
+        recorder.close()
+        rerun_logger.close()
+        # 用户手动关闭窗口时 viewer 已请求退出；避免对已经销毁的 GLFW
+        # 上下文再次调用 close，从而触发退出阶段的 GLFW 警告。
+        if viewer is not None and viewer.is_running():
+            viewer.close()
 
 
 def aggregate_shear(
@@ -90,6 +182,7 @@ class ForceCsvRecorder:
     )
 
     def __init__(self, path: Path | None, every: int = 1) -> None:
+        """初始化 CSV 记录器；``path`` 为 None 时静默禁用。"""
         if every <= 0:
             raise ValueError("记录间隔必须为正整数。")
         self._every = every
@@ -143,6 +236,7 @@ class RerunTactileLogger:
         hz: float = 100.0,
         pressure_max: float | None = None,
     ) -> None:
+        """配置 Rerun 输出：实时 Viewer、RRD 文件或两者。"""
         if hz <= 0:
             raise ValueError("Rerun 记录频率必须为正数。")
         if pressure_max is not None and pressure_max <= 0:
@@ -164,9 +258,7 @@ class RerunTactileLogger:
         if live:
             recording.spawn()
             if path is not None:
-                recording.set_sinks(
-                    rr.GrpcSink(), rr.FileSink(path), default_blueprint=blueprint
-                )
+                recording.set_sinks(rr.GrpcSink(), rr.FileSink(path), default_blueprint=blueprint)
             else:
                 recording.send_blueprint(blueprint)
         elif path is not None:
@@ -191,9 +283,7 @@ class RerunTactileLogger:
             for component, component_color in self._COMPONENT_COLORS.items():
                 self._recording.log(
                     f"tactile/{side}/force/{component}",
-                    rr.SeriesLines(
-                        colors=[component_color], names=[f"{side} {component.upper()}"]
-                    ),
+                    rr.SeriesLines(colors=[component_color], names=[f"{side} {component.upper()}"]),
                     static=True,
                 )
             self._recording.log(
@@ -292,12 +382,10 @@ def _shear_grid_lines(rows: int, cols: int) -> list[np.ndarray]:
     left, right = -0.5, cols - 0.5
     bottom, top = -0.5, rows - 0.5
     lines = [
-        np.asarray(((x - 0.5, bottom), (x - 0.5, top)), dtype=np.float32)
-        for x in range(cols + 1)
+        np.asarray(((x - 0.5, bottom), (x - 0.5, top)), dtype=np.float32) for x in range(cols + 1)
     ]
     lines.extend(
-        np.asarray(((left, y - 0.5), (right, y - 0.5)), dtype=np.float32)
-        for y in range(rows + 1)
+        np.asarray(((left, y - 0.5), (right, y - 0.5)), dtype=np.float32) for y in range(rows + 1)
     )
     return lines
 

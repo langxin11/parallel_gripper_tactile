@@ -2,8 +2,9 @@
 
 常见用法::
 
-    uv run scripts/plot_forces.py outputs/taxel_forces.csv
-    uv run scripts/plot_forces.py outputs/touch_grid_forces.csv --output outputs/touch_grid_forces.pdf
+    uv run scripts/plot_forces.py outputs/robotiq/taxel_demo/taxel_forces.csv
+    uv run scripts/plot_forces.py outputs/robotiq/touch_grid_demo/touch_grid_forces.csv \
+      --output outputs/robotiq/touch_grid_demo/touch_grid_forces.pdf
 """
 
 from __future__ import annotations

@@ -193,6 +193,7 @@ def build_taxel_tree(base_xml: Path, shape: str = "sphere") -> ET.ElementTree:
 
     Args:
         base_xml: 未添加触觉结构的 Robotiq 2F-85 MJCF 文件。
+        shape: taxel 几何形状，``sphere`` 或 ``box``。
 
     Returns:
         添加了左右 pad taxel 和传感器定义的 MJCF 树。

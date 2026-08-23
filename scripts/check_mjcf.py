@@ -23,7 +23,9 @@ def main() -> None:
     except ModuleNotFoundError as error:
         raise ModuleNotFoundError("请先使用 `uv sync` 安装项目依赖。") from error
 
-    default_xml = Path(__file__).resolve().parents[1] / "assets/grippers/robotiq_2f85/2f85_taxels.xml"
+    default_xml = (
+        Path(__file__).resolve().parents[1] / "assets/grippers/robotiq_2f85/2f85_taxels.xml"
+    )
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("xml", nargs="?", type=Path, default=default_xml)
     args = parser.parse_args()
