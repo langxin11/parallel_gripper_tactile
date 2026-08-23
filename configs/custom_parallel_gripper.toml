@@ -1,16 +1,18 @@
 name = "custom_parallel_gripper"
 
 [model]
-path = "assets/grippers/custom_parallel_gripper/parallel_gripper.xml"
+path = "assets/grippers/custom_parallel_gripper/parallel_gripper_prepared.xml"
 
 [control]
 actuator = "gripper_drive"
-open = -0.05
-closed = 1.85
+open = 0.05
+closed = 1.30
 
 [mount]
-pos = [0.0, 0.0, 0.08]
-quat = [1.0, 0.0, 0.0, 0.0]
+pos = [0.0, 0.0, 0.18]
+# local X (linear rail) -> world X; local Y (jaw closing) -> world Z;
+# local Z -> negative world Y.  Both rail and gripper body are horizontal.
+quat = [0.7071067811865476, 0.7071067811865476, 0.0, 0.0]
 
 [tactile]
 mode = "contact_geom"

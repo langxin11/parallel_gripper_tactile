@@ -1,0 +1,50 @@
+{
+  "url": "https://cad.onshape.com/documents/ee6a871f9e00fc227503180b/w/c90cab421a5e9546e31f5c11/e/16b75a7cc71174b7cd5960db",
+  "output_format": "mujoco",
+  "output_filename": "parallel_gripper",
+  "robot_name": "parallel_gripper",
+  "assets_directory": "assets",
+  "draw_frames": false,
+  "round_decimals": 12,
+
+  "ignore": {
+    "*": "collision",
+    "!Pillars*": "collision",
+    "!base": "collision",
+    "!stator": "collision",
+    "!bracket*": "collision",
+    "!*MGN9 Rail": "collision"
+  },
+
+  "joint_properties": {
+    "default": {
+      "damping": 0.01,
+      "frictionloss": 0.0
+    },
+    "gripper_drive": {
+      "actuated": true,
+      "type": "position",
+      "kp": 20.0,
+      "forcerange": 12.5
+    },
+    "left_link_crank_pin": {
+      "actuated": false
+    },
+    "right_link_crank_pin": {
+      "actuated": false
+    },
+    "left_finger_slide": {
+      "actuated": false
+    },
+    "right_finger_slide": {
+      "actuated": false
+    }
+  },
+
+  "equalities": {
+    "closing_*": {
+      "solref": "0.002 1",
+      "solimp": "0.99 0.999 0.0005 0.5 2"
+    }
+  }
+}

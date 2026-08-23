@@ -8,27 +8,27 @@
   <size memory="134217728"/>
 
   <visual>
-    <global offwidth="1920" offheight="1080"/>
-    <headlight ambient="0.25 0.25 0.25" diffuse="0.7 0.7 0.7" specular="0.2 0.2 0.2"/>
+    <headlight diffuse="0.6 0.6 0.6" ambient="0.3 0.3 0.3" specular="0 0 0"/>
+    <rgba haze="0.15 0.25 0.35 1"/>
+    <global azimuth="160" elevation="-20" offwidth="1920" offheight="1080"/>
   </visual>
 
   <asset>
-    <texture name="ground_checker" type="2d" builtin="checker"
-             rgb1="0.12 0.15 0.18" rgb2="0.48 0.52 0.56" width="512" height="512"/>
-    <texture name="starfield_skybox" type="skybox" builtin="gradient"
-             rgb1="0.03 0.10 0.18" rgb2="0.18 0.32 0.45" width="512"
-             mark="random" markrgb="1 1 1" random="0.008"/>
-    <material name="ground_checker" texture="ground_checker" texuniform="true"
-              texrepeat="16 16" reflectance="0.15"/>
+    <texture name="skybox" type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0"
+             width="512" height="3072"/>
+    <texture name="groundplane" type="2d" builtin="checker" mark="edge" rgb1="0.2 0.3 0.4"
+             rgb2="0.1 0.2 0.3" markrgb="0.8 0.8 0.8" width="300" height="300"/>
+    <material name="groundplane" texture="groundplane" texuniform="true" texrepeat="5 5"
+              reflectance="0.2"/>
   </asset>
 
   <worldbody>
-    <geom name="ground" type="plane" size="0 0 0.05" material="ground_checker"
+    <light pos="0 0 3.5" dir="0 0 -1" directional="true"/>
+    <geom name="floor" size="0 0 0.05" pos="0 0 0" type="plane" material="groundplane"
           friction="0.9 0.02 0.001"/>
     <geom name="target_cube_support_plate" type="box" pos="0 -0.155 0.0625"
           size="0.025 0.025 0.0025" friction="0.9 0.02 0.001"
           solimp="0.90 0.95 0.002" solref="0.015 1" rgba="0.20 0.28 0.36 1"/>
-    <light name="grasp_light" pos="0 -0.3 0.5" directional="true" dir="0 0.5 -1"/>
     <camera name="grasp_overview" pos="0.28 -0.35 0.22"
             xyaxes="0.78 0.62 0 -0.30 0.38 0.87"/>
   </worldbody>
