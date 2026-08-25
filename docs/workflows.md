@@ -1,8 +1,26 @@
 # 常用工作流
 
-所有命令均从仓库根目录执行。项目使用 Python 3.12，由 `uv` 自动管理环境。
+所有命令从仓库根目录运行。项目使用 `uv` 管理 Python 3.12 环境和开发工具。
 
-## 检查与查看资产
+## 初始化与回归检查
+
+```bash
+uv sync --all-groups
+uv run pgt-check configs/robotiq_2f85.toml
+uv run pgt-check configs/custom_parallel_gripper.toml
+uv run pytest
+```
+
+在修改 Python 代码后，还应运行：
+
+```bash
+uv run ruff check .
+uv run ruff format --check .
+```
+
+## Robotiq 参考模型
+
+生成或检查离散 taxel 与 `touch_grid` 派生资产：
 
 ```bash
 uv run scripts/generate_taxels_xml.py
@@ -13,89 +31,54 @@ uv run scripts/view_taxels.py
 uv run scripts/report_taxels.py
 ```
 
-`view_taxels.py` 默认显示 site 坐标系标架；`--no-site-frames` 可关闭。默认 60 FPS 渲染，
-`--render-fps 30` 可降低显示刷新率，不改变模型物理 `timestep`。`--no-physics` 用于静态检查位置。
-
-## 运行抓取演示
+运行离散 taxel 或 `touch_grid` 抓取演示：
 
 ```bash
-# 离散 taxel，自动闭合
 uv run scripts/run_cube_grasp_demo.py --auto-close
-
-# touch_grid，自动闭合
 uv run scripts/run_touch_grid_demo.py --auto-close
-
-# 无图形环境
-uv run scripts/run_cube_grasp_demo.py --auto-close --no-viewer --no-rerun
-uv run scripts/run_touch_grid_demo.py --auto-close --no-viewer --no-rerun
 ```
 
-不传 `--auto-close` 时，可在 MuJoCo viewer 的 **Control** 面板调节 `fingers_actuator`。
-两个演示默认还会启动 Rerun 触觉仪表盘：左压力、右压力、左切向和右切向四个等宽、等高空间
-视图紧凑排列在同一行；压力图保持传感器原始分辨率，切向箭头最多聚合为 8×8，并用网格线标出
-各显示区域。合力与控制量按仿真时间绘制。
-`--no-rerun` 只关闭 Rerun，不影响 MuJoCo viewer；
-`--render-fps` 控制 MuJoCo 渲染刷新率。
-
-## 记录与绘图
-
-记录钩子在每个物理步可采样控制量和左右合力；`--record-every` 指定每隔多少物理步写一行：
+无图形环境下记录 CSV 或 RRD：
 
 ```bash
-uv run scripts/run_cube_grasp_demo.py --auto-close --no-viewer --no-rerun \
-  --record-csv outputs/robotiq/taxel_demo/taxel_forces.csv --record-every 5
-
-uv run scripts/run_touch_grid_demo.py --auto-close --no-viewer --no-rerun \
-  --record-csv outputs/robotiq/touch_grid_demo/touch_grid_forces.csv --record-every 5
-
-uv run scripts/plot_forces.py outputs/robotiq/taxel_demo/taxel_forces.csv
-uv run scripts/plot_forces.py outputs/robotiq/touch_grid_demo/touch_grid_forces.csv \
-  --output outputs/robotiq/touch_grid_demo/touch_grid_forces.pdf
-```
-
-CSV 包含 `step`、`time_s`、`control` 及左右的 `fx/fy/fz`。taxel 与 touch-grid 都统一记录
-“物体施加给触觉表面”的力，在各自 site 局部坐标系中表达，压缩时 `Fz > 0`。绘图脚本使用
-SciencePlots 的 `science` 和 `no-latex` 风格，不要求安装 TeX。
-
-Rerun 的 `.rrd` 会保存左右完整三通道触觉网格、显示用箭头、合力与控制量；只有显式传入
-`--record-rrd` 才会落盘。`--rerun-hz` 按仿真时间控制采样频率，默认 100 Hz；频率不随场景
-`timestep` 改变，且不能超过 MuJoCo 物理频率：
-
-```bash
-# 实时观察并同时保存
-uv run scripts/run_touch_grid_demo.py --auto-close \
-  --record-rrd outputs/robotiq/touch_grid_demo/touch_grid.rrd
-
-# 不启动任何窗口，仅生成 CSV 和 RRD
 uv run scripts/run_cube_grasp_demo.py --auto-close --no-viewer --no-rerun \
   --record-csv outputs/robotiq/taxel_demo/taxel_forces.csv \
   --record-rrd outputs/robotiq/taxel_demo/taxel.rrd
 
-# 回放
+uv run scripts/run_touch_grid_demo.py --auto-close --no-viewer --no-rerun \
+  --record-csv outputs/robotiq/touch_grid_demo/touch_grid_forces.csv
+
 uv run rerun outputs/robotiq/taxel_demo/taxel.rrd
 ```
 
-即使传入 `--no-rerun`，`--record-rrd` 仍会使用文件 sink 正常记录。CSV 继续作为稳定、紧凑的
-合力数据格式；网格级回放使用 RRD。
+## 触觉模型比较
 
-## 切换触觉模型或场景
+`compare_tactile_models.py` 使用 3×3 平面 box taxel 与 3×3 `touch_grid` 进行同条件比较。
+二者共享 pad 外形、接触参数、物体初态和闭合轨迹。
 
 ```bash
-# 使用 3×3 touch_grid 资产
-uv run scripts/run_touch_grid_demo.py \
-  --gripper-xml assets/grippers/robotiq_2f85/2f85_touch_grid_3x3.xml
+uv run scripts/compare_tactile_models.py \
+  --output-csv outputs/robotiq/comparison/tactile_model_comparison.csv \
+  --output-plot outputs/robotiq/comparison/tactile_model_comparison.png
 
-# 使用完整的外部 MJCF，跳过默认运行时场景组合
-uv run scripts/run_cube_grasp_demo.py --scene path/to/complete_scene.xml
+uv run scripts/compare_tactile_models.py --disturbance \
+  --output-csv outputs/robotiq/comparison/tactile_disturbance_comparison.csv \
+  --output-plot outputs/robotiq/comparison/tactile_disturbance_comparison.png
 ```
 
-更多关于运行时组合和名称前缀见 [项目结构](architecture.md)；传感器力方向与坐标系见
-[触觉读数约定](tactile-conventions.md)。
+扰动实验会在带支撑稳定后移除支撑碰撞，避免支撑摩擦参与抗扰；随后向方块质心施加世界
+Y 方向的正弦力。结果中的左右局部力会额外转换为世界系，以便比较合力与滑移响应。
 
-## 自研夹爪：水平无支撑保持与滑移验收
+## 自研夹爪：资产与姿态检查
 
-首先可用交互式查看器确认 `mount` 安装姿态。查看器显示世界系和各刚体坐标轴，且使用与
-验收相同的运行时组合场景：
+自研资产应首先通过结构、闭环、碰撞过滤和运动扫掠检查：
+
+```bash
+uv run scripts/verify_mujoco.py
+uv run pgt-check configs/custom_parallel_gripper.toml
+```
+
+在实际抓取场景中查看 profile 的 mount 安装位姿：
 
 ```bash
 uv run scripts/view_custom_grasp_scene.py
@@ -103,76 +86,56 @@ uv run scripts/view_custom_grasp_scene.py --closed
 uv run scripts/view_custom_grasp_scene.py --frame body
 ```
 
+单独检查某个 Pillar 的接触读数：
+
+```bash
+uv run scripts/run_custom_gripper_tactile_demo.py --taxel left:11 --auto-close
+```
+
+## 自研夹爪：抓取验收与视频
+
+运行无支撑保持、法向力跟踪和切向扰动验收：
+
 ```bash
 uv run scripts/run_custom_grasp_validation.py \
   --output-csv outputs/custom_gripper/validation/custom_gripper_grasp.csv \
   --output-plot outputs/custom_gripper/validation/custom_gripper_grasp.png
 ```
 
-该场景复用 Robotiq 扰动协议：夹爪局部 X 与局部 Z 均位于地面平面。按自研夹爪实际指尖
-几何，测试块尺寸为 `6 × 25 × 25 mm`，因此 YZ 实际接触面为 `25 × 25 mm`（大于 `24 × 24 mm`）。
-方块在 world Z 方向由薄板临时承托。闭合并稳定后，
-程序关闭支撑板碰撞；首先在 `0.5 s` 的无外力阶段验收静态保持，再对方块质心施加 world Y
-方向 `5 N、2 Hz、1.0 s` 正弦力，并观察恢复。两项都以 world YZ 接触面内位移 `<= 2 mm` 为默认
-门限。`base` 在此仅被固定到 profile mount frame，保留
-它作为未来 FR3 转接法兰的机械接口。
+默认测试块质量为 `50 g`，默认扰动为世界 Y 方向 `5 N`、`2 Hz` 正弦力。退出码和控制台结果
+反映保持、扰动、法向力跟踪和数值稳定性检查；不要把一次仿真通过解读为实机性能保证。
 
-当前 B1 导出资产能通过零外力基线（无支撑保持），但默认 `5 N` 扰动会触发接触失稳，命令会以
-非零状态退出并明确标记 `FAIL`；该结果应作为后续接触参数、Pillar 表面和驱动/机构刚度调优的
-基线，而不是被视为已通过的抗滑移能力。
-
-同一场景也可录制 MP4。视频含阶段、仿真时间和世界 Y 向外力叠加；扰动阶段另外以红色箭头显示
-该外力。默认 `5 N` 版本会在数值失稳前截断并返回失败，稳定基线可使用零外力：
+录制视频：
 
 ```bash
 uv run scripts/record_custom_grasp_video.py \
-  --force 0 \
+  --output outputs/custom_gripper/disturbance_video/custom_gripper_disturbance.mp4
+
+uv run scripts/record_custom_grasp_video.py --force 0 \
   --output outputs/custom_gripper/disturbance_video/custom_gripper_zero_disturbance.mp4
 ```
 
-## 公平比较 box taxel 与 touch_grid
+视频与验收采用相同的“MIT 预接触 + simple-pid 法向力外环”控制器，画面显示控制状态及
+`Fn=实测值/目标值`。无桌面显示的环境在命令前添加 `MUJOCO_GL=egl`。对应 CSV/曲线使用
+`run_custom_grasp_validation.py` 的 `--output-csv/--output-plot` 写入同一目录；默认目标总
+法向力为 `8 N`、方块质量为 `50 g`。
+
+## 更新 Onshape 导出
 
 ```bash
-# 单独查看或运行 box taxel
-uv run scripts/view_taxels.py \
-  --gripper-xml assets/grippers/robotiq_2f85/2f85_taxels_box.xml
-uv run scripts/run_cube_grasp_demo.py --auto-close \
-  --gripper-xml assets/grippers/robotiq_2f85/2f85_taxels_box.xml
-
-# 自动运行同条件 A/B 比较
-uv run scripts/compare_tactile_models.py
-uv run scripts/compare_tactile_models.py \
-  --record-every 5 \
-  --output-csv outputs/robotiq/comparison/tactile_model_comparison.csv \
-  --output-plot outputs/robotiq/comparison/tactile_model_comparison.png
-
-# 抓稳后撤去支撑，并施加默认 5 N、2 Hz、1 s 的世界 Y 向正弦扰动
-uv run scripts/compare_tactile_models.py --disturbance \
-  --record-every 5 \
-  --output-csv outputs/robotiq/comparison/tactile_disturbance_comparison.csv \
-  --output-plot outputs/robotiq/comparison/tactile_disturbance_comparison.png
+uv run scripts/prepare_onshape_export.py RAW.xml PREPARED.xml
+uv run scripts/verify_mujoco.py --mjcf PREPARED.xml
 ```
 
-比较固定使用 3×3 平面 box taxel 与 3×3 touch-grid：二者具有相同的 pad 外形、碰撞分块、
-接触参数、物体初态和闭合轨迹。联合 CSV 保留左右三维力，曲线图叠加正法向压力。终端报告最后
-20% 仿真的稳态均值、峰值和对称相对误差；默认任一侧稳态误差超过 10% 即返回失败。
+确认检查通过后，才更新 profile 指向的 `parallel_gripper_prepared.xml`，并重新运行
+`pgt-check` 和完整测试。细节见[Onshape 导出与升级](onshape-export-upgrade.md)。
 
-`--disturbance` 启用固定时序的切向稳定性实验：闭合 1.0 s、带支撑稳定 0.5 s、关闭支撑板碰撞、
-无支撑稳定 0.5 s、扰动 1.0 s、恢复 0.5 s。外力通过 `xfrc_applied` 施加在方块质心，方向固定为
-世界坐标系 +Y；`--steps` 在该模式下不生效，步数由总时长和物理 `timestep` 自动决定。常用调节项为：
+## 文档站
 
 ```bash
-uv run scripts/compare_tactile_models.py --disturbance \
-  --disturbance-force 5 \
-  --disturbance-frequency 2 \
-  --disturbance-duration 1 \
-  --support-settle-duration 0.5 \
-  --hold-duration 0.5 \
-  --recovery-duration 0.5 \
-  --slip-threshold 0.002
+uv run zensical serve
+uv run zensical build
 ```
 
-扰动 CSV 在原有局部三维力之外增加阶段、世界系外力、左右世界系力、世界系合力以及方块位姿和
-速度。图中同时显示控制量、外力、局部切向力、世界 Y 合力和方块在世界 YZ 切平面内的位移。
-终端用两种模型世界 Y 合力的 NRMSE 衡量响应一致性，并以扰动开始时的位置为基准计算扰动及
-恢复阶段的最大切向位移和速度；默认位移超过 2 mm 判为滑移。
+`serve` 会监视 `docs/` 和 `zensical.toml`，保存后自动刷新预览；`build` 将静态站点写入
+被 Git 忽略的 `site/` 目录。

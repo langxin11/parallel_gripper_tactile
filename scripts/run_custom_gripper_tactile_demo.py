@@ -19,7 +19,7 @@ import xml.etree.ElementTree as ET
 import mujoco
 import numpy as np
 
-from parallel_gripper_tactile import ContactTaxelReader, load_profile
+from parallel_gripper_tactile import ContactTaxelReader, MITTorqueController, load_profile
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -163,7 +163,8 @@ def main() -> None:
         shear_axis=args.shear_axis if args.shear_distance else None,
     )
     data = mujoco.MjData(model)
-    actuator_id = model.actuator(profile.actuator).id
+    controller = MITTorqueController.from_profile(model, profile)
+    actuator_id = controller.actuator_id
     shear_mocap_id = (
         int(model.body_mocapid[model.body(CUBE_MOCAP).id]) if args.shear_distance else -1
     )
@@ -190,7 +191,11 @@ def main() -> None:
         next_render_time = wall_start
         while viewer is None or viewer.is_running():
             if args.auto_close:
-                data.ctrl[actuator_id] = profile.closed_control * min(1.0, step / (args.steps / 3))
+                progress = min(1.0, step / (args.steps / 3))
+                target_position = profile.open_control + progress * (
+                    profile.closed_control - profile.open_control
+                )
+                controller.apply(data, target_position=target_position)
             if initial_mocap_position is not None:
                 shear_start = args.steps * 0.5
                 shear_duration = args.steps * 0.25

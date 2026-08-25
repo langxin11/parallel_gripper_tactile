@@ -7,7 +7,7 @@ from types import SimpleNamespace
 import mujoco
 import numpy as np
 
-from parallel_gripper_tactile import ContactTaxelReader, load_profile
+from parallel_gripper_tactile import ContactTaxelReader, MITTorqueController, load_profile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -58,11 +58,16 @@ def test_prescribed_world_shear_maps_to_expected_local_components() -> None:
         model = demo.build_demo_model(profile, ("left", 1, 1), 0.003, shear_axis=axis)
         data = mujoco.MjData(model)
         reader = ContactTaxelReader.from_profile(model, profile)
-        drive_id = model.actuator(profile.actuator).id
+        controller = MITTorqueController.from_profile(model, profile)
         mocap_id = int(model.body_mocapid[model.body(demo.CUBE_MOCAP).id])
         initial_position = data.mocap_pos[mocap_id].copy()
         for step in range(1000):
-            data.ctrl[drive_id] = profile.closed_control * min(1.0, step / 333)
+            progress = min(1.0, step / 333)
+            controller.apply(
+                data,
+                target_position=profile.open_control
+                + progress * (profile.closed_control - profile.open_control),
+            )
             progress = min(1.0, max(0.0, (step - 500) / 250))
             data.mocap_pos[mocap_id] = initial_position
             data.mocap_pos[mocap_id, 1 if axis == "y" else 2] += 0.002 * progress

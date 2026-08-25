@@ -1,11 +1,13 @@
 """验证自研夹爪固定基座抓取场景与验收脚本。"""
 
+import csv
 from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 import sys
 
 import mujoco
 import numpy as np
+import pytest
 
 from parallel_gripper_tactile import load_profile
 
@@ -42,7 +44,9 @@ def test_custom_scene_fixes_reserved_base_and_keeps_free_cube() -> None:
         (0.0, 0.0, 1.0),
     )
     cube_size = model.geom_size[model.geom("cube/target_cube_geom").id, :3]
+    cube_mass = model.body_mass[model.body("cube/target_cube").id]
     assert np.allclose(cube_size, (0.003, 0.0125, 0.0125))
+    assert np.isclose(cube_mass, 0.050)
     assert 2.0 * cube_size[1] > 0.024
     assert 2.0 * cube_size[2] > 0.024
     pillar_id = model.geom("gripper/left_taxel_geom_11").id
@@ -64,6 +68,15 @@ def test_custom_horizontal_hold_and_zero_disturbance_baseline_passes() -> None:
     assert result.simulation_stable
 
 
+def test_custom_grasp_rejects_cube_mass_below_fifty_grams() -> None:
+    """自研夹爪验收场景拒绝低于 50 g 的测试块。"""
+    scene = _load_module("custom_grasp_scene_mass", "custom_grasp_scene.py")
+    profile = load_profile(ROOT / "configs/custom_parallel_gripper.toml")
+
+    with pytest.raises(ValueError, match="at least 0.05 kg"):
+        scene.build_custom_grasp_model(profile, cube_mass=0.049)
+
+
 def test_custom_grasp_trace_plot_is_written(tmp_path: Path) -> None:
     """验收脚本实际写出 CSV 与绘图文件。"""
     _load_module("custom_grasp_scene", "custom_grasp_scene.py")
@@ -80,3 +93,25 @@ def test_custom_grasp_trace_plot_is_written(tmp_path: Path) -> None:
     assert output_csv.is_file()
     assert output_plot.is_file()
     assert output_plot.stat().st_size > 0
+    with output_csv.open(newline="", encoding="utf-8") as stream:
+        rows = list(csv.DictReader(stream))
+    assert rows
+    required_columns = {
+        "control_state",
+        "target_normal_force_n",
+        "filtered_normal_force_n",
+        "normal_force_error_n",
+        "force_position_adjustment_rad",
+        "taxel_normal_force_n",
+        "left_taxel_normal_force_n",
+        "right_taxel_normal_force_n",
+        "active_taxel_contacts",
+        "available_friction_n",
+        "static_hold_demand_tangential_n",
+        "friction_margin_n",
+        "friction_utilization",
+    }
+    assert required_columns.issubset(rows[0])
+    assert any(float(row["taxel_normal_force_n"]) > 0 for row in rows)
+    assert any(row["control_state"] == "force_tracking" for row in rows)
+    assert all(float(row["available_friction_n"]) >= 0 for row in rows)

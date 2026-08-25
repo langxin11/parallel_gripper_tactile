@@ -1,7 +1,13 @@
 """MuJoCo parallel-gripper tactile simulation toolkit."""
 
 from .contact_taxels import ContactTaxelFrame, ContactTaxelReader
-from .profiles import GripperProfile, TactileLayout, load_profile
+from .control import (
+    MITControlCommand,
+    MITTorqueController,
+    NormalForceControlCommand,
+    NormalForceController,
+)
+from .profiles import GripperProfile, MITControl, NormalForceControl, TactileLayout, load_profile
 from .protocols import DisturbanceProtocol
 
 __all__ = [
@@ -9,6 +15,12 @@ __all__ = [
     "ContactTaxelReader",
     "DisturbanceProtocol",
     "GripperProfile",
+    "MITControl",
+    "MITControlCommand",
+    "MITTorqueController",
+    "NormalForceControlCommand",
+    "NormalForceControl",
+    "NormalForceController",
     "TactileLayout",
     "load_profile",
 ]

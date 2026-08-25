@@ -23,10 +23,16 @@ from custom_grasp_scene import (
     DEFAULT_CUBE_MASS,
     DEFAULT_PROFILE,
     GRIPPER_PREFIX,
+    MIN_CUBE_MASS,
     SUPPORT_GEOM_NAME,
     build_custom_grasp_model,
 )
-from parallel_gripper_tactile import ContactTaxelReader, DisturbanceProtocol, load_profile
+from parallel_gripper_tactile import (
+    ContactTaxelReader,
+    DisturbanceProtocol,
+    NormalForceController,
+    load_profile,
+)
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
@@ -44,14 +50,35 @@ class GraspAcceptance:
     hold_displacement_m: float
     disturbance_displacement_m: float
     disturbance_speed_m_s: float
+    minimum_friction_margin_n: float
+    peak_friction_utilization: float
+    force_tracking_rmse_n: float
+    force_tracking_mean_n: float
     hold_passed: bool
     disturbance_passed: bool
+    force_tracking_passed: bool
     simulation_stable: bool
 
     @property
     def passed(self) -> bool:
         """是否同时满足保持、扰动与仿真稳定性三项检查。"""
-        return self.hold_passed and self.disturbance_passed and self.simulation_stable
+        return (
+            self.hold_passed
+            and self.disturbance_passed
+            and self.force_tracking_passed
+            and self.simulation_stable
+        )
+
+
+@dataclass(frozen=True, slots=True)
+class FrictionCapacity:
+    """方块—Pillar 接触可提供的法向力与切向摩擦容量。"""
+
+    normal_force_n: float
+    left_normal_force_n: float
+    right_normal_force_n: float
+    available_friction_n: float
+    active_contacts: int
 
 
 def _prefixed_reader(model, profile) -> ContactTaxelReader:
@@ -67,6 +94,57 @@ def _prefixed_reader(model, profile) -> ContactTaxelReader:
 def _tangential_displacement(position: np.ndarray, reference: np.ndarray) -> float:
     """度量模型定义的 YZ 指尖接触平面内的位移。"""
     return float(np.linalg.norm(position[1:3] - reference[1:3]))
+
+
+def _taxel_geom_sides(model, profile) -> dict[int, str]:
+    """解析组合模型中左右两侧全部 Pillar 的 geom ID 与所属侧。"""
+    return {
+        model.geom(f"{GRIPPER_PREFIX}{name}").id: side
+        for side in ("left", "right")
+        for name in profile.tactile.names(side)
+    }
+
+
+def _friction_capacity(
+    model,
+    data,
+    *,
+    taxel_geom_sides: dict[int, str],
+    cube_geom_id: int,
+) -> FrictionCapacity:
+    """返回方块—Pillar 接触的法向力、摩擦容量与活跃接触数。
+
+    每一项摩擦容量按接触对的滑动摩擦系数乘以法向接触力计算。该和是可抵抗
+    任意切向合力的上界；实际可用力还会受接触位置、力矩平衡和接触脱离影响。
+    """
+    contact_force = np.empty(6, dtype=np.float64)
+    total_normal_force = 0.0
+    normal_force_by_side = {"left": 0.0, "right": 0.0}
+    total_friction_capacity = 0.0
+    active_contacts = 0
+    for contact_id in range(data.ncon):
+        contact = data.contact[contact_id]
+        if cube_geom_id not in {contact.geom1, contact.geom2}:
+            continue
+        taxel_geom_id = next(
+            (geom_id for geom_id in (contact.geom1, contact.geom2) if geom_id in taxel_geom_sides),
+            None,
+        )
+        if taxel_geom_id is None:
+            continue
+        mujoco.mj_contactForce(model, data, contact_id, contact_force)
+        normal_force = max(0.0, float(contact_force[0]))
+        total_normal_force += normal_force
+        normal_force_by_side[taxel_geom_sides[taxel_geom_id]] += normal_force
+        total_friction_capacity += float(contact.friction[0]) * normal_force
+        active_contacts += 1
+    return FrictionCapacity(
+        normal_force_n=total_normal_force,
+        left_normal_force_n=normal_force_by_side["left"],
+        right_normal_force_n=normal_force_by_side["right"],
+        available_friction_n=total_friction_capacity,
+        active_contacts=active_contacts,
+    )
 
 
 def plot_trace(path: Path, rows: list[dict[str, float | str]]) -> None:
@@ -91,9 +169,18 @@ def plot_trace(path: Path, rows: list[dict[str, float | str]]) -> None:
     )
     times = [float(row["time_s"]) for row in rows]
     control = [float(row["control"]) for row in rows]
+    drive_position = [float(row["drive_position_rad"]) for row in rows]
     applied_force = [float(row["applied_world_fy"]) for row in rows]
     left_shear = [math.hypot(float(row["left_fx"]), float(row["left_fy"])) for row in rows]
     right_shear = [math.hypot(float(row["right_fx"]), float(row["right_fy"])) for row in rows]
+    friction_capacity = [float(row["available_friction_n"]) for row in rows]
+    static_hold_demand = [float(row["static_hold_demand_tangential_n"]) for row in rows]
+    friction_margin = [float(row["friction_margin_n"]) for row in rows]
+    total_normal_force = [float(row["taxel_normal_force_n"]) for row in rows]
+    filtered_normal_force = [float(row["filtered_normal_force_n"]) for row in rows]
+    target_normal_force = [float(row["target_normal_force_n"]) for row in rows]
+    left_normal_force = [float(row["left_taxel_normal_force_n"]) for row in rows]
+    right_normal_force = [float(row["right_taxel_normal_force_n"]) for row in rows]
     initial_position = np.array([float(rows[0]["cube_y"]), float(rows[0]["cube_z"])])
     displacement = [
         1000.0
@@ -109,9 +196,25 @@ def plot_trace(path: Path, rows: list[dict[str, float | str]]) -> None:
     ]
 
     colors = {"black": "#000000", "blue": "#0072B2", "orange": "#D55E00", "green": "#009E73"}
-    figure, axes = plt.subplots(5, 1, figsize=(7.16, 9.2), sharex=True, layout="constrained")
-    control_axis, force_axis, tactile_axis, displacement_axis, speed_axis = axes
+    figure, axes = plt.subplots(7, 1, figsize=(7.16, 12.4), sharex=True, layout="constrained")
+    (
+        control_axis,
+        force_axis,
+        tactile_axis,
+        normal_axis,
+        friction_axis,
+        displacement_axis,
+        speed_axis,
+    ) = axes
     control_axis.plot(times, control, color=colors["black"], linewidth=1.3, label="drive target")
+    control_axis.plot(
+        times,
+        drive_position,
+        color=colors["blue"],
+        linewidth=1.1,
+        linestyle="--",
+        label="drive position",
+    )
     control_axis.set_ylabel("Drive target\n(rad)")
     force_axis.plot(
         times, applied_force, color=colors["orange"], linewidth=1.4, label=r"Applied $F_y^W$"
@@ -129,6 +232,69 @@ def plot_trace(path: Path, rows: list[dict[str, float | str]]) -> None:
         label="Right Pillar shear",
     )
     tactile_axis.set_ylabel("Local shear\n(N)")
+    normal_axis.plot(
+        times,
+        total_normal_force,
+        color=colors["black"],
+        linewidth=1.3,
+        label="Total normal pressure",
+    )
+    normal_axis.plot(
+        times,
+        filtered_normal_force,
+        color=colors["green"],
+        linewidth=1.0,
+        linestyle=":",
+        label="Filtered normal pressure",
+    )
+    normal_axis.plot(
+        times,
+        target_normal_force,
+        color="0.35",
+        linewidth=0.9,
+        linestyle="-.",
+        label="Force target",
+    )
+    normal_axis.plot(
+        times,
+        left_normal_force,
+        color=colors["blue"],
+        linewidth=1.1,
+        label="Left Pillar normal",
+    )
+    normal_axis.plot(
+        times,
+        right_normal_force,
+        color=colors["orange"],
+        linewidth=1.1,
+        linestyle="--",
+        label="Right Pillar normal",
+    )
+    normal_axis.set_ylabel("Normal\npressure (N)")
+    friction_axis.plot(
+        times,
+        friction_capacity,
+        color=colors["blue"],
+        linewidth=1.2,
+        label=r"Available $\sum \mu F_n$",
+    )
+    friction_axis.plot(
+        times,
+        static_hold_demand,
+        color=colors["orange"],
+        linewidth=1.2,
+        label="Static hold demand",
+    )
+    friction_axis.plot(
+        times,
+        friction_margin,
+        color=colors["green"],
+        linewidth=1.1,
+        linestyle="--",
+        label="Friction margin",
+    )
+    friction_axis.axhline(0.0, color="0.45", linewidth=0.7, zorder=0)
+    friction_axis.set_ylabel("Friction\n(N)")
     displacement_axis.plot(
         times, displacement, color=colors["blue"], linewidth=1.3, label="YZ displacement"
     )
@@ -185,6 +351,8 @@ def run_acceptance(
     cube_half_thickness: float = DEFAULT_CUBE_HALF_THICKNESS,
     cube_half_contact_side: float = DEFAULT_CUBE_HALF_CONTACT_SIDE,
     cube_mass: float = DEFAULT_CUBE_MASS,
+    target_force_n: float | None = None,
+    force_rmse_threshold_n: float = 0.5,
     output_csv: Path | None = None,
     output_plot: Path | None = None,
 ) -> GraspAcceptance:
@@ -198,15 +366,26 @@ def run_acceptance(
         cube_half_thickness: 测试块 X 方向半厚。
         cube_half_contact_side: 测试块 YZ 接触面半边长。
         cube_mass: 测试块质量。
+        target_force_n: 可选目标总法向力；省略时使用 profile 配置。
+        force_rmse_threshold_n: 接触切换后稳态法向力 RMSE 验收阈值。
         output_csv: 可选逐步轨迹 CSV 输出路径。
         output_plot: 可选轨迹图输出路径。
 
     Returns:
         两项检查与仿真稳定性的验收结果。
     """
-    if hold_threshold_m <= 0 or slip_threshold_m <= 0:
-        raise ValueError("hold_threshold_m 和 slip_threshold_m 必须为正数。")
+    if hold_threshold_m <= 0 or slip_threshold_m <= 0 or force_rmse_threshold_n <= 0:
+        raise ValueError("位移与法向力 RMSE 阈值必须为正数。")
+    if target_force_n is not None and target_force_n <= 0:
+        raise ValueError("target_force_n 必须为正数。")
     profile = load_profile(profile_path)
+    if target_force_n is not None:
+        if profile.normal_force is None:
+            raise ValueError("profile 未配置 control.force。")
+        profile = replace(
+            profile,
+            normal_force=replace(profile.normal_force, target_n=target_force_n),
+        )
     model = build_custom_grasp_model(
         profile,
         cube_half_thickness=cube_half_thickness,
@@ -215,17 +394,24 @@ def run_acceptance(
     )
     data = mujoco.MjData(model)
     reader = _prefixed_reader(model, profile)
-    actuator_id = model.actuator(f"{GRIPPER_PREFIX}{profile.actuator}").id
+    controller = NormalForceController.from_profile(model, profile, name_prefix=GRIPPER_PREFIX)
+    actuator_id = controller.actuator_id
     support_id = model.geom(SUPPORT_GEOM_NAME).id
     cube_body_id = model.body(CUBE_BODY_NAME).id
     cube_joint_id = model.joint(CUBE_JOINT_NAME).id
+    cube_geom_id = model.geom(f"{CUBE_PREFIX}target_cube_geom").id
     cube_dof = model.jnt_dofadr[cube_joint_id]
+    taxel_geom_sides = _taxel_geom_sides(model, profile)
+    cube_mass_in_kg = float(model.body_mass[cube_body_id])
+    gravity_tangent = cube_mass_in_kg * np.asarray(model.opt.gravity[1:3], dtype=np.float64)
 
     hold_reference: np.ndarray | None = None
     disturbance_reference: np.ndarray | None = None
     hold_displacement = 0.0
     disturbance_displacement = 0.0
     disturbance_speed = 0.0
+    minimum_friction_margin = math.inf
+    peak_friction_utilization = 0.0
     simulation_stable = True
     rows: list[dict[str, float | str]] = []
     steps = math.ceil(protocol.total_duration / model.opt.timestep)
@@ -239,7 +425,26 @@ def run_acceptance(
             close_control=profile.closed_control,
             support_geom_id=support_id,
             cube_body_id=cube_body_id,
+            apply_actuator_control=False,
         )
+        target_position = protocol.close_target_at(
+            time_s, profile.open_control, profile.closed_control
+        )
+        feedback_capacity = _friction_capacity(
+            model,
+            data,
+            taxel_geom_sides=taxel_geom_sides,
+            cube_geom_id=cube_geom_id,
+        )
+        force_command = controller.apply(
+            data,
+            approach_position=target_position,
+            total_normal_force_n=feedback_capacity.normal_force_n,
+            left_normal_force_n=feedback_capacity.left_normal_force_n,
+            right_normal_force_n=feedback_capacity.right_normal_force_n,
+            dt=float(model.opt.timestep),
+        )
+        motor_command = force_command.mit
         mujoco.mj_step(model, data)
         if (
             data.time <= time_s
@@ -252,6 +457,23 @@ def run_acceptance(
         position = data.xpos[cube_body_id].copy()
         velocity = data.qvel[cube_dof : cube_dof + 3]
         tactile = reader.read(data)
+        capacity = _friction_capacity(
+            model,
+            data,
+            taxel_geom_sides=taxel_geom_sides,
+            cube_geom_id=cube_geom_id,
+        )
+        applied_tangent = np.asarray(data.xfrc_applied[cube_body_id, 1:3], dtype=np.float64)
+        static_hold_demand = float(np.linalg.norm(applied_tangent + gravity_tangent))
+        friction_margin = capacity.available_friction_n - static_hold_demand
+        friction_utilization = (
+            static_hold_demand / capacity.available_friction_n
+            if capacity.available_friction_n > 1e-12
+            else (math.inf if static_hold_demand > 1e-12 else 0.0)
+        )
+        if phase in {"unsupported_hold", "disturbance", "recovery"}:
+            minimum_friction_margin = min(minimum_friction_margin, friction_margin)
+            peak_friction_utilization = max(peak_friction_utilization, friction_utilization)
         if phase == "unsupported_hold":
             if hold_reference is None:
                 hold_reference = position
@@ -269,7 +491,15 @@ def run_acceptance(
             {
                 "time_s": float(data.time),
                 "phase": phase,
-                "control": float(data.ctrl[actuator_id]),
+                "control_state": force_command.state,
+                "control": motor_command.target_position,
+                "drive_position_rad": motor_command.position,
+                "drive_velocity_rad_s": motor_command.velocity,
+                "motor_torque_n_m": motor_command.torque,
+                "target_normal_force_n": force_command.target_force_n,
+                "filtered_normal_force_n": force_command.filtered_force_n,
+                "normal_force_error_n": force_command.force_error_n,
+                "force_position_adjustment_rad": force_command.position_adjustment,
                 "applied_world_fy": float(data.xfrc_applied[cube_body_id, 1]),
                 "cube_y": float(position[1]),
                 "cube_z": float(position[2]),
@@ -281,6 +511,16 @@ def run_acceptance(
                 "right_fx": float(tactile.right[0].sum()),
                 "right_fy": float(tactile.right[1].sum()),
                 "right_fz": float(tactile.right[2].sum()),
+                "taxel_normal_force_n": capacity.normal_force_n,
+                "left_taxel_normal_force_n": capacity.left_normal_force_n,
+                "right_taxel_normal_force_n": capacity.right_normal_force_n,
+                "active_taxel_contacts": capacity.active_contacts,
+                "available_friction_n": capacity.available_friction_n,
+                "applied_tangential_force_n": float(np.linalg.norm(applied_tangent)),
+                "gravity_tangential_force_n": float(np.linalg.norm(gravity_tangent)),
+                "static_hold_demand_tangential_n": static_hold_demand,
+                "friction_margin_n": friction_margin,
+                "friction_utilization": friction_utilization,
             }
         )
     # 首步即失稳时 rows 为空：跳过输出，仍以 simulation_stable=False 返回。
@@ -293,12 +533,36 @@ def run_acceptance(
                 writer.writerows(rows)
         if output_plot is not None:
             plot_trace(output_plot, rows)
+    tracking_rows = [row for row in rows if row["control_state"] == "force_tracking"]
+    if tracking_rows:
+        settled_after = float(tracking_rows[0]["time_s"]) + 0.2
+        settled_forces = [
+            float(row["filtered_normal_force_n"])
+            for row in tracking_rows
+            if float(row["time_s"]) >= settled_after
+        ]
+    else:
+        settled_forces = []
+    if settled_forces:
+        force_target = float(tracking_rows[0]["target_normal_force_n"])
+        force_tracking_mean = float(np.mean(settled_forces))
+        force_tracking_rmse = float(
+            np.sqrt(np.mean([(force - force_target) ** 2 for force in settled_forces]))
+        )
+    else:
+        force_tracking_mean = 0.0
+        force_tracking_rmse = math.inf
     return GraspAcceptance(
         hold_displacement_m=hold_displacement,
         disturbance_displacement_m=disturbance_displacement,
         disturbance_speed_m_s=disturbance_speed,
+        minimum_friction_margin_n=minimum_friction_margin,
+        peak_friction_utilization=peak_friction_utilization,
+        force_tracking_rmse_n=force_tracking_rmse,
+        force_tracking_mean_n=force_tracking_mean,
         hold_passed=hold_displacement <= hold_threshold_m,
         disturbance_passed=disturbance_displacement <= slip_threshold_m,
+        force_tracking_passed=force_tracking_rmse <= force_rmse_threshold_n,
         simulation_stable=simulation_stable,
     )
 
@@ -318,11 +582,15 @@ def main() -> int:
     parser.add_argument("--slip-threshold", type=float, default=0.002, metavar="M")
     parser.add_argument("--disturbance-force", type=float, default=5.0, metavar="N")
     parser.add_argument("--disturbance-frequency", type=float, default=2.0, metavar="HZ")
+    parser.add_argument("--target-force", type=float, metavar="N", help="覆盖 profile 目标总法向力")
+    parser.add_argument("--force-rmse-threshold", type=float, default=0.5, metavar="N")
     parser.add_argument("--output-csv", type=Path, default=DEFAULT_OUTPUT_CSV)
     parser.add_argument("--output-plot", type=Path, help="输出轨迹图；默认与 CSV 同名的 PNG")
     args = parser.parse_args()
-    if args.cube_half_thickness <= 0 or args.cube_half_contact_side <= 0 or args.cube_mass <= 0:
-        parser.error("方块尺寸和质量必须为正数")
+    if args.cube_half_thickness <= 0 or args.cube_half_contact_side <= 0:
+        parser.error("方块尺寸必须为正数")
+    if args.cube_mass < MIN_CUBE_MASS:
+        parser.error(f"--cube-mass 不能小于 {MIN_CUBE_MASS:g} kg")
     protocol = DisturbanceProtocol(
         force_n=args.disturbance_force, frequency_hz=args.disturbance_frequency
     )
@@ -334,6 +602,8 @@ def main() -> int:
         cube_half_thickness=args.cube_half_thickness,
         cube_half_contact_side=args.cube_half_contact_side,
         cube_mass=args.cube_mass,
+        target_force_n=args.target_force,
+        force_rmse_threshold_n=args.force_rmse_threshold,
         output_csv=args.output_csv,
         output_plot=args.output_plot or args.output_csv.with_suffix(".png"),
     )
@@ -349,6 +619,17 @@ def main() -> int:
         f"max YZ displacement: {1000.0 * result.disturbance_displacement_m:.3f} mm; "
         f"max YZ speed: {result.disturbance_speed_m_s:.4f} m/s  "
         f"{'PASS' if result.disturbance_passed else 'FAIL'}"
+    )
+    print("friction margin during unsupported hold, disturbance, and recovery")
+    print(
+        f"minimum margin: {result.minimum_friction_margin_n:.3f} N; "
+        f"peak utilization: {result.peak_friction_utilization:.1%}"
+    )
+    print("normal-force tracking after 0.2 s settling")
+    print(
+        f"mean: {result.force_tracking_mean_n:.3f} N; "
+        f"RMSE: {result.force_tracking_rmse_n:.3f} N  "
+        f"{'PASS' if result.force_tracking_passed else 'FAIL'}"
     )
     if not result.simulation_stable:
         print("simulation stability: FAIL (MuJoCo reported a non-finite or reset state)")

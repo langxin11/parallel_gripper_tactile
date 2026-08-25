@@ -79,9 +79,19 @@ uv run pgt-check configs/custom_parallel_gripper.toml
 | `left_finger_slide` | slide | 左手指沿导轨移动 |
 | `right_finger_slide` | slide | 右手指沿导轨移动 |
 
-唯一执行器为 `gripper_drive`，控制量是弧度制的位置目标，可通过 `data.ctrl[0]` 设置。B1 导出的关节范围为 `[0, 1.5708] rad`（0--90°）。曲柄半径为 30 mm、连杆两销轴中心距为 40 mm。无被抓物时，左右 Pillars 在约 `1.34 rad` 开始接触；因此闭合控制建议限制在 `0.05` 至 `1.30 rad`。
+唯一执行器为 `gripper_drive`，它是 `<motor>` 输出轴纯力矩源，`data.ctrl` 的单位为 N·m。
+B1 导出的关节范围为 `[0, 1.5708] rad`（0--90°）。曲柄半径为 30 mm、连杆两销轴中心距为
+40 mm。无被抓物时，左右 Pillars 在约 `1.34 rad` 开始接触；因此 MIT 位置目标建议限制在
+`0.05` 至 `1.30 rad`。
 
-位置执行器当前使用 `kp=20`。DM-J4310P-2EC 输出端额定扭矩为 `3.5 N·m`，峰值扭矩为 `12.5 N·m`；模型中的 `forcerange=12.5` 适合短时能力验证，连续或长时仿真建议改为 `3.5`。该 `kp` 仅为仿真起始值，不代表真实电机内部伺服参数。
+Python 控制层按 MIT 形式计算 `kp*(p_des-p)+kd*(v_des-v)+t_ff`。当前 `T_MAX=10 N·m`，
+MJCF 的厂家峰值保护为 `12.5 N·m`；连续或长时仿真仍应按额定 `3.5 N·m` 或热模型降额。
+详细参数与建模假设见 `DM_J4310P_24V_MJCF_建模摘要.md`。
+
+抓取验收采用两层混合控制：未接触时按 MIT 位置目标低速闭合；左右指尖 taxel 均连续
+检测到接触后，切换到 `simple-pid` 法向力外环。PID 跟踪两侧 taxel 法向力之和，并输出
+接触位置附近的有限位置修正，再由 MIT 内环转换成电机力矩。默认目标总法向力为 `8 N`，
+接触阈值、滤波频率、PID 增益和最大位置修正均在 profile 的 `[control.force]` 中配置。
 
 ## 闭环约束
 

@@ -113,6 +113,11 @@ class DisturbanceProtocol:
         """Return the world-Y component of the disturbance force."""
         return float(self.force_vector_at(time_s)[1])
 
+    def close_target_at(self, time_s: float, open_control: float, closed_control: float) -> float:
+        """Return the linearly ramped gripper position target for this time."""
+        progress = min(1.0, max(0.0, time_s / self.close_duration))
+        return open_control + progress * (closed_control - open_control)
+
     def step(
         self,
         model,
@@ -122,6 +127,7 @@ class DisturbanceProtocol:
         close_control: float,
         support_geom_id: int,
         cube_body_id: int,
+        apply_actuator_control: bool = True,
     ) -> Vector3:
         """Apply this step's control, support state, and object force.
 
@@ -135,7 +141,8 @@ class DisturbanceProtocol:
             The applied world-frame force vector.
         """
         time_s = float(data.time)
-        data.ctrl[actuator_id] = close_control * min(1.0, time_s / self.close_duration)
+        if apply_actuator_control:
+            data.ctrl[actuator_id] = close_control * min(1.0, time_s / self.close_duration)
         if time_s >= self.release_time:
             model.geom_contype[support_geom_id] = 0
             model.geom_conaffinity[support_geom_id] = 0

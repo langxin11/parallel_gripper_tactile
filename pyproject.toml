@@ -18,13 +18,18 @@ dependencies = [
     "numpy>=2.0",
     "rerun-sdk>=0.34,<0.35",
     "SciencePlots>=2.0",
+    "simple-pid>=2.0",
 ]
 
 [project.scripts]
 pgt-check = "parallel_gripper_tactile.cli:check"
 
 [dependency-groups]
-dev = ["pytest>=7.0", "ruff>=0.15"]
+dev = [
+    "pytest>=7.0",
+    "ruff>=0.15",
+    "zensical>=0.0.56",
+]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

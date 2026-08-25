@@ -35,6 +35,19 @@ def validate_profile(profile: GripperProfile) -> ValidationReport:
     actuator_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_ACTUATOR, profile.actuator)
     if actuator_id < 0:
         raise ValueError(f"model is missing actuator {profile.actuator!r}")
+    if profile.control_mode == "mit_torque":
+        if profile.mit is None:
+            raise ValueError("MIT torque profile is missing control parameters")
+        ctrl_limit = min(abs(float(value)) for value in model.actuator_ctrlrange[actuator_id])
+        force_limit = min(abs(float(value)) for value in model.actuator_forcerange[actuator_id])
+        if profile.mit.t_max > min(ctrl_limit, force_limit):
+            raise ValueError("MIT t_max exceeds the compiled actuator limits")
+        joint_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, profile.actuator)
+        if joint_id < 0:
+            raise ValueError(f"model is missing MIT-controlled joint {profile.actuator!r}")
+        joint_min, joint_max = (float(value) for value in model.jnt_range[joint_id])
+        if profile.mit.p_min < joint_min or profile.mit.p_max > joint_max:
+            raise ValueError("MIT position range exceeds the controlled joint range")
 
     object_type = (
         mujoco.mjtObj.mjOBJ_GEOM

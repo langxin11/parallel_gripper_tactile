@@ -36,8 +36,10 @@ def main() -> None:
     profile = load_profile(args.profile)
     model = build_custom_grasp_model(profile)
     data = mujoco.MjData(model)
-    actuator_id = model.actuator(f"{GRIPPER_PREFIX}{profile.actuator}").id
-    data.ctrl[actuator_id] = profile.closed_control if args.closed else profile.open_control
+    drive_joint = model.joint(f"{GRIPPER_PREFIX}{profile.actuator}")
+    data.qpos[model.jnt_qposadr[drive_joint.id]] = (
+        profile.closed_control if args.closed else profile.open_control
+    )
     mujoco.mj_forward(model, data)
 
     from mujoco import viewer

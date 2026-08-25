@@ -42,3 +42,17 @@ def test_tactile_names_are_row_major() -> None:
         "left_taxel_geom_21",
         "left_taxel_geom_22",
     )
+
+
+def test_custom_profile_defines_bounded_mit_torque_control() -> None:
+    """自研夹爪使用不超过 MJCF 与电机峰值的 MIT 力矩控制参数。"""
+    profile = load_profile(ROOT / "configs" / "custom_parallel_gripper.toml")
+
+    assert profile.control_mode == "mit_torque"
+    assert profile.mit is not None
+    assert profile.mit.p_min <= profile.open_control < profile.closed_control <= profile.mit.p_max
+    assert profile.mit.v_max <= 20.943951023931955
+    assert profile.mit.t_max <= 10.0
+    assert profile.normal_force is not None
+    assert profile.normal_force.target_n == 8.0
+    assert profile.normal_force.release_threshold_n < profile.normal_force.contact_threshold_n

@@ -4,7 +4,6 @@
   <default>
     <default class="parallel_gripper">
       <joint frictionloss="0.1" armature="0.005" />
-      <position kp="50" dampratio="1" />
       <default class="visual">
         <geom type="mesh" contype="0" conaffinity="0" group="2" />
       </default>
@@ -12,8 +11,7 @@
         <geom group="3" />
       </default>
       <default class="pillar_collision">
-        <!-- Equivalent compliant Pillar contact: 15 N / 2.5 mm = 6 kN m^-1.
-             The 10 N s m^-1 damping is near critical for the 3 g test block. -->
+        <!-- Equivalent compliant Pillar contact calibrated from 15 N / 2.5 mm. -->
         <geom group="3" friction="0.8 0.02 0.001" solref="-6000 -10"
               solimp="0.75 0.95 0.0025 0.5 2" />
       </default>
@@ -32,7 +30,7 @@
       <geom type="mesh" class="visual" pos="0 0 0.05255" quat="1 -0 0 -0" mesh="bracket" material="bracket_material" />
       <geom type="mesh" class="collision" pos="0 0 0.05255" quat="1 -0 0 -0" mesh="bracket" material="bracket_material" />
       <body name="motor" pos="0 0 0.03405" quat="1 0 0 1.9e-11">
-        <joint axis="0 0 1" name="gripper_drive" type="hinge" range="-3.816591487293408e-11 1.5707963267567306" frictionloss="0.0" damping="0.01" />
+        <joint axis="0 0 1" name="gripper_drive" type="hinge" range="-3.816591487293408e-11 1.5707963267567306" frictionloss="0.04" damping="0.02532329" armature="0.002074755" />
         <inertial pos="0 0 0.0162295" mass="0.0736081" fullinertia="1.33678e-05 1.33678e-05 1.57706e-05 -2.09886e-06 0 -0" />
         <geom type="mesh" class="visual" pos="-0 -0 0.02" quat="1 -0 -0 0" mesh="crank" material="crank_material" />
         <geom type="mesh" class="visual" pos="0 -0 -0.02905" quat="1 -0 0 0" mesh="motor" material="motor_material" />
@@ -202,7 +200,7 @@
     <material name="pillars_2_material" rgba="1 0 1 1" />
   </asset>
   <actuator>
-    <position class="parallel_gripper" name="gripper_drive" joint="gripper_drive" kp="20.0" forcerange="-12.5 12.5" inheritrange="1" />
+    <motor class="parallel_gripper" name="gripper_drive" joint="gripper_drive" gear="1" ctrlrange="-10 10" forcerange="-12.5 12.5" />
   </actuator>
   <equality>
     <connect site1="closing_left_link_finger_pin_1" site2="closing_left_link_finger_pin_2" solref="0.002 1" solimp="0.99 0.999 0.0005 0.5 2" />

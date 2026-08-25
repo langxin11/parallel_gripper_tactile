@@ -14,9 +14,11 @@ from pathlib import Path
 import mujoco
 import numpy as np
 
+from parallel_gripper_tactile import MITTorqueController, load_profile
+
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_MODEL = REPOSITORY_ROOT / "assets/grippers/custom_parallel_gripper/parallel_gripper.xml"
+DEFAULT_PROFILE = REPOSITORY_ROOT / "configs/custom_parallel_gripper.toml"
 SAFE_CLOSED_TARGET = 1.30  # rad；避免无物体时 Pillar 之间相互接触。
 
 
@@ -31,16 +33,19 @@ def joint_position(model: mujoco.MjModel, data: mujoco.MjData, name: str) -> flo
 def main() -> None:
     """编译模型，检查执行器、闭链、碰撞过滤与运动扫描。"""
     parser = argparse.ArgumentParser()
-    parser.add_argument("--mjcf", type=Path, default=DEFAULT_MODEL)
+    parser.add_argument("--profile", type=Path, default=DEFAULT_PROFILE)
+    parser.add_argument("--mjcf", type=Path, help="覆盖 profile 中的 MJCF 路径。")
     parser.add_argument("--steps", type=int, default=1000)
     parser.add_argument(
         "--force-limit",
         type=float,
-        help="为本次检查临时覆盖位置执行器的力限 (N m)。",
+        help="为本次检查临时收紧 MIT 力矩命令上限 (N m)。",
     )
     args = parser.parse_args()
 
-    model = mujoco.MjModel.from_xml_path(str(args.mjcf))
+    profile = load_profile(args.profile)
+    model_path = args.mjcf or profile.model_path
+    model = mujoco.MjModel.from_xml_path(str(model_path))
     data = mujoco.MjData(model)
     model.opt.gravity[:] = 0.0  # 这是运动学检查，不是下落测试。
 
@@ -50,6 +55,8 @@ def main() -> None:
             f"Expected one actuator named gripper_drive; got nu={model.nu}, id={actuator_id}"
         )
     if args.force_limit is not None:
+        if args.force_limit <= 0:
+            parser.error("--force-limit 必须为正数。")
         model.actuator_forcerange[actuator_id] = [-args.force_limit, args.force_limit]
     if model.neq != 4:
         raise RuntimeError(
@@ -95,7 +102,9 @@ def main() -> None:
     drive_range = model.jnt_range[drive_id]
     targets = np.linspace(drive_range[0] + 0.05, min(SAFE_CLOSED_TARGET, drive_range[1] - 0.05), 3)
 
-    print(f"Loaded {args.mjcf}")
+    controller = MITTorqueController.from_profile(model, profile)
+
+    print(f"Loaded {model_path}")
     print(f"actuator: gripper_drive, range: [{drive_range[0]:.4f}, {drive_range[1]:.4f}] rad")
     if args.force_limit is not None:
         print(f"temporary actuator force limit: +/-{args.force_limit:.3f} N m")
@@ -105,8 +114,12 @@ def main() -> None:
     )
     max_tracking_error = 0.0
     for target in targets:
-        data.ctrl[0] = target
         for _ in range(args.steps):
+            command = controller.apply(data, target_position=float(target))
+            if args.force_limit is not None:
+                data.ctrl[actuator_id] = np.clip(
+                    command.torque, -args.force_limit, args.force_limit
+                )
             mujoco.mj_step(model, data)
         if not np.isfinite(data.qpos).all() or not np.isfinite(data.qvel).all():
             raise RuntimeError("Simulation produced non-finite state values")

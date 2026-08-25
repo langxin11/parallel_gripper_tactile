@@ -20,7 +20,8 @@ CUBE_PREFIX = "cube/"
 SUPPORT_GEOM_NAME = "target_cube_support_plate"
 DEFAULT_CUBE_HALF_THICKNESS = 0.003
 DEFAULT_CUBE_HALF_CONTACT_SIDE = 0.0125
-DEFAULT_CUBE_MASS = 0.003
+MIN_CUBE_MASS = 0.050
+DEFAULT_CUBE_MASS = MIN_CUBE_MASS
 PILLAR_ALIGNMENT_OFFSET_IN_BASE = np.array((0.0, 0.0, -0.002))
 
 
@@ -92,8 +93,10 @@ def _load_cube_spec(
     cube_mass: float,
 ):
     """加载 YZ 面 25×25 mm 且能放入夹爪开口的测试块。"""
-    if cube_half_thickness <= 0 or cube_half_contact_side <= 0 or cube_mass <= 0:
-        raise ValueError("cube dimensions and cube_mass must be positive")
+    if cube_half_thickness <= 0 or cube_half_contact_side <= 0:
+        raise ValueError("cube dimensions must be positive")
+    if cube_mass < MIN_CUBE_MASS:
+        raise ValueError(f"cube_mass must be at least {MIN_CUBE_MASS:g} kg")
     tree = ET.parse(TARGET_CUBE_XML)
     cube = tree.find(".//geom[@name='target_cube_geom']")
     if cube is None:
@@ -162,8 +165,10 @@ def build_custom_grasp_spec(
         prefix=CUBE_PREFIX,
         frame=cube_mount,
     )
-    scene.add_key(name="custom_open", ctrl=[profile.open_control])
-    scene.add_key(name="custom_closed", ctrl=[profile.closed_control])
+    # The custom actuator is a pure torque source.  Position presets belong in
+    # qpos/controller state, while zero torque is the only safe generic keyframe command.
+    scene.add_key(name="custom_open", ctrl=[0.0])
+    scene.add_key(name="custom_closed", ctrl=[0.0])
     return scene
 
 

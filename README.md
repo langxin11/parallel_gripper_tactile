@@ -13,6 +13,17 @@ uv run pgt-check configs/custom_parallel_gripper.toml
 uv run pytest
 ```
 
+## 文档站
+
+项目文档使用 Zensical 构建。安装依赖后，在仓库根目录运行：
+
+```bash
+uv run zensical serve
+```
+
+编辑 `docs/` 中的 Markdown 文件并保存会自动热重载。构建可部署的静态站点使用
+`uv run zensical build`；生成的 `site/` 目录不纳入版本控制。
+
 查看自研夹爪：
 
 ```bash
@@ -40,6 +51,9 @@ uv run scripts/record_custom_grasp_video.py \
   --output outputs/custom_gripper/disturbance_video/custom_gripper_disturbance.mp4
 ```
 
+该视频采用 MIT 预接触与接触后的 `simple-pid` 法向力外环，并在画面中显示控制状态、
+实测总法向力与目标法向力。
+
 运行下面的交互式查看器可直接检查 profile 中 `mount.pos/quat` 施加后的整体朝向；
 它加载与验收完全相同的物块、支撑板和安装 frame。使用 `--closed` 可查看闭合姿态：
 
@@ -51,6 +65,7 @@ uv run scripts/view_custom_grasp_scene.py --frame body
 
 夹爪通过 mount frame 横向安装：滑轨局部 X 与本体局部 Z 均平行地面。按自研夹爪实际指尖
 几何，测试块为 `6 × 25 × 25 mm`，在 YZ 接触面上形成 `25 × 25 mm`（大于 `24 × 24 mm`）的接触面。
+默认且允许的最小质量为 `50 g`。
 它在水平侧向夹持姿态下依次验证：撤去支撑板后的无外力静态保持，以及与 Robotiq 相同的
 `1.0 s` 闭合、`0.5 s` 带支撑稳定、`0.5 s` 无支撑稳定、`5 N / 2 Hz / 1.0 s` 世界 Y 向
 切向扰动和 `0.5 s` 恢复。两项默认均以 YZ 接触面内位移不超过 `2 mm` 为通过条件。
@@ -69,6 +84,15 @@ uv run scripts/view_custom_grasp_scene.py --frame body
 Pillar 碰撞采用等效软接触：`solref="-6000 -10"`（对应法向标称刚度约 `6 kN/m`）与
 `solimp="0.75 0.95 0.0025 0.5 2"`。该值由单柱 `15 N / 2.5 mm` 满量程换算，并保留
 `2.5 mm` 的柔顺过渡；它是接触层的等效模型，不等同于具有独立三轴弹性自由度的实体硅胶柱。
+
+自研夹爪执行器是减速器输出轴上的受限 `<motor>` 力矩源。Python 控制回路按
+`tau = kp*(p_des-p) + kd*(v_des-v) + t_ff` 实现 MIT 风格控制；可配置的
+`P_MAX/V_MAX/T_MAX` 位于 `configs/custom_parallel_gripper.toml`，MJCF 另以厂家峰值
+`±12.5 N·m` 作为最终物理保护限幅。
+
+自研夹爪的抓取验收还使用 `simple-pid` 法向力外环：预接触阶段执行 MIT 位置接近，
+双侧 taxel 确认接触后跟踪默认 `8 N` 总法向力，PID 输出经限幅的位置修正再交给 MIT
+力矩内环执行。
 
 ## 项目结构
 
