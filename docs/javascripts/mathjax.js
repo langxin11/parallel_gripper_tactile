@@ -1,0 +1,26 @@
+window.MathJax = {
+  tex: {
+    inlineMath: [["\\(", "\\)"]],
+    displayMath: [["\\[", "\\]"]],
+    processEscapes: true,
+    processEnvironments: true,
+  },
+  options: {
+    ignoreHtmlClass: ".*|",
+    processHtmlClass: "arithmatex",
+  },
+};
+
+// Re-typeset content that Zensical replaces during instant navigation.
+document$.subscribe(() => {
+  MathJax.startup.output.clearCache();
+  MathJax.typesetClear();
+  MathJax.texReset();
+  MathJax.typesetPromise();
+});
+
+component$.subscribe(({ ref }) => {
+  if (ref.classList.contains("md-annotation")) {
+    MathJax.typesetPromise([ref]);
+  }
+});

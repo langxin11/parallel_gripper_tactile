@@ -50,3 +50,4 @@ uv run zensical build
 - [常用工作流](workflows.md)：生成、仿真、记录与可视化命令。
 - [Onshape 导出与升级](onshape-export-upgrade.md)：资产导出及验证流程。
 - [自研夹爪状态与后续工作](custom-gripper-next-phase.md)：当前能力边界和后续工作。
+- [曲柄滑块力控制](crank-slider-force-control.md)：机构雅可比、等效接触刚度与目标力控制模型。
