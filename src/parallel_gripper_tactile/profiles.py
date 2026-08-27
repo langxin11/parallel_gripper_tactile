@@ -92,6 +92,13 @@ class NormalForceControl(_FrozenModel):
     kd: Annotated[FiniteFloat, Field(ge=0)] = 0.0
     max_position_adjustment: Annotated[FiniteFloat, Field(gt=0)]
     filter_cutoff_hz: Annotated[FiniteFloat, Field(gt=0)]
+    sensor_taxel_normal_noise_std_n: tuple[
+        Annotated[FiniteFloat, Field(ge=0)], Annotated[FiniteFloat, Field(ge=0)]
+    ] = (0.0, 0.0)
+    sensor_taxel_shear_noise_std_n: tuple[
+        Annotated[FiniteFloat, Field(ge=0)], Annotated[FiniteFloat, Field(ge=0)]
+    ] = (0.0, 0.0)
+    sensor_noise_seed: Annotated[int, Field(ge=0)] = 0
 
     @model_validator(mode="after")
     def validate_release_threshold(self) -> "NormalForceControl":

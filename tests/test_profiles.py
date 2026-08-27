@@ -59,6 +59,14 @@ def test_custom_profile_defines_bounded_mit_torque_control() -> None:
     assert profile.normal_force is not None
     assert profile.normal_force.target_n == 8.0
     assert profile.normal_force.release_threshold_n < profile.normal_force.contact_threshold_n
+    assert profile.normal_force.filter_cutoff_hz == 20.0
+    assert profile.normal_force.sensor_taxel_normal_noise_std_n == pytest.approx(
+        (0.0066666667, 0.0133333333)
+    )
+    assert profile.normal_force.sensor_taxel_shear_noise_std_n == pytest.approx(
+        (0.0033333333, 0.01)
+    )
+    assert profile.normal_force.sensor_noise_seed == 20260814
 
 
 def test_touch_grid_profile_reads_dimensions_from_plugin_configuration() -> None:

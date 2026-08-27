@@ -56,6 +56,12 @@ pillar 阵列，每个阵列单元可测 3D displacement、3D force 和 vibratio
 因此同一 Pillar 的多个接触点会累加；无接触单元严格为零。读取器返回
 `ContactTaxelFrame(left, right)`，两个数组均为 `(3, 3, 3)`。
 
+抓取验收中的触觉观测在理想接触力之上加入逐 taxel 空载标定噪声。当前自研夹爪 profile
+使用 2026-08-14 Contactile/PapillArray 空载记录的指尖总力噪声，并按 9 个 taxel 独立同分布
+假设除以 `sqrt(9)`：左右单 taxel 法向 `sigma=0.0067/0.0133 N`，左右单 taxel 切向
+`sigma=0.0033/0.0100 N`。汇总后的法向测量再以 `20 Hz` 一阶低通进入 PID。
+这只模拟测量链路，不向 MuJoCo 接触物理施加随机外力。
+
 ## 显示与记录
 
 Rerun 中的压力图、切向箭头是可视化；箭头可能为便于观察而聚合或缩放，不能根据屏幕长度

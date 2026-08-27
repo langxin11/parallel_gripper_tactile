@@ -77,6 +77,37 @@ class FrictionCapacity:
     active_contacts: int
 
 
+@dataclass(frozen=True, slots=True)
+class TactileMeasurement:
+    """带测量噪声的左右 taxel 三轴力。"""
+
+    left: np.ndarray
+    right: np.ndarray
+
+    @property
+    def left_force(self) -> np.ndarray:
+        """返回左指尖带噪总三轴力。"""
+        return self.left.sum(axis=(1, 2))
+
+    @property
+    def right_force(self) -> np.ndarray:
+        """返回右指尖带噪总三轴力。"""
+        return self.right.sum(axis=(1, 2))
+
+    @property
+    def normal_capacity(self) -> FrictionCapacity:
+        """返回用于力控反馈的带噪总法向力。"""
+        left_normal = max(0.0, float(self.left_force[2]))
+        right_normal = max(0.0, float(self.right_force[2]))
+        return FrictionCapacity(
+            normal_force_n=left_normal + right_normal,
+            left_normal_force_n=left_normal,
+            right_normal_force_n=right_normal,
+            available_friction_n=0.0,
+            active_contacts=0,
+        )
+
+
 def _prefixed_reader(model, profile) -> ContactTaxelReader:
     """创建读取 ``MjSpec.attach`` 前缀命名通道的接触读取器。"""
     tactile = profile.tactile.model_copy(
@@ -144,6 +175,23 @@ def _friction_capacity(
     )
 
 
+def _tactile_measurement(
+    tactile,
+    *,
+    left_normal_std_n: float,
+    right_normal_std_n: float,
+    left_shear_std_n: float,
+    right_shear_std_n: float,
+    rng: np.random.Generator,
+) -> TactileMeasurement:
+    """返回逐 taxel 加性高斯白噪声测量。"""
+    left_std = np.array([left_shear_std_n, left_shear_std_n, left_normal_std_n])[:, None, None]
+    right_std = np.array([right_shear_std_n, right_shear_std_n, right_normal_std_n])[:, None, None]
+    left = tactile.left + rng.normal(0.0, left_std, size=tactile.left.shape)
+    right = tactile.right + rng.normal(0.0, right_std, size=tactile.right.shape)
+    return TactileMeasurement(left=left, right=right)
+
+
 def plot_trace(path: Path, rows: list[dict[str, float | str]]) -> None:
     """绘制发表风格的控制量、触觉力与物体运动轨迹图。"""
     if not rows:
@@ -168,12 +216,19 @@ def plot_trace(path: Path, rows: list[dict[str, float | str]]) -> None:
     control = [float(row["control"]) for row in rows]
     drive_position = [float(row["drive_position_rad"]) for row in rows]
     applied_force = [float(row["applied_world_fy"]) for row in rows]
-    left_shear = [math.hypot(float(row["left_fx"]), float(row["left_fy"])) for row in rows]
-    right_shear = [math.hypot(float(row["right_fx"]), float(row["right_fy"])) for row in rows]
+    left_shear = [
+        math.hypot(float(row["measured_left_fx"]), float(row["measured_left_fy"]))
+        for row in rows
+    ]
+    right_shear = [
+        math.hypot(float(row["measured_right_fx"]), float(row["measured_right_fy"]))
+        for row in rows
+    ]
     friction_capacity = [float(row["available_friction_n"]) for row in rows]
     static_hold_demand = [float(row["static_hold_demand_tangential_n"]) for row in rows]
     friction_margin = [float(row["friction_margin_n"]) for row in rows]
     total_normal_force = [float(row["taxel_normal_force_n"]) for row in rows]
+    measured_normal_force = [float(row["measured_normal_force_n"]) for row in rows]
     filtered_normal_force = [float(row["filtered_normal_force_n"]) for row in rows]
     target_normal_force = [float(row["target_normal_force_n"]) for row in rows]
     left_normal_force = [float(row["left_taxel_normal_force_n"]) for row in rows]
@@ -243,6 +298,14 @@ def plot_trace(path: Path, rows: list[dict[str, float | str]]) -> None:
         linewidth=1.0,
         linestyle=":",
         label="Filtered normal pressure",
+    )
+    normal_axis.plot(
+        times,
+        measured_normal_force,
+        color="0.55",
+        linewidth=0.7,
+        alpha=0.8,
+        label="Measured normal pressure",
     )
     normal_axis.plot(
         times,
@@ -409,6 +472,10 @@ def run_acceptance(
     control_timer = SimulationTimer(control_period_s, float(data.time))
     reader = _prefixed_reader(model, profile)
     controller = NormalForceController.from_profile(model, profile, name_prefix=GRIPPER_PREFIX)
+    force_config = profile.normal_force
+    noise_rng = np.random.default_rng(
+        0 if force_config is None else int(force_config.sensor_noise_seed)
+    )
     actuator_id = controller.actuator_id
     support_id = model.geom(SUPPORT_GEOM_NAME).id
     cube_body_id = model.body(CUBE_BODY_NAME).id
@@ -447,12 +514,21 @@ def run_acceptance(
         )
         control_dt = control_timer.pop_due(time_s)
         if control_dt is not None:
-            feedback_capacity = _friction_capacity(
-                model,
-                data,
-                taxel_geom_sides=taxel_geom_sides,
-                cube_geom_id=cube_geom_id,
-            )
+            feedback_tactile = reader.read(data)
+            if force_config is not None:
+                feedback_measurement = _tactile_measurement(
+                    feedback_tactile,
+                    left_normal_std_n=float(force_config.sensor_taxel_normal_noise_std_n[0]),
+                    right_normal_std_n=float(force_config.sensor_taxel_normal_noise_std_n[1]),
+                    left_shear_std_n=float(force_config.sensor_taxel_shear_noise_std_n[0]),
+                    right_shear_std_n=float(force_config.sensor_taxel_shear_noise_std_n[1]),
+                    rng=noise_rng,
+                )
+            else:
+                feedback_measurement = TactileMeasurement(
+                    left=feedback_tactile.left, right=feedback_tactile.right
+                )
+            feedback_capacity = feedback_measurement.normal_capacity
             force_command = controller.apply(
                 data,
                 approach_position=target_position,
@@ -476,6 +552,17 @@ def run_acceptance(
         position = data.xpos[cube_body_id].copy()
         velocity = data.qvel[cube_dof : cube_dof + 3]
         tactile = reader.read(data)
+        if force_config is not None:
+            tactile_measurement = _tactile_measurement(
+                tactile,
+                left_normal_std_n=float(force_config.sensor_taxel_normal_noise_std_n[0]),
+                right_normal_std_n=float(force_config.sensor_taxel_normal_noise_std_n[1]),
+                left_shear_std_n=float(force_config.sensor_taxel_shear_noise_std_n[0]),
+                right_shear_std_n=float(force_config.sensor_taxel_shear_noise_std_n[1]),
+                rng=noise_rng,
+            )
+        else:
+            tactile_measurement = TactileMeasurement(left=tactile.left, right=tactile.right)
         capacity = _friction_capacity(
             model,
             data,
@@ -516,6 +603,7 @@ def run_acceptance(
                 "drive_velocity_rad_s": motor_command.velocity,
                 "motor_torque_n_m": motor_command.torque,
                 "target_normal_force_n": force_command.target_force_n,
+                "measured_normal_force_n": force_command.measured_force_n,
                 "filtered_normal_force_n": force_command.filtered_force_n,
                 "normal_force_error_n": force_command.force_error_n,
                 "force_position_adjustment_rad": force_command.position_adjustment,
@@ -530,6 +618,12 @@ def run_acceptance(
                 "right_fx": float(tactile.right[0].sum()),
                 "right_fy": float(tactile.right[1].sum()),
                 "right_fz": float(tactile.right[2].sum()),
+                "measured_left_fx": float(tactile_measurement.left_force[0]),
+                "measured_left_fy": float(tactile_measurement.left_force[1]),
+                "measured_left_fz": float(tactile_measurement.left_force[2]),
+                "measured_right_fx": float(tactile_measurement.right_force[0]),
+                "measured_right_fy": float(tactile_measurement.right_force[1]),
+                "measured_right_fz": float(tactile_measurement.right_force[2]),
                 "taxel_normal_force_n": capacity.normal_force_n,
                 "left_taxel_normal_force_n": capacity.left_normal_force_n,
                 "right_taxel_normal_force_n": capacity.right_normal_force_n,
