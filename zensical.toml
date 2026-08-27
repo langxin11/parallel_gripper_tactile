@@ -4,6 +4,7 @@ docs_dir = "docs"
 nav = [
   { "首页" = "index.md" },
   { "项目架构" = "architecture.md" },
+  { "代码与注释规范" = "coding-conventions.md" },
   { "触觉读数约定" = "tactile-conventions.md" },
   { "常用工作流" = "workflows.md" },
   { "Onshape 导出与升级" = "onshape-export-upgrade.md" },
