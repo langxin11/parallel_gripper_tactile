@@ -53,8 +53,9 @@ def test_custom_profile_defines_bounded_mit_torque_control() -> None:
     assert profile.control_mode == "mit_torque"
     assert profile.mit is not None
     assert profile.mit.p_min <= profile.open_control < profile.closed_control <= profile.mit.p_max
-    assert profile.mit.v_max <= 20.943951023931955
-    assert profile.mit.t_max <= 10.0
+    assert profile.mit.p_max <= 1.7
+    assert profile.mit.v_max <= 8.0
+    assert profile.mit.t_max <= 4.0
     assert profile.normal_force is not None
     assert profile.normal_force.target_n == 8.0
     assert profile.normal_force.release_threshold_n < profile.normal_force.contact_threshold_n

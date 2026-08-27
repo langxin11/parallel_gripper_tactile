@@ -25,7 +25,7 @@
       "actuated": true,
       "type": "position",
       "kp": 20.0,
-      "forcerange": 12.5
+      "forcerange": 4.0
     },
     "left_link_crank_pin": {
       "actuated": false

@@ -10,6 +10,24 @@ from simple_pid import PID
 from .profiles import GripperProfile, MITControl, NormalForceControl
 
 
+DAMIAO_POSITION_BITS = 16
+DAMIAO_VELOCITY_BITS = 12
+DAMIAO_TORQUE_BITS = 12
+DAMIAO_GAIN_BITS = 12
+DAMIAO_STIFFNESS_RANGE = (0.0, 500.0)
+DAMIAO_DAMPING_RANGE = (0.0, 5.0)
+
+
+def _roundtrip_unsigned(value: float, lower: float, upper: float, bits: int) -> float:
+    """按达妙 MIT 无符号整数编码后再解码回物理量。"""
+    if lower >= upper:
+        raise ValueError("encoding lower bound must be smaller than upper bound")
+    levels = (1 << bits) - 1
+    clipped = float(np.clip(value, lower, upper))
+    encoded = int(round((clipped - lower) / (upper - lower) * levels))
+    return lower + encoded / levels * (upper - lower)
+
+
 @dataclass(frozen=True, slots=True)
 class MITControlCommand:
     """一个经过饱和处理的 MIT 力矩命令，以及用于计算它的状态。"""
@@ -78,21 +96,42 @@ class MITTorqueController:
         target_velocity: float = 0.0,
         feedforward_torque: float | None = None,
     ) -> MITControlCommand:
-        """计算、饱和、写入并返回一个 MIT 力矩命令。"""
+        """计算、按达妙协议量化、饱和、写入并返回一个 MIT 力矩命令。"""
         config = self._config
-        desired_position = float(np.clip(target_position, config.p_min, config.p_max))
-        desired_velocity = float(np.clip(target_velocity, -config.v_max, config.v_max))
-        feedforward = float(
-            np.clip(
-                config.t_ff if feedforward_torque is None else feedforward_torque,
-                -config.t_max,
-                config.t_max,
-            )
+        desired_position = _roundtrip_unsigned(
+            target_position,
+            config.p_min,
+            config.p_max,
+            DAMIAO_POSITION_BITS,
+        )
+        desired_velocity = _roundtrip_unsigned(
+            target_velocity,
+            -config.v_max,
+            config.v_max,
+            DAMIAO_VELOCITY_BITS,
+        )
+        feedforward = _roundtrip_unsigned(
+            config.t_ff if feedforward_torque is None else feedforward_torque,
+            -config.t_max,
+            config.t_max,
+            DAMIAO_TORQUE_BITS,
+        )
+        stiffness = _roundtrip_unsigned(
+            config.kp,
+            DAMIAO_STIFFNESS_RANGE[0],
+            DAMIAO_STIFFNESS_RANGE[1],
+            DAMIAO_GAIN_BITS,
+        )
+        damping = _roundtrip_unsigned(
+            config.kd,
+            DAMIAO_DAMPING_RANGE[0],
+            DAMIAO_DAMPING_RANGE[1],
+            DAMIAO_GAIN_BITS,
         )
         position = float(data.qpos[self._qpos_address])
         velocity = float(data.qvel[self._dof_address])
-        torque = config.kp * (desired_position - position)
-        torque += config.kd * (desired_velocity - velocity) + feedforward
+        torque = stiffness * (desired_position - position)
+        torque += damping * (desired_velocity - velocity) + feedforward
         torque = float(np.clip(torque, -config.t_max, config.t_max))
         data.ctrl[self._actuator_id] = torque
         return MITControlCommand(

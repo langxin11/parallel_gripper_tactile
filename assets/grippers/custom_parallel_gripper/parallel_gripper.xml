@@ -34,7 +34,7 @@
       <!-- Link motor -->
       <body name="motor" pos="0 0 0.03405" quat="1 0 0 1.9e-11">
         <!-- Joint from base to motor -->
-        <joint axis="0 0 1" name="gripper_drive" type="hinge" range="-3.816591487293408e-11 1.5707963267567306" frictionloss="0.04" damping="0.02532329" armature="0.002074755"/>
+        <joint axis="0 0 1" name="gripper_drive" type="hinge" range="0 1.7" frictionloss="0.04" damping="0.02532329" armature="0.002074755"/>
         <inertial pos="0 0 0.0162295" mass="0.0736081" fullinertia="1.33678e-05 1.33678e-05 1.57706e-05 -2.09886e-06 0 -0"/>
         <!-- Part crank -->
         <geom type="mesh" class="visual" pos="-0 -0 0.02" quat="1 -0 -0 0" mesh="crank" material="crank_material"/>
@@ -286,7 +286,7 @@
     <material name="pillars_2_material" rgba="1 0 1 1"/>
   </asset>
   <actuator>
-    <motor class="parallel_gripper" name="gripper_drive" joint="gripper_drive" gear="1" ctrlrange="-10 10" forcerange="-12.5 12.5"/>
+    <motor class="parallel_gripper" name="gripper_drive" joint="gripper_drive" gear="1" ctrlrange="-4 4" forcerange="-4 4"/>
   </actuator>
   <equality>
     <connect site1="closing_left_link_finger_pin_1" site2="closing_left_link_finger_pin_2" solref="0.002 1" solimp="0.99 0.999 0.0005 0.5 2"/>

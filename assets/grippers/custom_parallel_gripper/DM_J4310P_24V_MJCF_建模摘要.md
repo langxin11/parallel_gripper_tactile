@@ -55,17 +55,17 @@ kp = 0, kd = 0, t_ff = τ_cmd
 | VBUS | 24.0170 V |
 | Imax | 20.522388 A |
 | 控制模式 | MIT Mode |
-| PMAX | 12.5 rad |
-| VMAX | 30 rad/s |
-| TMAX | 10 N·m |
+| PMAX | 1.7 rad |
+| VMAX | 8 rad/s |
+| TMAX | 4 N·m |
 | 减速比 | 10 |
 | 齿轮系数 | 1 |
 | CAN | 1 Mbps |
 
 说明：
 
-- `TMAX=10` 是当前 MIT 指令映射范围，不是物理峰值；
-- `VMAX=30` 是通信映射范围，不代表 24 V 电机实际最高转速；
+- `TMAX=4` 是当前 MIT 指令映射范围，不是物理峰值；
+- `VMAX=8` 是当前通信映射范围，已按夹爪实验需要低于 24 V 电机实际最高转速；
 - `PMAX`、`VMAX`、`TMAX` 都是驱动器 MIT 协议的可配置映射/命令范围，可以按实验需要
   人为收紧，但不得超过电机、减速器和夹爪机构的实际极限；
 - 物理峰值仍按 12.5 N·m；
@@ -75,9 +75,9 @@ kp = 0, kd = 0, t_ff = τ_cmd
 
 ```text
 P_MIN = 0 rad
-P_MAX = 1.570796 rad       # 受夹爪主动关节机械范围限制
-V_MAX = 20.943951 rad/s    # 不超过 24 V 空载输出转速
-T_MAX = 10 N·m             # 当前 MIT 命令范围，小于 12.5 N·m 厂家峰值
+P_MAX = 1.7 rad            # 当前达妙 PMAX，与夹爪可用开度范围匹配
+V_MAX = 8 rad/s            # 当前达妙 VMAX
+T_MAX = 4 N·m              # 当前达妙 TMAX，略高于额定 3.5 N·m
 ```
 
 其中 `P_MAX` 不是电机可累计旋转角度，而是本夹爪曲柄关节允许的控制目标上限。
@@ -157,22 +157,22 @@ frictionloss = 0.04 N·m
       joint="dm4310_output_joint"
       gear="1"
       ctrllimited="true"
-      ctrlrange="-10 10"
+      ctrlrange="-4 4"
       forcelimited="true"
-      forcerange="-12.5 12.5"/>
+      forcerange="-4 4"/>
   </actuator>
 
 </mujoco>
 ```
 
 仓库中的 `parallel_gripper.xml` 与 `parallel_gripper_prepared.xml` 已采用这一结构。
-`forcerange` 是模型的最终厂家峰值保护，Python 控制器的 `T_MAX` 还会先做一层较保守的命令限幅。
+`ctrlrange` 与 `forcerange` 均对齐当前实机 MIT 的 `TMAX=4 N·m`，厂家 12.5 N·m 峰值仅作为电机能力参考。
 
 ### 参数含义
 
 - `gear="1"`：joint 已定义在减速器输出轴；厂家转矩/转速也是减速后数据，不再重复乘 10。
-- `ctrlrange="-10 10"`：匹配当前实机 `TMAX=10`。
-- `forcerange="-12.5 12.5"`：表示厂家峰值输出能力。
+- `ctrlrange="-4 4"`：匹配当前实机 `TMAX=4`。
+- `forcerange="-4 4"`：让 MuJoCo 执行器最终输出也不超过当前 MIT 力矩范围。
 - `armature`：当前按转子惯量经 10:1 减速器反射到输出轴。
 - `damping`：当前按转子侧粘滞系数经 10:1 减速器反射到输出轴。
 - `frictionloss=0.04`：经验初值，后续用低速/静摩擦实验替换。
@@ -208,8 +208,8 @@ MuJoCo 的 DC motor 模型对后续高保真建模有帮助，尤其是：
 |---|---:|
 | actuator | `<motor>` |
 | gear | 1 |
-| ctrlrange | ±10 N·m |
-| forcerange | ±12.5 N·m |
+| ctrlrange | ±4 N·m |
+| forcerange | ±4 N·m |
 | armature | 0.002074755 kg·m² |
 | damping | 0.02532329 N·m·s/rad |
 | frictionloss | 0.04 N·m（经验值） |
@@ -232,12 +232,35 @@ K_p(p_{des}-p) + K_d(v_{des}-v) + t_{ff},
 
 | MIT 参数 | 当前值 |
 |---|---:|
-| P_MIN / P_MAX | 0 / 1.570796 rad |
-| V_MAX | 20.943951 rad/s |
-| T_MAX | 10 N·m |
+| P_MIN / P_MAX | 0 / 1.7 rad |
+| V_MAX | 8 rad/s |
+| T_MAX | 4 N·m |
 | Kp | 20 N·m/rad |
 | Kd | 0.63793536 N·m·s/rad |
 | t_ff | 0 N·m |
+
+### 达妙 MIT 协议量化
+
+达妙电机在 CAN/串口数据帧中不会直接传输浮点物理量，而是先映射到固定 bit 数的无符号整数：
+
+```math
+u=\frac{x-x_{\min}}{x_{\max}-x_{\min}}(2^N-1)
+```
+
+仿真控制器会先按该公式量化，再解码回物理量参与 MIT 力矩计算，从而保留实机协议的分辨率影响。
+当前配置下的分辨率为：
+
+| 物理量 | 编码范围 | bit 数 | 分辨率 |
+|---|---:|---:|---:|
+| Position | 0..1.7 rad | 16 | 2.594e-5 rad |
+| Velocity | -8..8 rad/s | 12 | 3.907e-3 rad/s |
+| Torque / t_ff | -4..4 N·m | 12 | 1.954e-3 N·m |
+| Stiffness / Kp | 0..500 N·m/rad | 12 | 0.1221 N·m/rad |
+| Damping / Kd | 0..5 N·m·s/rad | 12 | 0.001221 N·m·s/rad |
+
+其中 Position 使用 profile 的 `[P_MIN, P_MAX]`；Velocity 和 Torque 分别使用
+`[-V_MAX, V_MAX]` 与 `[-T_MAX, T_MAX]`。Stiffness 和 Damping 使用达妙协议固定范围，
+因此 profile 中 `kp` 必须在 `0..500`，`kd` 必须在 `0..5`。
 
 这些参数统一配置在 `configs/custom_parallel_gripper.yaml`；控制实现位于
 `src/parallel_gripper_tactile/control.py`。因此修改 MIT 命令范围不需要改 MJCF，但

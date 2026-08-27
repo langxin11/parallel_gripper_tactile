@@ -65,8 +65,8 @@ class MITControl(_FrozenModel):
     p_max: FiniteFloat
     v_max: Annotated[FiniteFloat, Field(gt=0)]
     t_max: Annotated[FiniteFloat, Field(gt=0)]
-    kp: Annotated[FiniteFloat, Field(ge=0)]
-    kd: Annotated[FiniteFloat, Field(ge=0)]
+    kp: Annotated[FiniteFloat, Field(ge=0, le=500)]
+    kd: Annotated[FiniteFloat, Field(ge=0, le=5)]
     t_ff: FiniteFloat = 0.0
 
     @model_validator(mode="after")

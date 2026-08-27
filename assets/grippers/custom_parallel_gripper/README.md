@@ -78,12 +78,14 @@ uv run pgt compare contact --profile configs/custom_parallel_gripper.yaml
 | `right_finger_slide` | slide | 右手指沿导轨移动 |
 
 唯一执行器为 `gripper_drive`，它是 `<motor>` 输出轴纯力矩源，`data.ctrl` 的单位为 N·m。
-B1 导出的关节范围为 `[0, 1.5708] rad`（0--90°）。曲柄半径为 30 mm、连杆两销轴中心距为
-40 mm。无被抓物时，左右 Pillars 在约 `1.34 rad` 开始接触；因此 MIT 位置目标建议限制在
-`0.05` 至 `1.30 rad`。
+B1 导出的关节范围按当前达妙 MIT 配置扩展为 `[0, 1.7] rad`。曲柄半径为 30 mm、连杆两销轴
+中心距为 40 mm。无被抓物时，左右 Pillars 在约 `1.34 rad` 开始接触；因此默认抓取闭合目标
+仍保持在 `1.30 rad`。
 
-Python 控制层按 MIT 形式计算 `kp*(p_des-p)+kd*(v_des-v)+t_ff`。当前 `T_MAX=10 N·m`，
-MJCF 的厂家峰值保护为 `12.5 N·m`；连续或长时仿真仍应按额定 `3.5 N·m` 或热模型降额。
+Python 控制层按 MIT 形式计算 `kp*(p_des-p)+kd*(v_des-v)+t_ff`。当前 `T_MAX=4 N·m`，
+MJCF 执行器也限制为 `±4 N·m`；连续或长时仿真仍应按额定 `3.5 N·m` 或热模型降额。
+进入控制律前，命令会先模拟达妙 CAN/串口帧量化：位置 16 bit，速度和力矩 12 bit，
+刚度按 `0..500`、阻尼按 `0..5` 的 12 bit 区间编码。
 详细参数与建模假设见 `DM_J4310P_24V_MJCF_建模摘要.md`。
 
 抓取验收采用两层混合控制：未接触时按 MIT 位置目标低速闭合；左右指尖 taxel 均连续
