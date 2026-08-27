@@ -8,11 +8,11 @@ import xml.etree.ElementTree as ET
 
 import numpy as np
 
-from parallel_gripper_tactile import GripperProfile
+from ..profiles import GripperProfile
 
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_PROFILE = REPOSITORY_ROOT / "configs" / "custom_parallel_gripper.toml"
+REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_PROFILE = REPOSITORY_ROOT / "configs" / "custom_parallel_gripper.yaml"
 GRASP_WORLD_XML = REPOSITORY_ROOT / "assets" / "scenes" / "grasp_world.xml"
 TARGET_CUBE_XML = REPOSITORY_ROOT / "assets" / "objects" / "target_cube.xml"
 GRIPPER_PREFIX = "gripper/"
@@ -165,8 +165,8 @@ def build_custom_grasp_spec(
         prefix=CUBE_PREFIX,
         frame=cube_mount,
     )
-    # The custom actuator is a pure torque source.  Position presets belong in
-    # qpos/controller state, while zero torque is the only safe generic keyframe command.
+    # 自研执行器是纯力矩源。位置预设应放在 qpos/控制器状态里，
+    # 而零力矩是唯一安全的通用 keyframe 命令。
     scene.add_key(name="custom_open", ctrl=[0.0])
     scene.add_key(name="custom_closed", ctrl=[0.0])
     return scene

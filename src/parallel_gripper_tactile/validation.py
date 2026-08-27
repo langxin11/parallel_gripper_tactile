@@ -1,4 +1,4 @@
-"""Compile-time validation shared by CI and command-line workflows."""
+"""由 CI 与命令行工作流共享的编译期校验。"""
 
 from __future__ import annotations
 
@@ -9,13 +9,13 @@ from .profiles import GripperProfile
 
 @dataclass(frozen=True, slots=True)
 class ValidationReport:
-    """Summary of a profile validated against its compiled MJCF model.
+    """针对其编译后 MJCF 模型进行校验的 profile 摘要。
 
     Attributes:
-        model_name: Profile name from the configuration file.
-        actuator: Actuator name expected in the compiled model.
-        tactile_channels: Total number of tactile channels (left plus right).
-        equalities: Number of equality constraints in the compiled model.
+        model_name: 来自配置文件的 profile 名称。
+        actuator: 编译后模型中预期的执行器名称。
+        tactile_channels: 触觉通道总数（左侧加右侧）。
+        equalities: 编译后模型中等式约束的数量。
     """
 
     model_name: str
@@ -25,7 +25,7 @@ class ValidationReport:
 
 
 def validate_profile(profile: GripperProfile) -> ValidationReport:
-    """Compile a profile's MJCF and verify its actuator and tactile contract."""
+    """编译 profile 的 MJCF 并验证其执行器与触觉约定。"""
     try:
         import mujoco
     except ModuleNotFoundError as error:

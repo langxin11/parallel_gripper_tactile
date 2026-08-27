@@ -1,15 +1,7 @@
-"""绘制抓取演示导出的控制量与三维接触力曲线。
-
-常见用法::
-
-    uv run scripts/plot_forces.py outputs/robotiq/taxel_demo/taxel_forces.csv
-    uv run scripts/plot_forces.py outputs/robotiq/touch_grid_demo/touch_grid_forces.csv \
-      --output outputs/robotiq/touch_grid_demo/touch_grid_forces.pdf
-"""
+"""读取并绘制常见的触觉力 CSV 轨迹。"""
 
 from __future__ import annotations
 
-import argparse
 import csv
 from pathlib import Path
 
@@ -78,18 +70,3 @@ def plot_forces(values: dict[str, list[float]], output: Path, show: bool = False
     if show:
         plt.show()
     plt.close(figure)
-
-
-def main() -> None:
-    """读取 CSV 并保存曲线图。"""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("csv", type=Path, help="由抓取演示生成的记录 CSV。")
-    parser.add_argument("--output", type=Path, help="输出图片路径，默认与 CSV 同名的 PNG。")
-    parser.add_argument("--show", action="store_true", help="保存后同时打开 Matplotlib 窗口。")
-    args = parser.parse_args()
-    output = args.output or args.csv.with_suffix(".png")
-    plot_forces(read_force_csv(args.csv), output, args.show)
-
-
-if __name__ == "__main__":
-    main()

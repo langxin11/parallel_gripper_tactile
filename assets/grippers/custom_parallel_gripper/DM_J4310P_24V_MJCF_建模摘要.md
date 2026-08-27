@@ -239,7 +239,7 @@ K_p(p_{des}-p) + K_d(v_{des}-v) + t_{ff},
 | Kd | 0.63793536 N·m·s/rad |
 | t_ff | 0 N·m |
 
-这些参数统一配置在 `configs/custom_parallel_gripper.toml`；控制实现位于
+这些参数统一配置在 `configs/custom_parallel_gripper.yaml`；控制实现位于
 `src/parallel_gripper_tactile/control.py`。因此修改 MIT 命令范围不需要改 MJCF，但
 `T_MAX` 必须同时不超过 `<motor ctrlrange>` 和 `<motor forcerange>`。
 
@@ -257,7 +257,7 @@ p_{des}=p_{contact}+\operatorname{clip}(\Delta p,-\Delta p_{max},\Delta p_{max})
 
 总法向力先经过一阶低通滤波。`simple-pid` 的输出限幅同时实现积分抗饱和，随后仍由
 MIT 内环和 `T_MAX` 执行最终力矩保护。当前默认 `F_target=8 N`，配置位于
-`configs/custom_parallel_gripper.toml` 的 `[control.force]`。
+`configs/custom_parallel_gripper.yaml` 的 `control.force`。
 
 ---
 

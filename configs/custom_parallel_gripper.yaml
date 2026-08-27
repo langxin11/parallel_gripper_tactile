@@ -1,0 +1,43 @@
+schema_version: 1
+name: custom_parallel_gripper
+
+model:
+  path: ../assets/grippers/custom_parallel_gripper/parallel_gripper_prepared.xml
+
+control:
+  mode: mit_torque
+  actuator: gripper_drive
+  open: 0.05
+  closed: 1.30
+  mit:
+    # DM-J4310P-24V 资产输出侧机械与电气限幅。
+    p_min: 0.0
+    p_max: 1.5707963267567306
+    v_max: 20.943951023931955
+    t_max: 10.0
+    kp: 20.0
+    kd: 0.63793536
+    t_ff: 0.0
+  force:
+    # 两侧 3×3 指尖 taxel 阵列求和得到的总法向力。
+    target_n: 8.0
+    contact_threshold_n: 0.15
+    contact_confirm_steps: 5
+    release_threshold_n: 0.05
+    release_confirm_steps: 25
+    kp: 0.008
+    ki: 0.040
+    kd: 0.0
+    max_position_adjustment: 0.15
+    filter_cutoff_hz: 30.0
+
+mount:
+  pos: [0.0, 0.0, 0.18]
+  quat: [0.7071067811865476, 0.7071067811865476, 0.0, 0.0]
+
+tactile:
+  mode: contact_geom
+  rows: 3
+  cols: 3
+  left_prefix: left_taxel_geom_
+  right_prefix: right_taxel_geom_

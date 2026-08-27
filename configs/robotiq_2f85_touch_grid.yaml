@@ -1,0 +1,20 @@
+schema_version: 1
+name: robotiq_2f85_touch_grid_3x3
+
+model:
+  path: ../assets/grippers/robotiq_2f85/2f85_touch_grid_3x3.xml
+
+control:
+  mode: position
+  actuator: fingers_actuator
+  open: 0.0
+  closed: 220.0
+
+mount:
+  pos: [0.0, 0.0, 0.08]
+  quat: [0.70710678, 0.70710678, 0.0, 0.0]
+
+tactile:
+  mode: touch_grid
+  left_sensor: touch_left
+  right_sensor: touch_right

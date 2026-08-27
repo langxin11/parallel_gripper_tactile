@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_mit_controller_clamps_position_velocity_and_torque() -> None:
     """MIT 控制器按 profile 限制 P/V/T 命令并向 motor 写入力矩。"""
-    profile = load_profile(ROOT / "configs/custom_parallel_gripper.toml")
+    profile = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
     model = mujoco.MjModel.from_xml_path(str(profile.model_path))
     data = mujoco.MjData(model)
     controller = MITTorqueController.from_profile(model, profile)
@@ -39,7 +39,7 @@ def test_mit_controller_clamps_position_velocity_and_torque() -> None:
 
 def test_normal_force_controller_switches_after_bilateral_contact() -> None:
     """双侧接触确认后 simple-pid 外环接管，并在完全脱离后恢复接近。"""
-    profile = load_profile(ROOT / "configs/custom_parallel_gripper.toml")
+    profile = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
     model = mujoco.MjModel.from_xml_path(str(profile.model_path))
     data = mujoco.MjData(model)
     controller = NormalForceController.from_profile(model, profile)

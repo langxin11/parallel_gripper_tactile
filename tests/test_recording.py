@@ -3,22 +3,13 @@
 from __future__ import annotations
 
 import csv
-import importlib.util
-import sys
 from pathlib import Path
 
 import numpy as np
 import pytest
 
-
-def _load_recording():
-    path = Path(__file__).resolve().parents[1] / "scripts/recording.py"
-    spec = importlib.util.spec_from_file_location("recording", path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+from parallel_gripper_tactile import recording as module
+from parallel_gripper_tactile.scenes import robotiq as scene
 
 
 def _frame(module, step: int = 0):
@@ -29,7 +20,6 @@ def _frame(module, step: int = 0):
 
 def test_tactile_frame_validates_grid_and_sums_full_force() -> None:
     """触觉帧校验网格形状并汇总完整合力。"""
-    module = _load_recording()
     frame = _frame(module)
     np.testing.assert_allclose(frame.left_force, frame.left.sum(axis=(1, 2)))
     np.testing.assert_allclose(frame.right_force, frame.right.sum(axis=(1, 2)))
@@ -39,7 +29,6 @@ def test_tactile_frame_validates_grid_and_sums_full_force() -> None:
 
 def test_force_csv_recorder_writes_downsampled_samples(tmp_path: Path) -> None:
     """CSV 记录器按间隔降采样写入。"""
-    module = _load_recording()
     output = tmp_path / "forces.csv"
     recorder = module.ForceCsvRecorder(output, every=2)
     recorder.record(_frame(module, step=0))
@@ -57,7 +46,6 @@ def test_force_csv_recorder_writes_downsampled_samples(tmp_path: Path) -> None:
 @pytest.mark.parametrize(("shape", "display_shape"), [((3, 3), (3, 3)), ((32, 32), (8, 8))])
 def test_aggregate_shear_preserves_force(shape, display_shape) -> None:
     """剪切聚合保持力的总量守恒。"""
-    module = _load_recording()
     rows, cols = shape
     tactile = np.arange(3 * rows * cols, dtype=float).reshape(3, rows, cols)
     origins, vectors, pressures = module.aggregate_shear(tactile)
@@ -68,7 +56,6 @@ def test_aggregate_shear_preserves_force(shape, display_shape) -> None:
 
 def test_shear_grid_lines_bound_each_display_cell() -> None:
     """剪切网格线包围每个显示单元。"""
-    module = _load_recording()
     lines = module._shear_grid_lines(3, 4)
     assert len(lines) == 9
     np.testing.assert_allclose(lines[0], ((-0.5, -0.5), (-0.5, 2.5)))
@@ -78,17 +65,7 @@ def test_shear_grid_lines_bound_each_display_cell() -> None:
 
 def test_run_demo_loop_headless_steps_and_records(tmp_path: Path) -> None:
     """无 viewer 模式应恰好推进 steps 步，并按间隔记录 CSV。"""
-    module = _load_recording()
-    import importlib.util
-
     import mujoco
-
-    scene_path = Path(__file__).resolve().parents[1] / "scripts/grasp_scene.py"
-    spec = importlib.util.spec_from_file_location("grasp_scene_for_loop", scene_path)
-    assert spec is not None and spec.loader is not None
-    scene = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = scene
-    spec.loader.exec_module(scene)
 
     model = scene.load_grasp_model(None, scene.DEFAULT_GRIPPER_XML)
     data = mujoco.MjData(model)
@@ -121,7 +98,6 @@ def test_rerun_logger_uses_simulation_timelines_and_full_tensors(
     tmp_path: Path, monkeypatch
 ) -> None:
     """Rerun 记录器使用仿真时间线并输出完整张量。"""
-    module = _load_recording()
     import rerun as rr
 
     class FakeRecording:

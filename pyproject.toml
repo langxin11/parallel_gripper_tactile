@@ -16,13 +16,17 @@ dependencies = [
     "matplotlib>=3.8",
     "mujoco>=3.1",
     "numpy>=2.0",
+    "pydantic>=2.0",
+    "PyYAML>=6.0",
     "rerun-sdk>=0.34,<0.35",
+    "rich>=13.0",
     "SciencePlots>=2.0",
     "simple-pid>=2.0",
+    "typer>=0.12",
 ]
 
 [project.scripts]
-pgt-check = "parallel_gripper_tactile.cli:check"
+pgt = "parallel_gripper_tactile.cli:main"
 
 [dependency-groups]
 dev = [
@@ -38,7 +42,7 @@ addopts = "-q"
 [tool.ruff]
 target-version = "py312"
 line-length = 100
-src = ["src", "scripts", "tests"]
+src = ["src", "tests"]
 
 [tool.ruff.lint]
 select = ["E4", "E7", "E9", "F", "D"]
@@ -50,4 +54,6 @@ convention = "google"
 # 仅豁免与英文语法/ASCII 标点绑定的规则：中文 docstring 的祈使语气、首词大写
 # 与全角句号会触发 D401/D403/D404/D400/D415 误报；其余格式类 D 规则仍生效。
 "tests/**" = ["D400", "D401", "D403", "D404", "D415"]
-"scripts/**" = ["D400", "D401", "D403", "D404", "D415"]
+# The public library keeps domain documentation in Chinese. These English- and
+# ASCII-punctuation-specific pydocstyle checks do not apply to that prose.
+"src/**" = ["D400", "D401", "D403", "D404", "D415"]

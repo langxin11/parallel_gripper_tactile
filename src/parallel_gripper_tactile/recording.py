@@ -11,6 +11,11 @@ import time
 import mujoco
 import numpy as np
 
+from .timing import RealtimePacer, SimulationTimer
+
+
+MAX_PHYSICS_STEPS_PER_UI_TICK = 50
+
 
 @dataclass(frozen=True)
 class TactileFrame:
@@ -58,6 +63,8 @@ def run_demo_loop(
     auto_close: bool,
     no_viewer: bool,
     render_fps: float,
+    control_period_s: float | None = None,
+    realtime_factor: float = 1.0,
     control_at: Callable[[int], float],
     sample_frame: Callable[[int], TactileFrame],
     recorder: ForceCsvRecorder,
@@ -68,9 +75,19 @@ def run_demo_loop(
     渲染与物理步解耦：降低 FPS 不会降低仿真时间或物理精度。手动模式
     （``auto_close=False``）下控制量由 viewer 滑块写入 ``data.ctrl``，
     循环不覆盖它；自动闭合模式下每步调用 ``control_at`` 计算控制量。
-    每步依次调用 ``sample_frame`` 采样、``recorder`` 与 ``rerun_logger``
-    记录，循环结束后统一清理三者。
+    物理积分使用模型 timestep；若 ``control_period_s`` 未指定，则控制频率
+    与物理频率相同。viewer 使用 ``render_fps`` 刷新画面，并以
+    ``realtime_factor`` 将墙钟映射为目标仿真时间。每步仍调用
+    ``sample_frame`` 采样、``recorder`` 与 ``rerun_logger`` 记录，循环结束后
+    统一清理三者。
     """
+    physics_timestep = float(model.opt.timestep)
+    control_period = physics_timestep if control_period_s is None else control_period_s
+    if control_period <= 0 or control_period + 1e-12 < physics_timestep or realtime_factor <= 0:
+        raise ValueError(
+            "control_period_s and realtime_factor must be positive; control period must not be shorter than physics timestep"
+        )
+    control_timer = SimulationTimer(control_period, float(data.time))
     viewer = None
     if not no_viewer:
         # 用 from-import 避免在函数内绑定局部名 mujoco，遮蔽模块级导入。
@@ -87,14 +104,20 @@ def run_demo_loop(
         step = 0
         wall_start = time.monotonic()
         simulation_start = data.time
+        pacer = RealtimePacer(realtime_factor, simulation_start, wall_start)
         render_period = 1.0 / render_fps
         next_render_time = wall_start
         while viewer is None or viewer.is_running():
             if viewer is not None:
-                target_simulation_time = simulation_start + (time.monotonic() - wall_start)
-                while data.time < target_simulation_time:
+                target_simulation_time = pacer.target_simulation_time(time.monotonic())
+                physics_steps = 0
+                while (
+                    data.time < target_simulation_time
+                    and physics_steps < MAX_PHYSICS_STEPS_PER_UI_TICK
+                ):
                     if auto_close:
-                        data.ctrl[0] = control_at(step)
+                        if control_timer.pop_due(float(data.time)) is not None:
+                            data.ctrl[0] = control_at(step)
                     mujoco.mj_step(model, data)
                     frame = sample_frame(step)
                     recorder.record(frame)
@@ -106,16 +129,21 @@ def run_demo_loop(
                             f"right={frame.right_force[2]:8.3f} N"
                         )
                     step += 1
+                    physics_steps += 1
                     if auto_close and step >= steps:
                         break
-                viewer.sync()
                 if auto_close and step >= steps:
                     break
-                next_render_time += render_period
-                time.sleep(max(0.0, next_render_time - time.monotonic()))
+                now = time.monotonic()
+                if now >= next_render_time:
+                    viewer.sync()
+                    next_render_time = now + render_period
+                elif physics_steps == 0:
+                    time.sleep(min(0.005, next_render_time - now))
             else:
                 if auto_close:
-                    data.ctrl[0] = control_at(step)
+                    if control_timer.pop_due(float(data.time)) is not None:
+                        data.ctrl[0] = control_at(step)
                 mujoco.mj_step(model, data)
                 frame = sample_frame(step)
                 recorder.record(frame)

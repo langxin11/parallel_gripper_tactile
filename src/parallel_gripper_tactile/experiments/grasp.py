@@ -7,35 +7,31 @@
 
 from __future__ import annotations
 
-import argparse
 import csv
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 import math
 from pathlib import Path
 
 import mujoco
 import numpy as np
 
-from custom_grasp_scene import (
+from ..scenes.custom import (
     CUBE_PREFIX,
     DEFAULT_CUBE_HALF_CONTACT_SIDE,
     DEFAULT_CUBE_HALF_THICKNESS,
     DEFAULT_CUBE_MASS,
     DEFAULT_PROFILE,
     GRIPPER_PREFIX,
-    MIN_CUBE_MASS,
     SUPPORT_GEOM_NAME,
     build_custom_grasp_model,
 )
-from parallel_gripper_tactile import (
-    ContactTaxelReader,
-    DisturbanceProtocol,
-    NormalForceController,
-    load_profile,
-)
+from ..contact_taxels import ContactTaxelReader
+from ..control import NormalForceController
+from ..profiles import load_profile
+from ..protocols import DisturbanceProtocol
+from ..timing import SimulationTimer
 
-
-REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_OUTPUT_CSV = (
     REPOSITORY_ROOT / "outputs" / "custom_gripper" / "validation" / "custom_gripper_grasp.csv"
 )
@@ -83,10 +79,11 @@ class FrictionCapacity:
 
 def _prefixed_reader(model, profile) -> ContactTaxelReader:
     """创建读取 ``MjSpec.attach`` 前缀命名通道的接触读取器。"""
-    tactile = replace(
-        profile.tactile,
-        left_prefix=f"{GRIPPER_PREFIX}{profile.tactile.left_prefix}",
-        right_prefix=f"{GRIPPER_PREFIX}{profile.tactile.right_prefix}",
+    tactile = profile.tactile.model_copy(
+        update={
+            "left_prefix": f"{GRIPPER_PREFIX}{profile.tactile.left_prefix}",
+            "right_prefix": f"{GRIPPER_PREFIX}{profile.tactile.right_prefix}",
+        }
     )
     return ContactTaxelReader(model, tactile)
 
@@ -353,6 +350,7 @@ def run_acceptance(
     cube_mass: float = DEFAULT_CUBE_MASS,
     target_force_n: float | None = None,
     force_rmse_threshold_n: float = 0.5,
+    control_period_s: float = 0.002,
     output_csv: Path | None = None,
     output_plot: Path | None = None,
 ) -> GraspAcceptance:
@@ -368,13 +366,19 @@ def run_acceptance(
         cube_mass: 测试块质量。
         target_force_n: 可选目标总法向力；省略时使用 profile 配置。
         force_rmse_threshold_n: 接触切换后稳态法向力 RMSE 验收阈值。
+        control_period_s: 法向力控制器的仿真时间更新周期（s）。
         output_csv: 可选逐步轨迹 CSV 输出路径。
         output_plot: 可选轨迹图输出路径。
 
     Returns:
         两项检查与仿真稳定性的验收结果。
     """
-    if hold_threshold_m <= 0 or slip_threshold_m <= 0 or force_rmse_threshold_n <= 0:
+    if (
+        hold_threshold_m <= 0
+        or slip_threshold_m <= 0
+        or force_rmse_threshold_n <= 0
+        or control_period_s <= 0
+    ):
         raise ValueError("位移与法向力 RMSE 阈值必须为正数。")
     if target_force_n is not None and target_force_n <= 0:
         raise ValueError("target_force_n 必须为正数。")
@@ -382,9 +386,16 @@ def run_acceptance(
     if target_force_n is not None:
         if profile.normal_force is None:
             raise ValueError("profile 未配置 control.force。")
-        profile = replace(
-            profile,
-            normal_force=replace(profile.normal_force, target_n=target_force_n),
+        profile = profile.model_copy(
+            update={
+                "control": profile.control.model_copy(
+                    update={
+                        "force": profile.normal_force.model_copy(
+                            update={"target_n": target_force_n}
+                        )
+                    }
+                )
+            }
         )
     model = build_custom_grasp_model(
         profile,
@@ -392,7 +403,10 @@ def run_acceptance(
         cube_half_contact_side=cube_half_contact_side,
         cube_mass=cube_mass,
     )
+    if control_period_s + 1e-12 < float(model.opt.timestep):
+        raise ValueError("control_period_s must not be smaller than the physics timestep")
     data = mujoco.MjData(model)
+    control_timer = SimulationTimer(control_period_s, float(data.time))
     reader = _prefixed_reader(model, profile)
     controller = NormalForceController.from_profile(model, profile, name_prefix=GRIPPER_PREFIX)
     actuator_id = controller.actuator_id
@@ -414,6 +428,7 @@ def run_acceptance(
     peak_friction_utilization = 0.0
     simulation_stable = True
     rows: list[dict[str, float | str]] = []
+    force_command = None
     steps = math.ceil(protocol.total_duration / model.opt.timestep)
     for _ in range(steps):
         time_s = float(data.time)
@@ -430,20 +445,24 @@ def run_acceptance(
         target_position = protocol.close_target_at(
             time_s, profile.open_control, profile.closed_control
         )
-        feedback_capacity = _friction_capacity(
-            model,
-            data,
-            taxel_geom_sides=taxel_geom_sides,
-            cube_geom_id=cube_geom_id,
-        )
-        force_command = controller.apply(
-            data,
-            approach_position=target_position,
-            total_normal_force_n=feedback_capacity.normal_force_n,
-            left_normal_force_n=feedback_capacity.left_normal_force_n,
-            right_normal_force_n=feedback_capacity.right_normal_force_n,
-            dt=float(model.opt.timestep),
-        )
+        control_dt = control_timer.pop_due(time_s)
+        if control_dt is not None:
+            feedback_capacity = _friction_capacity(
+                model,
+                data,
+                taxel_geom_sides=taxel_geom_sides,
+                cube_geom_id=cube_geom_id,
+            )
+            force_command = controller.apply(
+                data,
+                approach_position=target_position,
+                total_normal_force_n=feedback_capacity.normal_force_n,
+                left_normal_force_n=feedback_capacity.left_normal_force_n,
+                right_normal_force_n=feedback_capacity.right_normal_force_n,
+                dt=control_dt,
+            )
+        if force_command is None:
+            raise RuntimeError("control timer did not produce an initial command")
         motor_command = force_command.mit
         mujoco.mj_step(model, data)
         if (
@@ -565,77 +584,3 @@ def run_acceptance(
         force_tracking_passed=force_tracking_rmse <= force_rmse_threshold_n,
         simulation_stable=simulation_stable,
     )
-
-
-def main() -> int:
-    """运行两次验收检查，任一失败时返回非零。"""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--profile", type=Path, default=DEFAULT_PROFILE)
-    parser.add_argument(
-        "--cube-half-thickness", type=float, default=DEFAULT_CUBE_HALF_THICKNESS, metavar="M"
-    )
-    parser.add_argument(
-        "--cube-half-contact-side", type=float, default=DEFAULT_CUBE_HALF_CONTACT_SIDE, metavar="M"
-    )
-    parser.add_argument("--cube-mass", type=float, default=DEFAULT_CUBE_MASS, metavar="KG")
-    parser.add_argument("--hold-threshold", type=float, default=0.002, metavar="M")
-    parser.add_argument("--slip-threshold", type=float, default=0.002, metavar="M")
-    parser.add_argument("--disturbance-force", type=float, default=5.0, metavar="N")
-    parser.add_argument("--disturbance-frequency", type=float, default=2.0, metavar="HZ")
-    parser.add_argument("--target-force", type=float, metavar="N", help="覆盖 profile 目标总法向力")
-    parser.add_argument("--force-rmse-threshold", type=float, default=0.5, metavar="N")
-    parser.add_argument("--output-csv", type=Path, default=DEFAULT_OUTPUT_CSV)
-    parser.add_argument("--output-plot", type=Path, help="输出轨迹图；默认与 CSV 同名的 PNG")
-    args = parser.parse_args()
-    if args.cube_half_thickness <= 0 or args.cube_half_contact_side <= 0:
-        parser.error("方块尺寸必须为正数")
-    if args.cube_mass < MIN_CUBE_MASS:
-        parser.error(f"--cube-mass 不能小于 {MIN_CUBE_MASS:g} kg")
-    protocol = DisturbanceProtocol(
-        force_n=args.disturbance_force, frequency_hz=args.disturbance_frequency
-    )
-    result = run_acceptance(
-        args.profile,
-        protocol=protocol,
-        hold_threshold_m=args.hold_threshold,
-        slip_threshold_m=args.slip_threshold,
-        cube_half_thickness=args.cube_half_thickness,
-        cube_half_contact_side=args.cube_half_contact_side,
-        cube_mass=args.cube_mass,
-        target_force_n=args.target_force,
-        force_rmse_threshold_n=args.force_rmse_threshold,
-        output_csv=args.output_csv,
-        output_plot=args.output_plot or args.output_csv.with_suffix(".png"),
-    )
-    print(f"CSV:  {args.output_csv}")
-    print(f"Plot: {args.output_plot or args.output_csv.with_suffix('.png')}")
-    print("horizontal unsupported hold")
-    print(
-        f"max YZ displacement: {1000.0 * result.hold_displacement_m:.3f} mm  "
-        f"{'PASS' if result.hold_passed else 'FAIL'}"
-    )
-    print("release-and-disturbance")
-    print(
-        f"max YZ displacement: {1000.0 * result.disturbance_displacement_m:.3f} mm; "
-        f"max YZ speed: {result.disturbance_speed_m_s:.4f} m/s  "
-        f"{'PASS' if result.disturbance_passed else 'FAIL'}"
-    )
-    print("friction margin during unsupported hold, disturbance, and recovery")
-    print(
-        f"minimum margin: {result.minimum_friction_margin_n:.3f} N; "
-        f"peak utilization: {result.peak_friction_utilization:.1%}"
-    )
-    print("normal-force tracking after 0.2 s settling")
-    print(
-        f"mean: {result.force_tracking_mean_n:.3f} N; "
-        f"RMSE: {result.force_tracking_rmse_n:.3f} N  "
-        f"{'PASS' if result.force_tracking_passed else 'FAIL'}"
-    )
-    if not result.simulation_stable:
-        print("simulation stability: FAIL (MuJoCo reported a non-finite or reset state)")
-    print(f"acceptance: {'PASS' if result.passed else 'FAIL'}")
-    return 0 if result.passed else 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

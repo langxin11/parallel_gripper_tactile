@@ -1,202 +1,314 @@
-"""Typed, path-safe gripper profiles used by simulations and tooling."""
+"""用于夹爪仿真与工具的、经 Pydantic 校验的 YAML profile。"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
-import tomllib
+from typing import Annotated, Literal, TypeAlias
+import xml.etree.ElementTree as ET
+
+from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, ValidationError, model_validator
+import yaml
 
 
-@dataclass(frozen=True, slots=True)
-class TactileLayout:
-    """Names and shape of the two fingertip tactile arrays."""
+class ProfileLoadError(ValueError):
+    """当 profile 在 Pydantic 校验之前无法解码时抛出。"""
 
-    mode: str
-    rows: int
-    cols: int
-    left_prefix: str
-    right_prefix: str
 
-    def names(self, side: str) -> tuple[str, ...]:
-        """Return row-major sensor or geometry names for one fingertip."""
-        if side not in {"left", "right"}:
-            raise ValueError("side must be 'left' or 'right'")
+class _FrozenModel(BaseModel):
+    """拒绝拼写错误的字段以及运行时变更的基类模型。"""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+
+class TaxelTactileLayout(_FrozenModel):
+    """由力传感器或碰撞几何体组成的规则命名网格。"""
+
+    mode: Literal["force_sensor", "contact_geom"]
+    rows: Annotated[int, Field(gt=0)]
+    cols: Annotated[int, Field(gt=0)]
+    left_prefix: Annotated[str, Field(min_length=1)]
+    right_prefix: Annotated[str, Field(min_length=1)]
+
+    def names(self, side: Literal["left", "right"]) -> tuple[str, ...]:
+        """返回单个指尖按行优先排列的传感器或几何体名称。"""
         prefix = self.left_prefix if side == "left" else self.right_prefix
-        return tuple(f"{prefix}{row}{col}" for row in range(self.rows) for col in range(self.cols))
+        return tuple(
+            f"{prefix}{row}{column}" for row in range(self.rows) for column in range(self.cols)
+        )
 
 
-@dataclass(frozen=True, slots=True)
-class MITControl:
-    """MIT-style output-shaft position, velocity, and torque limits and gains."""
+class TouchGridTactileLayout(_FrozenModel):
+    """一对 MuJoCo ``touch_grid`` 插件传感器。
 
-    p_min: float
-    p_max: float
-    v_max: float
-    t_max: float
-    kp: float
-    kd: float
-    t_ff: float
-
-
-@dataclass(frozen=True, slots=True)
-class NormalForceControl:
-    """Outer-loop normal-force tracking parameters."""
-
-    target_n: float
-    contact_threshold_n: float
-    contact_confirm_steps: int
-    release_threshold_n: float
-    release_confirm_steps: int
-    kp: float
-    ki: float
-    kd: float
-    max_position_adjustment: float
-    filter_cutoff_hz: float
-
-
-@dataclass(frozen=True, slots=True)
-class GripperProfile:
-    """Model-independent description of a parallel gripper."""
-
-    name: str
-    model_path: Path
-    actuator: str
-    open_control: float
-    closed_control: float
-    control_mode: str
-    mit: MITControl | None
-    normal_force: NormalForceControl | None
-    mount_pos: tuple[float, float, float]
-    mount_quat: tuple[float, float, float, float]
-    tactile: TactileLayout
-
-
-def _float_tuple(values: list[object], length: int, field: str) -> tuple[float, ...]:
-    if len(values) != length:
-        raise ValueError(f"{field} must contain {length} values")
-    return tuple(float(value) for value in values)
-
-
-def _find_repository_root(profile_path: Path) -> Path:
-    """Walk upward from the profile to the directory containing ``assets``.
-
-    Falls back to the profile's grandparent, preserving the historical
-    ``configs/<profile>.toml`` layout for repositories without an ``assets``
-    directory at the expected level.
+    ``rows`` 与 ``cols`` 特意不出现在 YAML 中。加载器会从被引用 MJCF 中
+    插件的 ``size`` 配置推导出它们，并将校验结果记录在此不可变模型上。
     """
-    for parent in profile_path.parents:
-        if (parent / "assets").is_dir():
-            return parent
-    return profile_path.parents[1]
+
+    mode: Literal["touch_grid"]
+    left_sensor: Annotated[str, Field(min_length=1)]
+    right_sensor: Annotated[str, Field(min_length=1)]
+    rows: Annotated[int, Field(gt=0, exclude=True)] = 1
+    cols: Annotated[int, Field(gt=0, exclude=True)] = 1
+
+    def names(self, side: Literal["left", "right"]) -> tuple[str, ...]:
+        """返回与 ``side`` 关联的那一个插件传感器名称。"""
+        return (self.left_sensor if side == "left" else self.right_sensor,)
 
 
-def _load_mit_control(control: dict[str, object]) -> MITControl | None:
-    """Load and validate the optional MIT torque-controller configuration."""
-    mode = str(control.get("mode", "position"))
-    if mode == "position":
-        return None
-    if mode != "mit_torque":
-        raise ValueError(f"unsupported control.mode {mode!r}")
-    raw = control.get("mit")
+TactileLayout: TypeAlias = TaxelTactileLayout | TouchGridTactileLayout
+
+
+class MITControl(_FrozenModel):
+    """MIT 风格输出轴的位置、速度和力矩限值与增益。"""
+
+    p_min: FiniteFloat
+    p_max: FiniteFloat
+    v_max: Annotated[FiniteFloat, Field(gt=0)]
+    t_max: Annotated[FiniteFloat, Field(gt=0)]
+    kp: Annotated[FiniteFloat, Field(ge=0)]
+    kd: Annotated[FiniteFloat, Field(ge=0)]
+    t_ff: FiniteFloat = 0.0
+
+    @model_validator(mode="after")
+    def validate_limits(self) -> "MITControl":
+        """确保命令位置与前馈范围相互一致。"""
+        if self.p_min >= self.p_max:
+            raise ValueError("p_min must be smaller than p_max")
+        if abs(self.t_ff) > self.t_max:
+            raise ValueError("t_ff must not exceed t_max")
+        return self
+
+
+class NormalForceControl(_FrozenModel):
+    """外环法向力跟踪参数。"""
+
+    target_n: Annotated[FiniteFloat, Field(gt=0)]
+    contact_threshold_n: Annotated[FiniteFloat, Field(gt=0)]
+    contact_confirm_steps: Annotated[int, Field(gt=0)]
+    release_threshold_n: Annotated[FiniteFloat, Field(ge=0)]
+    release_confirm_steps: Annotated[int, Field(gt=0)]
+    kp: Annotated[FiniteFloat, Field(ge=0)]
+    ki: Annotated[FiniteFloat, Field(ge=0)]
+    kd: Annotated[FiniteFloat, Field(ge=0)] = 0.0
+    max_position_adjustment: Annotated[FiniteFloat, Field(gt=0)]
+    filter_cutoff_hz: Annotated[FiniteFloat, Field(gt=0)]
+
+    @model_validator(mode="after")
+    def validate_release_threshold(self) -> "NormalForceControl":
+        """要求释放阈值保持在接触阈值之内。"""
+        if self.release_threshold_n > self.contact_threshold_n:
+            raise ValueError("release_threshold_n must not exceed contact_threshold_n")
+        return self
+
+
+class PositionControl(_FrozenModel):
+    """直接位置控制的执行器 profile。"""
+
+    mode: Literal["position"]
+    actuator: Annotated[str, Field(min_length=1)]
+    open: FiniteFloat
+    closed: FiniteFloat
+
+
+class MITTorqueControl(_FrozenModel):
+    """通过受限的 MIT 力矩命令控制的位置目标。"""
+
+    mode: Literal["mit_torque"]
+    actuator: Annotated[str, Field(min_length=1)]
+    open: FiniteFloat
+    closed: FiniteFloat
+    mit: MITControl
+    force: NormalForceControl | None = None
+
+    @model_validator(mode="after")
+    def validate_position_targets(self) -> "MITTorqueControl":
+        """要求开合目标位于 MIT 范围之内。"""
+        if not self.mit.p_min <= self.open <= self.mit.p_max:
+            raise ValueError("open must lie within mit position limits")
+        if not self.mit.p_min <= self.closed <= self.mit.p_max:
+            raise ValueError("closed must lie within mit position limits")
+        return self
+
+
+ControlLayout: TypeAlias = Annotated[
+    PositionControl | MITTorqueControl, Field(discriminator="mode")
+]
+
+
+class ModelSpec(_FrozenModel):
+    """profile 所使用的 MJCF 源。"""
+
+    path: Path
+
+
+class Mount(_FrozenModel):
+    """将夹爪附加到场景时所使用的位姿。"""
+
+    pos: tuple[FiniteFloat, FiniteFloat, FiniteFloat]
+    quat: tuple[FiniteFloat, FiniteFloat, FiniteFloat, FiniteFloat]
+
+    @model_validator(mode="after")
+    def validate_quaternion(self) -> "Mount":
+        """拒绝零四元数，同时将归一化留给 MuJoCo。"""
+        if not any(self.quat):
+            raise ValueError("quat must not be the zero quaternion")
+        return self
+
+
+class GripperProfile(_FrozenModel):
+    """一个完整且带 schema 版本号的平行夹爪描述。"""
+
+    schema_version: Literal[1]
+    name: Annotated[str, Field(min_length=1)]
+    model: ModelSpec
+    control: ControlLayout
+    mount: Mount
+    tactile: Annotated[TactileLayout, Field(discriminator="mode")]
+
+    @property
+    def model_path(self) -> Path:
+        """返回为兼容旧调用方而保留的、已解析的 MJCF 路径。"""
+        return self.model.path
+
+    @property
+    def actuator(self) -> str:
+        """返回为兼容旧调用方而保留的、已配置的执行器名称。"""
+        return self.control.actuator
+
+    @property
+    def open_control(self) -> float:
+        """返回为兼容旧调用方而保留的打开命令。"""
+        return float(self.control.open)
+
+    @property
+    def closed_control(self) -> float:
+        """返回为兼容旧调用方而保留的闭合命令。"""
+        return float(self.control.closed)
+
+    @property
+    def control_mode(self) -> Literal["position", "mit_torque"]:
+        """返回为兼容旧调用方而保留的控制判别符。"""
+        return self.control.mode
+
+    @property
+    def mit(self) -> MITControl | None:
+        """当此 profile 使用 MIT 力矩控制器时返回 MIT 限值。"""
+        return self.control.mit if isinstance(self.control, MITTorqueControl) else None
+
+    @property
+    def normal_force(self) -> NormalForceControl | None:
+        """返回为兼容旧调用方而保留的可选力跟踪参数。"""
+        return self.control.force if isinstance(self.control, MITTorqueControl) else None
+
+    @property
+    def mount_pos(self) -> tuple[float, float, float]:
+        """返回为兼容旧调用方而保留的安装位置。"""
+        return tuple(float(value) for value in self.mount.pos)  # type: ignore[return-value]
+
+    @property
+    def mount_quat(self) -> tuple[float, float, float, float]:
+        """返回为兼容旧调用方而保留的安装四元数。"""
+        return tuple(float(value) for value in self.mount.quat)  # type: ignore[return-value]
+
+
+def _load_yaml_mapping(profile_path: Path) -> dict[str, object]:
+    """使用 PyYAML 的 safe 加载器加载恰好一个 YAML 映射。"""
+    if profile_path.suffix.lower() not in {".yaml", ".yml"}:
+        raise ProfileLoadError("profiles must use a .yaml or .yml extension; TOML is unsupported")
+    try:
+        with profile_path.open(encoding="utf-8") as stream:
+            documents = list(yaml.safe_load_all(stream))
+    except yaml.YAMLError as error:
+        raise ProfileLoadError(f"invalid YAML in {profile_path}: {error}") from error
+    if not documents or documents == [None]:
+        raise ProfileLoadError(f"profile is empty: {profile_path}")
+    if len(documents) != 1:
+        raise ProfileLoadError(f"profile must contain exactly one YAML document: {profile_path}")
+    raw = documents[0]
     if not isinstance(raw, dict):
-        raise ValueError("control.mit is required when control.mode='mit_torque'")
-    mit = MITControl(
-        p_min=float(raw["p_min"]),
-        p_max=float(raw["p_max"]),
-        v_max=float(raw["v_max"]),
-        t_max=float(raw["t_max"]),
-        kp=float(raw["kp"]),
-        kd=float(raw["kd"]),
-        t_ff=float(raw.get("t_ff", 0.0)),
-    )
-    if mit.p_min >= mit.p_max:
-        raise ValueError("control.mit.p_min must be smaller than p_max")
-    if mit.v_max <= 0 or mit.t_max <= 0:
-        raise ValueError("control.mit.v_max and t_max must be positive")
-    if mit.kp < 0 or mit.kd < 0:
-        raise ValueError("control.mit.kp and kd must be nonnegative")
-    if abs(mit.t_ff) > mit.t_max:
-        raise ValueError("control.mit.t_ff must not exceed t_max")
-    return mit
+        raise ProfileLoadError(f"profile root must be a mapping: {profile_path}")
+    return raw
 
 
-def _load_normal_force_control(control: dict[str, object]) -> NormalForceControl | None:
-    """Load and validate the optional taxel normal-force outer loop."""
-    raw = control.get("force")
-    if raw is None:
-        return None
-    if not isinstance(raw, dict):
-        raise ValueError("control.force must be a table")
-    force = NormalForceControl(
-        target_n=float(raw["target_n"]),
-        contact_threshold_n=float(raw["contact_threshold_n"]),
-        contact_confirm_steps=int(raw["contact_confirm_steps"]),
-        release_threshold_n=float(raw["release_threshold_n"]),
-        release_confirm_steps=int(raw["release_confirm_steps"]),
-        kp=float(raw["kp"]),
-        ki=float(raw["ki"]),
-        kd=float(raw.get("kd", 0.0)),
-        max_position_adjustment=float(raw["max_position_adjustment"]),
-        filter_cutoff_hz=float(raw["filter_cutoff_hz"]),
-    )
-    if force.target_n <= 0:
-        raise ValueError("control.force.target_n must be positive")
-    if force.contact_threshold_n <= 0:
-        raise ValueError("control.force.contact_threshold_n must be positive")
-    if not 0 <= force.release_threshold_n <= force.contact_threshold_n:
-        raise ValueError("control.force.release_threshold_n must lie within contact threshold")
-    if force.contact_confirm_steps <= 0 or force.release_confirm_steps <= 0:
-        raise ValueError("control.force confirmation step counts must be positive")
-    if force.kp < 0 or force.ki < 0 or force.kd < 0:
-        raise ValueError("control.force PID gains must be nonnegative")
-    if force.max_position_adjustment <= 0 or force.filter_cutoff_hz <= 0:
-        raise ValueError("control.force position adjustment and filter cutoff must be positive")
-    return force
+def _touch_grid_shape(model_path: Path, sensor_name: str) -> tuple[int, int]:
+    """从其 MJCF 插件配置读取一个 touch-grid 传感器的 ``rows, cols``。"""
+    try:
+        root = ET.parse(model_path).getroot()
+    except ET.ParseError as error:
+        raise ProfileLoadError(f"invalid MJCF XML {model_path}: {error}") from error
+    plugin = root.find(f"./sensor/plugin[@name='{sensor_name}']")
+    if plugin is None:
+        raise ProfileLoadError(f"touch_grid sensor {sensor_name!r} is missing from {model_path}")
+    if plugin.get("plugin") != "mujoco.sensor.touch_grid":
+        raise ProfileLoadError(f"sensor {sensor_name!r} is not a mujoco.sensor.touch_grid plugin")
+    config = next((item for item in plugin.findall("config") if item.get("key") == "size"), None)
+    if config is None or config.get("value") is None:
+        raise ProfileLoadError(
+            f"touch_grid sensor {sensor_name!r} is missing its size configuration"
+        )
+    try:
+        cols, rows = (int(value) for value in config.get("value", "").split())
+    except ValueError as error:
+        raise ProfileLoadError(
+            f"touch_grid sensor {sensor_name!r} has invalid size {config.get('value')!r}"
+        ) from error
+    if rows <= 0 or cols <= 0:
+        raise ProfileLoadError(f"touch_grid sensor {sensor_name!r} has non-positive size")
+    return rows, cols
+
+
+def _resolve_touch_grid_shape(profile: GripperProfile) -> GripperProfile:
+    """从 MJCF 填充并校验 touch-grid profile 的维度。"""
+    tactile = profile.tactile
+    if not isinstance(tactile, TouchGridTactileLayout):
+        return profile
+    left_shape = _touch_grid_shape(profile.model_path, tactile.left_sensor)
+    right_shape = _touch_grid_shape(profile.model_path, tactile.right_sensor)
+    if left_shape != right_shape:
+        raise ProfileLoadError(
+            "left and right touch_grid sensors must have matching dimensions, "
+            f"got {left_shape} and {right_shape}"
+        )
+    resolved_tactile = tactile.model_copy(update={"rows": left_shape[0], "cols": left_shape[1]})
+    return profile.model_copy(update={"tactile": resolved_tactile})
 
 
 def load_profile(path: str | Path, *, repository_root: str | Path | None = None) -> GripperProfile:
-    """Load a TOML profile and resolve its MJCF path against the repository root."""
+    """加载、校验并解析路径的单个 YAML 夹爪 profile。
+
+    相对模型路径始终相对于 profile 文件所在目录解析。``repository_root``
+    仍作为已废弃的兼容参数保留；YAML profile 必须自包含，且不会推断仓库根目录。
+    """
+    if repository_root is not None:
+        raise TypeError(
+            "repository_root is no longer supported; use paths relative to the YAML profile"
+        )
     profile_path = Path(path).resolve()
-    with profile_path.open("rb") as stream:
-        raw = tomllib.load(stream)
-
-    root = (
-        Path(repository_root).resolve() if repository_root else _find_repository_root(profile_path)
+    raw = _load_yaml_mapping(profile_path)
+    profile = GripperProfile.model_validate(raw)
+    model_path = profile.model.path
+    resolved_model_path = (
+        model_path if model_path.is_absolute() else profile_path.parent / model_path
     )
-    model_path = (root / raw["model"]["path"]).resolve()
-    if not model_path.is_file():
-        raise FileNotFoundError(f"gripper MJCF does not exist: {model_path}")
+    resolved_model_path = resolved_model_path.resolve()
+    if not resolved_model_path.is_file():
+        raise FileNotFoundError(f"gripper MJCF does not exist: {resolved_model_path}")
+    resolved_model = profile.model.model_copy(update={"path": resolved_model_path})
+    return _resolve_touch_grid_shape(profile.model_copy(update={"model": resolved_model}))
 
-    control = raw["control"]
-    mount = raw["mount"]
-    tactile = raw["tactile"]
-    control_mode = str(control.get("mode", "position"))
-    mit = _load_mit_control(control)
-    normal_force = _load_normal_force_control(control)
-    if normal_force is not None and mit is None:
-        raise ValueError("control.force requires control.mode='mit_torque'")
-    open_control = float(control["open"])
-    closed_control = float(control["closed"])
-    if mit is not None and not (
-        mit.p_min <= open_control <= mit.p_max and mit.p_min <= closed_control <= mit.p_max
-    ):
-        raise ValueError("control.open/closed must lie within control.mit position limits")
-    return GripperProfile(
-        name=str(raw["name"]),
-        model_path=model_path,
-        actuator=str(control["actuator"]),
-        open_control=open_control,
-        closed_control=closed_control,
-        control_mode=control_mode,
-        mit=mit,
-        normal_force=normal_force,
-        mount_pos=_float_tuple(mount["pos"], 3, "mount.pos"),  # type: ignore[arg-type]
-        mount_quat=_float_tuple(mount["quat"], 4, "mount.quat"),  # type: ignore[arg-type]
-        tactile=TactileLayout(
-            mode=str(tactile["mode"]),
-            rows=int(tactile["rows"]),
-            cols=int(tactile["cols"]),
-            left_prefix=str(tactile["left_prefix"]),
-            right_prefix=str(tactile["right_prefix"]),
-        ),
-    )
+
+__all__ = [
+    "ControlLayout",
+    "GripperProfile",
+    "MITControl",
+    "MITTorqueControl",
+    "Mount",
+    "NormalForceControl",
+    "PositionControl",
+    "ProfileLoadError",
+    "TactileLayout",
+    "TaxelTactileLayout",
+    "TouchGridTactileLayout",
+    "ValidationError",
+    "load_profile",
+]

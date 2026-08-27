@@ -5,7 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 import xml.etree.ElementTree as ET
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_GRIPPER_XML = REPOSITORY_ROOT / "assets" / "grippers" / "robotiq_2f85" / "2f85_taxels.xml"
 DEFAULT_TOUCH_GRID_XML = (
     REPOSITORY_ROOT / "assets" / "grippers" / "robotiq_2f85" / "2f85_touch_grid.xml"

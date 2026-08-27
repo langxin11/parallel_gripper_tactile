@@ -1,27 +1,20 @@
-"""在相同抓取条件下比较 3×3 box taxel 与 3×3 touch_grid。
-
-常见用法::
-
-    uv run scripts/compare_tactile_models.py
-    uv run scripts/compare_tactile_models.py --output-csv outputs/robotiq/comparison/comparison.csv
-"""
+"""在同一抓取下比较 3×3 box-taxel 与 touch-grid 的读数。"""
 
 from __future__ import annotations
 
-import argparse
 import csv
 import math
 from dataclasses import dataclass, field
 from pathlib import Path
 from statistics import fmean
 
-from grasp_scene import gripper_name_in_model, load_grasp_model, prefixed_gripper_name
-from parallel_gripper_tactile import DisturbanceProtocol
-from run_cube_grasp_demo import _taxel_surface_force_vector
-from run_touch_grid_demo import _read_tactile, _touch_grid_shape
+import numpy as np
+
+from ..protocols import DisturbanceProtocol
+from ..scenes.robotiq import gripper_name_in_model, load_grasp_model, prefixed_gripper_name
 
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_BOX_TAXEL_XML = REPOSITORY_ROOT / "assets/grippers/robotiq_2f85/2f85_taxels_box.xml"
 DEFAULT_TOUCH_GRID_XML = REPOSITORY_ROOT / "assets/grippers/robotiq_2f85/2f85_touch_grid_3x3.xml"
 DEFAULT_OUTPUT_CSV = REPOSITORY_ROOT / "outputs/robotiq/comparison/tactile_model_comparison.csv"
@@ -31,6 +24,39 @@ CUBE_JOINT_NAME = "cube/target_cube_free_joint"
 
 
 Vector3 = tuple[float, float, float]
+
+
+def _taxel_surface_force_vector(data, side: str, sensor_name) -> Vector3:
+    """返回一个力传感器 taxel 表面上的总局部力。"""
+    total = np.zeros(3, dtype=np.float64)
+    for row in range(3):
+        for column in range(3):
+            total -= data.sensor(sensor_name(f"{side}_taxel_force_{row}{column}")).data
+    return tuple(float(value) for value in total)
+
+
+def _touch_grid_shape(mujoco, model, name: str) -> tuple[int, int]:
+    """读取 touch-grid 插件的 ``rows, cols`` 维度。"""
+    sensor_id = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_SENSOR, name)
+    plugin_id = model.sensor_plugin[sensor_id]
+    get_config = getattr(mujoco, "mj_getPluginConfig", None)
+    if get_config is not None:
+        size = get_config(model, plugin_id, "size")
+    else:
+        start = model.plugin_attradr[plugin_id]
+        end = (
+            model.plugin_attradr[plugin_id + 1]
+            if plugin_id + 1 < model.nplugin
+            else model.npluginattr
+        )
+        size = bytes(model.plugin_attr[start:end]).split(b"\0")[1].decode()
+    cols, rows = (int(value) for value in size.split())
+    return rows, cols
+
+
+def _read_tactile(data, name: str, shape: tuple[int, int]) -> np.ndarray:
+    """读取插件的 ``zxy`` 输出，并重排为局部 ``xyz`` 力网格。"""
+    return data.sensor(name).data.reshape((3, *shape))[[1, 2, 0]]
 
 
 @dataclass(slots=True)
@@ -564,121 +590,3 @@ def _plot_disturbance_comparison(plt, path: Path, box: ForceTrace, grid: ForceTr
     path.parent.mkdir(parents=True, exist_ok=True)
     figure.savefig(path, dpi=600)
     plt.close(figure)
-
-
-def _print_summary(left: SideSummary, right: SideSummary, tolerance: float) -> bool:
-    print("side   box steady   grid steady   rel. error   box peak   grid peak")
-    for side, summary in (("left", left), ("right", right)):
-        print(
-            f"{side:5s} {summary.box_steady_n:10.3f} N {summary.grid_steady_n:10.3f} N "
-            f"{summary.relative_error:9.2%} {summary.box_peak_n:10.3f} N "
-            f"{summary.grid_peak_n:10.3f} N"
-        )
-    passed = left.relative_error <= tolerance and right.relative_error <= tolerance
-    print(f"result: {'PASS' if passed else 'FAIL'} (tolerance={tolerance:.1%})")
-    return passed
-
-
-def _print_disturbance_summary(
-    summary: DisturbanceSummary, tolerance: float, slip_threshold_m: float
-) -> bool:
-    print("\ndisturbance response (world Y) and tangential slip (world YZ)")
-    print(f"response NRMSE: {summary.response_nrmse:.2%} (tolerance={tolerance:.1%})")
-    print("model       max disp.   max speed   slip")
-    for name, displacement, speed, slipped in (
-        (
-            "box taxel",
-            summary.box_max_displacement_m,
-            summary.box_max_speed_m_s,
-            summary.box_slipped,
-        ),
-        (
-            "touch grid",
-            summary.grid_max_displacement_m,
-            summary.grid_max_speed_m_s,
-            summary.grid_slipped,
-        ),
-    ):
-        print(
-            f"{name:10s} {1000.0 * displacement:8.3f} mm "
-            f"{speed:9.4f} m/s   {'YES' if slipped else 'no'}"
-        )
-    passed = (
-        summary.response_nrmse <= tolerance and not summary.box_slipped and not summary.grid_slipped
-    )
-    print(
-        f"disturbance result: {'PASS' if passed else 'FAIL'} "
-        f"(slip threshold={1000.0 * slip_threshold_m:.1f} mm)"
-    )
-    return passed
-
-
-def main() -> int:
-    """运行比较，保存联合 CSV 和叠加曲线，并按容差返回状态。"""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--box-xml", type=Path, default=DEFAULT_BOX_TAXEL_XML)
-    parser.add_argument("--grid-xml", type=Path, default=DEFAULT_TOUCH_GRID_XML)
-    parser.add_argument("--steps", type=int, default=1500, help="无扰动模式的仿真步数")
-    parser.add_argument("--close-control", type=float, default=220.0)
-    parser.add_argument("--record-every", type=int, default=1)
-    parser.add_argument("--output-csv", type=Path, default=DEFAULT_OUTPUT_CSV)
-    parser.add_argument("--output-plot", type=Path)
-    parser.add_argument("--tolerance", type=float, default=0.10)
-    parser.add_argument(
-        "--disturbance",
-        action="store_true",
-        help="抓稳并撤去支撑后，在方块质心施加世界 Y 方向正弦力",
-    )
-    parser.add_argument("--disturbance-force", type=float, default=5.0, metavar="N")
-    parser.add_argument("--disturbance-frequency", type=float, default=2.0, metavar="HZ")
-    parser.add_argument("--disturbance-duration", type=float, default=1.0, metavar="S")
-    parser.add_argument("--support-settle-duration", type=float, default=0.5, metavar="S")
-    parser.add_argument(
-        "--hold-duration", type=float, default=0.5, metavar="S", help="撤去支撑后的无支撑保持时长"
-    )
-    parser.add_argument("--recovery-duration", type=float, default=0.5, metavar="S")
-    parser.add_argument("--slip-threshold", type=float, default=0.002, metavar="M")
-    args = parser.parse_args()
-    if args.steps <= 0:
-        parser.error("--steps 必须为正整数。")
-    if args.record_every <= 0:
-        parser.error("--record-every 必须为正整数。")
-    if args.tolerance < 0:
-        parser.error("--tolerance 不得为负数。")
-
-    protocol = None
-    if args.disturbance:
-        try:
-            protocol = DisturbanceProtocol(
-                support_settle_duration=args.support_settle_duration,
-                hold_duration=args.hold_duration,
-                disturbance_duration=args.disturbance_duration,
-                recovery_duration=args.recovery_duration,
-                force_n=args.disturbance_force,
-                frequency_hz=args.disturbance_frequency,
-                slip_threshold_m=args.slip_threshold,
-            )
-        except ValueError as error:
-            parser.error(str(error))
-    box, grid = run_comparison(
-        args.box_xml, args.grid_xml, args.steps, args.close_control, protocol
-    )
-    output_plot = args.output_plot or args.output_csv.with_suffix(".png")
-    write_comparison_csv(args.output_csv, box, grid, args.record_every)
-    plot_comparison(output_plot, box, grid)
-    print(f"CSV:  {args.output_csv}")
-    print(f"Plot: {output_plot}")
-    left = summarize_side(box.left, grid.left)
-    right = summarize_side(box.right, grid.right)
-    passed = _print_summary(left, right, args.tolerance)
-    if protocol is not None:
-        disturbance = summarize_disturbance(box, grid, protocol.slip_threshold_m)
-        passed = (
-            _print_disturbance_summary(disturbance, args.tolerance, protocol.slip_threshold_m)
-            and passed
-        )
-    return 0 if passed else 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

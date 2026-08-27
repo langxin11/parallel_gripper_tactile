@@ -1,6 +1,5 @@
 """验证接触力读取器的符号约定、命名解析与切向剪切映射。"""
 
-from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -8,18 +7,10 @@ import mujoco
 import numpy as np
 
 from parallel_gripper_tactile import ContactTaxelReader, MITTorqueController, load_profile
+from parallel_gripper_tactile.experiments import custom_demo as demo
 
 
 ROOT = Path(__file__).resolve().parents[1]
-
-
-def _load_custom_demo():
-    path = ROOT / "scripts" / "run_custom_gripper_tactile_demo.py"
-    spec = spec_from_file_location("run_custom_gripper_tactile_demo", path)
-    assert spec is not None and spec.loader is not None
-    module = module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 def test_contact_force_sign_depends_on_contact_geom_order() -> None:
@@ -36,7 +27,7 @@ def test_contact_force_sign_depends_on_contact_geom_order() -> None:
 
 def test_custom_gripper_reader_resolves_all_taxels_and_reports_zero_without_contact() -> None:
     """全部 taxel 命名可解析且无接触时输出全零网格。"""
-    profile = load_profile(ROOT / "configs/custom_parallel_gripper.toml")
+    profile = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
     model = mujoco.MjModel.from_xml_path(str(profile.model_path))
     data = mujoco.MjData(model)
     mujoco.mj_forward(model, data)
@@ -51,8 +42,7 @@ def test_custom_gripper_reader_resolves_all_taxels_and_reports_zero_without_cont
 
 def test_prescribed_world_shear_maps_to_expected_local_components() -> None:
     """预设世界系剪切正确映射为左右指尖局部 Fx/Fy。"""
-    profile = load_profile(ROOT / "configs/custom_parallel_gripper.toml")
-    demo = _load_custom_demo()
+    profile = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
 
     def read_after_shear(axis: str):
         model = demo.build_demo_model(profile, ("left", 1, 1), 0.003, shear_axis=axis)

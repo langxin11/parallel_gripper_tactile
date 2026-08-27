@@ -1,20 +1,7 @@
-r"""录制自研夹爪法向力 PID 抓取的无支撑保持与扰动实验视频。
-
-示例::
-
-    uv run scripts/record_custom_grasp_video.py
-    uv run scripts/record_custom_grasp_video.py --force 0 \\
-      --output outputs/custom_gripper/disturbance_video/custom_gripper_zero_disturbance.mp4
-
-源模型 ``base`` 仍是未来转接法兰的安装根；录制时只移除其临时仿真自由关节，
-并将它刚性固定到场景中。控制器在预接触阶段运行 MIT 位置接近，双侧 taxel
-确认接触后切换为 simple-pid 法向力外环与 MIT 力矩内环。
-"""
+"""录制自研夹爪法向力抓取验收实验。"""
 
 from __future__ import annotations
 
-import argparse
-from dataclasses import replace
 import math
 import shutil
 import tempfile
@@ -23,23 +10,24 @@ from pathlib import Path
 import mujoco
 import numpy as np
 
-from custom_grasp_scene import (
+from ..scenes.custom import (
     CUBE_PREFIX,
     DEFAULT_CUBE_HALF_CONTACT_SIDE,
     DEFAULT_CUBE_HALF_THICKNESS,
     DEFAULT_CUBE_MASS,
     DEFAULT_PROFILE,
     GRIPPER_PREFIX,
-    MIN_CUBE_MASS,
     SUPPORT_GEOM_NAME,
     build_custom_grasp_model,
 )
-from parallel_gripper_tactile import DisturbanceProtocol, NormalForceController, load_profile
-from parallel_gripper_tactile.video import add_arrow_to_scene, encode_video, save_pixels
-from run_custom_grasp_validation import _friction_capacity, _taxel_geom_sides
+from ..control import NormalForceController
+from ..profiles import load_profile
+from ..protocols import DisturbanceProtocol
+from ..timing import SimulationTimer
+from ..video import add_arrow_to_scene, encode_video, save_pixels
+from .grasp import _friction_capacity, _taxel_geom_sides
 
-
-REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
+REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_OUTPUT = (
     REPOSITORY_ROOT
     / "outputs"
@@ -121,20 +109,28 @@ def record_custom_grasp_video(
     cube_half_contact_side: float = DEFAULT_CUBE_HALF_CONTACT_SIDE,
     cube_mass: float = DEFAULT_CUBE_MASS,
     target_force_n: float | None = None,
+    control_period_s: float = 0.002,
     keep_frames: bool = False,
 ) -> bool:
     """录制水平自研夹爪抓取视频，并返回仿真稳定性。"""
-    if width <= 0 or height <= 0 or fps <= 0:
-        raise ValueError("width, height, and fps must be positive")
+    if width <= 0 or height <= 0 or fps <= 0 or control_period_s <= 0:
+        raise ValueError("width, height, fps, and control_period_s must be positive")
     profile = load_profile(profile_path)
     if target_force_n is not None:
         if target_force_n <= 0:
             raise ValueError("target_force_n must be positive")
         if profile.normal_force is None:
             raise ValueError("profile does not define control.force")
-        profile = replace(
-            profile,
-            normal_force=replace(profile.normal_force, target_n=target_force_n),
+        profile = profile.model_copy(
+            update={
+                "control": profile.control.model_copy(
+                    update={
+                        "force": profile.normal_force.model_copy(
+                            update={"target_n": target_force_n}
+                        )
+                    }
+                )
+            }
         )
     if profile.normal_force is None:
         raise ValueError("profile does not define control.force")
@@ -144,8 +140,11 @@ def record_custom_grasp_video(
         cube_half_contact_side=cube_half_contact_side,
         cube_mass=cube_mass,
     )
+    if control_period_s + 1e-12 < float(model.opt.timestep):
+        raise ValueError("control_period_s must not be smaller than the physics timestep")
     data = mujoco.MjData(model)
     mujoco.mj_forward(model, data)
+    control_timer = SimulationTimer(control_period_s, float(data.time))
     controller = NormalForceController.from_profile(model, profile, name_prefix=GRIPPER_PREFIX)
     actuator_id = controller.actuator_id
     support_id = model.geom(SUPPORT_GEOM_NAME).id
@@ -185,23 +184,25 @@ def record_custom_grasp_video(
                     cube_body_id=cube_body_id,
                     apply_actuator_control=False,
                 )
-                feedback = _friction_capacity(
-                    model,
-                    data,
-                    taxel_geom_sides=taxel_geom_sides,
-                    cube_geom_id=cube_geom_id,
-                )
-                force_command = controller.apply(
-                    data,
-                    approach_position=protocol.close_target_at(
-                        time_s, profile.open_control, profile.closed_control
-                    ),
-                    total_normal_force_n=feedback.normal_force_n,
-                    left_normal_force_n=feedback.left_normal_force_n,
-                    right_normal_force_n=feedback.right_normal_force_n,
-                    dt=float(model.opt.timestep),
-                )
-                control_state = force_command.state
+                control_dt = control_timer.pop_due(time_s)
+                if control_dt is not None:
+                    feedback = _friction_capacity(
+                        model,
+                        data,
+                        taxel_geom_sides=taxel_geom_sides,
+                        cube_geom_id=cube_geom_id,
+                    )
+                    force_command = controller.apply(
+                        data,
+                        approach_position=protocol.close_target_at(
+                            time_s, profile.open_control, profile.closed_control
+                        ),
+                        total_normal_force_n=feedback.normal_force_n,
+                        left_normal_force_n=feedback.left_normal_force_n,
+                        right_normal_force_n=feedback.right_normal_force_n,
+                        dt=control_dt,
+                    )
+                    control_state = force_command.state
                 mujoco.mj_step(model, data)
                 if data.time <= time_s or not np.isfinite(data.qpos).all():
                     stable = False
@@ -253,49 +254,3 @@ def record_custom_grasp_video(
     print(f"Frames: {frame_count}/{total_frames}")
     print(f"Simulation stability: {'PASS' if stable else 'FAIL'}")
     return stable
-
-
-def main() -> int:
-    """运行视频录制，并把数值失稳作为失败状态传播。"""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--profile", type=Path, default=DEFAULT_PROFILE)
-    parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
-    parser.add_argument("--resolution", type=int, nargs=2, default=(1920, 1080), metavar=("W", "H"))
-    parser.add_argument("--fps", type=int, default=30)
-    parser.add_argument(
-        "--cube-half-thickness", type=float, default=DEFAULT_CUBE_HALF_THICKNESS, metavar="M"
-    )
-    parser.add_argument(
-        "--cube-half-contact-side", type=float, default=DEFAULT_CUBE_HALF_CONTACT_SIDE, metavar="M"
-    )
-    parser.add_argument("--cube-mass", type=float, default=DEFAULT_CUBE_MASS, metavar="KG")
-    parser.add_argument("--force", type=float, default=5.0, help="世界 Y 方向扰动幅值 (N)。")
-    parser.add_argument("--frequency", type=float, default=2.0, help="扰动频率 (Hz)。")
-    parser.add_argument("--target-force", type=float, metavar="N", help="覆盖 profile 目标总法向力。")
-    parser.add_argument("--keep-frames", action="store_true")
-    args = parser.parse_args()
-    if args.force < 0 or args.frequency <= 0:
-        parser.error("--force 必须非负，--frequency 必须为正数。")
-    if args.cube_half_thickness <= 0 or args.cube_half_contact_side <= 0:
-        parser.error("方块尺寸必须为正数。")
-    if args.cube_mass < MIN_CUBE_MASS:
-        parser.error(f"--cube-mass 不能小于 {MIN_CUBE_MASS:g} kg。")
-    width, height = args.resolution
-    stable = record_custom_grasp_video(
-        profile_path=args.profile,
-        output=args.output,
-        width=width,
-        height=height,
-        fps=args.fps,
-        protocol=DisturbanceProtocol(force_n=args.force, frequency_hz=args.frequency),
-        cube_half_thickness=args.cube_half_thickness,
-        cube_half_contact_side=args.cube_half_contact_side,
-        cube_mass=args.cube_mass,
-        target_force_n=args.target_force,
-        keep_frames=args.keep_frames,
-    )
-    return 0 if stable else 1
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())

@@ -1,4 +1,4 @@
-"""Read three-axis tactile forces directly from named MuJoCo contact geoms."""
+"""直接从具名 MuJoCo 接触几何体读取三轴触觉力。"""
 
 from __future__ import annotations
 
@@ -12,11 +12,11 @@ from .profiles import GripperProfile, TactileLayout
 
 @dataclass(frozen=True, slots=True)
 class ContactTaxelFrame:
-    """Forces applied to the two tactile surfaces in their local site frames.
+    """作用于两个触觉表面、位于其局部 site 坐标系中的力。
 
-    Each array has shape ``(3, rows, cols)`` in ``Fx, Fy, Fz`` order.  The
-    sign is the force applied *to* the Pillar, so a correctly oriented tactile
-    site reports positive ``Fz`` under compression.
+    每个数组的形状为 ``(3, rows, cols)``，顺序为 ``Fx, Fy, Fz``。
+    符号表示施加到 Pillar *上* 的力，因此方向正确的触觉 site
+    在受压时报告正的 ``Fz``。
     """
 
     left: np.ndarray
@@ -25,19 +25,20 @@ class ContactTaxelFrame:
 
 @dataclass(frozen=True, slots=True)
 class _TaxelChannel:
-    """Compiled IDs and grid coordinates for one collision taxel."""
+    """单个碰撞 taxel 的编译后 ID 与网格坐标。"""
 
     side: str
     row: int
     column: int
     site_id: int
+    geom_id: int
 
 
 class ContactTaxelReader:
-    """Aggregate MuJoCo contact forces for a ``contact_geom`` tactile layout."""
+    """为 ``contact_geom`` 触觉布局聚合 MuJoCo 接触力。"""
 
     def __init__(self, model: mujoco.MjModel, tactile: TactileLayout) -> None:
-        """Resolve the profile's named collision geoms and corresponding sites."""
+        """解析 profile 中具名的碰撞几何体及其对应的 site。"""
         if tactile.mode != "contact_geom":
             raise ValueError(f"ContactTaxelReader requires contact_geom mode, got {tactile.mode!r}")
         self._model = model
@@ -57,20 +58,20 @@ class ContactTaxelReader:
                         raise ValueError(
                             f"model is missing tactile site {site_name!r} for geom {geom_name!r}"
                         )
-                    self._channels[geom_id] = _TaxelChannel(side, row, column, site_id)
+                    self._channels[geom_id] = _TaxelChannel(side, row, column, site_id, geom_id)
 
     @classmethod
     def from_profile(cls, model: mujoco.MjModel, profile: GripperProfile) -> "ContactTaxelReader":
-        """Construct a reader using the tactile naming convention in a profile."""
+        """使用 profile 中的触觉命名约定构造读取器。"""
         return cls(model, profile.tactile)
 
     @staticmethod
     def _force_on_geom_world(contact, contact_force: np.ndarray, geom_id: int) -> np.ndarray:
-        """Return the contact force applied to ``geom_id`` in world coordinates.
+        """返回世界坐标系中施加到 ``geom_id`` 的接触力。
 
-        ``mj_contactForce`` expresses force in the contact frame and reports the
-        force on ``geom2``.  The first contact-frame row is its normal axis, so
-        the transpose converts contact-frame vectors to world coordinates.
+        ``mj_contactForce`` 在接触坐标系中表示力，并报告施加在 ``geom2``
+        上的力。接触坐标系的第一行是其法向轴，因此转置可将接触坐标系向量
+        转换为世界坐标。
         """
         force_on_geom2_world = (
             np.asarray(contact.frame, dtype=np.float64).reshape(3, 3).T @ contact_force[:3]
@@ -82,7 +83,7 @@ class ContactTaxelReader:
         raise ValueError(f"geom {geom_id} does not belong to this contact")
 
     def read(self, data: mujoco.MjData) -> ContactTaxelFrame:
-        """Return the current left and right ``(3, rows, cols)`` force grids."""
+        """返回当前的左右 ``(3, rows, cols)`` 力网格。"""
         forces = {
             "left": np.zeros((3, self._rows, self._columns), dtype=np.float64),
             "right": np.zeros((3, self._rows, self._columns), dtype=np.float64),

@@ -3,29 +3,16 @@
 from __future__ import annotations
 
 import csv
-import importlib.util
 import math
-import sys
 from pathlib import Path
 
 import numpy as np
 
-
-def _load_comparison():
-    scripts = Path(__file__).resolve().parents[1] / "scripts"
-    sys.path.insert(0, str(scripts))
-    path = scripts / "compare_tactile_models.py"
-    spec = importlib.util.spec_from_file_location("compare_tactile_models", path)
-    assert spec is not None and spec.loader is not None
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
+from parallel_gripper_tactile.experiments import tactile_compare as comparison
 
 
 def test_comparison_summary_uses_steady_tail_and_symmetric_error() -> None:
     """稳态尾段均值与对称相对误差计算。"""
-    comparison = _load_comparison()
     box = [(0.0, 0.0, value) for value in (0, 1, 2, 10, 10)]
     grid = [(0.0, 0.0, value) for value in (0, 1, 2, 9, 9)]
     summary = comparison.summarize_side(box, grid)
@@ -38,7 +25,6 @@ def test_comparison_summary_uses_steady_tail_and_symmetric_error() -> None:
 
 def test_comparison_csv_uses_common_positive_pressure_convention(tmp_path: Path) -> None:
     """CSV 输出采用统一的压缩压力为正约定。"""
-    comparison = _load_comparison()
     box = comparison.ForceTrace(
         [0.002, 0.004], [0.0, 220.0], [(1, 2, 3), (4, 5, 6)], [(7, 8, 9), (10, 11, 12)]
     )
@@ -56,7 +42,6 @@ def test_comparison_csv_uses_common_positive_pressure_convention(tmp_path: Path)
 
 def test_disturbance_protocol_phases_and_waveform() -> None:
     """扰动协议的相位边界与正弦波形。"""
-    comparison = _load_comparison()
     protocol = comparison.DisturbanceProtocol()
     assert protocol.release_time == 1.5
     assert protocol.disturbance_start == 2.0
@@ -75,7 +60,6 @@ def test_disturbance_protocol_phases_and_waveform() -> None:
 
 def test_release_disables_support_and_applies_world_y_force() -> None:
     """释放后支撑禁用且注入世界 Y 向外力。"""
-    comparison = _load_comparison()
     protocol = comparison.DisturbanceProtocol()
 
     class Model:
@@ -100,7 +84,6 @@ def test_release_disables_support_and_applies_world_y_force() -> None:
 
 def test_local_force_rotation_uses_site_frame() -> None:
     """接触力经 site 旋转矩阵变换到世界系。"""
-    comparison = _load_comparison()
     rotation = (0.0, -1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0)
     assert comparison._rotate_local_to_world(rotation, (2.0, 3.0, 4.0)) == (
         -3.0,
@@ -128,7 +111,6 @@ def _disturbance_trace(comparison, total_world_y, y_positions):
 
 def test_disturbance_summary_compares_world_response_and_slip() -> None:
     """扰动汇总比较世界系响应与滑移判定。"""
-    comparison = _load_comparison()
     box = _disturbance_trace(comparison, [1.0, 2.0, 0.0], [0.0, 0.001, 0.003])
     grid = _disturbance_trace(comparison, [1.1, 1.8, 0.0], [0.0, 0.0005, 0.001])
     summary = comparison.summarize_disturbance(box, grid, slip_threshold_m=0.002)
@@ -140,7 +122,6 @@ def test_disturbance_summary_compares_world_response_and_slip() -> None:
 
 def test_disturbance_csv_contains_world_force_and_cube_motion(tmp_path: Path) -> None:
     """扰动 CSV 含世界系外力与物体运动列。"""
-    comparison = _load_comparison()
     box = _disturbance_trace(comparison, [1.0, 2.0], [0.0, 0.001])
     grid = _disturbance_trace(comparison, [1.1, 1.9], [0.0, 0.001])
     output = tmp_path / "disturbance.csv"
@@ -155,7 +136,6 @@ def test_disturbance_csv_contains_world_force_and_cube_motion(tmp_path: Path) ->
 
 def test_box_taxel_and_touch_grid_steady_forces_agree() -> None:
     """box taxel 与 touch_grid 稳态法向力一致。"""
-    comparison = _load_comparison()
     box, grid = comparison.run_comparison(steps=600)
     assert comparison.summarize_side(box.left, grid.left).relative_error <= 0.10
     assert comparison.summarize_side(box.right, grid.right).relative_error <= 0.10
@@ -163,7 +143,6 @@ def test_box_taxel_and_touch_grid_steady_forces_agree() -> None:
 
 def test_default_disturbance_responses_agree_without_slip() -> None:
     """默认扰动下两种模型响应一致且不滑移。"""
-    comparison = _load_comparison()
     protocol = comparison.DisturbanceProtocol()
     box, grid = comparison.run_comparison(protocol=protocol)
     summary = comparison.summarize_disturbance(box, grid, protocol.slip_threshold_m)

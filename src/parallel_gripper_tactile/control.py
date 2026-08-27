@@ -1,4 +1,4 @@
-"""MIT-style torque control for MuJoCo motor actuators."""
+"""用于 MuJoCo 电机执行器的 MIT 风格力矩控制。"""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from .profiles import GripperProfile, MITControl, NormalForceControl
 
 @dataclass(frozen=True, slots=True)
 class MITControlCommand:
-    """One saturated MIT torque command and the state used to compute it."""
+    """一个经过饱和处理的 MIT 力矩命令，以及用于计算它的状态。"""
 
     target_position: float
     target_velocity: float
@@ -23,7 +23,7 @@ class MITControlCommand:
 
 
 class MITTorqueController:
-    """Apply ``kp*(p_des-p) + kd*(v_des-v) + t_ff`` to a motor actuator."""
+    """将 ``kp*(p_des-p) + kd*(v_des-v) + t_ff`` 施加到电机执行器。"""
 
     def __init__(
         self,
@@ -33,7 +33,7 @@ class MITTorqueController:
         joint_name: str,
         config: MITControl,
     ) -> None:
-        """Resolve model indices and reject limits inconsistent with the MJCF."""
+        """解析模型索引，并拒绝与 MJCF 不一致的限值。"""
         self._actuator_id = model.actuator(actuator_name).id
         joint_id = model.joint(joint_name).id
         self._qpos_address = int(model.jnt_qposadr[joint_id])
@@ -55,7 +55,7 @@ class MITTorqueController:
         *,
         name_prefix: str = "",
     ) -> "MITTorqueController":
-        """Build a controller from a profile and an optional attached-model prefix."""
+        """基于 profile 和一个可选的附加模型前缀构建控制器。"""
         if profile.control_mode != "mit_torque" or profile.mit is None:
             raise ValueError("profile does not define MIT torque control")
         return cls(
@@ -67,7 +67,7 @@ class MITTorqueController:
 
     @property
     def actuator_id(self) -> int:
-        """Return the compiled actuator index controlled by this instance."""
+        """返回此实例所控制的编译后执行器索引。"""
         return self._actuator_id
 
     def apply(
@@ -78,7 +78,7 @@ class MITTorqueController:
         target_velocity: float = 0.0,
         feedforward_torque: float | None = None,
     ) -> MITControlCommand:
-        """Compute, saturate, write, and return one MIT torque command."""
+        """计算、饱和、写入并返回一个 MIT 力矩命令。"""
         config = self._config
         desired_position = float(np.clip(target_position, config.p_min, config.p_max))
         desired_velocity = float(np.clip(target_velocity, -config.v_max, config.v_max))
@@ -107,7 +107,7 @@ class MITTorqueController:
 
 @dataclass(frozen=True, slots=True)
 class NormalForceControlCommand:
-    """One hybrid approach/force-control command and its observed force state."""
+    """一个混合的接近/力控制命令及其观察到的力状态。"""
 
     state: str
     target_force_n: float
@@ -119,14 +119,14 @@ class NormalForceControlCommand:
 
 
 class NormalForceController:
-    """Approach in position control, then track summed taxel normal force."""
+    """先以位置控制接近，再跟踪相加后的 taxel 法向力。"""
 
     def __init__(
         self,
         inner: MITTorqueController,
         config: NormalForceControl,
     ) -> None:
-        """Create the simple-pid outer loop and contact state machine."""
+        """创建 simple-pid 外环与接触状态机。"""
         self._inner = inner
         self._config = config
         adjustment = config.max_position_adjustment
@@ -149,7 +149,7 @@ class NormalForceController:
         *,
         name_prefix: str = "",
     ) -> "NormalForceController":
-        """Build the outer force loop and its MIT inner loop from one profile."""
+        """基于一个 profile 构建外环力环路及其 MIT 内环。"""
         if profile.normal_force is None:
             raise ValueError("profile does not define normal-force control")
         return cls(
@@ -159,16 +159,16 @@ class NormalForceController:
 
     @property
     def actuator_id(self) -> int:
-        """Return the motor actuator controlled by the inner MIT loop."""
+        """返回由内环 MIT 环路控制的电机执行器。"""
         return self._inner.actuator_id
 
     @property
     def state(self) -> str:
-        """Return ``approach`` or ``force_tracking``."""
+        """返回 ``approach`` 或 ``force_tracking``。"""
         return self._state
 
     def reset(self) -> None:
-        """Return to approach mode and clear filter, counters, and PID history."""
+        """返回接近模式，并清除滤波器、计数器和 PID 历史。"""
         self._state = "approach"
         self._filtered_force: float | None = None
         self._contact_position = 0.0
@@ -188,11 +188,10 @@ class NormalForceController:
         dt: float,
         approach_velocity: float = 0.0,
     ) -> NormalForceControlCommand:
-        """Advance contact detection/force tracking and write one motor torque.
+        """推进接触检测/力跟踪，并写入一个电机力矩。
 
-        Contact requires both fingertips to remain above the configured threshold.
-        Once confirmed, simple-pid adjusts the detected contact position and the
-        existing MIT controller converts that position target into motor torque.
+        接触要求两个指尖都保持在配置阈值之上。一旦确认，simple-pid 会
+        调整检测到的接触位置，现有 MIT 控制器再将该位置目标转换为电机力矩。
         """
         if dt <= 0:
             raise ValueError("dt must be positive")
@@ -207,9 +206,7 @@ class NormalForceController:
         if self._state == "approach":
             both_contacting = min(left_normal_force_n, right_normal_force_n)
             self._contact_steps = (
-                self._contact_steps + 1
-                if both_contacting >= config.contact_threshold_n
-                else 0
+                self._contact_steps + 1 if both_contacting >= config.contact_threshold_n else 0
             )
             mit = self._inner.apply(
                 data,
@@ -230,9 +227,7 @@ class NormalForceController:
         else:
             both_released = max(left_normal_force_n, right_normal_force_n)
             self._release_steps = (
-                self._release_steps + 1
-                if both_released <= config.release_threshold_n
-                else 0
+                self._release_steps + 1 if both_released <= config.release_threshold_n else 0
             )
             if self._release_steps >= config.release_confirm_steps:
                 self.reset()

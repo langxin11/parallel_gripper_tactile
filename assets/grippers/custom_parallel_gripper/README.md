@@ -32,33 +32,31 @@ uv run -m mujoco.viewer \
 运行本模型的基础验证：
 
 ```bash
-uv run python assets/grippers/custom_parallel_gripper/verify_mujoco.py
+uv run pgt validate configs/custom_parallel_gripper.yaml
 ```
 
 运行项目级模型检查：
 
 ```bash
-uv run pgt-check configs/custom_parallel_gripper.toml
+uv run pgt validate configs/custom_parallel_gripper.yaml
 ```
 
 以静态方块压住某个 Pillar，并在 Viewer 中查看 taxel site 坐标轴、接触点和三维接触力：
 
 ```bash
-.venv/bin/python scripts/run_custom_gripper_tactile_demo.py --taxel left:11 --auto-close
+uv run pgt view grasp --profile configs/custom_parallel_gripper.yaml
 ```
 
 无界面验证右侧对应单元的正压缩力：
 
 ```bash
-.venv/bin/python scripts/run_custom_gripper_tactile_demo.py \
-  --taxel right:11 --auto-close --no-viewer
+uv run pgt run grasp --profile configs/custom_parallel_gripper.yaml
 ```
 
 以受控世界系切向位移验证剪切通道（`y` 对应局部 `Fy`，`z` 对应局部 `Fx`）：
 
 ```bash
-.venv/bin/python scripts/run_custom_gripper_tactile_demo.py \
-  --taxel left:11 --auto-close --shear-axis y --shear-distance 0.002
+uv run pgt compare contact --profile configs/custom_parallel_gripper.yaml
 ```
 
 切向测试使用“自由方块 + mocap weld”夹具提供规定运动；它用于确认剪切方向与通道映射，
@@ -186,12 +184,12 @@ uv run onshape-to-robot-mujoco assets/grippers/custom_parallel_gripper
 - 两个闭环各有中心点和 `_z` 点约束，共 4 条 equality。
 - 18 个 Pillars geom 与 4 个外壳 mesh 启用碰撞；motor/crank 不参与碰撞。
 - 有 18 个 `left_taxel_*` / `right_taxel_*` site，且无独立 `frame_freejoint`。
-- `verify_mujoco.py` 通过。运行 `pgt-check` 前，先执行导出后处理，为 18 个 Pillars collision geom 赋予稳定名称。
+- 运行 `pgt validate` 前，先执行导出后处理，为 18 个 Pillars collision geom 赋予稳定名称。
 - 低、中、高三个目标位置均无非有限状态、明显跳变或严重跟踪误差。
 
 ## 已知事项与排障
 
-- 重新导出会覆盖主 XML 的导出后处理结果；应再次执行 `scripts/prepare_onshape_export.py`，并确认闭环 `_z` 约束仍存在。
+- 重新导出会覆盖主 XML 的导出后处理结果；应再次执行 `pgt assets prepare-onshape`，并确认闭环 `_z` 约束仍存在。
 - 模型发散或闭环松软时，先检查 Mate Connector 的原点、Z 轴和默认姿态，再调节 equality 的 `solref` / `solimp`；不要一开始就极端增大刚度。
 - Onshape 中可动但导出后卡住时，优先检查轴向和 mate limits 是否包含默认姿态。
 - 出现额外自由度时，检查转子与曲柄、滑台与指体，以及 `frame` 与 `base` 是否正确固定或合并。

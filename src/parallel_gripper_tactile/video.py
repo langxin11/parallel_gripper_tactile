@@ -1,4 +1,4 @@
-"""Shared offscreen-rendering helpers for the disturbance video scripts."""
+"""供扰动视频脚本共享的离屏渲染辅助函数。"""
 
 from __future__ import annotations
 
@@ -11,13 +11,13 @@ import numpy as np
 
 
 def add_arrow_to_scene(scene, base_idx: int, origin, force, scale: float) -> int:
-    """Write a native MuJoCo ``mjGEOM_ARROW`` force arrow into a free scene slot.
+    """将一个原生 MuJoCo ``mjGEOM_ARROW`` 力箭头写入空闲的 scene 槽。
 
-    ``mjv_connector`` builds a complete arrow with a conical head between
-    ``from_`` and ``to`` and consumes one scene slot.
+    ``mjv_connector`` 会在 ``from_`` 与 ``to`` 之间构建一个带锥形箭头的
+    完整箭头，并占用一个 scene 槽。
 
     Returns:
-        The number of slots consumed (0 when the force is negligible).
+        被占用的槽数量（当力可忽略时返回 0）。
     """
     magnitude = float(np.linalg.norm(force))
     if magnitude < 1e-9:
@@ -32,11 +32,11 @@ def add_arrow_to_scene(scene, base_idx: int, origin, force, scale: float) -> int
     mujoco.mjv_connector(
         slot,
         type=mujoco.mjtGeom.mjGEOM_ARROW,
-        width=0.006,  # shaft radius
+        width=0.006,  # 箭杆半径
         from_=origin.astype(np.float64),
         to=arrow_tip.astype(np.float64),
     )
-    # matid=-1 makes MuJoCo use the geom's own rgba instead of a model material.
+    # matid=-1 让 MuJoCo 使用几何体自身的 rgba，而不是模型材质。
     slot.matid = -1
     slot.rgba = np.array([1.0, 0.08, 0.08, 0.92], dtype=np.float32)
     slot.emission = 0.15
@@ -51,7 +51,7 @@ def add_arrow_to_scene(scene, base_idx: int, origin, force, scale: float) -> int
 
 
 def save_pixels(pixels: np.ndarray, path: Path) -> None:
-    """Save an RGB render to a PNG, falling back to Matplotlib without Pillow."""
+    """将 RGB 渲染保存为 PNG，在没有 Pillow 时回退到 Matplotlib。"""
     try:
         from PIL import Image
 
@@ -75,13 +75,13 @@ def save_pixels(pixels: np.ndarray, path: Path) -> None:
 
 
 def encode_video(frames_dir: Path, output: Path, fps: int, width: int, height: int) -> None:
-    """Encode a numbered PNG frame sequence into an MP4 with ffmpeg or imageio."""
+    """使用 ffmpeg 或 imageio 将编号的 PNG 帧序列编码为 MP4。"""
     if shutil.which("ffmpeg"):
         subprocess.run(
             [
                 "ffmpeg",
                 "-y",
-                "-r",
+                "-framerate",
                 str(fps),
                 "-i",
                 str(frames_dir / "frame_%06d.png"),
