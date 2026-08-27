@@ -39,7 +39,7 @@ def test_custom_scene_fixes_reserved_base_and_keeps_free_cube() -> None:
     assert 2.0 * cube_size[1] > 0.024
     assert 2.0 * cube_size[2] > 0.024
     pillar_id = model.geom("gripper/left_taxel_geom_11").id
-    assert np.allclose(model.geom_solref[pillar_id], (-6000.0, -10.0))
+    assert np.allclose(model.geom_solref[pillar_id], (-1200.0, -10.0))
     assert np.allclose(model.geom_solimp[pillar_id], (0.75, 0.95, 0.0025, 0.5, 2.0))
 
 

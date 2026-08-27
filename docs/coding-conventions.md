@@ -13,7 +13,7 @@
 | 行内 `#` 注释 | 中文 | `# 只在样本时钟到点时采样，避免重复记录。` |
 | 代码标识符、API、类/函数名 | 英文 | `SimulationSession`、`read()`、`sample_period_s` |
 | 命令行参数与子命令 | 英文 | `pgt run grasp`、`--profile`、`--video` |
-| 物理量符号、单位、`solref`/`solimp` 等求解器参数 | 英文 | `Fz`、`solref="-6000 -10"` |
+| 物理量符号、单位、`solref`/`solimp` 等求解器参数 | 英文 | `Fz`、`solref="-1200 -10"` |
 | MuJoCo/资产对象名 | 英文 | `left_taxel_geom_00`、`touch_grid` |
 
 原则：中文读起来是"这句话什么意思"，英文标识符是"程序里就是这个名字"。两者不混写。

@@ -9,5 +9,5 @@ uv run pgt run grasp --profile configs/custom_parallel_gripper.yaml
 uv run pgt view grasp --profile configs/custom_parallel_gripper.yaml
 ```
 
-Pillars 使用保留的等效接触参数 `solref="-6000 -10"` 与
+Pillars 使用保留的等效接触参数 `solref="-1200 -10"` 与
 `solimp="0.75 0.95 0.0025 0.5 2"`；它们不是独立的硅胶有限元模型。

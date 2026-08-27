@@ -140,7 +140,7 @@ J_F(q)=\frac{\partial F_\Sigma}{\partial q}
 进而得到 \(\hat J_F\)，或在已知 \(J_c(q)\) 后反算 \(\hat k_{\mathrm{pair}}\)。
 这首先辨识的是“Pillar—物体—机构”组合的等效刚度；只有在 Pillar、机构和装夹柔顺性已经独立标定时，才能可靠反推物体本身的 \(k_{\mathrm{obj}}\)。
 
-当前 MuJoCo Pillar 使用 `solref="-6000 -10"` 和
+当前 MuJoCo Pillar 使用 `solref="-1200 -10"` 和
 `solimp="0.75 0.95 0.0025 0.5 2"`。目标方块也声明了
 `solref="0.015 1"`、`solimp="0.90 0.95 0.002"` 的接触参数。
 动态生成的方块—Pillar 接触对中，Pillar 的负值 `solref` 使用直接格式并主导该对的 `solref`；

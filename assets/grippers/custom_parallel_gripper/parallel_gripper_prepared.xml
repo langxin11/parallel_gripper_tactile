@@ -11,8 +11,8 @@
         <geom group="3" />
       </default>
       <default class="pillar_collision">
-        <!-- Equivalent compliant Pillar contact calibrated from 15 N / 2.5 mm. -->
-        <geom group="3" friction="0.8 0.02 0.001" solref="-6000 -10"
+        <!-- Equivalent compliant Pillar contact near PapillArray reported 1.174 N/mm. -->
+        <geom group="3" friction="0.8 0.02 0.001" solref="-1200 -10"
               solimp="0.75 0.95 0.0025 0.5 2" />
       </default>
     </default>

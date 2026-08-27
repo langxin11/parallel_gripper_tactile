@@ -112,6 +112,25 @@ MJCF 执行器也限制为 `±4 N·m`；连续或长时仿真仍应按额定 `3.
 
 夹持接触来自左右手指的 Pillars STL。左右各有 9 个有效碰撞 mesh，共 18 个；另有 base、MGN9 rail、stator 和 bracket 四个外壳碰撞 mesh。motor、crank 与传动标准件只保留可视化，避免内部传动碰撞。导出配置通过以下规则持久化碰撞白名单：
 
+同一指尖的 3×3 taxel site 不是共面阵列，而是随 Pillars 顶面形成轻微凸起：四角 site
+高度最低，边中间高约 0.30 mm，中心最高且比四角高约 0.50 mm。以左指尖局部 site 为例，
+`left_taxel_00/02/20/22` 的 `z=0.03295`，`left_taxel_01/10/12/21` 的 `z=0.03325`，
+`left_taxel_11` 的 `z=0.03345`；右指尖保持同样的中心高、四周低规律。
+
+该结构对应 Contactile PapillArray 类传感器：Contactile 官方说明其触觉阵列由可独立偏转的
+soft silicone pillars 组成，可在每个阵列单元测量 3D displacement、3D force 和 vibration
+（见 [Contactile technology](https://contactile.com/novel-optical-sensing-technology/) 与
+[Contactile products](https://contactile.com/products/)）。公开产品页给出的 PapillArray
+规格为 3×3 阵列、pillar 直径 6 mm、高度 4.2 mm、间距 7 mm、硅胶 Shore A40、Z 向位移
+量程 +2.5 mm、Z 向力量程 15 N（见
+[Scivaro PapillArray specs](https://www.scivaro.com/index.php?c=show&id=454)）。若按
+`15 N / 2.5 mm` 换算，`6000 N/m` 可作为偏硬上界；若 15 N 是整个 3×3 阵列的总量程，
+单个 pillar 的等效法向刚度约为 667 N/m。PapillArray 原型论文报告过单 pillar 弹簧常数
+约 `1.174 N/mm = 1174 N/m`（见
+[PapillArray slip sensor paper](https://www.sciencedirect.com/science/article/pii/S0924424717313419)）。
+当前 MJCF 采用 `solref="-1200 -10"`，对应约 `1200 N/m`，并将力外环积分增益调到
+`ki=0.100` 以保持 `8 N` 目标法向力下的跟踪精度。
+
 ```json
 "ignore": {
   "*": "collision",

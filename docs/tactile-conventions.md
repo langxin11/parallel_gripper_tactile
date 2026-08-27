@@ -38,6 +38,21 @@ taxel 合力仅代表这些离散触觉单元传递的力，不等同于整个 p
 `mj_contactForce` 读取接触坐标系力，转换到世界系后再转换到对应触觉 site 局部系，并按
 `left/right_taxel_geom_00` 至 `22` 聚合。
 
+Pillars 的 3×3 触觉面不是严格共面：中心 taxel 最高，四个边中间次之，四角最低。当前
+MJCF 中中心比四角高约 0.50 mm，边中间比四角高约 0.30 mm。这个几何形状会影响最先接触
+的 taxel 顺序，不能把它当作完全平整的 3×3 平面压力阵列。
+
+该指尖按 Contactile PapillArray 类传感器处理。公开资料说明 PapillArray 是 soft silicone
+pillar 阵列，每个阵列单元可测 3D displacement、3D force 和 vibration；产品规格可参考
+[Contactile technology](https://contactile.com/novel-optical-sensing-technology/)、
+[Contactile products](https://contactile.com/products/) 和
+[Scivaro PapillArray specs](https://www.scivaro.com/index.php?c=show&id=454)。按
+`15 N / 2.5 mm` 的 Z 向量程换算，`6000 N/m` 可视为偏硬上界；若 15 N 对应整阵列总量程，
+单 pillar 约为 667 N/m。PapillArray 原型论文报告的单 pillar 弹簧常数约为
+`1.174 N/mm`，即 `1174 N/m`
+（[PapillArray slip sensor paper](https://www.sciencedirect.com/science/article/pii/S0924424717313419)）。
+当前 MJCF 采用接近该公开实测值的 `1200 N/m`。
+
 因此同一 Pillar 的多个接触点会累加；无接触单元严格为零。读取器返回
 `ContactTaxelFrame(left, right)`，两个数组均为 `(3, 3, 3)`。
 
