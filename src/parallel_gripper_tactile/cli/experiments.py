@@ -13,6 +13,7 @@ import mujoco
 import typer
 
 from ..experiments.contact_compare import record_contact_ab
+from ..experiments.force_tracking import ForceTrackingTask, run_force_tracking
 from ..experiments.grasp import run_acceptance
 from ..experiments.grasp_video import record_custom_grasp_video
 from ..profiles import load_profile
@@ -135,6 +136,65 @@ def run_grasp(
     table.add_row("Hold displacement", f"{result.hold_displacement_m * 1000:.3f} mm")
     table.add_row("Disturbance displacement", f"{result.disturbance_displacement_m * 1000:.3f} mm")
     table.add_row("Force RMSE", f"{result.force_tracking_rmse_n:.3f} N")
+    state(context).console.print(table)
+    state(context).console.print(f"Run: [cyan]{run.path}[/cyan]")
+    if not result.passed:
+        raise typer.Exit(1)
+
+
+@run_app.command("force-track")
+def run_force_track(
+    context: typer.Context,
+    profile: Annotated[Path, typer.Option("--profile", exists=True, dir_okay=False)],
+    task: Annotated[Path, typer.Option("--task", exists=True, dir_okay=False)],
+    output_root: Annotated[Path, typer.Option("--output-root", file_okay=False)] = Path("outputs"),
+    run_name: Annotated[str | None, typer.Option()] = None,
+) -> None:
+    """运行 waypoint 目标法向力跟踪实验。"""
+    try:
+        tracking_task = ForceTrackingTask.load(task)
+        run = _run_directory(
+            profile,
+            "force-track",
+            output_root,
+            run_name,
+            {
+                "task": str(task),
+                "task_name": tracking_task.name,
+                "tracking_duration_s": tracking_task.reference.duration_s,
+            },
+        )
+        task_snapshot = run.artifact_path("task.yaml")
+        task_snapshot.write_bytes(task.read_bytes())
+        run.register_artifact(task_snapshot)
+        csv_path = run.artifact_path("trace.csv")
+        plot_path = run.artifact_path("plot.png")
+        result = run_force_tracking(
+            profile,
+            task=tracking_task,
+            output_csv=csv_path,
+            output_plot=plot_path,
+        )
+        run.register_artifact(csv_path)
+        run.register_artifact(plot_path)
+        metrics_path = run.artifact_path("metrics.json")
+        metrics_path.write_text(
+            json.dumps(asdict(result), indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        run.register_artifact(metrics_path)
+        run.finalize()
+    except Exception as error:
+        fail(context, error, title="Force tracking experiment failed")
+    table = Table(title="Force tracking")
+    table.add_column("Result")
+    table.add_column("Value")
+    table.add_row("Passed", "PASS" if result.passed else "FAIL")
+    table.add_row("Contact time", f"{result.contact_time_s:.3f} s")
+    table.add_row("Tracking start", f"{result.tracking_start_time_s:.3f} s")
+    table.add_row("RMSE", f"{result.rmse_n:.3f} N")
+    table.add_row("MAE", f"{result.mae_n:.3f} N")
+    table.add_row("Peak error", f"{result.peak_abs_error_n:.3f} N")
+    table.add_row("Torque saturation", f"{100.0 * result.torque_saturation_ratio:.1f}%")
     state(context).console.print(table)
     state(context).console.print(f"Run: [cyan]{run.path}[/cyan]")
     if not result.passed:

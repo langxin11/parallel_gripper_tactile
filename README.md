@@ -11,6 +11,7 @@ uv run pgt validate configs/robotiq_2f85.yaml
 uv run pgt validate configs/custom_parallel_gripper.yaml
 uv run pgt run demo --profile configs/robotiq_2f85.yaml
 uv run pgt run grasp --profile configs/custom_parallel_gripper.yaml
+uv run pgt run force-track --profile configs/custom_parallel_gripper.yaml --task configs/force_tracking/default_waypoints.yaml
 ```
 
 Profile 仅使用 YAML。它们是不可变的 Pydantic v2 模型：未知字段、非法控制限幅、空/多文档输入、
@@ -25,6 +26,7 @@ pgt assets generate-touch-grid
 pgt assets prepare-onshape INPUT OUTPUT
 pgt run demo --profile PROFILE
 pgt run grasp --profile PROFILE [--video]
+pgt run force-track --profile PROFILE --task TASK.yaml
 pgt compare tactile --left-profile A --right-profile B
 pgt compare contact --profile PROFILE
 pgt view taxels --profile PROFILE

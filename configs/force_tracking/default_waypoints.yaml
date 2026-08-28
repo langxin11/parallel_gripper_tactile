@@ -1,0 +1,24 @@
+schema_version: 1
+name: default_waypoint_force_tracking
+
+approach:
+  duration_s: 1.0
+  timeout_s: 3.0
+  settle_after_contact_s: 0.2
+  feedforward_force_n: 2.0
+
+reference:
+  interpolation: smoothstep
+  waypoints:
+    - {t_s: 0.0, force_n: 2.0}
+    - {t_s: 0.5, force_n: 2.0}
+    - {t_s: 1.5, force_n: 8.0}
+    - {t_s: 2.5, force_n: 5.0}
+    - {t_s: 3.5, force_n: 10.0}
+    - {t_s: 4.5, force_n: 8.0}
+
+metrics:
+  ignore_initial_s: 0.2
+
+control_period_s: 0.002
+release_support_on_tracking: false

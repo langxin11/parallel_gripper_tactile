@@ -7,6 +7,7 @@ uv sync
 uv run pgt validate configs/robotiq_2f85.yaml
 uv run pgt validate configs/custom_parallel_gripper.yaml
 uv run pgt run demo --profile configs/robotiq_2f85.yaml
+uv run pgt run force-track --profile configs/custom_parallel_gripper.yaml --task configs/force_tracking/default_waypoints.yaml
 </code></pre>
 
 参见[常用工作流](workflows.md)与[项目架构](architecture.md)。

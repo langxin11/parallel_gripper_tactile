@@ -19,6 +19,7 @@ def test_root_and_subcommand_help_are_available() -> None:
     for command in ("validate", "assets", "run", "compare", "view", "runs"):
         assert command in result.output
     assert RUNNER.invoke(app, ["run", "grasp", "--help"]).exit_code == 0
+    assert RUNNER.invoke(app, ["run", "force-track", "--help"]).exit_code == 0
     assert RUNNER.invoke(app, ["compare", "tactile", "--help"]).exit_code == 0
 
 

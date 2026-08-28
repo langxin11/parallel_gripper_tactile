@@ -11,6 +11,9 @@ uv run pgt compare tactile \
   --left-profile configs/robotiq_2f85_box.yaml \
   --right-profile configs/robotiq_2f85_touch_grid.yaml
 uv run pgt run grasp --profile configs/custom_parallel_gripper.yaml --video
+uv run pgt run force-track \
+  --profile configs/custom_parallel_gripper.yaml \
+  --task configs/force_tracking/default_waypoints.yaml
 uv run pgt compare contact --profile configs/custom_parallel_gripper.yaml
 </code></pre>
 
