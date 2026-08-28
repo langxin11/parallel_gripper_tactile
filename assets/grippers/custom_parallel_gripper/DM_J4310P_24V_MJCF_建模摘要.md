@@ -278,8 +278,26 @@ F_n = \sum_i F_{n,i},\qquad
 p_{des}=p_{contact}+\operatorname{clip}(\Delta p,-\Delta p_{max},\Delta p_{max})
 ```
 
+当前控制器还使用曲柄滑块开度公式计算闭合行程雅可比 \(J_c(q)\)，并在线估计
+\(\hat K_c\simeq \Delta F_n/\Delta c\)。力跟踪阶段的实际位置修正为：
+
+```math
+\Delta p =
+\operatorname{clip}\left(
+\alpha\frac{F_{target}-F_n}{\hat K_cJ_c(q)}
++ \Delta p_{PID},
+-\Delta p_{max},\Delta p_{max}
+\right)
+```
+
+同时加入准静态力矩前馈：
+
+```math
+t_{ff}=\beta\frac{F_{target}}{2}J_c(q)
+```
+
 总法向力先经过一阶低通滤波。`simple-pid` 的输出限幅同时实现积分抗饱和，随后仍由
-MIT 内环和 `T_MAX` 执行最终力矩保护。当前默认 `F_target=8 N`，配置位于
+MIT 内环、达妙协议量化和 `T_MAX` 执行最终力矩保护。当前默认 `F_target=8 N`，配置位于
 `configs/custom_parallel_gripper.yaml` 的 `control.force`。
 
 ---

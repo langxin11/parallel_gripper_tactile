@@ -607,6 +607,26 @@ def run_acceptance(
                 "filtered_normal_force_n": force_command.filtered_force_n,
                 "normal_force_error_n": force_command.force_error_n,
                 "force_position_adjustment_rad": force_command.position_adjustment,
+                "stiffness_position_adjustment_rad": (
+                    force_command.stiffness_position_adjustment
+                ),
+                "force_feedforward_torque_n_m": force_command.force_feedforward_torque,
+                "mit_feedforward_torque_n_m": motor_command.feedforward_torque,
+                "estimated_contact_stiffness_n_per_m": (
+                    force_command.estimated_contact_stiffness_n_per_m
+                    if force_command.estimated_contact_stiffness_n_per_m is not None
+                    else math.nan
+                ),
+                "closure_jacobian_m_per_rad": (
+                    force_command.closure_jacobian_m_per_rad
+                    if force_command.closure_jacobian_m_per_rad is not None
+                    else math.nan
+                ),
+                "aperture_m": (
+                    force_command.aperture_m
+                    if force_command.aperture_m is not None
+                    else math.nan
+                ),
                 "applied_world_fy": float(data.xfrc_applied[cube_body_id, 1]),
                 "cube_y": float(position[1]),
                 "cube_z": float(position[2]),

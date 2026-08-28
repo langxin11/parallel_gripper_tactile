@@ -2,18 +2,32 @@
 
 from .contact_taxels import ContactTaxelFrame, ContactTaxelReader
 from .control import (
+    ContactStiffnessEstimator,
+    CrankSliderKinematics,
     MITControlCommand,
     MITTorqueController,
     NormalForceControlCommand,
     NormalForceController,
 )
-from .profiles import GripperProfile, MITControl, NormalForceControl, TactileLayout, load_profile
+from .profiles import (
+    ContactStiffnessControl,
+    CrankSliderGeometry,
+    GripperProfile,
+    MITControl,
+    NormalForceControl,
+    TactileLayout,
+    load_profile,
+)
 from .protocols import DisturbanceProtocol
 from .timing import RealtimePacer, SimulationTimer
 
 __all__ = [
     "ContactTaxelFrame",
     "ContactTaxelReader",
+    "ContactStiffnessControl",
+    "ContactStiffnessEstimator",
+    "CrankSliderGeometry",
+    "CrankSliderKinematics",
     "DisturbanceProtocol",
     "GripperProfile",
     "MITControl",

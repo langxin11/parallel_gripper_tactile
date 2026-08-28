@@ -79,6 +79,38 @@ class MITControl(_FrozenModel):
         return self
 
 
+class CrankSliderGeometry(_FrozenModel):
+    """自研曲柄滑块夹爪的开度几何参数。"""
+
+    theta0_rad: FiniteFloat
+    crank_radius_m: Annotated[FiniteFloat, Field(gt=0)]
+    link_length_m: Annotated[FiniteFloat, Field(gt=0)]
+    offset_m: Annotated[FiniteFloat, Field(ge=0)]
+
+
+class ContactStiffnessControl(_FrozenModel):
+    """在线接触刚度估计和前馈控制参数。"""
+
+    enabled: bool = True
+    initial_n_per_m: Annotated[FiniteFloat, Field(gt=0)]
+    min_n_per_m: Annotated[FiniteFloat, Field(gt=0)]
+    max_n_per_m: Annotated[FiniteFloat, Field(gt=0)]
+    filter_alpha: Annotated[FiniteFloat, Field(gt=0, le=1)]
+    min_delta_closure_m: Annotated[FiniteFloat, Field(gt=0)]
+    min_delta_force_n: Annotated[FiniteFloat, Field(gt=0)]
+    position_feedforward_gain: Annotated[FiniteFloat, Field(ge=0, le=1)] = 0.25
+    torque_feedforward_gain: Annotated[FiniteFloat, Field(ge=0, le=1)] = 1.0
+
+    @model_validator(mode="after")
+    def validate_stiffness_limits(self) -> "ContactStiffnessControl":
+        """要求刚度估计范围有效，初始值位于范围内。"""
+        if self.min_n_per_m >= self.max_n_per_m:
+            raise ValueError("min_n_per_m must be smaller than max_n_per_m")
+        if not self.min_n_per_m <= self.initial_n_per_m <= self.max_n_per_m:
+            raise ValueError("initial_n_per_m must lie within stiffness limits")
+        return self
+
+
 class NormalForceControl(_FrozenModel):
     """外环法向力跟踪参数。"""
 
@@ -99,12 +131,16 @@ class NormalForceControl(_FrozenModel):
         Annotated[FiniteFloat, Field(ge=0)], Annotated[FiniteFloat, Field(ge=0)]
     ] = (0.0, 0.0)
     sensor_noise_seed: Annotated[int, Field(ge=0)] = 0
+    geometry: CrankSliderGeometry | None = None
+    stiffness: ContactStiffnessControl | None = None
 
     @model_validator(mode="after")
-    def validate_release_threshold(self) -> "NormalForceControl":
-        """要求释放阈值保持在接触阈值之内。"""
+    def validate_force_control(self) -> "NormalForceControl":
+        """要求释放阈值和可选刚度估计配置相互一致。"""
         if self.release_threshold_n > self.contact_threshold_n:
             raise ValueError("release_threshold_n must not exceed contact_threshold_n")
+        if self.stiffness is not None and self.stiffness.enabled and self.geometry is None:
+            raise ValueError("geometry is required when contact stiffness estimation is enabled")
         return self
 
 
@@ -307,6 +343,8 @@ def load_profile(path: str | Path, *, repository_root: str | Path | None = None)
 __all__ = [
     "ControlLayout",
     "GripperProfile",
+    "ContactStiffnessControl",
+    "CrankSliderGeometry",
     "MITControl",
     "MITTorqueControl",
     "Mount",

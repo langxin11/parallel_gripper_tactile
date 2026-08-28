@@ -67,6 +67,14 @@ def test_custom_profile_defines_bounded_mit_torque_control() -> None:
         (0.0033333333, 0.01)
     )
     assert profile.normal_force.sensor_noise_seed == 20260814
+    assert profile.normal_force.geometry is not None
+    assert profile.normal_force.geometry.crank_radius_m == pytest.approx(0.03)
+    assert profile.normal_force.geometry.link_length_m == pytest.approx(0.04)
+    assert profile.normal_force.geometry.offset_m == pytest.approx(0.03 / 2**0.5)
+    assert profile.normal_force.stiffness is not None
+    assert profile.normal_force.stiffness.initial_n_per_m == pytest.approx(6000.0)
+    assert profile.normal_force.stiffness.position_feedforward_gain == pytest.approx(0.25)
+    assert profile.normal_force.stiffness.torque_feedforward_gain == pytest.approx(1.0)
 
 
 def test_touch_grid_profile_reads_dimensions_from_plugin_configuration() -> None:

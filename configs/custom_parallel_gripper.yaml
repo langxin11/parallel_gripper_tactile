@@ -35,6 +35,21 @@ control:
     sensor_taxel_normal_noise_std_n: [0.0066666667, 0.0133333333]
     sensor_taxel_shear_noise_std_n: [0.0033333333, 0.0100000000]
     sensor_noise_seed: 20260814
+    geometry:
+      theta0_rad: 0.7853981633974483
+      crank_radius_m: 0.03
+      link_length_m: 0.04
+      offset_m: 0.021213203435596423
+    stiffness:
+      enabled: true
+      initial_n_per_m: 6000.0
+      min_n_per_m: 500.0
+      max_n_per_m: 50000.0
+      filter_alpha: 0.15
+      min_delta_closure_m: 0.00005
+      min_delta_force_n: 0.05
+      position_feedforward_gain: 0.25
+      torque_feedforward_gain: 1.0
 
 mount:
   pos: [0.0, 0.0, 0.18]

@@ -6,7 +6,13 @@ import mujoco
 import numpy as np
 import pytest
 
-from parallel_gripper_tactile import MITTorqueController, NormalForceController, load_profile
+from parallel_gripper_tactile import (
+    ContactStiffnessEstimator,
+    CrankSliderKinematics,
+    MITTorqueController,
+    NormalForceController,
+    load_profile,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -74,6 +80,42 @@ def test_mit_controller_roundtrips_damiao_protocol_quantization() -> None:
     assert data.ctrl[controller.actuator_id] == pytest.approx(expected_torque)
 
 
+def test_crank_slider_kinematics_matches_gripper_aperture_formula() -> None:
+    """曲柄滑块模型复现夹爪开度公式和闭合雅可比。"""
+    profile = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+
+    assert profile.normal_force is not None
+    assert profile.normal_force.geometry is not None
+    kinematics = CrankSliderKinematics.from_config(profile.normal_force.geometry)
+
+    assert kinematics.aperture(0.0) == pytest.approx(0.122426407, abs=1e-9)
+    assert kinematics.aperture(np.pi / 4.0) == pytest.approx(0.078045940, abs=1e-9)
+    assert kinematics.closure_jacobian(np.pi / 4.0) == pytest.approx(0.06, abs=1e-9)
+
+
+def test_contact_stiffness_estimator_tracks_force_over_closure() -> None:
+    """接触刚度估计器用总闭合行程上的 dF/dc 样本更新。"""
+    profile = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+
+    assert profile.normal_force is not None
+    assert profile.normal_force.geometry is not None
+    assert profile.normal_force.stiffness is not None
+    kinematics = CrankSliderKinematics.from_config(profile.normal_force.geometry)
+    estimator = ContactStiffnessEstimator(profile.normal_force.stiffness, kinematics)
+
+    q0 = 0.4
+    q1 = 0.5
+    estimator.reset(position_rad=q0, normal_force_n=1.0)
+    delta_closure = kinematics.closure(q1) - kinematics.closure(q0)
+    estimate = estimator.update(
+        position_rad=q1,
+        normal_force_n=1.0 + 10000.0 * delta_closure,
+    )
+
+    expected = 6000.0 + 0.15 * (10000.0 - 6000.0)
+    assert estimate == pytest.approx(expected)
+
+
 def test_normal_force_controller_switches_after_bilateral_contact() -> None:
     """双侧接触确认后 simple-pid 外环接管，并在完全脱离后恢复接近。"""
     profile = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
@@ -102,6 +144,11 @@ def test_normal_force_controller_switches_after_bilateral_contact() -> None:
     )
     assert command.state == "force_tracking"
     assert command.position_adjustment > 0
+    assert command.stiffness_position_adjustment > 0
+    assert command.force_feedforward_torque > 0
+    assert command.estimated_contact_stiffness_n_per_m == pytest.approx(6000.0)
+    assert command.closure_jacobian_m_per_rad == pytest.approx(0.042426407, abs=1e-9)
+    assert command.aperture_m == pytest.approx(0.122426407, abs=1e-9)
     assert command.mit.target_position < 0.5
 
     assert profile.normal_force is not None
