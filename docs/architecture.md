@@ -2,9 +2,9 @@
 
 仓库使用单向依赖图：
 
-```text
+<pre><code>
 config → tactile / scenes / simulation → experiments / analysis / io → CLI
-```
+</code></pre>
 
 `parallel_gripper_tactile.config` 由 `profiles.py` 中的 Pydantic 模型表示。YAML profile 是
 冻结的（frozen）、拒绝未知字段、按 `mode` 区分控制与触觉后端，并以自身所在目录解析路径。

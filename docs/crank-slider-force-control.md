@@ -18,7 +18,7 @@
 \[
 \theta_0=\frac{\pi}{4},\qquad r=0.03\ \mathrm{m},\qquad
 l=0.04\ \mathrm{m},\qquad e=\frac{0.03}{\sqrt2}\ \mathrm{m},
-\qquad q\in[0,\pi/2].
+\qquad q\in[0,1.7].
 \]
 
 定义从张开初始位置起算的总闭合行程：
@@ -50,6 +50,7 @@ J_c(q)=\frac{\partial c}{\partial q}=
 | \(q=0\) | 122.43 mm | 42.43 mm/rad |
 | \(q=\pi/4\) | 78.05 mm | 60.00 mm/rad |
 | \(q=\pi/2\) | 37.57 mm | 42.43 mm/rad |
+| \(q=1.7\) | 32.25 mm | 30.49 mm/rad |
 
 因此，夹爪在中间开口附近具有更大的位移传动比；固定的关节位置增益会随姿态表现出不同的力控增益。
 
@@ -101,10 +102,16 @@ J_F(q)=\frac{\partial F_\Sigma}{\partial q}
 
 ## 4. 用于目标力控制
 
-令 \(e_F=F_{\mathrm{ref}}-F_\Sigma\)，使用估计值 \(\hat J_F(q)\) 的位置前馈为：
+令 \(e_F=F_{\mathrm{ref}}-F_\Sigma\)，并在线估计总法向力相对总闭合行程的等效刚度：
 
 \[
-\Delta q_{\mathrm{ff}}=\frac{e_F}{\hat J_F(q)}.
+\hat K_c\simeq\frac{\Delta F_\Sigma}{\Delta c}.
+\]
+
+则 \(\hat J_F(q)=\hat K_cJ_c(q)\)，使用估计值的位置前馈为：
+
+\[
+\Delta q_{\mathrm{ff}}=\frac{e_F}{\hat K_cJ_c(q)}.
 \]
 
 建议保留现有力反馈环，并采用受限的组合命令：
@@ -121,13 +128,28 @@ J_F(q)=\frac{\partial F_\Sigma}{\partial q}
 其中 \(\alpha\) 是保守系数，\(\Delta q_{\mathrm{PI}}\) 用来抵消建模误差和稳态偏差。
 对较硬物体，\(\hat J_F\) 较大，位置修正会自动减小以抑制过冲；对较软物体，位置修正会增大以更快达到目标力。
 
+同时使用开度雅可比计算准静态力矩前馈：
+
+\[
+\tau_{\mathrm{ff}}=\beta\frac{F_{\mathrm{ref}}}{2}J_c(q),
+\qquad 0\le\beta\le1.
+\]
+
+该项只作为 MIT `t_ff` 的前馈输入，最终仍由达妙协议量化和 `T_MAX` 限幅保护。
+
 实际实现中应：
 
-1. 对 \(\hat J_F\) 进行低通滤波，并设置正的上下限；
-2. 仅在双侧接触确认、接触柱集合稳定时更新刚度估计；
+1. 对 \(\hat K_c\) 进行低通滤波，并设置正的上下限；
+2. 仅在双侧接触确认后更新刚度估计，接触柱集合变化时应冻结估计；
 3. 在接触建立、脱离、滑移、力突变或接触柱数量变化时冻结估计，并退回保守 PI；
 4. 根据 \(1/\hat J_F\) 对位置式力环的比例和积分增益做调度，保持不同物体上的闭环带宽接近；
 5. 对 \(\Delta q\)、目标位置、MIT 力矩命令分别限幅，保持在 profile 中定义的机械与执行器范围内。
+
+当前实现位于 `src/parallel_gripper_tactile/control.py`：
+
+- `CrankSliderKinematics` 计算 \(\omega(q)\)、\(c(q)\) 和 \(J_c(q)\)；
+- `ContactStiffnessEstimator` 用 secant 样本 \(\Delta F_\Sigma/\Delta c\) 加 EWMA 滤波估计 \(\hat K_c\)；
+- `NormalForceController` 将 \(\Delta q_{\mathrm{ff}}\)、PI 修正和 \(\tau_{\mathrm{ff}}\) 合并后交给 MIT 力矩内环。
 
 ## 5. 刚度辨识与 MuJoCo 模型解释
 

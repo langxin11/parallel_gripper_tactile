@@ -30,7 +30,7 @@
 - 内容较多时，摘要后空一行再写详细说明；详细说明也可用中文。
 - 参数、返回、异常用 Google 节标题，**节标题保持英文字面值**（pydocstyle 依赖）：
 
-  ```python
+  <pre><code class="language-python">
   def sample(self, dt_s: float) -> SampleT:
       """返回一个采样。
 
@@ -40,7 +40,7 @@
       Returns:
           按样本时钟到点时的实验采样。
       """
-  ```
+  </code></pre>
 
   `Args:`、`Returns:`、`Raises:`、`Yields:`、`Note:` 等标题必须原样保留英文，节内文字用中文。
 
@@ -68,11 +68,11 @@ ASCII 标点（例如请求式语气、首词大写、句末英文句号），�
 
 ## 提交前检查
 
-```bash
+<pre><code class="language-bash">
 uv run ruff check .            # 环境缓存异常时：uv run ruff check --no-cache .
 uv run ruff format --check .
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest
-```
+</code></pre>
 
 版本管理、更新日志与发布按 [Keep a Changelog](https://keepachangelog.com/zh-CN/) 与
 [语义化版本](https://semver.org/lang/zh-CN/) 执行。
