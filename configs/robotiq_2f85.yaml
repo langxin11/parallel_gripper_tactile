@@ -2,19 +2,24 @@ schema_version: 1
 name: robotiq_2f85
 
 model:
+  # Robotiq 2F-85 的 3×3 taxel 力传感器版本 MJCF。
   path: ../assets/grippers/robotiq_2f85/2f85_taxels.xml
 
 control:
+  # Robotiq 示例模型使用位置执行器；控制量为模型内定义的 actuator 命令。
   mode: position
   actuator: fingers_actuator
+  # 张开/闭合命令范围，对应 MJCF 中 position actuator 的控制输入。
   open: 0.0
   closed: 220.0
 
 mount:
+  # 抓取场景中夹爪基座的安装位姿。
   pos: [0.0, 0.0, 0.08]
   quat: [0.70710678, 0.70710678, 0.0, 0.0]
 
 tactile:
+  # 使用每个 taxel 独立 force sensor，按行优先读取左右 3×3 阵列。
   mode: force_sensor
   rows: 3
   cols: 3

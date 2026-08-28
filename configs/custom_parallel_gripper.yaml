@@ -2,60 +2,75 @@ schema_version: 1
 name: custom_parallel_gripper
 
 model:
+  # 自研夹爪的已后处理 MJCF：包含稳定 taxel geom 命名和闭环约束。
   path: ../assets/grippers/custom_parallel_gripper/parallel_gripper_prepared.xml
 
 control:
+  # 达妙 MIT 风格控制：外部给位置/速度/力矩目标，仿真内显式计算输出轴力矩。
   mode: mit_torque
   actuator: gripper_drive
+  # 抓取流程默认的张开和闭合位置目标，单位 rad；closed 不是 PMAX，只是常用抓取目标。
   open: 0.05
   closed: 1.30
   mit:
-    # DM-J4310P-24V 资产输出侧机械与电气限幅。
+    # DM-J4310P-24V 当前实机 MIT 编码范围；控制器会按达妙协议位宽量化这些物理量。
     p_min: 0.0
     p_max: 1.7
     v_max: 8.0
     t_max: 4.0
+    # MIT 内环增益：kp/kd 也会按达妙固定范围 0..500 / 0..5 量化。
     kp: 20.0
     kd: 0.63793536
     t_ff: 0.0
   force:
     # 两侧 3×3 指尖 taxel 阵列求和得到的总法向力。
     target_n: 8.0
+    # 双侧法向力都超过阈值并连续保持若干控制步后，才从接近阶段切换到力跟踪。
     contact_threshold_n: 0.15
     contact_confirm_steps: 5
+    # 双侧法向力都低于释放阈值并持续若干控制步后，退出力跟踪并重新接近。
     release_threshold_n: 0.05
     release_confirm_steps: 25
+    # simple-pid 位置修正外环，输出单位 rad；后续会与刚度估计得到的位置前馈相加。
     kp: 0.008
     ki: 0.100
     kd: 0.0
     max_position_adjustment: 0.15
+    # 法向总力测量的一阶低通截止频率。
     filter_cutoff_hz: 20.0
-    # Contactile/PapillArray 20260814 no-load calibration, converted from fingertip-total
-    # sigma to per-taxel sigma by dividing by sqrt(9).
+    # Contactile/PapillArray 20260814 空载标定：从单指 3×3 总力噪声除以 sqrt(9)，得到单 taxel 噪声。
+    # 元组顺序为 [左指, 右指]，单位 N。
     sensor_taxel_normal_noise_std_n: [0.0066666667, 0.0133333333]
     sensor_taxel_shear_noise_std_n: [0.0033333333, 0.0100000000]
     sensor_noise_seed: 20260814
     geometry:
+      # 曲柄滑块开度公式 omega(q) 的结构参数，用于闭合行程雅可比和力矩前馈。
       theta0_rad: 0.7853981633974483
       crank_radius_m: 0.03
       link_length_m: 0.04
       offset_m: 0.021213203435596423
     stiffness:
+      # 在线估计等效接触刚度 K=dF/dc，单位 N/m；估计的是夹爪-触觉层-物体-接触模型组合刚度。
       enabled: true
       initial_n_per_m: 6000.0
       min_n_per_m: 500.0
       max_n_per_m: 50000.0
+      # EWMA 滤波系数；越大响应越快，越小越抗噪。
       filter_alpha: 0.15
+      # secant 样本门限：闭合行程和法向力变化太小时不更新刚度，避免噪声主导估计。
       min_delta_closure_m: 0.00005
       min_delta_force_n: 0.05
+      # 位置前馈用力误差除以 K*Jc；力矩前馈用 F_target/2*Jc，两个增益用于保守缩放。
       position_feedforward_gain: 0.25
       torque_feedforward_gain: 1.0
 
 mount:
+  # 抓取场景中夹爪基座的安装位姿。
   pos: [0.0, 0.0, 0.18]
   quat: [0.7071067811865476, 0.7071067811865476, 0.0, 0.0]
 
 tactile:
+  # 使用可命名的接触 geom 作为触觉 taxel，按行优先读取左右 3×3 阵列。
   mode: contact_geom
   rows: 3
   cols: 3
