@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
+from typing import Protocol
 
 import numpy as np
 from simple_pid import PID
@@ -158,6 +159,27 @@ class MITControlCommand:
     torque: float
 
 
+@dataclass(frozen=True, slots=True)
+class ForceControlObservation:
+    """力控器在一个控制周期内可用的仿真或硬件观测。"""
+
+    time_s: float
+    approach_position: float
+    total_normal_force_n: float
+    left_normal_force_n: float
+    right_normal_force_n: float
+    dt: float
+    approach_velocity: float = 0.0
+
+
+@dataclass(frozen=True, slots=True)
+class ForceControlReference:
+    """力控器在一个控制周期内需要跟踪的参考量。"""
+
+    target_force_n: float
+    approach_feedforward_force_n: float = 0.0
+
+
 class MITTorqueController:
     """将 ``kp*(p_des-p) + kd*(v_des-v) + t_ff`` 施加到电机执行器。"""
 
@@ -288,6 +310,29 @@ class NormalForceControlCommand:
     aperture_m: float | None = None
 
 
+class ForceTrackingController(Protocol):
+    """force tracking 实验调用的最小控制器接口。"""
+
+    @property
+    def actuator_id(self) -> int:
+        """返回由控制器写入命令的执行器索引。"""
+        ...
+
+    def reset(self) -> None:
+        """重置控制器内部状态。"""
+        ...
+
+    def step(
+        self,
+        data,
+        *,
+        observation: ForceControlObservation,
+        reference: ForceControlReference,
+    ) -> NormalForceControlCommand:
+        """使用当前观测和参考量推进一个控制周期。"""
+        ...
+
+
 @dataclass(frozen=True, slots=True)
 class _ForceTrackingStep:
     """力跟踪阶段的一次控制输出及其诊断量。"""
@@ -373,6 +418,26 @@ class NormalForceController:
             self._stiffness_estimator.reset()
         self._pid.set_auto_mode(False)
         self._pid.reset()
+
+    def step(
+        self,
+        data,
+        *,
+        observation: ForceControlObservation,
+        reference: ForceControlReference,
+    ) -> NormalForceControlCommand:
+        """实现 force tracking 实验使用的统一控制器接口。"""
+        return self.apply(
+            data,
+            approach_position=observation.approach_position,
+            total_normal_force_n=observation.total_normal_force_n,
+            left_normal_force_n=observation.left_normal_force_n,
+            right_normal_force_n=observation.right_normal_force_n,
+            dt=observation.dt,
+            approach_velocity=observation.approach_velocity,
+            target_force_n=reference.target_force_n,
+            approach_feedforward_force_n=reference.approach_feedforward_force_n,
+        )
 
     def _force_feedforward_torque(
         self,

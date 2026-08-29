@@ -26,7 +26,7 @@ pgt assets generate-touch-grid
 pgt assets prepare-onshape INPUT OUTPUT
 pgt run demo --profile PROFILE
 pgt run grasp --profile PROFILE [--video]
-pgt run force-track --profile PROFILE --task TASK.yaml
+pgt run force-track --profile PROFILE --task TASK.yaml [--viewer]
 pgt compare tactile --left-profile A --right-profile B
 pgt compare contact --profile PROFILE
 pgt view taxels --profile PROFILE
@@ -35,7 +35,8 @@ pgt runs list
 pgt runs clean (--older-than-days N | --all | --cache) [--apply]
 ```
 
-仿真默认无界面（headless）。`pgt view` 会打开显式的 MuJoCo GUI。Typer 通过
+仿真默认无界面（headless）。`pgt run force-track --viewer` 会在运行 waypoint
+目标力跟踪任务时同步打开 MuJoCo GUI；`pgt view` 会打开静态交互检查场景。Typer 通过
 `pgt --install-completion` 提供 shell 补全。
 
 ## Profiles

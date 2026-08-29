@@ -9,6 +9,8 @@ import pytest
 from parallel_gripper_tactile import (
     ContactStiffnessEstimator,
     CrankSliderKinematics,
+    ForceControlObservation,
+    ForceControlReference,
     MITTorqueController,
     NormalForceController,
     load_profile,
@@ -166,3 +168,34 @@ def test_normal_force_controller_switches_after_bilateral_contact() -> None:
             dt=0.002,
         )
     assert command.state == "approach"
+
+
+def test_normal_force_controller_exposes_force_tracking_interface() -> None:
+    """统一 step 接口可供 force tracking 任务替换不同控制器实现。"""
+    profile = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    model = mujoco.MjModel.from_xml_path(str(profile.model_path))
+    data = mujoco.MjData(model)
+    controller = NormalForceController.from_profile(model, profile)
+
+    command = controller.step(
+        data,
+        observation=ForceControlObservation(
+            time_s=0.0,
+            approach_position=0.5,
+            total_normal_force_n=0.0,
+            left_normal_force_n=0.0,
+            right_normal_force_n=0.0,
+            dt=0.002,
+        ),
+        reference=ForceControlReference(
+            target_force_n=4.0,
+            approach_feedforward_force_n=2.0,
+        ),
+    )
+
+    assert command.state == "approach"
+    assert command.target_force_n == pytest.approx(4.0)
+    assert command.closure_jacobian_m_per_rad == pytest.approx(0.042426407, abs=1e-9)
+    assert command.force_feedforward_torque == pytest.approx(
+        2.0 * command.closure_jacobian_m_per_rad
+    )

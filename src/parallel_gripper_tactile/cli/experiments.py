@@ -149,6 +149,9 @@ def run_force_track(
     task: Annotated[Path, typer.Option("--task", exists=True, dir_okay=False)],
     output_root: Annotated[Path, typer.Option("--output-root", file_okay=False)] = Path("outputs"),
     run_name: Annotated[str | None, typer.Option()] = None,
+    viewer: Annotated[bool, typer.Option("--viewer", help="Open MuJoCo viewer while running.")] = False,
+    render_fps: Annotated[float, typer.Option("--render-fps", min=1.0)] = 30.0,
+    realtime_factor: Annotated[float, typer.Option("--realtime-factor", min=0.001)] = 1.0,
 ) -> None:
     """运行 waypoint 目标法向力跟踪实验。"""
     try:
@@ -162,6 +165,9 @@ def run_force_track(
                 "task": str(task),
                 "task_name": tracking_task.name,
                 "tracking_duration_s": tracking_task.reference.duration_s,
+                "viewer": viewer,
+                "render_fps": render_fps,
+                "realtime_factor": realtime_factor,
             },
         )
         task_snapshot = run.artifact_path("task.yaml")
@@ -174,6 +180,9 @@ def run_force_track(
             task=tracking_task,
             output_csv=csv_path,
             output_plot=plot_path,
+            viewer=viewer,
+            render_fps=render_fps,
+            realtime_factor=realtime_factor,
         )
         run.register_artifact(csv_path)
         run.register_artifact(plot_path)
