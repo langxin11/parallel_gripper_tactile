@@ -140,6 +140,31 @@ J_f(q)=\frac{\partial f_n}{\partial q}
 
 该项只作为 MIT `t_ff` 的前馈输入，最终仍由达妙协议量化和 `T_MAX` 限幅保护。
 
+也可以构造直接力矩式力控。此时 MIT 内环的 `kp` 和 `kd` 设为 0，不再通过位置误差产生输出力矩，
+而是把力反馈项和机构模型前馈直接合成为 `t_ff`：
+
+\[
+t_{\mathrm{ff}}=
+\tau_{\mathrm{force\ feedback}}+
+\tau_{\mathrm{model\ feedforward}}.
+\]
+
+其中一种最小形式为：
+
+\[
+\tau_{\mathrm{force\ feedback}}=
+K_p^F e_f+
+K_i^F\int e_f\,dt+
+K_d^F\frac{de_f}{dt},
+\qquad
+\tau_{\mathrm{model\ feedforward}}=
+\beta f_{\mathrm{ref}}J_c(q).
+\]
+
+该模式更直接地测试“力误差到电机力矩”的闭环，不受 MIT 位置刚度主导，适合作为当前位置式力控的对照。
+但它接触前没有位置弹簧提供闭合趋势，因此仍需要单独的接近阶段；接触后也必须处理噪声、积分饱和、
+脱离接触和 `T_MAX` 限幅。实现时应至少保留接触状态机、低通滤波、积分 anti-windup 和力矩斜率限制。
+
 实际实现中应：
 
 1. 对 \(\hat K_c\) 进行低通滤波，并设置正的上下限；
@@ -153,6 +178,9 @@ J_f(q)=\frac{\partial f_n}{\partial q}
 - `CrankSliderKinematics` 计算 \(\omega(q)\)、\(c(q)\) 和 \(J_c(q)\)；
 - `ContactStiffnessEstimator` 用 secant 样本 \(\Delta f_n/\Delta c\) 加 EWMA 滤波估计 \(\hat K_c\)；
 - `NormalForceController` 将 \(\Delta q_{\mathrm{ff}}\)、PI 修正和 \(\tau_{\mathrm{ff}}\) 合并后交给 MIT 力矩内环。
+
+直接力矩式力控尚未作为独立控制器实现。后续可在统一控制器接口下增加
+`DirectTorqueForceController`，使其与当前位置式控制器共享同一个 `force-track` benchmark。
 
 ## 5. 刚度辨识与 MuJoCo 模型解释
 

@@ -17,5 +17,8 @@ uv run pgt run force-track \
 uv run pgt compare contact --profile configs/custom_parallel_gripper.yaml
 </code></pre>
 
+动态目标力跟踪任务的配置、两阶段流程和指标解读见[动态目标力跟踪](force-tracking.md)。
+控制算法对比、消融矩阵和项目分工见[控制算法对比与消融](control-comparison-ablation.md)。
+
 用 `pgt runs list` 查看既有产物。用 `pgt runs clean --all` 预览要删除的目标；确认目标后
 再加 `--apply`。
