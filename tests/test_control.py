@@ -143,11 +143,15 @@ def test_normal_force_controller_switches_after_bilateral_contact() -> None:
         dt=0.002,
     )
     assert command.state == "force_tracking"
+    assert command.measured_force_n == pytest.approx(0.2)
+    assert command.filtered_force_n == pytest.approx(0.2)
     assert command.position_adjustment > 0
     assert command.stiffness_position_adjustment > 0
-    assert command.force_feedforward_torque > 0
     assert command.estimated_contact_stiffness_n_per_m == pytest.approx(6000.0)
     assert command.closure_jacobian_m_per_rad == pytest.approx(0.042426407, abs=1e-9)
+    assert command.force_feedforward_torque == pytest.approx(
+        8.0 * command.closure_jacobian_m_per_rad
+    )
     assert command.aperture_m == pytest.approx(0.122426407, abs=1e-9)
     assert command.mit.target_position < 0.5
 

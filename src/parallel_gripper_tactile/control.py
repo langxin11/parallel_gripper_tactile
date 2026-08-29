@@ -302,7 +302,7 @@ class _ForceTrackingStep:
 
 
 class NormalForceController:
-    """先以位置控制接近，再跟踪相加后的 taxel 法向力。"""
+    """先以位置控制接近，再跟踪左右平均单侧 taxel 法向力。"""
 
     def __init__(
         self,
@@ -380,7 +380,7 @@ class NormalForceController:
         position_rad: float,
         target_force_n: float,
     ) -> tuple[float, float | None, float | None]:
-        """用开度雅可比把目标总法向力转换成准静态输出轴力矩。"""
+        """用开度雅可比把目标平均单侧法向力转换成准静态输出轴力矩。"""
         if self._kinematics is None:
             return 0.0, None, None
         aperture = self._kinematics.aperture(position_rad)
@@ -390,7 +390,7 @@ class NormalForceController:
             if self._config.stiffness is not None
             else 1.0
         )
-        torque = gain * max(0.0, float(target_force_n)) * 0.5 * closure_jacobian
+        torque = gain * max(0.0, float(target_force_n)) * closure_jacobian
         return torque, closure_jacobian, aperture
 
     def _tracking_command(
@@ -484,7 +484,9 @@ class NormalForceController:
         if dt <= 0:
             raise ValueError("dt must be positive")
         config = self._config
-        measured_force = max(0.0, float(total_normal_force_n))
+        measured_force = 0.5 * (
+            max(0.0, float(left_normal_force_n)) + max(0.0, float(right_normal_force_n))
+        )
         stiffness_adjustment = 0.0
         force_feedforward_torque = 0.0
         stiffness_estimate = None

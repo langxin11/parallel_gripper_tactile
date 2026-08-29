@@ -96,7 +96,7 @@ class TactileMeasurement:
 
     @property
     def normal_capacity(self) -> FrictionCapacity:
-        """返回用于力控反馈的带噪总法向力。"""
+        """返回带噪左右法向力汇总；控制器内部使用平均单侧力。"""
         left_normal = max(0.0, float(self.left_force[2]))
         right_normal = max(0.0, float(self.right_force[2]))
         return FrictionCapacity(
@@ -227,12 +227,15 @@ def plot_trace(path: Path, rows: list[dict[str, float | str]]) -> None:
     friction_capacity = [float(row["available_friction_n"]) for row in rows]
     static_hold_demand = [float(row["static_hold_demand_tangential_n"]) for row in rows]
     friction_margin = [float(row["friction_margin_n"]) for row in rows]
-    total_normal_force = [float(row["taxel_normal_force_n"]) for row in rows]
     measured_normal_force = [float(row["measured_normal_force_n"]) for row in rows]
     filtered_normal_force = [float(row["filtered_normal_force_n"]) for row in rows]
     target_normal_force = [float(row["target_normal_force_n"]) for row in rows]
     left_normal_force = [float(row["left_taxel_normal_force_n"]) for row in rows]
     right_normal_force = [float(row["right_taxel_normal_force_n"]) for row in rows]
+    mean_side_normal_force = [
+        0.5 * (left_force + right_force)
+        for left_force, right_force in zip(left_normal_force, right_normal_force)
+    ]
     initial_position = np.array([float(rows[0]["cube_y"]), float(rows[0]["cube_z"])])
     displacement = [
         1000.0
@@ -286,10 +289,10 @@ def plot_trace(path: Path, rows: list[dict[str, float | str]]) -> None:
     tactile_axis.set_ylabel("Local shear\n(N)")
     normal_axis.plot(
         times,
-        total_normal_force,
+        mean_side_normal_force,
         color=colors["black"],
         linewidth=1.3,
-        label="Total normal pressure",
+        label="Mean side normal pressure",
     )
     normal_axis.plot(
         times,
@@ -427,7 +430,7 @@ def run_acceptance(
         cube_half_thickness: 测试块 X 方向半厚。
         cube_half_contact_side: 测试块 YZ 接触面半边长。
         cube_mass: 测试块质量。
-        target_force_n: 可选目标总法向力；省略时使用 profile 配置。
+        target_force_n: 可选目标平均单侧法向力；省略时使用 profile 配置。
         force_rmse_threshold_n: 接触切换后稳态法向力 RMSE 验收阈值。
         control_period_s: 法向力控制器的仿真时间更新周期（s）。
         output_csv: 可选逐步轨迹 CSV 输出路径。

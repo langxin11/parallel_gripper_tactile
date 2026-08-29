@@ -14,7 +14,7 @@ approach:
 reference:
   # 第二阶段：按 waypoint 生成时变目标法向力；支持 hold、linear、smoothstep。
   interpolation: smoothstep
-  # 每个点为“跟踪阶段时间 t_s”和“目标总法向力 force_n”。时间必须严格递增。
+  # 每个点为“跟踪阶段时间 t_s”和“目标平均单侧法向力 force_n”。时间必须严格递增。
   waypoints:
     - {t_s: 0.0, force_n: 2.0}
     - {t_s: 0.5, force_n: 2.0}
