@@ -16,9 +16,6 @@ nav = [
     { "常用工作流" = "workflows.md" },
     { "代码与注释规范" = "coding-conventions.md" },
   ] },
-  { "归档" = [
-    { "历史提交规划" = "commit-split-plan.md" },
-  ] },
 ]
 extra_javascript = [
   "javascripts/mathjax.js",
