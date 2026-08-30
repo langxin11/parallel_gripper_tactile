@@ -17,6 +17,7 @@ from ..scenes.custom import (
     DEFAULT_CUBE_MASS,
     DEFAULT_PROFILE,
     GRIPPER_PREFIX,
+    ObjectMaterial,
     SUPPORT_GEOM_NAME,
     build_custom_grasp_model,
 )
@@ -108,6 +109,7 @@ def record_custom_grasp_video(
     cube_half_thickness: float = DEFAULT_CUBE_HALF_THICKNESS,
     cube_half_contact_side: float = DEFAULT_CUBE_HALF_CONTACT_SIDE,
     cube_mass: float = DEFAULT_CUBE_MASS,
+    object_material: ObjectMaterial = "hard",
     target_force_n: float | None = None,
     control_period_s: float = 0.002,
     keep_frames: bool = False,
@@ -139,6 +141,7 @@ def record_custom_grasp_video(
         cube_half_thickness=cube_half_thickness,
         cube_half_contact_side=cube_half_contact_side,
         cube_mass=cube_mass,
+        object_material=object_material,
     )
     if control_period_s + 1e-12 < float(model.opt.timestep):
         raise ValueError("control_period_s must not be smaller than the physics timestep")

@@ -78,6 +78,40 @@ def test_run_name_is_exclusive_and_profile_must_be_yaml(tmp_path: Path) -> None:
         )
 
 
+def test_generated_run_name_supports_safe_prefix_and_suffix(tmp_path: Path) -> None:
+    """自动名称可以在保留时间戳与短 ID 的同时增加可读标签。"""
+    created = datetime(2026, 8, 30, 10, 47, 26, tzinfo=UTC)
+    run = RunDirectory.create(
+        tmp_path / "outputs",
+        profile_name="profile",
+        experiment="force-track",
+        profile_source=_profile(tmp_path),
+        run_prefix="pid-only-soft",
+        run_suffix="seed01",
+        now=created,
+    )
+
+    assert run.path.name.startswith("pid-only-soft-20260830T104726Z-")
+    assert run.path.name.endswith("-seed01")
+    with pytest.raises(ValueError, match="cannot be combined"):
+        RunDirectory.create(
+            tmp_path / "outputs",
+            profile_name="profile",
+            experiment="force-track",
+            profile_source=_profile(tmp_path),
+            run_name="exact",
+            run_prefix="study",
+        )
+    with pytest.raises(ValueError, match="simple path component"):
+        RunDirectory.create(
+            tmp_path / "outputs",
+            profile_name="profile",
+            experiment="force-track",
+            profile_source=_profile(tmp_path),
+            run_prefix="../escape",
+        )
+
+
 def test_artifacts_cannot_escape_run_or_be_registered_after_finalization(tmp_path: Path) -> None:
     """工件 API 强制限定在边界内，且定稿后的清单已关闭。"""
     run = RunDirectory.create(

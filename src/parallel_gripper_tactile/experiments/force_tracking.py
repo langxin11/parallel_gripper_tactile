@@ -20,7 +20,7 @@ from ..control import (
     ForceTrackingController,
     NormalForceController,
 )
-from ..profiles import load_profile
+from ..profiles import GripperProfile, MITTorqueControl, load_profile
 from ..scenes.custom import (
     CUBE_PREFIX,
     DEFAULT_CUBE_HALF_CONTACT_SIDE,
@@ -28,6 +28,7 @@ from ..scenes.custom import (
     DEFAULT_CUBE_MASS,
     DEFAULT_PROFILE,
     GRIPPER_PREFIX,
+    ObjectMaterial,
     SUPPORT_GEOM_NAME,
     build_custom_grasp_model,
 )
@@ -40,6 +41,51 @@ from .grasp import (
     _tactile_measurement,
     _taxel_geom_sides,
 )
+
+
+ControllerVariant = Literal["pid-only", "pid-torque-ff", "pid-stiffness-ff", "full"]
+CONTROLLER_VARIANTS: tuple[ControllerVariant, ...] = (
+    "pid-only",
+    "pid-torque-ff",
+    "pid-stiffness-ff",
+    "full",
+)
+
+
+def configure_force_controller(
+    profile: GripperProfile,
+    *,
+    variant: ControllerVariant = "full",
+    sensor_noise_seed: int | None = None,
+) -> GripperProfile:
+    """返回用于公平消融的力控 profile 副本，不修改磁盘源配置。"""
+    if variant not in CONTROLLER_VARIANTS:
+        choices = ", ".join(CONTROLLER_VARIANTS)
+        raise ValueError(f"controller_variant must be one of: {choices}")
+    if sensor_noise_seed is not None and sensor_noise_seed < 0:
+        raise ValueError("sensor_noise_seed must be non-negative")
+    if not isinstance(profile.control, MITTorqueControl) or profile.normal_force is None:
+        raise ValueError("controller ablation requires MIT torque control with control.force")
+    force = profile.normal_force
+    stiffness = force.stiffness
+    if stiffness is None and variant not in {"pid-only", "full"}:
+        raise ValueError("controller ablation requires control.force.stiffness")
+
+    if variant == "pid-only" and stiffness is not None:
+        stiffness = stiffness.model_copy(update={"enabled": False})
+    elif variant == "pid-torque-ff" and stiffness is not None:
+        stiffness = stiffness.model_copy(update={"enabled": True, "position_feedforward_gain": 0.0})
+    elif variant == "pid-stiffness-ff" and stiffness is not None:
+        stiffness = stiffness.model_copy(update={"enabled": True, "torque_feedforward_gain": 0.0})
+
+    force_updates: dict[str, object] = {}
+    if stiffness is not None:
+        force_updates["stiffness"] = stiffness
+    if sensor_noise_seed is not None:
+        force_updates["sensor_noise_seed"] = sensor_noise_seed
+    configured_force = force.model_copy(update=force_updates)
+    configured_control = profile.control.model_copy(update={"force": configured_force})
+    return profile.model_copy(update={"control": configured_control})
 
 
 class ForceTrackingConfigError(ValueError):
@@ -137,7 +183,9 @@ class ForceTrackingTask(_TaskModel):
         if raw is None:
             raise ForceTrackingConfigError(f"force tracking task is empty: {task_path}")
         if not isinstance(raw, dict):
-            raise ForceTrackingConfigError(f"force tracking task root must be a mapping: {task_path}")
+            raise ForceTrackingConfigError(
+                f"force tracking task root must be a mapping: {task_path}"
+            )
         try:
             return cls.model_validate(raw)
         except ValidationError as error:
@@ -189,7 +237,9 @@ def _plot_force_tracking(path: Path, rows: list[dict[str, float | str]]) -> None
     figure, axes = plt.subplots(3, 1, figsize=(7.16, 6.4), sharex=True, layout="constrained")
     axes[0].plot(times, target, color=colors["black"], label="target", linewidth=1.2)
     axes[0].plot(times, filtered, color=colors["blue"], label="filtered", linewidth=1.2)
-    axes[0].plot(times, measured, color=colors["orange"], label="measured", linewidth=0.8, alpha=0.7)
+    axes[0].plot(
+        times, measured, color=colors["orange"], label="measured", linewidth=0.8, alpha=0.7
+    )
     axes[0].set_ylabel("Normal force (N)")
     axes[0].legend(loc="best")
     axes[1].plot(times, torque, color=colors["green"], linewidth=1.2)
@@ -232,9 +282,7 @@ def _evaluate_tracking(
         dtype=np.float64,
     )
     torque_saturation = float(np.mean(np.abs(torques) >= 0.999 * mit_t_max))
-    position_saturation = float(
-        np.mean((positions <= p_min + 1e-6) | (positions >= p_max - 1e-6))
-    )
+    position_saturation = float(np.mean((positions <= p_min + 1e-6) | (positions >= p_max - 1e-6)))
     return (
         float(np.sqrt(np.mean(errors**2))),
         float(np.mean(np.abs(errors))),
@@ -254,6 +302,9 @@ def run_force_tracking(
     cube_half_thickness: float = DEFAULT_CUBE_HALF_THICKNESS,
     cube_half_contact_side: float = DEFAULT_CUBE_HALF_CONTACT_SIDE,
     cube_mass: float = DEFAULT_CUBE_MASS,
+    object_material: ObjectMaterial = "hard",
+    controller_variant: ControllerVariant = "full",
+    sensor_noise_seed: int | None = None,
     output_csv: Path | None = None,
     output_plot: Path | None = None,
     viewer: bool = False,
@@ -261,7 +312,11 @@ def run_force_tracking(
     realtime_factor: float = 1.0,
 ) -> ForceTrackingResult:
     """运行两阶段目标法向力跟踪测试。"""
-    profile = load_profile(profile_path)
+    profile = configure_force_controller(
+        load_profile(profile_path),
+        variant=controller_variant,
+        sensor_noise_seed=sensor_noise_seed,
+    )
     if profile.normal_force is None or profile.mit is None:
         raise ValueError("force tracking requires MIT torque control with control.force")
     if viewer and (render_fps <= 0 or realtime_factor <= 0):
@@ -271,6 +326,7 @@ def run_force_tracking(
         cube_half_thickness=cube_half_thickness,
         cube_half_contact_side=cube_half_contact_side,
         cube_mass=cube_mass,
+        object_material=object_material,
     )
     if task.control_period_s + 1e-12 < float(model.opt.timestep):
         raise ValueError("control_period_s must not be smaller than the physics timestep")
@@ -342,9 +398,9 @@ def run_force_tracking(
                     support_released = True
 
             data.xfrc_applied[cube_body_id] = 0.0
-            target_position = profile.open_control + min(
-                1.0, time_s / task.approach.duration_s
-            ) * (profile.closed_control - profile.open_control)
+            target_position = profile.open_control + min(1.0, time_s / task.approach.duration_s) * (
+                profile.closed_control - profile.open_control
+            )
             control_dt = control_timer.pop_due(time_s)
             if control_dt is not None:
                 feedback_tactile = reader.read(data)
@@ -501,9 +557,7 @@ def run_force_tracking(
     )
     return ForceTrackingResult(
         contact_time_s=math.nan if contact_time_s is None else contact_time_s,
-        tracking_start_time_s=math.nan
-        if tracking_start_time_s is None
-        else tracking_start_time_s,
+        tracking_start_time_s=math.nan if tracking_start_time_s is None else tracking_start_time_s,
         tracking_duration_s=task.reference.duration_s,
         rmse_n=rmse_n,
         mae_n=mae_n,

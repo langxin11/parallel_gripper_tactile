@@ -2,24 +2,33 @@
 
 from __future__ import annotations
 
+import csv
 from dataclasses import asdict
 import json
+import math
 from pathlib import Path
+from statistics import fmean, stdev
 import sys
-from typing import Annotated
+from typing import Annotated, Literal, cast
 
 from rich.table import Table
 import mujoco
 import typer
 
 from ..experiments.contact_compare import record_contact_ab
-from ..experiments.force_tracking import ForceTrackingTask, run_force_tracking
+from ..experiments.force_tracking import (
+    CONTROLLER_VARIANTS,
+    ControllerVariant,
+    ForceTrackingResult,
+    ForceTrackingTask,
+    run_force_tracking,
+)
 from ..experiments.grasp import run_acceptance
 from ..experiments.grasp_video import record_custom_grasp_video
 from ..profiles import load_profile
 from ..protocols import DisturbanceProtocol
 from ..run_artifacts import RunDirectory
-from ..scenes.custom import build_custom_grasp_model
+from ..scenes.custom import ObjectMaterial, build_custom_grasp_model
 from ..scenes.robotiq import load_grasp_model
 from ..tactile import create_tactile_reader
 from .common import fail, state
@@ -36,6 +45,9 @@ def _run_directory(
     output_root: Path,
     run_name: str | None,
     parameters: dict[str, object],
+    *,
+    run_prefix: str | None = None,
+    run_suffix: str | None = None,
 ) -> RunDirectory:
     """创建一个输出目录，包含 profile 快照与 manifest。"""
     validated = load_profile(profile)
@@ -47,6 +59,8 @@ def _run_directory(
         command=tuple(sys.argv),
         parameters=parameters,
         run_name=run_name,
+        run_prefix=run_prefix,
+        run_suffix=run_suffix,
     )
 
 
@@ -79,10 +93,15 @@ def run_grasp(
     profile: Annotated[Path, typer.Option("--profile", exists=True, dir_okay=False)],
     output_root: Annotated[Path, typer.Option("--output-root", file_okay=False)] = Path("outputs"),
     run_name: Annotated[str | None, typer.Option()] = None,
+    run_prefix: Annotated[str | None, typer.Option("--run-prefix")] = None,
+    run_suffix: Annotated[str | None, typer.Option("--run-suffix")] = None,
     disturbance_force: Annotated[float, typer.Option(min=0.0)] = 5.0,
     disturbance_frequency: Annotated[float, typer.Option(min=0.001)] = 2.0,
     target_force: Annotated[float | None, typer.Option(min=0.001)] = None,
     video: Annotated[bool, typer.Option()] = False,
+    object_material: Annotated[
+        Literal["soft", "medium", "hard"], typer.Option("--object-material")
+    ] = "hard",
 ) -> None:
     """运行自研夹爪抓取验收实验。"""
     try:
@@ -96,7 +115,10 @@ def run_grasp(
                 "disturbance_frequency_hz": disturbance_frequency,
                 "target_force_n": target_force,
                 "video": video,
+                "object_material": object_material,
             },
+            run_prefix=run_prefix,
+            run_suffix=run_suffix,
         )
         csv_path = run.artifact_path("trace.csv")
         plot_path = run.artifact_path("plot.png")
@@ -109,6 +131,7 @@ def run_grasp(
             target_force_n=target_force,
             output_csv=csv_path,
             output_plot=plot_path,
+            object_material=object_material,
         )
         run.register_artifact(csv_path)
         run.register_artifact(plot_path)
@@ -124,6 +147,7 @@ def run_grasp(
                 output=video_path,
                 protocol=protocol,
                 target_force_n=target_force,
+                object_material=object_material,
             )
             run.register_artifact(video_path)
         run.finalize()
@@ -142,6 +166,70 @@ def run_grasp(
         raise typer.Exit(1)
 
 
+def _execute_force_tracking_run(
+    *,
+    profile: Path,
+    task_path: Path,
+    tracking_task: ForceTrackingTask,
+    output_root: Path,
+    run_name: str | None,
+    run_prefix: str | None,
+    run_suffix: str | None,
+    object_material: Literal["soft", "medium", "hard"],
+    controller_variant: ControllerVariant,
+    sensor_noise_seed: int | None,
+    viewer: bool = False,
+    render_fps: float = 30.0,
+    realtime_factor: float = 1.0,
+) -> tuple[RunDirectory, ForceTrackingResult]:
+    """执行一次力跟踪并写出完整、可复现的运行工件。"""
+    run = _run_directory(
+        profile,
+        "force-track",
+        output_root,
+        run_name,
+        {
+            "task": str(task_path),
+            "task_name": tracking_task.name,
+            "tracking_duration_s": tracking_task.reference.duration_s,
+            "viewer": viewer,
+            "render_fps": render_fps,
+            "realtime_factor": realtime_factor,
+            "object_material": object_material,
+            "controller_variant": controller_variant,
+            "sensor_noise_seed": sensor_noise_seed,
+        },
+        run_prefix=run_prefix,
+        run_suffix=run_suffix,
+    )
+    task_snapshot = run.artifact_path("task.yaml")
+    task_snapshot.write_bytes(task_path.read_bytes())
+    run.register_artifact(task_snapshot)
+    csv_path = run.artifact_path("trace.csv")
+    plot_path = run.artifact_path("plot.png")
+    result = run_force_tracking(
+        profile,
+        task=tracking_task,
+        output_csv=csv_path,
+        output_plot=plot_path,
+        viewer=viewer,
+        render_fps=render_fps,
+        realtime_factor=realtime_factor,
+        object_material=object_material,
+        controller_variant=controller_variant,
+        sensor_noise_seed=sensor_noise_seed,
+    )
+    run.register_artifact(csv_path)
+    run.register_artifact(plot_path)
+    metrics_path = run.artifact_path("metrics.json")
+    metrics_path.write_text(
+        json.dumps(asdict(result), indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    )
+    run.register_artifact(metrics_path)
+    run.finalize()
+    return run, result
+
+
 @run_app.command("force-track")
 def run_force_track(
     context: typer.Context,
@@ -149,49 +237,40 @@ def run_force_track(
     task: Annotated[Path, typer.Option("--task", exists=True, dir_okay=False)],
     output_root: Annotated[Path, typer.Option("--output-root", file_okay=False)] = Path("outputs"),
     run_name: Annotated[str | None, typer.Option()] = None,
-    viewer: Annotated[bool, typer.Option("--viewer", help="Open MuJoCo viewer while running.")] = False,
+    run_prefix: Annotated[str | None, typer.Option("--run-prefix")] = None,
+    run_suffix: Annotated[str | None, typer.Option("--run-suffix")] = None,
+    viewer: Annotated[
+        bool, typer.Option("--viewer", help="Open MuJoCo viewer while running.")
+    ] = False,
     render_fps: Annotated[float, typer.Option("--render-fps", min=1.0)] = 30.0,
     realtime_factor: Annotated[float, typer.Option("--realtime-factor", min=0.001)] = 1.0,
+    object_material: Annotated[
+        Literal["soft", "medium", "hard"], typer.Option("--object-material")
+    ] = "hard",
+    controller_variant: Annotated[
+        Literal["pid-only", "pid-torque-ff", "pid-stiffness-ff", "full"],
+        typer.Option("--controller-variant"),
+    ] = "full",
+    sensor_noise_seed: Annotated[int | None, typer.Option("--sensor-noise-seed", min=0)] = None,
 ) -> None:
     """运行 waypoint 目标法向力跟踪实验。"""
     try:
         tracking_task = ForceTrackingTask.load(task)
-        run = _run_directory(
-            profile,
-            "force-track",
-            output_root,
-            run_name,
-            {
-                "task": str(task),
-                "task_name": tracking_task.name,
-                "tracking_duration_s": tracking_task.reference.duration_s,
-                "viewer": viewer,
-                "render_fps": render_fps,
-                "realtime_factor": realtime_factor,
-            },
-        )
-        task_snapshot = run.artifact_path("task.yaml")
-        task_snapshot.write_bytes(task.read_bytes())
-        run.register_artifact(task_snapshot)
-        csv_path = run.artifact_path("trace.csv")
-        plot_path = run.artifact_path("plot.png")
-        result = run_force_tracking(
-            profile,
-            task=tracking_task,
-            output_csv=csv_path,
-            output_plot=plot_path,
+        run, result = _execute_force_tracking_run(
+            profile=profile,
+            task_path=task,
+            tracking_task=tracking_task,
+            output_root=output_root,
+            run_name=run_name,
+            run_prefix=run_prefix,
+            run_suffix=run_suffix,
+            object_material=object_material,
+            controller_variant=controller_variant,
+            sensor_noise_seed=sensor_noise_seed,
             viewer=viewer,
             render_fps=render_fps,
             realtime_factor=realtime_factor,
         )
-        run.register_artifact(csv_path)
-        run.register_artifact(plot_path)
-        metrics_path = run.artifact_path("metrics.json")
-        metrics_path.write_text(
-            json.dumps(asdict(result), indent=2, sort_keys=True) + "\n", encoding="utf-8"
-        )
-        run.register_artifact(metrics_path)
-        run.finalize()
     except Exception as error:
         fail(context, error, title="Force tracking experiment failed")
     table = Table(title="Force tracking")
@@ -208,6 +287,194 @@ def run_force_track(
     state(context).console.print(f"Run: [cyan]{run.path}[/cyan]")
     if not result.passed:
         raise typer.Exit(1)
+
+
+_ABLATION_METRICS = (
+    "contact_time_s",
+    "tracking_start_time_s",
+    "rmse_n",
+    "mae_n",
+    "peak_abs_error_n",
+    "mean_error_n",
+    "final_error_n",
+    "torque_saturation_ratio",
+    "position_saturation_ratio",
+    "mean_estimated_stiffness_n_per_m",
+)
+
+
+def _parse_selection(value: str, choices: tuple[str, ...], field_name: str) -> tuple[str, ...]:
+    """解析逗号分隔选项，去重并拒绝空值或未知值。"""
+    selected = tuple(dict.fromkeys(part.strip() for part in value.split(",") if part.strip()))
+    unknown = [item for item in selected if item not in choices]
+    if not selected or unknown:
+        expected = ", ".join(choices)
+        detail = "empty selection" if not selected else f"unknown values: {', '.join(unknown)}"
+        raise ValueError(f"{field_name} must select from {expected}; {detail}")
+    return selected
+
+
+def _write_rows_csv(path: Path, rows: list[dict[str, object]]) -> None:
+    """将同构字典行写为 CSV。"""
+    if not rows:
+        raise ValueError("cannot write an empty ablation summary")
+    with path.open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
+        writer.writeheader()
+        writer.writerows(rows)
+
+
+def _aggregate_ablation_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
+    """按控制器和材料计算有限指标的均值与样本标准差。"""
+    groups: dict[tuple[str, str], list[dict[str, object]]] = {}
+    for row in rows:
+        key = (str(row["controller_variant"]), str(row["object_material"]))
+        groups.setdefault(key, []).append(row)
+
+    aggregated: list[dict[str, object]] = []
+    for (controller, material), group in groups.items():
+        output: dict[str, object] = {
+            "controller_variant": controller,
+            "object_material": material,
+            "runs": len(group),
+            "passed_runs": sum(bool(row["passed"]) for row in group),
+        }
+        for metric in _ABLATION_METRICS:
+            values = [float(row[metric]) for row in group]
+            finite = [value for value in values if math.isfinite(value)]
+            output[f"{metric}_mean"] = fmean(finite) if finite else None
+            output[f"{metric}_std"] = stdev(finite) if len(finite) >= 2 else None
+        aggregated.append(output)
+    return aggregated
+
+
+def _json_compatible(value: object) -> object:
+    """递归地将非有限浮点数转换成标准 JSON 的 ``null``。"""
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, dict):
+        return {str(key): _json_compatible(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_compatible(item) for item in value]
+    return value
+
+
+@run_app.command("force-track-ablation")
+def run_force_track_ablation(
+    context: typer.Context,
+    profile: Annotated[Path, typer.Option("--profile", exists=True, dir_okay=False)],
+    task: Annotated[Path, typer.Option("--task", exists=True, dir_okay=False)],
+    output_root: Annotated[Path, typer.Option("--output-root", file_okay=False)] = Path("outputs"),
+    run_name: Annotated[str | None, typer.Option()] = None,
+    run_prefix: Annotated[str | None, typer.Option("--run-prefix")] = None,
+    run_suffix: Annotated[str | None, typer.Option("--run-suffix")] = None,
+    materials: Annotated[str, typer.Option("--materials")] = "soft,medium,hard",
+    controllers: Annotated[str, typer.Option("--controllers")] = ",".join(CONTROLLER_VARIANTS),
+    repeats: Annotated[int, typer.Option("--repeats", min=1)] = 1,
+    seed_start: Annotated[int | None, typer.Option("--seed-start", min=0)] = None,
+) -> None:
+    """批量运行材料×控制器消融，并输出逐次与聚合统计。"""
+    try:
+        selected_materials = _parse_selection(materials, ("soft", "medium", "hard"), "materials")
+        selected_controllers = _parse_selection(
+            controllers, tuple(CONTROLLER_VARIANTS), "controllers"
+        )
+        configured = load_profile(profile)
+        if configured.normal_force is None:
+            raise ValueError("force-track ablation requires control.force")
+        first_seed = configured.normal_force.sensor_noise_seed if seed_start is None else seed_start
+        tracking_task = ForceTrackingTask.load(task)
+        parent = _run_directory(
+            profile,
+            "force-track-ablation",
+            output_root,
+            run_name,
+            {
+                "task": str(task),
+                "task_name": tracking_task.name,
+                "materials": list(selected_materials),
+                "controllers": list(selected_controllers),
+                "repeats": repeats,
+                "seed_start": first_seed,
+            },
+            run_prefix=run_prefix,
+            run_suffix=run_suffix,
+        )
+        task_snapshot = parent.artifact_path("task.yaml")
+        task_snapshot.write_bytes(task.read_bytes())
+        parent.register_artifact(task_snapshot)
+
+        rows: list[dict[str, object]] = []
+        label_prefix = run_prefix or run_name
+        for controller_name in selected_controllers:
+            controller = cast(ControllerVariant, controller_name)
+            for material_name in selected_materials:
+                material = cast(ObjectMaterial, material_name)
+                for repeat in range(repeats):
+                    seed = first_seed + repeat
+                    condition = f"{controller}-{material}-seed{seed}"
+                    child_prefix = f"{label_prefix}-{condition}" if label_prefix else condition
+                    child, result = _execute_force_tracking_run(
+                        profile=profile,
+                        task_path=task,
+                        tracking_task=tracking_task,
+                        output_root=output_root,
+                        run_name=None,
+                        run_prefix=child_prefix,
+                        run_suffix=run_suffix,
+                        object_material=material,
+                        controller_variant=controller,
+                        sensor_noise_seed=seed,
+                    )
+                    rows.append(
+                        {
+                            "controller_variant": controller,
+                            "object_material": material,
+                            "repeat": repeat,
+                            "sensor_noise_seed": seed,
+                            "passed": result.passed,
+                            "run_directory": str(child.path.relative_to(output_root.resolve())),
+                            **asdict(result),
+                        }
+                    )
+
+        aggregates = _aggregate_ablation_rows(rows)
+        summary_csv = parent.artifact_path("summary.csv")
+        aggregate_csv = parent.artifact_path("aggregate.csv")
+        summary_json = parent.artifact_path("summary.json")
+        _write_rows_csv(summary_csv, rows)
+        _write_rows_csv(aggregate_csv, aggregates)
+        summary_json.write_text(
+            json.dumps(
+                _json_compatible({"runs": rows, "aggregates": aggregates}),
+                indent=2,
+                sort_keys=True,
+                allow_nan=False,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        for artifact in (summary_csv, aggregate_csv, summary_json):
+            parent.register_artifact(artifact)
+        parent.finalize()
+    except Exception as error:
+        fail(context, error, title="Force tracking ablation failed")
+
+    table = Table(title="Force tracking ablation")
+    table.add_column("Controller")
+    table.add_column("Material")
+    table.add_column("Passed")
+    table.add_column("RMSE mean")
+    for row in aggregates:
+        rmse = row["rmse_n_mean"]
+        table.add_row(
+            str(row["controller_variant"]),
+            str(row["object_material"]),
+            f"{row['passed_runs']}/{row['runs']}",
+            "-" if rmse is None else f"{float(rmse):.3f} N",
+        )
+    state(context).console.print(table)
+    state(context).console.print(f"Summary: [cyan]{parent.path}[/cyan]")
 
 
 @run_app.command("demo")
@@ -350,10 +617,13 @@ def compare_tactile(
 def view_grasp(
     context: typer.Context,
     profile: Annotated[Path, typer.Option("--profile", exists=True, dir_okay=False)],
+    object_material: Annotated[
+        Literal["soft", "medium", "hard"], typer.Option("--object-material")
+    ] = "hard",
 ) -> None:
     """打开一个可交互的自研夹爪抓取场景。"""
     try:
-        model = build_custom_grasp_model(load_profile(profile))
+        model = build_custom_grasp_model(load_profile(profile), object_material=object_material)
         data = mujoco.MjData(model)
         from mujoco import viewer
 

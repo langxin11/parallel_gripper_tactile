@@ -12,6 +12,11 @@ uv run pgt validate configs/custom_parallel_gripper.yaml
 uv run pgt run demo --profile configs/robotiq_2f85.yaml
 uv run pgt run grasp --profile configs/custom_parallel_gripper.yaml
 uv run pgt run force-track --profile configs/custom_parallel_gripper.yaml --task configs/force_tracking/default_waypoints.yaml
+# 自研夹爪可选 soft / medium / hard 显式触觉接触材料（默认 hard）
+uv run pgt run grasp --profile configs/custom_parallel_gripper.yaml --object-material soft
+uv run pgt run force-track --profile configs/custom_parallel_gripper.yaml --task configs/force_tracking/default_waypoints.yaml --object-material medium
+# 运行 soft/medium/hard × 四种控制器的消融矩阵，每个条件使用3个独立噪声种子
+uv run pgt run force-track-ablation --profile configs/custom_parallel_gripper.yaml --task configs/force_tracking/default_waypoints.yaml --repeats 3 --run-prefix controller-study
 ```
 
 Profile 仅使用 YAML。它们是不可变的 Pydantic v2 模型：未知字段、非法控制限幅、空/多文档输入、
@@ -25,12 +30,13 @@ pgt assets generate-taxels [--shape sphere|box]
 pgt assets generate-touch-grid
 pgt assets prepare-onshape INPUT OUTPUT
 pgt run demo --profile PROFILE
-pgt run grasp --profile PROFILE [--video]
-pgt run force-track --profile PROFILE --task TASK.yaml [--viewer]
+pgt run grasp --profile PROFILE [--video] [--object-material soft|medium|hard]
+pgt run force-track --profile PROFILE --task TASK.yaml [--viewer] [--object-material soft|medium|hard]
+pgt run force-track-ablation --profile PROFILE --task TASK.yaml [--repeats N]
 pgt compare tactile --left-profile A --right-profile B
 pgt compare contact --profile PROFILE
 pgt view taxels --profile PROFILE
-pgt view grasp --profile PROFILE
+pgt view grasp --profile PROFILE [--object-material soft|medium|hard]
 pgt runs list
 pgt runs clean (--older-than-days N | --all | --cache) [--apply]
 ```
@@ -38,6 +44,25 @@ pgt runs clean (--older-than-days N | --all | --cache) [--apply]
 仿真默认无界面（headless）。`pgt run force-track --viewer` 会在运行 waypoint
 目标力跟踪任务时同步打开 MuJoCo GUI；`pgt view` 会打开静态交互检查场景。Typer 通过
 `pgt --install-completion` 提供 shell 补全。
+
+`pgt run grasp`、`force-track` 和 `force-track-ablation` 支持 `--run-prefix` 与
+`--run-suffix`。它们会保留自动生成的 UTC 时间戳和短 ID，例如
+`pid-only-soft-20260830T104726Z-6dc7385b-seed01`；原有 `--run-name` 仍用于指定完整、
+不可改写的目录名，不能与前缀或后缀同时使用。消融命令会为每次子实验自动加入控制器、材料和
+噪声种子标签，并在父目录生成 `summary.csv`、`aggregate.csv` 与 `summary.json`。
+
+力控消融的四个跟踪阶段变体为：
+
+| 变体 | PID | 刚度位置前馈 | 力矩前馈 |
+| --- | --- | --- | --- |
+| `pid-only` | 开 | 关 | 关 |
+| `pid-torque-ff` | 开 | 关 | 开 |
+| `pid-stiffness-ff` | 开 | 开 | 关 |
+| `full` | 开 | 开 | 开 |
+
+所有变体共享相同的接近阶段和 waypoint 任务；`--seed-start` 指定第一个传感器噪声种子，后续
+重复按整数递增。`--materials` 与 `--controllers` 接受逗号分隔的子集，可用于先做小规模冒烟
+实验，再运行完整矩阵。
 
 ## Profiles
 

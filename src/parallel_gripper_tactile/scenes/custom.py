@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
-from pathlib import Path
+from dataclasses import dataclass
 import math
+from pathlib import Path
+from typing import Literal, cast
 import xml.etree.ElementTree as ET
 
 import numpy as np
@@ -23,6 +25,44 @@ DEFAULT_CUBE_HALF_CONTACT_SIDE = 0.0125
 MIN_CUBE_MASS = 0.050
 DEFAULT_CUBE_MASS = MIN_CUBE_MASS
 PILLAR_ALIGNMENT_OFFSET_IN_BASE = np.array((0.0, 0.0, -0.002))
+
+ObjectMaterial = Literal["soft", "medium", "hard"]
+
+
+@dataclass(frozen=True, slots=True)
+class ContactPreset:
+    """显式触觉—物体接触使用的 MuJoCo 参数。"""
+
+    solref: tuple[float, float]
+    solimp: tuple[float, float, float, float, float]
+    friction: tuple[float, float, float, float, float]
+    condim: int = 3
+
+
+_TACTILE_SOLIMP = (0.75, 0.95, 0.0025, 0.5, 2.0)
+_TACTILE_FRICTION = (0.8, 0.8, 0.02, 0.001, 0.001)
+
+# 仅用 direct-format solref 表达材料差异；其余接触参数保持一致，确保三档实验
+# 可比较，同时避免结果依赖 geom priority/solmix 的隐式混合规则。
+OBJECT_CONTACT_PRESETS: dict[ObjectMaterial, ContactPreset] = {
+    "soft": ContactPreset(
+        solref=(-250.0, -5.0), solimp=_TACTILE_SOLIMP, friction=_TACTILE_FRICTION
+    ),
+    "medium": ContactPreset(
+        solref=(-650.0, -8.0), solimp=_TACTILE_SOLIMP, friction=_TACTILE_FRICTION
+    ),
+    "hard": ContactPreset(
+        solref=(-1200.0, -10.0), solimp=_TACTILE_SOLIMP, friction=_TACTILE_FRICTION
+    ),
+}
+
+
+def _validate_object_material(object_material: str) -> ObjectMaterial:
+    """验证并返回受支持的触觉接触材料档位。"""
+    if object_material not in OBJECT_CONTACT_PRESETS:
+        choices = ", ".join(OBJECT_CONTACT_PRESETS)
+        raise ValueError(f"object_material must be one of: {choices}")
+    return cast(ObjectMaterial, object_material)
 
 
 def _quaternion_rotate(
@@ -112,12 +152,38 @@ def _load_cube_spec(
     return mujoco.MjSpec.from_string(ET.tostring(tree.getroot(), encoding="unicode"))
 
 
+def _add_tactile_object_pairs(
+    scene,
+    profile: GripperProfile,
+    object_material: ObjectMaterial,
+) -> None:
+    """为左右指尖 taxel 与测试块添加显式接触参数。
+
+    Pair 参数直接写入 MuJoCo 的 contact，而不是经过两个 geom 的
+    ``priority``/``solmix`` 混合，因此物体材料档位只影响触觉—物体接触。
+    """
+    material = OBJECT_CONTACT_PRESETS[_validate_object_material(object_material)]
+    object_geom = f"{CUBE_PREFIX}target_cube_geom"
+    for side in ("left", "right"):
+        for index, taxel_name in enumerate(profile.tactile.names(side)):
+            scene.add_pair(
+                name=f"tactile_object_{side}_{index}",
+                geomname1=f"{GRIPPER_PREFIX}{taxel_name}",
+                geomname2=object_geom,
+                condim=material.condim,
+                solref=list(material.solref),
+                solimp=list(material.solimp),
+                friction=list(material.friction),
+            )
+
+
 def build_custom_grasp_spec(
     profile: GripperProfile,
     *,
     cube_half_thickness: float = DEFAULT_CUBE_HALF_THICKNESS,
     cube_half_contact_side: float = DEFAULT_CUBE_HALF_CONTACT_SIDE,
     cube_mass: float = DEFAULT_CUBE_MASS,
+    object_material: ObjectMaterial = "hard",
 ):
     """附加固定自研基座、自由方块与临时支撑。
 
@@ -165,6 +231,7 @@ def build_custom_grasp_spec(
         prefix=CUBE_PREFIX,
         frame=cube_mount,
     )
+    _add_tactile_object_pairs(scene, profile, object_material)
     # 自研执行器是纯力矩源。位置预设应放在 qpos/控制器状态里，
     # 而零力矩是唯一安全的通用 keyframe 命令。
     scene.add_key(name="custom_open", ctrl=[0.0])
@@ -178,6 +245,7 @@ def build_custom_grasp_model(
     cube_half_thickness: float = DEFAULT_CUBE_HALF_THICKNESS,
     cube_half_contact_side: float = DEFAULT_CUBE_HALF_CONTACT_SIDE,
     cube_mass: float = DEFAULT_CUBE_MASS,
+    object_material: ObjectMaterial = "hard",
 ):
     """编译水平安装的自研夹爪抓取场景。"""
     return build_custom_grasp_spec(
@@ -185,4 +253,5 @@ def build_custom_grasp_model(
         cube_half_thickness=cube_half_thickness,
         cube_half_contact_side=cube_half_contact_side,
         cube_mass=cube_mass,
+        object_material=object_material,
     ).compile()

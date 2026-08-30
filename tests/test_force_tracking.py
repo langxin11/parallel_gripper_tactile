@@ -9,8 +9,10 @@ from parallel_gripper_tactile.experiments.force_tracking import (
     ForceReference,
     ForceTrackingTask,
     ForceWaypoint,
+    configure_force_controller,
     run_force_tracking,
 )
+from parallel_gripper_tactile.profiles import load_profile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,6 +36,47 @@ def test_force_tracking_task_loads_default_waypoint_config() -> None:
     assert task.approach.feedforward_force_n == pytest.approx(2.0)
     assert task.reference.duration_s == pytest.approx(4.5)
     assert task.reference.target_at(3.5) == pytest.approx(10.0)
+
+
+@pytest.mark.parametrize(
+    ("variant", "enabled", "position_gain", "torque_gain"),
+    [
+        ("pid-only", False, 0.25, 1.0),
+        ("pid-torque-ff", True, 0.0, 1.0),
+        ("pid-stiffness-ff", True, 0.25, 0.0),
+        ("full", True, 0.25, 1.0),
+    ],
+)
+def test_controller_variants_apply_reproducible_ablation_settings(
+    variant: str,
+    enabled: bool,
+    position_gain: float,
+    torque_gain: float,
+) -> None:
+    """四种控制器档位只修改对应的刚度估计与前馈开关。"""
+    source = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    configured = configure_force_controller(  # type: ignore[arg-type]
+        source, variant=variant, sensor_noise_seed=17
+    )
+
+    assert configured.normal_force is not None
+    assert configured.normal_force.sensor_noise_seed == 17
+    assert configured.normal_force.stiffness is not None
+    assert configured.normal_force.stiffness.enabled is enabled
+    assert configured.normal_force.stiffness.position_feedforward_gain == position_gain
+    assert configured.normal_force.stiffness.torque_feedforward_gain == torque_gain
+    assert source.normal_force is not None
+    assert source.normal_force.sensor_noise_seed == 20260814
+
+
+def test_controller_variant_rejects_unknown_name_and_negative_seed() -> None:
+    """运行时消融覆盖必须通过名称和随机种子校验。"""
+    profile = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+
+    with pytest.raises(ValueError, match="controller_variant"):
+        configure_force_controller(profile, variant="unknown")  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="non-negative"):
+        configure_force_controller(profile, sensor_noise_seed=-1)
 
 
 def test_force_tracking_run_writes_dynamic_reference_trace(tmp_path: Path) -> None:

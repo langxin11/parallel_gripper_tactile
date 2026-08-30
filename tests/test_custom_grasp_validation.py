@@ -43,6 +43,45 @@ def test_custom_scene_fixes_reserved_base_and_keeps_free_cube() -> None:
     assert np.allclose(model.geom_solimp[pillar_id], (0.75, 0.95, 0.0025, 0.5, 2.0))
 
 
+@pytest.mark.parametrize(
+    ("material", "solref"),
+    [
+        ("soft", (-250.0, -5.0)),
+        ("medium", (-650.0, -8.0)),
+        ("hard", (-1200.0, -10.0)),
+    ],
+)
+def test_custom_scene_adds_18_explicit_tactile_object_pairs(
+    material: str, solref: tuple[float, float]
+) -> None:
+    """每档材料都为左右 3×3 taxel 生成独立显式 pair。"""
+    profile = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    model = scene.build_custom_grasp_model(profile, object_material=material)  # type: ignore[arg-type]
+
+    assert model.npair == 18
+    cube_geom_id = model.geom("cube/target_cube_geom").id
+    tactile_geom_ids = {
+        model.geom(f"gripper/{name}").id
+        for side in ("left", "right")
+        for name in profile.tactile.names(side)
+    }
+    assert {
+        (int(geom1), int(geom2)) for geom1, geom2 in zip(model.pair_geom1, model.pair_geom2)
+    } == {(geom_id, cube_geom_id) for geom_id in tactile_geom_ids}
+    assert np.allclose(model.pair_solref, solref)
+    assert np.allclose(model.pair_solimp, (0.75, 0.95, 0.0025, 0.5, 2.0))
+    assert np.allclose(model.pair_friction, (0.8, 0.8, 0.02, 0.001, 0.001))
+    assert np.all(model.pair_dim == 3)
+
+
+def test_custom_scene_rejects_unknown_object_material() -> None:
+    """材料档位必须是受支持的 soft/medium/hard 之一。"""
+    profile = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+
+    with pytest.raises(ValueError, match="object_material must be one of"):
+        scene.build_custom_grasp_model(profile, object_material="rubber")  # type: ignore[arg-type]
+
+
 def test_custom_horizontal_hold_and_zero_disturbance_baseline_passes() -> None:
     """水平无支撑保持与零扰动基线验收通过。"""
     protocol = validation.DisturbanceProtocol(force_n=0.0)

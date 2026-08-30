@@ -22,6 +22,7 @@ from ..scenes.custom import (
     DEFAULT_CUBE_MASS,
     DEFAULT_PROFILE,
     GRIPPER_PREFIX,
+    ObjectMaterial,
     SUPPORT_GEOM_NAME,
     build_custom_grasp_model,
 )
@@ -217,12 +218,10 @@ def plot_trace(path: Path, rows: list[dict[str, float | str]]) -> None:
     drive_position = [float(row["drive_position_rad"]) for row in rows]
     applied_force = [float(row["applied_world_fy"]) for row in rows]
     left_shear = [
-        math.hypot(float(row["measured_left_fx"]), float(row["measured_left_fy"]))
-        for row in rows
+        math.hypot(float(row["measured_left_fx"]), float(row["measured_left_fy"])) for row in rows
     ]
     right_shear = [
-        math.hypot(float(row["measured_right_fx"]), float(row["measured_right_fy"]))
-        for row in rows
+        math.hypot(float(row["measured_right_fx"]), float(row["measured_right_fy"])) for row in rows
     ]
     friction_capacity = [float(row["available_friction_n"]) for row in rows]
     static_hold_demand = [float(row["static_hold_demand_tangential_n"]) for row in rows]
@@ -414,6 +413,7 @@ def run_acceptance(
     cube_half_thickness: float = DEFAULT_CUBE_HALF_THICKNESS,
     cube_half_contact_side: float = DEFAULT_CUBE_HALF_CONTACT_SIDE,
     cube_mass: float = DEFAULT_CUBE_MASS,
+    object_material: ObjectMaterial = "hard",
     target_force_n: float | None = None,
     force_rmse_threshold_n: float = 0.5,
     control_period_s: float = 0.002,
@@ -430,6 +430,7 @@ def run_acceptance(
         cube_half_thickness: 测试块 X 方向半厚。
         cube_half_contact_side: 测试块 YZ 接触面半边长。
         cube_mass: 测试块质量。
+        object_material: 触觉—物体显式接触材料档位。
         target_force_n: 可选目标平均单侧法向力；省略时使用 profile 配置。
         force_rmse_threshold_n: 接触切换后稳态法向力 RMSE 验收阈值。
         control_period_s: 法向力控制器的仿真时间更新周期（s）。
@@ -468,6 +469,7 @@ def run_acceptance(
         cube_half_thickness=cube_half_thickness,
         cube_half_contact_side=cube_half_contact_side,
         cube_mass=cube_mass,
+        object_material=object_material,
     )
     if control_period_s + 1e-12 < float(model.opt.timestep):
         raise ValueError("control_period_s must not be smaller than the physics timestep")
@@ -610,9 +612,7 @@ def run_acceptance(
                 "filtered_normal_force_n": force_command.filtered_force_n,
                 "normal_force_error_n": force_command.force_error_n,
                 "force_position_adjustment_rad": force_command.position_adjustment,
-                "stiffness_position_adjustment_rad": (
-                    force_command.stiffness_position_adjustment
-                ),
+                "stiffness_position_adjustment_rad": (force_command.stiffness_position_adjustment),
                 "force_feedforward_torque_n_m": force_command.force_feedforward_torque,
                 "mit_feedforward_torque_n_m": motor_command.feedforward_torque,
                 "estimated_contact_stiffness_n_per_m": (
@@ -626,9 +626,7 @@ def run_acceptance(
                     else math.nan
                 ),
                 "aperture_m": (
-                    force_command.aperture_m
-                    if force_command.aperture_m is not None
-                    else math.nan
+                    force_command.aperture_m if force_command.aperture_m is not None else math.nan
                 ),
                 "applied_world_fy": float(data.xfrc_applied[cube_body_id, 1]),
                 "cube_y": float(position[1]),

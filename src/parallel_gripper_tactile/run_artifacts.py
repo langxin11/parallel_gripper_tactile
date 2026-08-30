@@ -192,22 +192,34 @@ class RunDirectory:
         command: Sequence[str] = (),
         parameters: Mapping[str, Any] | None = None,
         run_name: str | None = None,
+        run_prefix: str | None = None,
+        run_suffix: str | None = None,
         now: datetime | None = None,
     ) -> "RunDirectory":
         """创建一个独占的、以 UTC 命名的运行目录与 profile 快照。
 
         ``profile_source`` 可以是 YAML profile 路径或已序列化的 YAML 文本。
         调用方提供的 ``run_name`` 有意从不会被修改；发生冲突时抛出
-        :class:`FileExistsError`。
+        :class:`FileExistsError`。``run_prefix`` 与 ``run_suffix`` 仅修饰自动生成的
+        ``UTC时间戳-短ID`` 名称，并且不能与 ``run_name`` 同时使用。
         """
         root = _resolved_root(output_root, create=True)
         profile_component = _validate_component(profile_name, "profile_name")
         experiment_component = _validate_component(experiment, "experiment")
+        if run_name is not None and (run_prefix is not None or run_suffix is not None):
+            raise ValueError("run_name cannot be combined with run_prefix or run_suffix")
         if run_name is not None:
             name = _validate_component(run_name, "run_name")
         else:
             timestamp = (now or datetime.now(UTC)).astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
-            name = f"{timestamp}-{uuid4().hex[:8]}"
+            generated = f"{timestamp}-{uuid4().hex[:8]}"
+            components = []
+            if run_prefix is not None:
+                components.append(_validate_component(run_prefix, "run_prefix"))
+            components.append(generated)
+            if run_suffix is not None:
+                components.append(_validate_component(run_suffix, "run_suffix"))
+            name = "-".join(components)
 
         run_path = root / profile_component / experiment_component / name
         _require_descendant(root, run_path)

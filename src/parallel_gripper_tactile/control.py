@@ -62,10 +62,7 @@ class CrankSliderKinematics:
         radicand = self.link_length_m**2 - radial_offset**2
         if radicand <= 0:
             raise ValueError("crank-slider geometry is outside its valid aperture domain")
-        return 2.0 * (
-            self.crank_radius_m * math.cos(alpha)
-            + math.sqrt(radicand)
-        )
+        return 2.0 * (self.crank_radius_m * math.cos(alpha) + math.sqrt(radicand))
 
     def closure(self, position_rad: float) -> float:
         """返回从 ``q=0`` 起算的总闭合行程，单位 m。"""
@@ -78,9 +75,10 @@ class CrankSliderKinematics:
         radicand = self.link_length_m**2 - radial_offset**2
         if radicand <= 0:
             raise ValueError("crank-slider geometry is outside its valid Jacobian domain")
-        return 2.0 * self.crank_radius_m * (
-            math.sin(alpha)
-            + radial_offset * math.cos(alpha) / math.sqrt(radicand)
+        return (
+            2.0
+            * self.crank_radius_m
+            * (math.sin(alpha) + radial_offset * math.cos(alpha) / math.sqrt(radicand))
         )
 
 
@@ -136,9 +134,7 @@ class ContactStiffnessEstimator:
 
         if delta_closure * delta_force > 0:
             sample = abs(delta_force / delta_closure)
-            sample = float(
-                np.clip(sample, self._config.min_n_per_m, self._config.max_n_per_m)
-            )
+            sample = float(np.clip(sample, self._config.min_n_per_m, self._config.max_n_per_m))
             alpha = float(self._config.filter_alpha)
             self._estimate_n_per_m += alpha * (sample - self._estimate_n_per_m)
 
@@ -444,17 +440,20 @@ class NormalForceController:
         *,
         position_rad: float,
         target_force_n: float,
+        gain_override: float | None = None,
     ) -> tuple[float, float | None, float | None]:
         """用开度雅可比把目标平均单侧法向力转换成准静态输出轴力矩。"""
         if self._kinematics is None:
             return 0.0, None, None
         aperture = self._kinematics.aperture(position_rad)
         closure_jacobian = self._kinematics.closure_jacobian(position_rad)
-        gain = (
-            float(self._config.stiffness.torque_feedforward_gain)
-            if self._config.stiffness is not None
-            else 1.0
-        )
+        gain = gain_override
+        if gain is None:
+            gain = (
+                float(self._config.stiffness.torque_feedforward_gain)
+                if self._config.stiffness is not None
+                else 1.0
+            )
         torque = gain * max(0.0, float(target_force_n)) * closure_jacobian
         return torque, closure_jacobian, aperture
 
@@ -497,11 +496,9 @@ class NormalForceController:
                 * force_error
                 / max(joint_stiffness, 1e-12)
             )
-            force_feedforward_torque, closure_jacobian, aperture = (
-                self._force_feedforward_torque(
-                    position_rad=current_position,
-                    target_force_n=target_force_n,
-                )
+            force_feedforward_torque, closure_jacobian, aperture = self._force_feedforward_torque(
+                position_rad=current_position,
+                target_force_n=target_force_n,
             )
 
         self._pid.setpoint = target_force_n
@@ -574,6 +571,8 @@ class NormalForceController:
             force_feedforward_torque, closure_jacobian, aperture = self._force_feedforward_torque(
                 position_rad=self._inner.position(data),
                 target_force_n=approach_feedforward_force_n,
+                # 控制器消融只作用于接触后的跟踪阶段；所有方案共享相同接近轨迹。
+                gain_override=1.0,
             )
             mit = self._inner.apply(
                 data,
