@@ -2,16 +2,23 @@
 site_name = "平行夹爪指尖触觉仿真"
 docs_dir = "docs"
 nav = [
-  { "首页" = "index.md" },
-  { "项目架构" = "architecture.md" },
-  { "代码与注释规范" = "coding-conventions.md" },
-  { "触觉读数约定" = "tactile-conventions.md" },
-  { "曲柄滑块力控模型" = "crank-slider-force-control.md" },
-  { "动态目标力跟踪" = "force-tracking.md" },
-  { "控制算法对比与消融" = "control-comparison-ablation.md" },
-  { "常用工作流" = "workflows.md" },
-  { "Onshape 导出与升级" = "onshape-export-upgrade.md" },
-  { "自研夹爪状态与后续工作" = "custom-gripper-next-phase.md" },
+  { "开始阅读" = "index.md" },
+  { "推荐路线" = [
+    { "1. 触觉读数约定" = "tactile-conventions.md" },
+    { "2. Onshape 导出" = "onshape-export-upgrade.md" },
+    { "3. 曲柄滑块力控模型" = "crank-slider-force-control.md" },
+    { "4. 动态目标力跟踪" = "force-tracking.md" },
+    { "5. 控制算法对比与消融" = "control-comparison-ablation.md" },
+  ] },
+  { "工程基线" = [
+    { "自研夹爪配置基线与状态" = "custom-gripper-next-phase.md" },
+    { "项目架构" = "architecture.md" },
+    { "常用工作流" = "workflows.md" },
+    { "代码与注释规范" = "coding-conventions.md" },
+  ] },
+  { "归档" = [
+    { "历史提交规划" = "commit-split-plan.md" },
+  ] },
 ]
 extra_javascript = [
   "javascripts/mathjax.js",

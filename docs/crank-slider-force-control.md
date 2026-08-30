@@ -56,15 +56,16 @@ J_c(q)=\frac{\partial c}{\partial q}=
 
 ## 2. 等效法向刚度
 
-在单个稳定的左右接触对中，设左右 Pillar 等效法向刚度为 \(k_L,k_R\)，物体沿夹持方向的等效刚度为 \(k_{\mathrm{obj}}\)。设 \(c_{\mathrm{contact}}\) 是双侧刚建立接触时的闭合行程，并定义接触压入量 \(\Delta c=c(q)-c_{\mathrm{contact}}\)。若忽略机构、装夹和传感器的额外柔顺性，接触保持期间的单侧夹持力近似为：
+设 \(c_{\mathrm{contact}}\) 是双侧刚建立接触时的闭合行程，并定义接触压入量
+\(\Delta c=c(q)-c_{\mathrm{contact}}\)。在当前稳定接触集合和小范围行程内，使用整体等效刚度
+\(k_{\mathrm{pair}}\) 近似描述 Pillar—物体—机构/接触链路：
 
 \[
 f_n=F_{\mathrm{side}}=k_{\mathrm{pair}}\,\Delta c,\qquad
-\frac1{k_{\mathrm{pair}}}=
-\frac1{k_L}+\frac1{k_{\mathrm{obj}}}+\frac1{k_R}.
 \]
 
-该串联模型表示：接触之后新增的闭合行程由左接触层、物体和右接触层共同吸收。触觉读数仍分别保留左右法向力，并可派生总法向力：
+`k_pair` 是控制用的组合局部斜率，不是材料弹性模量，也不拆分或在线反推任何单独部件参数。
+触觉读数仍分别保留左右法向力，并可派生总法向力：
 
 \[
 F_\Sigma=F_L+F_R,\qquad f_n=\frac{F_\Sigma}{2}.
@@ -72,7 +73,6 @@ F_\Sigma=F_L+F_R,\qquad f_n=\frac{F_\Sigma}{2}.
 
 后续控制主量采用平均单侧力 \(f_n\)，而不是总法向力 \(F_\Sigma\)。这样目标力、跟踪误差和刚度估计都直接对应夹爪实际施加在物体每一侧的法向夹持力；\(F_\Sigma\) 仅作为派生记录量或摩擦容量计算中的总接触力使用。
 
-若每侧有多个稳定且并联的 Pillar，则可先取 \(k_L=\sum_i k_{L,i}\)、\(k_R=\sum_i k_{R,i}\)。
 这只适用于接触柱集合不变、法向近似一致的局部线性化；不能把所有九个柱简单相加后视为全行程常数。
 
 ## 3. 力雅可比与电机力矩
@@ -105,16 +105,16 @@ J_f(q)=\frac{\partial f_n}{\partial q}
 
 ## 4. 用于目标力控制
 
-令 \(e_f=f_{\mathrm{ref}}-f_n\)，并在线估计平均单侧法向力相对总闭合行程的等效刚度：
+令 \(e_f=f_{\mathrm{ref}}-f_n\)，并在线估计平均单侧法向力相对总闭合行程的整体等效刚度：
 
 \[
-\hat K_c\simeq\frac{\Delta f_n}{\Delta c}.
+\hat k_{\mathrm{pair}}\simeq\frac{\Delta f_n}{\Delta c}.
 \]
 
-则 \(\hat J_f(q)=\hat K_cJ_c(q)\)，使用估计值的位置前馈为：
+则 \(\hat J_f(q)=\hat k_{\mathrm{pair}}J_c(q)\)，使用估计值的位置前馈为：
 
 \[
-\Delta q_{\mathrm{ff}}=\frac{e_f}{\hat K_cJ_c(q)}.
+\Delta q_{\mathrm{ff}}=\frac{e_f}{\hat k_{\mathrm{pair}}J_c(q)}.
 \]
 
 建议保留现有力反馈环，并采用受限的组合命令：
@@ -167,7 +167,7 @@ K_d^F\frac{de_f}{dt},
 
 实际实现中应：
 
-1. 对 \(\hat K_c\) 进行低通滤波，并设置正的上下限；
+1. 对 \(\hat k_{\mathrm{pair}}\) 进行低通滤波，并设置正的上下限；
 2. 仅在双侧接触确认后更新刚度估计，接触柱集合变化时应冻结估计；
 3. 在接触建立、脱离、滑移、力突变或接触柱数量变化时冻结估计，并退回保守 PI；
 4. 根据 \(1/\hat J_f\) 对位置式力环的比例和积分增益做调度，保持不同物体上的闭环带宽接近；
@@ -176,7 +176,7 @@ K_d^F\frac{de_f}{dt},
 当前实现位于 `src/parallel_gripper_tactile/control.py`：
 
 - `CrankSliderKinematics` 计算 \(\omega(q)\)、\(c(q)\) 和 \(J_c(q)\)；
-- `ContactStiffnessEstimator` 用 secant 样本 \(\Delta f_n/\Delta c\) 加 EWMA 滤波估计 \(\hat K_c\)；
+- `ContactStiffnessEstimator` 用 secant 样本 \(\Delta f_n/\Delta c\) 加 EWMA 滤波估计 \(\hat k_{\mathrm{pair}}\)；
 - `NormalForceController` 将 \(\Delta q_{\mathrm{ff}}\)、PI 修正和 \(\tau_{\mathrm{ff}}\) 合并后交给 MIT 力矩内环。
 
 直接力矩式力控尚未作为独立控制器实现。后续可在统一控制器接口下增加
@@ -191,7 +191,8 @@ K_d^F\frac{de_f}{dt},
 \]
 
 进而得到 \(\hat J_f\)，或在已知 \(J_c(q)\) 后反算 \(\hat k_{\mathrm{pair}}\)。
-这首先辨识的是“Pillar—物体—机构”组合的等效刚度；只有在 Pillar、机构和装夹柔顺性已经独立标定时，才能可靠反推物体本身的 \(k_{\mathrm{obj}}\)。
+这辨识的是“Pillar—物体—机构/接触链路”组合的整体等效 \(k_{\mathrm{pair}}\)，用于前馈、增益调度
+和实验比较；它不表示材料弹性模量，也不用于在线反推物体参数。
 
 当前 MuJoCo Pillar 使用 `solref="-1200 -10"` 和
 `solimp="0.75 0.95 0.0025 0.5 2"`。目标方块也声明了

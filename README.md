@@ -49,8 +49,8 @@ pgt runs clean (--older-than-days N | --all | --cache) [--apply]
 | `custom_parallel_gripper.yaml` | MIT 力矩 + 法向力外环 | `contact_geom` |
 
 自研夹爪的 Pillars 有意使用等效软接触，而非独立的可变形硅胶体：
-`solref="-6000 -10"`、`solimp="0.75 0.95 0.0025 0.5 2"`。这表示由单根 Pillar
-15 N / 2.5 mm 满量程换算得到的约 `6 kN/m` 名义法向刚度，并带有 2.5 mm 的柔顺过渡。
+`solref="-1200 -10"`、`solimp="0.75 0.95 0.0025 0.5 2"`。当前仿真接触响应约为
+`1200 N/m`；产品量程换算只能作为设计背景，不能替代仓库模型参数。
 
 ## 运行产物
 
