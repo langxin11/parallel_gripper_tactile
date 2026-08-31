@@ -11,6 +11,19 @@
 
 ```bash
 uv sync --all-groups
+uv run pre-commit install
+```
+
+安装后，每次 `git commit` 会自动执行 Ruff 检查、Ruff 格式检查和完整 pytest。需要手动对全部文件
+运行同一组门禁时执行：
+
+```bash
+uv run pre-commit run --all-files
+```
+
+也可逐项执行：
+
+```bash
 uv run ruff check .            # 环境缓存异常时：uv run ruff check --no-cache .
 uv run ruff format --check .
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest
