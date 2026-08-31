@@ -31,10 +31,7 @@ def test_root_and_subcommand_help_are_available() -> None:
         "--sensor-noise-seed",
     ):
         assert option in force_track_help.output
-    ablation_help = RUNNER.invoke(app, ["run", "force-track-ablation", "--help"])
-    assert ablation_help.exit_code == 0
-    for option in ("--materials", "--controllers", "--repeats", "--seed-start"):
-        assert option in ablation_help.output
+    assert RUNNER.invoke(app, ["run", "force-track-ablation", "--help"]).exit_code != 0
     assert RUNNER.invoke(app, ["compare", "tactile", "--help"]).exit_code == 0
 
 

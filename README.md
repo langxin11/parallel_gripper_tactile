@@ -15,8 +15,7 @@ uv run pgt run force-track --profile configs/custom_parallel_gripper.yaml --task
 # 自研夹爪可选 soft / medium / hard 显式触觉接触材料（默认 hard）
 uv run pgt run grasp --profile configs/custom_parallel_gripper.yaml --object-material soft
 uv run pgt run force-track --profile configs/custom_parallel_gripper.yaml --task configs/force_tracking/default_waypoints.yaml --object-material medium
-# 运行 soft/medium/hard × 四种控制器的消融矩阵，每个条件使用3个独立噪声种子
-uv run pgt run force-track-ablation --profile configs/custom_parallel_gripper.yaml --task configs/force_tracking/default_waypoints.yaml --repeats 3 --run-prefix controller-study
+uv run pgt run force-track --profile configs/custom_parallel_gripper.yaml --task configs/force_tracking/default_waypoints.yaml --controller-variant full --object-material hard --sensor-noise-seed 0
 ```
 
 Profile 仅使用 YAML。它们是不可变的 Pydantic v2 模型：未知字段、非法控制限幅、空/多文档输入、
@@ -32,7 +31,6 @@ pgt assets prepare-onshape INPUT OUTPUT
 pgt run demo --profile PROFILE
 pgt run grasp --profile PROFILE [--video] [--object-material soft|medium|hard]
 pgt run force-track --profile PROFILE --task TASK.yaml [--viewer] [--object-material soft|medium|hard]
-pgt run force-track-ablation --profile PROFILE --task TASK.yaml [--repeats N]
 pgt compare tactile --left-profile A --right-profile B
 pgt compare contact --profile PROFILE
 pgt view taxels --profile PROFILE
@@ -45,11 +43,10 @@ pgt runs clean (--older-than-days N | --all | --cache) [--apply]
 目标力跟踪任务时同步打开 MuJoCo GUI；`pgt view` 会打开静态交互检查场景。Typer 通过
 `pgt --install-completion` 提供 shell 补全。
 
-`pgt run grasp`、`force-track` 和 `force-track-ablation` 支持 `--run-prefix` 与
+`pgt run grasp` 和 `force-track` 支持 `--run-prefix` 与
 `--run-suffix`。它们会保留自动生成的 UTC 时间戳和短 ID，例如
-`pid-only-soft-20260830T104726Z-6dc7385b-seed01`；原有 `--run-name` 仍用于指定完整、
-不可改写的目录名，不能与前缀或后缀同时使用。消融命令会为每次子实验自动加入控制器、材料和
-噪声种子标签，并在父目录生成 `summary.csv`、`aggregate.csv` 与 `summary.json`。
+`trial-20260830T104726Z-6dc7385b`；原有 `--run-name` 仍用于指定完整、不可改写的目录名，
+不能与前缀或后缀同时使用。
 
 力控消融的四个跟踪阶段变体为：
 
@@ -60,9 +57,20 @@ pgt runs clean (--older-than-days N | --all | --cache) [--apply]
 | `pid-stiffness-ff` | 开 | 开 | 关 |
 | `full` | 开 | 开 | 开 |
 
-所有变体共享相同的接近阶段和 waypoint 任务；`--seed-start` 指定第一个传感器噪声种子，后续
-重复按整数递增。`--materials` 与 `--controllers` 接受逗号分隔的子集，可用于先做小规模冒烟
-实验，再运行完整矩阵。
+所有变体共享相同的接近阶段和 waypoint 任务。
+
+## Research studies
+
+`pgt` 提供确定参数下的单次实验；`scripts/experiments` 保存 controller、材料和重复次数组成的
+多次科研 protocol。运行力跟踪消融研究：
+
+```bash
+uv run python scripts/experiments/force_tracking_ablation.py \
+    --config configs/studies/force_tracking_ablation.yaml
+```
+
+该 study 直接调用 Python runner，而非通过子进程调用 CLI。它会在 `outputs/studies` 创建独立父目录，
+保存 study 配置、逐次结果、聚合统计和每个子 run 的可复现工件。
 
 ## Profiles
 

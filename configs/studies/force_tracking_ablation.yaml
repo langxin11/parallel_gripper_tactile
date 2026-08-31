@@ -1,0 +1,16 @@
+name: force_tracking_ablation
+profile: ../custom_parallel_gripper.yaml
+task: ../force_tracking/default_waypoints.yaml
+controllers:
+  - pid-only
+  - pid-torque-ff
+  - pid-stiffness-ff
+  - full
+materials:
+  - soft
+  - medium
+  - hard
+seeds:
+  start: 0
+  count: 3
+output_root: ../../outputs/studies
