@@ -42,6 +42,22 @@ Pillars 的 3×3 触觉面不是严格共面：中心 taxel 最高，四个边�
 MJCF 中中心比四角高约 0.50 mm，边中间比四角高约 0.30 mm。这个几何形状会影响最先接触
 的 taxel 顺序，不能把它当作完全平整的 3×3 平面压力阵列。
 
+### 2026-08-31：高载荷接触 A/B 观察
+
+在 `configs/force_tracking/default_waypoints.yaml`（峰值 10 N/侧）、`full` 控制器、`hard`
+材料和固定噪声种子 `20260814` 下，原 mesh 碰撞模型出现了明显的高载荷接触切换：活跃接触数在
+18 至 72 间变化，跟踪阶段记录到 22 次接触塌陷事件。对应的 RMSE 为 0.222 N、滤波后峰值误差
+为 1.661 N，原始触觉力峰值误差为 5.723 N；力矩饱和比例仍为 0%。
+
+对照模型 `parallel_gripper_flat_sphere_collision.xml` 保留原视觉 mesh，仅把 18 个 Pillar 的
+碰撞体替换为半径 2.8 mm、面向方块最高点共面的球体。其它实验条件完全相同。该对照中活跃接触数
+恒为 18、接触塌陷事件为 0，RMSE 降至 0.092 N、滤波后峰值误差降至 0.231 N，原始触觉力峰值
+误差降至 0.195 N。
+
+因此，本仿真中高目标力下的主要失稳来源是原非共面 mesh Pillar 的离散接触集合切换，而不是平均
+单侧力语义或执行器力矩饱和。平面球模型是用于因果验证的碰撞近似，不等同于已标定的真实传感器
+几何；将其作为默认模型前，仍需依据实物 Pillar 外形和力—压入标定进一步确认。
+
 该指尖按 Contactile PapillArray 类传感器处理。公开资料说明 PapillArray 是 soft silicone
 pillar 阵列，每个阵列单元可测 3D displacement、3D force 和 vibration；产品规格可参考
 [Contactile technology](https://contactile.com/novel-optical-sensing-technology/)、

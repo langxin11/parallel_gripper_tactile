@@ -17,6 +17,7 @@ import yaml
 from ..control import (
     ForceControlObservation,
     ForceControlReference,
+    ForceSemantics,
     ForceTrackingController,
     NormalForceController,
 )
@@ -28,6 +29,7 @@ from ..scenes.custom import (
     DEFAULT_CUBE_MASS,
     DEFAULT_PROFILE,
     GRIPPER_PREFIX,
+    ObjectContactModel,
     ObjectMaterial,
     SUPPORT_GEOM_NAME,
     build_custom_grasp_model,
@@ -240,7 +242,12 @@ def _plot_force_tracking(path: Path, rows: list[dict[str, float | str]]) -> None
     axes[0].plot(
         times, measured, color=colors["orange"], label="measured", linewidth=0.8, alpha=0.7
     )
-    axes[0].set_ylabel("Normal force (N)")
+    force_label = (
+        "Total normal force (N)"
+        if rows[0].get("force_semantics") == "total"
+        else "Mean side normal force (N)"
+    )
+    axes[0].set_ylabel(force_label)
     axes[0].legend(loc="best")
     axes[1].plot(times, torque, color=colors["green"], linewidth=1.2)
     axes[1].set_ylabel("Motor torque (N m)")
@@ -303,6 +310,8 @@ def run_force_tracking(
     cube_half_contact_side: float = DEFAULT_CUBE_HALF_CONTACT_SIDE,
     cube_mass: float = DEFAULT_CUBE_MASS,
     object_material: ObjectMaterial = "hard",
+    object_contact_model: ObjectContactModel = "explicit",
+    force_semantics: ForceSemantics = "average_side",
     controller_variant: ControllerVariant = "full",
     sensor_noise_seed: int | None = None,
     output_csv: Path | None = None,
@@ -327,6 +336,7 @@ def run_force_tracking(
         cube_half_contact_side=cube_half_contact_side,
         cube_mass=cube_mass,
         object_material=object_material,
+        object_contact_model=object_contact_model,
     )
     if task.control_period_s + 1e-12 < float(model.opt.timestep):
         raise ValueError("control_period_s must not be smaller than the physics timestep")
@@ -335,7 +345,10 @@ def run_force_tracking(
     control_timer = SimulationTimer(task.control_period_s, float(data.time))
     reader = _prefixed_reader(model, profile)
     controller: ForceTrackingController = NormalForceController.from_profile(
-        model, profile, name_prefix=GRIPPER_PREFIX
+        model,
+        profile,
+        name_prefix=GRIPPER_PREFIX,
+        force_semantics=force_semantics,
     )
     force_config = profile.normal_force
     noise_rng = np.random.default_rng(int(force_config.sensor_noise_seed))
@@ -470,6 +483,7 @@ def run_force_tracking(
                 {
                     "time_s": float(data.time),
                     "phase": phase,
+                    "force_semantics": force_semantics,
                     "tracking_time_s": tracking_time_s,
                     "control_state": force_command.state,
                     "target_normal_force_n": force_command.target_force_n,
@@ -481,6 +495,7 @@ def run_force_tracking(
                     "drive_velocity_rad_s": motor_command.velocity,
                     "motor_torque_n_m": motor_command.torque,
                     "force_position_adjustment_rad": force_command.position_adjustment,
+                    "pid_position_adjustment_rad": force_command.pid_position_adjustment,
                     "stiffness_position_adjustment_rad": (
                         force_command.stiffness_position_adjustment
                     ),

@@ -1,0 +1,61 @@
+schema_version: 1
+name: custom_parallel_gripper_flat_spheres
+
+model:
+  # A/B 模型：可视 Pillar mesh 保持原样；碰撞体改为同一接触平面的 3×3 球阵列。
+  path: ../assets/grippers/custom_parallel_gripper/parallel_gripper_flat_sphere_collision.xml
+
+control:
+  mode: mit_torque
+  actuator: gripper_drive
+  open: 0.05
+  closed: 1.30
+  mit:
+    p_min: 0.0
+    p_max: 1.7
+    v_max: 8.0
+    t_max: 4.0
+    kp: 20.0
+    kd: 0.63793536
+    t_ff: 0.0
+  force:
+    # 控制主量：平均单侧法向力 f_n=(F_L+F_R)/2。
+    target_n: 8.0
+    contact_threshold_n: 0.15
+    contact_confirm_steps: 5
+    release_threshold_n: 0.05
+    release_confirm_steps: 25
+    kp: 0.016
+    ki: 0.200
+    kd: 0.0
+    max_position_adjustment: 0.15
+    filter_cutoff_hz: 20.0
+    sensor_taxel_normal_noise_std_n: [0.0066666667, 0.0133333333]
+    sensor_taxel_shear_noise_std_n: [0.0033333333, 0.0100000000]
+    sensor_noise_seed: 20260814
+    geometry:
+      theta0_rad: 0.7853981633974483
+      crank_radius_m: 0.03
+      link_length_m: 0.04
+      offset_m: 0.021213203435596423
+    stiffness:
+      enabled: true
+      initial_n_per_m: 3000
+      min_n_per_m: 250
+      max_n_per_m: 25000
+      filter_alpha: 0.15
+      min_delta_closure_m: 0.00005
+      min_delta_force_n: 0.025
+      position_feedforward_gain: 0.25
+      torque_feedforward_gain: 1.0
+
+mount:
+  pos: [0.0, 0.0, 0.18]
+  quat: [0.7071067811865476, 0.7071067811865476, 0.0, 0.0]
+
+tactile:
+  mode: contact_geom
+  rows: 3
+  cols: 3
+  left_prefix: left_taxel_geom_
+  right_prefix: right_taxel_geom_

@@ -33,7 +33,7 @@ def test_force_tracking_task_loads_default_waypoint_config() -> None:
     task = ForceTrackingTask.load(ROOT / "configs/force_tracking/default_waypoints.yaml")
 
     assert task.name == "default_waypoint_force_tracking"
-    assert task.approach.feedforward_force_n == pytest.approx(2.0)
+    assert task.approach.feedforward_force_n == pytest.approx(1.0)
     assert task.reference.duration_s == pytest.approx(4.5)
     assert task.reference.target_at(3.5) == pytest.approx(10.0)
 

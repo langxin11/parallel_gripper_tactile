@@ -114,7 +114,8 @@ def test_contact_stiffness_estimator_tracks_force_over_closure() -> None:
         normal_force_n=1.0 + 10000.0 * delta_closure,
     )
 
-    expected = 6000.0 + 0.15 * (10000.0 - 6000.0)
+    initial = profile.normal_force.stiffness.initial_n_per_m
+    expected = initial + 0.15 * (10000.0 - initial)
     assert estimate == pytest.approx(expected)
 
 
@@ -149,7 +150,10 @@ def test_normal_force_controller_switches_after_bilateral_contact() -> None:
     assert command.filtered_force_n == pytest.approx(0.2)
     assert command.position_adjustment > 0
     assert command.stiffness_position_adjustment > 0
-    assert command.estimated_contact_stiffness_n_per_m == pytest.approx(6000.0)
+    assert profile.normal_force.stiffness is not None
+    assert command.estimated_contact_stiffness_n_per_m == pytest.approx(
+        profile.normal_force.stiffness.initial_n_per_m
+    )
     assert command.closure_jacobian_m_per_rad == pytest.approx(0.042426407, abs=1e-9)
     assert command.force_feedforward_torque == pytest.approx(
         8.0 * command.closure_jacobian_m_per_rad
@@ -168,6 +172,31 @@ def test_normal_force_controller_switches_after_bilateral_contact() -> None:
             dt=0.002,
         )
     assert command.state == "approach"
+
+
+def test_total_force_semantics_preserves_legacy_measurement_and_feedforward() -> None:
+    """旧总力语义使用双侧和，并以 ``F_sum / 2`` 映射总闭合雅可比。"""
+    profile = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    model = mujoco.MjModel.from_xml_path(str(profile.model_path))
+    data = mujoco.MjData(model)
+    controller = NormalForceController.from_profile(model, profile, force_semantics="total")
+
+    for _ in range(5):
+        command = controller.apply(
+            data,
+            approach_position=0.5,
+            total_normal_force_n=0.4,
+            left_normal_force_n=0.2,
+            right_normal_force_n=0.2,
+            dt=0.002,
+        )
+
+    assert command.state == "force_tracking"
+    assert command.measured_force_n == pytest.approx(0.4)
+    assert command.closure_jacobian_m_per_rad is not None
+    assert command.force_feedforward_torque == pytest.approx(
+        0.5 * 8.0 * command.closure_jacobian_m_per_rad
+    )
 
 
 def test_normal_force_controller_exposes_force_tracking_interface() -> None:

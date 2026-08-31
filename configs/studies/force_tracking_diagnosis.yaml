@@ -1,0 +1,30 @@
+name: force_tracking_diagnosis
+profile: ../custom_parallel_gripper.yaml
+task: ../force_tracking/default_waypoints.yaml
+output_root: ../../outputs/studies
+
+# A fixed seed turns each phase into a causal, directly comparable experiment.
+sensor_noise_seed: 20260814
+reproducibility_repeats: 2
+
+controllers:
+  - pid-only
+  - pid-torque-ff
+  - pid-stiffness-ff
+  - full
+materials:
+  - soft
+  - medium
+  - hard
+
+# Diagnostic load sweep only: factors scale average-side task references and do
+# not change the waypoint or feedback force semantics.
+force_scales: [0.5, 0.625, 0.75, 0.875, 1.0]
+contact_models: [explicit, legacy]
+
+# Sequential high-load stability sweeps. Each phase changes only one value; once
+# a condition is selected, make it the profile baseline before running the next phase.
+stability_controller: pid-torque-ff
+position_adjustment_limits_rad: [0.15, 0.10, 0.075, 0.05, 0.03]
+integral_gains: [0.2, 0.1, 0.05, 0.025, 0.0]
+filter_cutoffs_hz: [20.0, 30.0, 40.0, 60.0]

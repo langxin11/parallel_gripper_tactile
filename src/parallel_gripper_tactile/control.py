@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-from typing import Protocol
+from typing import Literal, Protocol
 
 import numpy as np
 from simple_pid import PID
@@ -176,6 +176,9 @@ class ForceControlReference:
     approach_feedforward_force_n: float = 0.0
 
 
+ForceSemantics = Literal["average_side", "total"]
+
+
 class MITTorqueController:
     """将 ``kp*(p_des-p) + kd*(v_des-v) + t_ff`` 施加到电机执行器。"""
 
@@ -299,6 +302,7 @@ class NormalForceControlCommand:
     force_error_n: float
     position_adjustment: float
     mit: MITControlCommand
+    pid_position_adjustment: float = 0.0
     stiffness_position_adjustment: float = 0.0
     force_feedforward_torque: float = 0.0
     estimated_contact_stiffness_n_per_m: float | None = None
@@ -335,6 +339,7 @@ class _ForceTrackingStep:
 
     mit: MITControlCommand
     position_adjustment: float
+    pid_position_adjustment: float
     stiffness_position_adjustment: float
     force_feedforward_torque: float
     estimated_contact_stiffness_n_per_m: float | None
@@ -343,16 +348,19 @@ class _ForceTrackingStep:
 
 
 class NormalForceController:
-    """先以位置控制接近，再跟踪左右平均单侧 taxel 法向力。"""
+    """先以位置控制接近，再跟踪指定语义的双指 taxel 法向力。"""
 
     def __init__(
         self,
         inner: MITTorqueController,
         config: NormalForceControl,
+        *,
+        force_semantics: ForceSemantics = "average_side",
     ) -> None:
         """创建 simple-pid 外环与接触状态机。"""
         self._inner = inner
         self._config = config
+        self._force_semantics = force_semantics
         self._kinematics = (
             CrankSliderKinematics.from_config(config.geometry)
             if config.geometry is not None
@@ -384,6 +392,7 @@ class NormalForceController:
         profile: GripperProfile,
         *,
         name_prefix: str = "",
+        force_semantics: ForceSemantics = "average_side",
     ) -> "NormalForceController":
         """基于一个 profile 构建外环力环路及其 MIT 内环。"""
         if profile.normal_force is None:
@@ -391,6 +400,7 @@ class NormalForceController:
         return cls(
             MITTorqueController.from_profile(model, profile, name_prefix=name_prefix),
             profile.normal_force,
+            force_semantics=force_semantics,
         )
 
     @property
@@ -442,7 +452,7 @@ class NormalForceController:
         target_force_n: float,
         gain_override: float | None = None,
     ) -> tuple[float, float | None, float | None]:
-        """用开度雅可比把目标平均单侧法向力转换成准静态输出轴力矩。"""
+        """将当前语义的目标力转换为与总闭合量功共轭的输出轴力矩。"""
         if self._kinematics is None:
             return 0.0, None, None
         aperture = self._kinematics.aperture(position_rad)
@@ -454,7 +464,8 @@ class NormalForceController:
                 if self._config.stiffness is not None
                 else 1.0
             )
-        torque = gain * max(0.0, float(target_force_n)) * closure_jacobian
+        semantic_scale = 1.0 if self._force_semantics == "average_side" else 0.5
+        torque = gain * max(0.0, float(target_force_n)) * semantic_scale * closure_jacobian
         return torque, closure_jacobian, aperture
 
     def _tracking_command(
@@ -518,6 +529,7 @@ class NormalForceController:
         return _ForceTrackingStep(
             mit=mit,
             position_adjustment=adjustment,
+            pid_position_adjustment=pid_adjustment,
             stiffness_position_adjustment=stiffness_adjustment,
             force_feedforward_torque=force_feedforward_torque,
             estimated_contact_stiffness_n_per_m=stiffness_estimate,
@@ -546,10 +558,12 @@ class NormalForceController:
         if dt <= 0:
             raise ValueError("dt must be positive")
         config = self._config
-        measured_force = 0.5 * (
-            max(0.0, float(left_normal_force_n)) + max(0.0, float(right_normal_force_n))
+        total_force = max(0.0, float(left_normal_force_n)) + max(0.0, float(right_normal_force_n))
+        measured_force = (
+            0.5 * total_force if self._force_semantics == "average_side" else total_force
         )
         stiffness_adjustment = 0.0
+        pid_adjustment = 0.0
         force_feedforward_torque = 0.0
         stiffness_estimate = None
         closure_jacobian = None
@@ -599,6 +613,7 @@ class NormalForceController:
                 )
                 mit = tracking.mit
                 adjustment = tracking.position_adjustment
+                pid_adjustment = tracking.pid_position_adjustment
                 stiffness_adjustment = tracking.stiffness_position_adjustment
                 force_feedforward_torque = tracking.force_feedforward_torque
                 stiffness_estimate = tracking.estimated_contact_stiffness_n_per_m
@@ -626,6 +641,7 @@ class NormalForceController:
                 )
                 mit = tracking.mit
                 adjustment = tracking.position_adjustment
+                pid_adjustment = tracking.pid_position_adjustment
                 stiffness_adjustment = tracking.stiffness_position_adjustment
                 force_feedforward_torque = tracking.force_feedforward_torque
                 stiffness_estimate = tracking.estimated_contact_stiffness_n_per_m
@@ -643,6 +659,7 @@ class NormalForceController:
             force_error_n=active_target_force - reported_filtered_force,
             position_adjustment=adjustment,
             mit=mit,
+            pid_position_adjustment=pid_adjustment,
             stiffness_position_adjustment=stiffness_adjustment,
             force_feedforward_torque=force_feedforward_torque,
             estimated_contact_stiffness_n_per_m=stiffness_estimate,

@@ -27,6 +27,7 @@ DEFAULT_CUBE_MASS = MIN_CUBE_MASS
 PILLAR_ALIGNMENT_OFFSET_IN_BASE = np.array((0.0, 0.0, -0.002))
 
 ObjectMaterial = Literal["soft", "medium", "hard"]
+ObjectContactModel = Literal["explicit", "legacy"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +64,13 @@ def _validate_object_material(object_material: str) -> ObjectMaterial:
         choices = ", ".join(OBJECT_CONTACT_PRESETS)
         raise ValueError(f"object_material must be one of: {choices}")
     return cast(ObjectMaterial, object_material)
+
+
+def _validate_object_contact_model(contact_model: str) -> ObjectContactModel:
+    """验证触觉—物体接触模型选择。"""
+    if contact_model not in {"explicit", "legacy"}:
+        raise ValueError("object_contact_model must be one of: explicit, legacy")
+    return cast(ObjectContactModel, contact_model)
 
 
 def _quaternion_rotate(
@@ -184,6 +192,7 @@ def build_custom_grasp_spec(
     cube_half_contact_side: float = DEFAULT_CUBE_HALF_CONTACT_SIDE,
     cube_mass: float = DEFAULT_CUBE_MASS,
     object_material: ObjectMaterial = "hard",
+    object_contact_model: ObjectContactModel = "explicit",
 ):
     """附加固定自研基座、自由方块与临时支撑。
 
@@ -231,7 +240,8 @@ def build_custom_grasp_spec(
         prefix=CUBE_PREFIX,
         frame=cube_mount,
     )
-    _add_tactile_object_pairs(scene, profile, object_material)
+    if _validate_object_contact_model(object_contact_model) == "explicit":
+        _add_tactile_object_pairs(scene, profile, object_material)
     # 自研执行器是纯力矩源。位置预设应放在 qpos/控制器状态里，
     # 而零力矩是唯一安全的通用 keyframe 命令。
     scene.add_key(name="custom_open", ctrl=[0.0])
@@ -246,6 +256,7 @@ def build_custom_grasp_model(
     cube_half_contact_side: float = DEFAULT_CUBE_HALF_CONTACT_SIDE,
     cube_mass: float = DEFAULT_CUBE_MASS,
     object_material: ObjectMaterial = "hard",
+    object_contact_model: ObjectContactModel = "explicit",
 ):
     """编译水平安装的自研夹爪抓取场景。"""
     return build_custom_grasp_spec(
@@ -254,4 +265,5 @@ def build_custom_grasp_model(
         cube_half_contact_side=cube_half_contact_side,
         cube_mass=cube_mass,
         object_material=object_material,
+        object_contact_model=object_contact_model,
     ).compile()
