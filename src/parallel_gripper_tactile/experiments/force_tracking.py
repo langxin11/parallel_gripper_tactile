@@ -311,6 +311,7 @@ def run_force_tracking(
     cube_mass: float = DEFAULT_CUBE_MASS,
     object_material: ObjectMaterial = "hard",
     object_contact_model: ObjectContactModel = "explicit",
+    multiccd_enabled: bool = True,
     force_semantics: ForceSemantics = "average_side",
     controller_variant: ControllerVariant = "full",
     sensor_noise_seed: int | None = None,
@@ -337,6 +338,7 @@ def run_force_tracking(
         cube_mass=cube_mass,
         object_material=object_material,
         object_contact_model=object_contact_model,
+        multiccd_enabled=multiccd_enabled,
     )
     if task.control_period_s + 1e-12 < float(model.opt.timestep):
         raise ValueError("control_period_s must not be smaller than the physics timestep")
@@ -484,6 +486,7 @@ def run_force_tracking(
                     "time_s": float(data.time),
                     "phase": phase,
                     "force_semantics": force_semantics,
+                    "multiccd_enabled": str(multiccd_enabled).lower(),
                     "tracking_time_s": tracking_time_s,
                     "control_state": force_command.state,
                     "target_normal_force_n": force_command.target_force_n,

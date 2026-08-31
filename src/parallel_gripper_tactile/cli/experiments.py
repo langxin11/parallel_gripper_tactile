@@ -177,6 +177,10 @@ def run_force_track(
     object_material: Annotated[
         Literal["soft", "medium", "hard"], typer.Option("--object-material")
     ] = "hard",
+    disable_multiccd: Annotated[
+        bool,
+        typer.Option("--disable-multiccd", help="Use one contact per convex geom pair."),
+    ] = False,
     controller_variant: Annotated[
         Literal["pid-only", "pid-torque-ff", "pid-stiffness-ff", "full"],
         typer.Option("--controller-variant"),
@@ -195,6 +199,7 @@ def run_force_track(
             run_prefix=run_prefix,
             run_suffix=run_suffix,
             object_material=object_material,
+            multiccd_enabled=not disable_multiccd,
             controller_variant=controller_variant,
             sensor_noise_seed=sensor_noise_seed,
             viewer=viewer,

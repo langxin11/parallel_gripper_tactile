@@ -54,9 +54,36 @@ MJCF 中中心比四角高约 0.50 mm，边中间比四角高约 0.30 mm。这�
 恒为 18、接触塌陷事件为 0，RMSE 降至 0.092 N、滤波后峰值误差降至 0.231 N，原始触觉力峰值
 误差降至 0.195 N。
 
-因此，本仿真中高目标力下的主要失稳来源是原非共面 mesh Pillar 的离散接触集合切换，而不是平均
-单侧力语义或执行器力矩饱和。平面球模型是用于因果验证的碰撞近似，不等同于已标定的真实传感器
-几何；将其作为默认模型前，仍需依据实物 Pillar 外形和力—压入标定进一步确认。
+为区分“非共面”“mesh 几何”和“multiccd”三个因素，随后在相同任务、控制器、材料和噪声种子下
+增加三个对照。完整五条件结果如下：
+
+| 碰撞条件 | RMSE (N) | MAE (N) | 峰值误差 (N) | 活跃接触数 | 塌陷事件 |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 原非共面 mesh + multiccd | 0.222 | 0.139 | 1.661 | 18–72 | 22 |
+| 保留原高度差的球体 + multiccd | 0.094 | 0.072 | 0.236 | 18 | 0 |
+| 共面 mesh + multiccd | 0.088 | 0.067 | 0.220 | 72 | 0 |
+| 原非共面 mesh，关闭 multiccd | 0.094 | 0.072 | 0.236 | 18 | 0 |
+| 共面球体 + multiccd | 0.092 | 0.070 | 0.231 | 18 | 0 |
+
+这些对照修正了只根据原 A/B 得出的过强结论：非共面本身不是充分原因，因为保留高度差的球体仍然
+稳定；mesh 和每对四点接触本身也不是充分原因，因为共面 mesh 始终保持 72 个接触且跟踪最好。
+高载荷振荡来自三者的交互——原非共面 mesh 在 multiccd 下反复切换接触流形，使总接触数在
+18 与 72 之间跳变。关闭 multiccd、消除 mesh 流形或使 mesh 共面，任一种都能消除这种切换。
+
+可使用以下命令复现实验：
+
+```bash
+uv run python scripts/experiments/force_tracking_diagnosis.py \
+  --config configs/studies/force_tracking_diagnosis.yaml \
+  --phase collision-geometry
+```
+
+实物 Pillar 确认为“中心高、边中间次之、四角低”后，默认 profile 采用保留该高度差的球体碰撞
+代理 `parallel_gripper_height_sphere_collision.xml`，并保持 `multiccd` 开启。它保留分阶段接触的
+物理几何趋势，同时避免非共面 mesh 接触流形切换。
+
+原非共面 mesh 加 `--disable-multiccd` 保留为候选物理设置，供后续以实物面接触承载、摩擦和
+力—压入标定进行比较；在完成该标定前，不应把它替换为默认模型。
 
 该指尖按 Contactile PapillArray 类传感器处理。公开资料说明 PapillArray 是 soft silicone
 pillar 阵列，每个阵列单元可测 3D displacement、3D force 和 vibration；产品规格可参考

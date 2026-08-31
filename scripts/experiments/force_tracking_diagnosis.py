@@ -29,6 +29,7 @@ Phase = Literal[
     "materials",
     "force-scale",
     "contact-model",
+    "collision-geometry",
     "force-semantics",
     "position-limit",
     "integral-gain",
@@ -40,6 +41,7 @@ ALL_PHASES: tuple[Phase, ...] = (
     "materials",
     "force-scale",
     "contact-model",
+    "collision-geometry",
     "force-semantics",
     "position-limit",
     "integral-gain",
@@ -49,6 +51,16 @@ ALL_PHASES: tuple[Phase, ...] = (
 
 class DiagnosisConfigError(ValueError):
     """Raised when the diagnostic study configuration is invalid."""
+
+
+class CollisionGeometryCondition(BaseModel):
+    """One collision-geometry model and its multicontact setting."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    label: str = Field(min_length=1)
+    model: Path
+    multiccd_enabled: bool = True
 
 
 class DiagnosisConfig(BaseModel):
@@ -66,6 +78,7 @@ class DiagnosisConfig(BaseModel):
     materials: tuple[ObjectMaterial, ...] = ("soft", "medium", "hard")
     force_scales: tuple[Annotated[float, Field(gt=0)], ...] = (0.5, 1.0)
     contact_models: tuple[ObjectContactModel, ...] = ("explicit", "legacy")
+    collision_geometry_models: tuple[CollisionGeometryCondition, ...]
     stability_controller: ControllerVariant = "pid-torque-ff"
     position_adjustment_limits_rad: tuple[Annotated[float, Field(gt=0)], ...] = (
         0.15,
@@ -95,6 +108,19 @@ class DiagnosisConfig(BaseModel):
             raise ValueError("must not contain duplicate values")
         return value
 
+    @field_validator("collision_geometry_models")
+    @classmethod
+    def require_unique_collision_labels(
+        cls, value: tuple[CollisionGeometryCondition, ...]
+    ) -> tuple[CollisionGeometryCondition, ...]:
+        """Reject an empty geometry study or duplicate condition labels."""
+        if not value:
+            raise ValueError("must contain at least one collision geometry")
+        labels = [condition.label for condition in value]
+        if len(set(labels)) != len(labels):
+            raise ValueError("collision geometry labels must be unique")
+        return value
+
 
 def load_config(path: Path) -> DiagnosisConfig:
     """Load YAML and resolve all relative paths from the YAML directory."""
@@ -110,6 +136,18 @@ def load_config(path: Path) -> DiagnosisConfig:
             "profile": (base / config.profile).resolve(),
             "task": (base / config.task).resolve(),
             "output_root": (base / config.output_root).resolve(),
+            "collision_geometry_models": tuple(
+                condition.model_copy(
+                    update={
+                        "model": (
+                            condition.model
+                            if condition.model.is_absolute()
+                            else (base / condition.model).resolve()
+                        )
+                    }
+                )
+                for condition in config.collision_geometry_models
+            ),
         }
     )
 
@@ -193,6 +231,19 @@ def _tuning_profile(
     return output
 
 
+def _model_profile(source: Path, profile_dir: Path, label: str, model_path: Path) -> Path:
+    """Materialize a profile that changes only the referenced collision model."""
+    raw = yaml.safe_load(source.read_text(encoding="utf-8"))
+    try:
+        raw["model"]["path"] = str(model_path.resolve())
+    except (KeyError, TypeError) as error:
+        raise DiagnosisConfigError(f"profile lacks model settings: {source}") from error
+    profile_dir.mkdir(parents=True, exist_ok=True)
+    output = profile_dir / f"{label}.yaml"
+    output.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
+    return output
+
+
 def _force_parameters(profile_path: Path) -> dict[str, float]:
     """Read the force-control parameters recorded beside a diagnostic run."""
     raw = yaml.safe_load(profile_path.read_text(encoding="utf-8"))
@@ -256,6 +307,7 @@ def _contact_diagnostics(trace_path: Path) -> dict[str, object]:
     left_forces = [float(row["left_taxel_normal_force_n"]) for row in rows]
     right_forces = [float(row["right_taxel_normal_force_n"]) for row in rows]
     return {
+        "min_active_taxel_contacts": min(contacts),
         "max_active_taxel_contacts": maximum,
         "contact_collapse_events": events,
         "mean_left_force_n": sum(left_forces) / len(left_forces),
@@ -283,41 +335,125 @@ def _conditions(
         ForceSemantics,
         bool,
         tuple[str, float] | None,
+        Path | None,
+        bool,
     ],
     ...,
 ]:
     """Return the deliberately one-factor-at-a-time conditions for one phase."""
     if phase == "reproducibility":
         return tuple(
-            (f"repeat-{index:02d}", "full", "hard", 1.0, "explicit", "average_side", False, None)
+            (
+                f"repeat-{index:02d}",
+                "full",
+                "hard",
+                1.0,
+                "explicit",
+                "average_side",
+                False,
+                None,
+                None,
+                True,
+            )
             for index in range(config.reproducibility_repeats)
         )
     if phase == "controllers":
         return tuple(
-            (variant, variant, "hard", 1.0, "explicit", "average_side", False, None)
+            (variant, variant, "hard", 1.0, "explicit", "average_side", False, None, None, True)
             for variant in config.controllers
         )
     if phase == "materials":
         return tuple(
-            (material, "full", material, 1.0, "explicit", "average_side", False, None)
+            (material, "full", material, 1.0, "explicit", "average_side", False, None, None, True)
             for material in config.materials
         )
     if phase == "force-scale":
         return tuple(
-            (f"scale-{scale:.3f}", "full", "hard", scale, "explicit", "average_side", False, None)
+            (
+                f"scale-{scale:.3f}",
+                "full",
+                "hard",
+                scale,
+                "explicit",
+                "average_side",
+                False,
+                None,
+                None,
+                True,
+            )
             for scale in config.force_scales
         )
     if phase == "contact-model":
         return tuple(
-            (model, "full", "hard", 0.5, model, "average_side", False, None)
+            (model, "full", "hard", 0.5, model, "average_side", False, None, None, True)
             for model in config.contact_models
+        )
+    if phase == "collision-geometry":
+        return tuple(
+            (
+                condition.label,
+                "full",
+                "hard",
+                1.0,
+                "explicit",
+                "average_side",
+                False,
+                None,
+                condition.model,
+                condition.multiccd_enabled,
+            )
+            for condition in config.collision_geometry_models
         )
     if phase == "force-semantics":
         return (
-            ("legacy-sum-8N", "full", "hard", 1.0, "legacy", "total", False, None),
-            ("average-4N-unscaled", "full", "hard", 0.5, "legacy", "average_side", False, None),
-            ("average-4N-scaled", "full", "hard", 0.5, "legacy", "average_side", True, None),
-            ("average-8N-current", "full", "hard", 1.0, "explicit", "average_side", False, None),
+            (
+                "legacy-sum-8N",
+                "full",
+                "hard",
+                1.0,
+                "legacy",
+                "total",
+                False,
+                None,
+                None,
+                True,
+            ),
+            (
+                "average-4N-unscaled",
+                "full",
+                "hard",
+                0.5,
+                "legacy",
+                "average_side",
+                False,
+                None,
+                None,
+                True,
+            ),
+            (
+                "average-4N-scaled",
+                "full",
+                "hard",
+                0.5,
+                "legacy",
+                "average_side",
+                True,
+                None,
+                None,
+                True,
+            ),
+            (
+                "average-8N-current",
+                "full",
+                "hard",
+                1.0,
+                "explicit",
+                "average_side",
+                False,
+                None,
+                None,
+                True,
+            ),
         )
     if phase == "position-limit":
         return tuple(
@@ -330,6 +466,8 @@ def _conditions(
                 "average_side",
                 False,
                 ("max_position_adjustment", value),
+                None,
+                True,
             )
             for value in config.position_adjustment_limits_rad
         )
@@ -344,6 +482,8 @@ def _conditions(
                 "average_side",
                 False,
                 ("ki", value),
+                None,
+                True,
             )
             for value in config.integral_gains
         )
@@ -357,6 +497,8 @@ def _conditions(
             "average_side",
             False,
             ("filter_cutoff_hz", value),
+            None,
+            True,
         )
         for value in config.filter_cutoffs_hz
     )
@@ -376,6 +518,8 @@ def run_phase(config: DiagnosisConfig, phase: Phase, *, config_source: Path) -> 
         force_semantics,
         scale_parameters,
         tuning_override,
+        collision_model_path,
+        multiccd_enabled,
     ) in _conditions(config, phase):
         task_path = _scaled_task(config.task, scale, study_dir / "tasks")
         profile_path = (
@@ -387,6 +531,13 @@ def run_phase(config: DiagnosisConfig, phase: Phase, *, config_source: Path) -> 
             profile_path = _tuning_profile(
                 config.profile, study_dir / "profiles", label, tuning_override
             )
+        if collision_model_path is not None:
+            profile_path = _model_profile(
+                config.profile,
+                study_dir / "profiles",
+                label,
+                collision_model_path,
+            )
         targets = _task_targets(task_path, force_semantics)
         run, result = execute_force_tracking(
             profile=profile_path,
@@ -395,6 +546,7 @@ def run_phase(config: DiagnosisConfig, phase: Phase, *, config_source: Path) -> 
             run_prefix=label,
             object_material=material,
             object_contact_model=contact_model,
+            multiccd_enabled=multiccd_enabled,
             force_semantics=force_semantics,
             controller_variant=controller,
             sensor_noise_seed=config.sensor_noise_seed,
@@ -405,6 +557,10 @@ def run_phase(config: DiagnosisConfig, phase: Phase, *, config_source: Path) -> 
                 "controller_variant": controller,
                 "object_material": material,
                 "object_contact_model": contact_model,
+                "collision_model": (
+                    None if collision_model_path is None else collision_model_path.name
+                ),
+                "multiccd_enabled": multiccd_enabled,
                 "force_semantics": force_semantics,
                 "force_scale": scale,
                 "parameter_scale_conversion": scale_parameters,

@@ -2,8 +2,10 @@ schema_version: 1
 name: custom_parallel_gripper
 
 model:
-  # 自研夹爪的已后处理 MJCF：包含稳定 taxel geom 命名和闭环约束。
-  path: ../assets/grippers/custom_parallel_gripper/parallel_gripper_prepared.xml
+  # 默认碰撞代理：保留实物“中心高、边中间次之、四角低”的 Pillar 高度差，
+  # 但以每 taxel 一个球体避免非共面 mesh 在 multiccd 下切换接触流形。
+  # 原 mesh + --disable-multiccd 作为保留候选，用于后续实物标定对照。
+  path: ../assets/grippers/custom_parallel_gripper/parallel_gripper_height_sphere_collision.xml
 
 control:
   # 达妙 MIT 风格控制：外部给位置/速度/力矩目标，仿真内显式计算输出轴力矩。

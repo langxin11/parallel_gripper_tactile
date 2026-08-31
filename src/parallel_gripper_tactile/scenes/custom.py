@@ -193,6 +193,7 @@ def build_custom_grasp_spec(
     cube_mass: float = DEFAULT_CUBE_MASS,
     object_material: ObjectMaterial = "hard",
     object_contact_model: ObjectContactModel = "explicit",
+    multiccd_enabled: bool = True,
 ):
     """附加固定自研基座、自由方块与临时支撑。
 
@@ -227,6 +228,8 @@ def build_custom_grasp_spec(
     support.set("contype", "2")
     support.set("conaffinity", "2")
     scene = mujoco.MjSpec.from_string(ET.tostring(world_tree.getroot(), encoding="unicode"))
+    if not multiccd_enabled:
+        scene.option.disableflags |= int(mujoco.mjtDisableBit.mjDSBL_MULTICCD)
 
     gripper_mount = scene.worldbody.add_frame(
         name="custom_gripper_mount", pos=list(profile.mount_pos), quat=list(profile.mount_quat)
@@ -257,6 +260,7 @@ def build_custom_grasp_model(
     cube_mass: float = DEFAULT_CUBE_MASS,
     object_material: ObjectMaterial = "hard",
     object_contact_model: ObjectContactModel = "explicit",
+    multiccd_enabled: bool = True,
 ):
     """编译水平安装的自研夹爪抓取场景。"""
     return build_custom_grasp_spec(
@@ -266,4 +270,5 @@ def build_custom_grasp_model(
         cube_mass=cube_mass,
         object_material=object_material,
         object_contact_model=object_contact_model,
+        multiccd_enabled=multiccd_enabled,
     ).compile()

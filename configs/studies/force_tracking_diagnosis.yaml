@@ -22,6 +22,26 @@ materials:
 force_scales: [0.5, 0.625, 0.75, 0.875, 1.0]
 contact_models: [explicit, legacy]
 
+# Five conditions isolate three factors: original height variation, mesh versus
+# sphere topology, and multiccd.  The first and last conditions retain the
+# original A/B endpoints; the middle three are the added causal controls.
+collision_geometry_models:
+  - label: original-mesh-multiccd
+    model: ../../assets/grippers/custom_parallel_gripper/parallel_gripper_prepared.xml
+    multiccd_enabled: true
+  - label: height-spheres-multiccd
+    model: ../../assets/grippers/custom_parallel_gripper/parallel_gripper_height_sphere_collision.xml
+    multiccd_enabled: true
+  - label: coplanar-mesh-multiccd
+    model: ../../assets/grippers/custom_parallel_gripper/parallel_gripper_coplanar_mesh_collision.xml
+    multiccd_enabled: true
+  - label: original-mesh-single-contact
+    model: ../../assets/grippers/custom_parallel_gripper/parallel_gripper_prepared.xml
+    multiccd_enabled: false
+  - label: coplanar-spheres-multiccd
+    model: ../../assets/grippers/custom_parallel_gripper/parallel_gripper_flat_sphere_collision.xml
+    multiccd_enabled: true
+
 # Sequential high-load stability sweeps. Each phase changes only one value; once
 # a condition is selected, make it the profile baseline before running the next phase.
 stability_controller: pid-torque-ff

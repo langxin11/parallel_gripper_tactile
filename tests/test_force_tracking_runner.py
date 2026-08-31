@@ -53,6 +53,7 @@ def test_execute_force_tracking_writes_complete_run_artifacts(tmp_path: Path, mo
     manifest = json.loads((run.path / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["parameters"]["controller_variant"] == "pid-only"
     assert manifest["parameters"]["object_material"] == "soft"
+    assert manifest["parameters"]["multiccd_enabled"] is True
     assert manifest["parameters"]["force_semantics"] == "average_side"
     assert manifest["parameters"]["sensor_noise_seed"] == 7
     assert {"profile.yaml", "task.yaml", "trace.csv", "plot.png", "metrics.json"} <= set(
