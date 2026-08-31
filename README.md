@@ -1,9 +1,9 @@
-# Parallel Gripper Tactile
+# 🤖 Parallel Gripper Tactile
 
 MuJoCo 二指平行夹爪触觉仿真：使用通过 schema 校验的 YAML profile、单一 `pgt` 命令，以及
 可复现的逐次运行产物（run artifacts）。
 
-## 快速开始
+## 🚀 快速开始
 
 ```bash
 uv sync
@@ -21,7 +21,7 @@ uv run pgt run force-track --profile configs/custom_parallel_gripper.yaml --task
 Profile 仅使用 YAML。它们是不可变的 Pydantic v2 模型：未知字段、非法控制限幅、空/多文档输入、
 未解析的模型路径都会在仿真开始前失败。相对模型路径以 profile 所在目录为基准解析。
 
-## 命令
+## 🧰 命令
 
 ```text
 pgt validate PROFILE
@@ -59,7 +59,7 @@ pgt runs clean (--older-than-days N | --all | --cache) [--apply]
 
 所有变体共享相同的接近阶段和 waypoint 任务。
 
-## Research studies
+## 🧪 Research studies
 
 `pgt` 提供确定参数下的单次实验；`scripts/experiments` 保存 controller、材料和重复次数组成的
 多次科研 protocol。运行力跟踪消融研究：
@@ -72,7 +72,7 @@ uv run python scripts/experiments/force_tracking_ablation.py \
 该 study 直接调用 Python runner，而非通过子进程调用 CLI。它会在 `outputs/studies` 创建独立父目录，
 保存 study 配置、逐次结果、聚合统计和每个子 run 的可复现工件。
 
-## Profiles
+## 🧩 Profiles
 
 | Profile | 控制 | 触觉后端 |
 | --- | --- | --- |
@@ -85,7 +85,7 @@ uv run python scripts/experiments/force_tracking_ablation.py \
 `solref="-1200 -10"`、`solimp="0.75 0.95 0.0025 0.5 2"`。当前仿真接触响应约为
 `1200 N/m`；产品量程换算只能作为设计背景，不能替代仓库模型参数。
 
-## 运行产物
+## 📦 运行产物
 
 每个产出结果（result-producing）的命令都会创建独占目录：
 
@@ -102,7 +102,7 @@ outputs/<profile>/<experiment>/<UTC timestamp>-<id>/
 `manifest.json` 只列出实际产出的产物，并记录 profile 哈希、Git 状态、依赖版本、参数与创建时间。
 `pgt runs clean` 默认只预览将删除的目标；需要删除时加 `--apply`。
 
-## 架构
+## 🏗️ 架构
 
 ```text
 config → tactile / scenes / simulation → experiments / analysis / io → CLI
@@ -111,13 +111,13 @@ config → tactile / scenes / simulation → experiments / analysis / io → CLI
 `SimulationSession` 独占 `mj_step`；控制时钟与采样时钟相互独立。所有触觉读取器在不可变坐标系中
 返回局部 `(3, rows, cols)` 力数组，压缩以正的 `Fz` 表示。
 
-## 接触模型决策
+## 🧲 接触模型决策
 
 实验性的 Drake/Hydroelastic 桥接已从主线移除。它未经标定、对本模型无材料准确性收益、存在穿透限制，
 且每次求值约 0.510 ms——约为 mesh-SDF 比较路径的 30 倍。原生 MuJoCo 接触与 mesh-SDF 仍可用于
 A/B 实验。
 
-## 开发
+## 🛠️ 开发
 
 ```bash
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest

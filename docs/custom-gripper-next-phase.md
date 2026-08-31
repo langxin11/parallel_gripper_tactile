@@ -1,4 +1,4 @@
-# 自研夹爪配置基线与状态
+# 📌 自研夹爪配置基线与状态
 
 自研夹爪完全由 `configs/custom_parallel_gripper.yaml` 配置：MJCF 来源、法兰安装、MIT 限幅、
 法向力控制器，以及 3×3 接触几何触觉布局。
