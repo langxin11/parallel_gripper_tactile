@@ -23,6 +23,7 @@
   `DisturbanceProtocol`（含支撑释放、无支撑保持、切向扰动状态设置）
 - `parallel_gripper_tactile.video`：渲染级力箭头、像素保存与 MP4 编码共享工具
 - `recording.run_demo_loop`：两个触觉演示共用的驱动循环（viewer 节流、物理推进、采样与记录）
+- `AGENTS.md`：面向 AI 编码代理的仓库协作约定入口，汇总语言策略、提交信息规范与验证门禁
 
 ### 修复
 
