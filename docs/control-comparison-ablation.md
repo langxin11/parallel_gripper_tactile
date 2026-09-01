@@ -166,6 +166,7 @@ controller command -> 达妙电机 CAN/串口命令
 [`outputs/studies/force_tracking_controller_comparison/20260901T125358Z-0a777c0f`](../outputs/studies/force_tracking_controller_comparison/20260901T125358Z-0a777c0f/aggregate.csv)。
 本次矩阵包含 4 个控制器变体、3 类目标力任务、3 个正式接触 preset 和 3 个噪声 seed，共 108 次运行。
 所有运行均成功完成，且力矩与位置饱和比例均为 0，因此当前差异没有被执行器限幅主导。
+本次历史 benchmark 使用 `secant_ewma`；study 配置已显式锁定该方法，避免默认估计器更新后改变复现实验。
 
 跨 `medium`、`hard`、`stiff` 三种 preset 对 RMSE 取平均后，相对 `pid-only` 的降幅为：
 
@@ -202,10 +203,11 @@ controller command -> 达妙电机 CAN/串口命令
 2. Ramp 结束时的误差约为 -0.15 至 -0.20 N，但当前卸载到 1 N 后没有终端保持段；该值更接近动态滞后，
    不能视为严格稳态误差。后续应增加 1 至 2 s terminal hold。
 
-### 6.2 当前刚度估计器的原理与定位
+### 6.2 历史割线估计器的原理与定位
 
-当前 `ContactStiffnessEstimator` 是轻量级局部割线估计器，不属于先进的概率状态估计或系统辨识算法。
-它适合作为计算量小、容易解释的工程基线，其详细力学关系也见[曲柄滑块力控模型](crank-slider-force-control.md)。
+上述 108-run benchmark 使用的 `secant_ewma` 是轻量级局部割线估计器，不属于先进的概率状态估计或系统
+辨识算法。它继续作为计算量小、容易解释的历史工程基线；当前 profile 默认方法已经切换为
+`window_linear`。详细力学关系也见[曲柄滑块力控模型](crank-slider-force-control.md)。
 
 对每个控制周期，先用曲柄滑块运动学把电机位置 (q) 转换为总闭合行程 (c(q))，再计算自上一个有效参考点
 以来的增量：
@@ -231,7 +233,7 @@ k_{\min},k_{\max}
 \hat k_k=\hat k_{k-1}+\alpha(k_{\mathrm{sample}}-\hat k_{k-1}).
 \]
 
-当前 profile 使用 `initial=3000 N/m`、`min=250 N/m`、`max=25000 N/m`、`alpha=0.15`、
+三种方法共用 `initial=3000 N/m`、`min=250 N/m`、`max=25000 N/m`、`alpha=0.15`、
 `min_delta_closure=0.05 mm` 和 `min_delta_force=0.025 N`。估计器在双侧接触确认时以当前位置和滤波力重置；
 控制器随后把它换算为 \(\hat J_f=\hat kJ_c(q)\)，并生成受限的位置前馈：
 
@@ -240,8 +242,8 @@ k_{\min},k_{\max}
 \gamma\frac{f_{\mathrm{ref}}-f_n}{\hat kJ_c(q)}.
 \]
 
-该实现的优点是每步只需常数时间和常数内存，带有增量门限、符号检查、上下限与 EWMA，适合实时控制和
-当前可复现 benchmark。它的主要局限是：
+割线实现的优点是每步只需常数时间和常数内存，带有增量门限、符号检查、上下限与 EWMA，适合实时控制和
+历史 benchmark。它的主要局限是：
 
 - 仅使用两个参考点之间的割线，没有利用一段时间窗内的全部样本；
 - 不估计置信度或噪声协方差，也没有遗忘因子的正规最小二乘模型；
@@ -249,11 +251,32 @@ k_{\min},k_{\max}
 - 无法分离 Pillar、物体、机构和 MuJoCo 接触参数各自的贡献；
 - 当前控制器没有依据活跃 taxel 集合变化、滑移等事件专门冻结估计，主要依赖接触状态、门限和符号检查。
 
-因此论文中宜称为“在线局部割线刚度估计（EWMA-filtered secant estimate）”，而不宜笼统称为先进自适应
+因此论文中宜将该基线称为“在线局部割线刚度估计（EWMA-filtered secant estimate）”，而不宜笼统称为先进自适应
 辨识。若后续希望提高算法层级，可依次比较滑动窗鲁棒回归、带遗忘因子的递推最小二乘（RLS）、联合估计
 刚度与阻尼的 EKF/UKF，以及显式处理接触模式切换的多模型估计器。已有研究中，RLS 可结合残差模型在线拟合
 非线性刚度，[Flacco 等](https://doi.org/10.1177/0278364912461813)；也有工作使用双候选力观测器在缺少可靠
 接触位置时估计环境刚度，[Online stiffness estimation for robotic tasks with force observers](https://doi.org/10.1016/j.conengprac.2013.11.002)。这些方法模型更完整，但辨识条件、调参与验证成本也更高。
+
+### 6.3 滑动窗刚度估计器对比
+
+在不改变 PID 参数、目标力任务或接触条件的前提下，当前新增独立的刚度估计器对比 protocol。该 protocol 固定
+`pid-stiffness-ff`：保留刚度位置前馈、关闭机构力矩前馈，因此结果只比较估计器如何影响位置前馈，而不把力矩前馈
+的收益混入结论。比较方法为：
+
+| 方法 | 局部模型 | 当前刚度 |
+| --- | --- | --- |
+| `secant_ewma` | 相邻有效点的割线 | 割线斜率经 EWMA 平滑 |
+| `window_linear` | 最近窗口的 \(F=a_0+a_1c\) | \(a_1\) 经 EWMA 平滑 |
+| `window_quadratic` | 最近窗口的 \(F=a_0+a_1c+a_2c^2\) | 当前闭合量处的 \(a_1+2a_2c\)，再经 EWMA 平滑 |
+
+默认 profile 使用 `window_linear`，它利用整段窗口的样本但仍保持线性、易解释和较低计算量；`secant_ewma`
+保留为历史工程基线，`window_quadratic` 用于验证是否确实存在对控制有益的局部非线性。窗口估计只在样本数量、
+闭合行程跨度与力变化均足够时更新；拟合退化或给出非正刚度时保持上一次估计。所有输出仍裁剪到既有的安全刚度范围。
+
+正式矩阵固定为 3 个估计器 × 3 个目标任务 × 3 个接触 preset × 3 个噪声 seed，共 81 次运行。主指标仍为
+RMSE、MAE、最终误差与力矩/位置饱和率；同时从 trace 检查刚度曲线的抖动、是否频繁触及上下限，以及相同 seed
+下的力—刚度叠加图。窗口法不能仅因估计曲线更平滑而判优，只有在不增加饱和或显著动态滞后的条件下改善跟踪误差，
+才可认为其对控制有效。
 
 ## 7. 配置组织建议
 
@@ -268,7 +291,8 @@ configs/
 │   └── mixed_waypoints.yaml
 └── studies/
     ├── force_tracking_ablation.yaml
-    └── force_tracking_controller_comparison.yaml
+    ├── force_tracking_controller_comparison.yaml
+    └── force_tracking_stiffness_estimator_comparison.yaml
 ```
 
 控制器变体通过运行时的不可变 profile 副本实现，不复制完整 profile。study schema 只展开条件矩阵，
@@ -304,6 +328,16 @@ uv run python scripts/experiments/force_tracking_controller_comparison.py \
 默认配置展开 4 个 PID 系变体 × 3 个 task × 3 个正式接触 preset × 3 个 seed，共 108 个条件。每个条件保留独立
 run，study 父目录生成 `summary.csv`、`aggregate.csv`、`summary.json`、对比图和
 `study_manifest.json`。脚本顺序调用 runner，不通过 CLI 子进程启动单次实验。
+
+刚度估计器对比同样先 dry-run；它固定 `pid-stiffness-ff`，默认展开 81 个条件：
+
+<pre><code class="language-bash">
+uv run python scripts/experiments/force_tracking_stiffness_estimator_comparison.py \
+  --config configs/studies/force_tracking_stiffness_estimator_comparison.yaml \
+  --dry-run
+uv run python scripts/experiments/force_tracking_stiffness_estimator_comparison.py \
+  --config configs/studies/force_tracking_stiffness_estimator_comparison.yaml
+</code></pre>
 
 ## 9. 决策原则
 

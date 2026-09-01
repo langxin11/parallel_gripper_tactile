@@ -1,4 +1,4 @@
-"""运行可复现的力跟踪控制器对比研究并生成 study 级图表。"""
+"""运行可复现的刚度估计器对比研究并生成 study 级图表。"""
 
 from __future__ import annotations
 
@@ -18,9 +18,9 @@ import numpy as np
 from parallel_gripper_tactile.experiments.force_tracking import ForceTrackingTask
 from parallel_gripper_tactile.profiles import load_profile
 from parallel_gripper_tactile.runners import execute_force_tracking
-from parallel_gripper_tactile.studies.force_tracking_comparison import (
-    ForceTrackingComparisonConfig,
-    load_comparison_config,
+from parallel_gripper_tactile.studies.force_tracking_stiffness_estimator_comparison import (
+    ForceTrackingStiffnessEstimatorComparisonConfig,
+    load_stiffness_estimator_comparison_config,
 )
 
 
@@ -39,9 +39,10 @@ METRICS = (
 PLOTTED_METRICS = (
     ("rmse_n", "RMSE (N)"),
     ("mae_n", "MAE (N)"),
-    ("peak_abs_error_n", "Peak absolute error (N)"),
+    ("final_error_n", "Final error (N)"),
 )
 PUBLICATION_DPI = 600
+BASELINE_ESTIMATOR = "secant_ewma"
 
 
 def _json_compatible(value: object) -> object:
@@ -66,20 +67,20 @@ def _write_rows_csv(path: Path, rows: list[dict[str, object]]) -> None:
 
 
 def aggregate_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
-    """按控制器、任务和材料计算有限指标的均值与样本标准差。"""
+    """按估计器、任务和材料计算有限指标的均值与样本标准差。"""
     groups: dict[tuple[str, str, str], list[dict[str, object]]] = {}
     for row in rows:
         key = (
-            str(row["controller_variant"]),
+            str(row["stiffness_estimator_method"]),
             str(row["task_name"]),
             str(row["object_material"]),
         )
         groups.setdefault(key, []).append(row)
 
     aggregates: list[dict[str, object]] = []
-    for (controller, task_name, material), group in groups.items():
+    for (estimator, task_name, material), group in groups.items():
         aggregate: dict[str, object] = {
-            "controller_variant": controller,
+            "stiffness_estimator_method": estimator,
             "task_name": task_name,
             "object_material": material,
             "runs": len(group),
@@ -122,27 +123,28 @@ def _finite_error(value: object) -> float:
 
 
 def plot_metric_summary(
-    aggregates: list[dict[str, object]],
-    output: Path,
-    *,
-    controller_order: Iterable[str],
+    aggregates: list[dict[str, object]], output: Path, *, estimator_order: Iterable[str]
 ) -> Path:
-    """按任务绘制各控制器跟踪误差的均值与样本标准差。"""
+    """按任务绘制各刚度估计器的跟踪指标均值与样本标准差。"""
     if not aggregates:
         raise ValueError("cannot plot empty aggregates")
     plt = _science_pyplot()
-    controllers = tuple(controller_order)
+    estimators = tuple(estimator_order)
     tasks = tuple(dict.fromkeys(str(row["task_name"]) for row in aggregates))
     materials = tuple(dict.fromkeys(str(row["object_material"]) for row in aggregates))
-    colors = ("#0072B2", "#E69F00", "#009E73", "#D55E00")
+    colors = ("#0072B2", "#E69F00", "#009E73")
     figure, axes = plt.subplots(
         len(tasks), len(PLOTTED_METRICS), figsize=(10.5, 3.1 * len(tasks)), squeeze=False
     )
     lookup = {
-        (str(row["controller_variant"]), str(row["task_name"]), str(row["object_material"])): row
+        (
+            str(row["stiffness_estimator_method"]),
+            str(row["task_name"]),
+            str(row["object_material"]),
+        ): row
         for row in aggregates
     }
-    x = np.arange(len(controllers), dtype=np.float64)
+    x = np.arange(len(estimators), dtype=np.float64)
     width = 0.8 / max(1, len(materials))
     for task_index, task_name in enumerate(tasks):
         for metric_index, (metric, label) in enumerate(PLOTTED_METRICS):
@@ -151,8 +153,8 @@ def plot_metric_summary(
                 positions = x - 0.4 + width / 2.0 + material_index * width
                 values: list[float] = []
                 errors: list[float] = []
-                for controller in controllers:
-                    row = lookup.get((controller, task_name, material))
+                for estimator in estimators:
+                    row = lookup.get((estimator, task_name, material))
                     mean = None if row is None else row.get(f"{metric}_mean")
                     values.append(math.nan if mean is None else float(mean))
                     errors.append(0.0 if row is None else _finite_error(row.get(f"{metric}_std")))
@@ -165,7 +167,7 @@ def plot_metric_summary(
                     label=material,
                     color=colors[material_index % len(colors)],
                 )
-            axis.set_xticks(x, controllers, rotation=20, ha="right")
+            axis.set_xticks(x, estimators, rotation=20, ha="right")
             axis.set_ylabel(label)
             axis.grid(True, axis="y", linewidth=0.3, alpha=0.5)
             if metric_index == 0:
@@ -177,82 +179,42 @@ def plot_metric_summary(
     return pdf_path
 
 
-def plot_saturation_summary(
-    aggregates: list[dict[str, object]],
-    output: Path,
-    *,
-    controller_order: Iterable[str],
+def plot_delta_vs_secant(
+    aggregates: list[dict[str, object]], output: Path, *, estimator_order: Iterable[str]
 ) -> Path:
-    """绘制各控制器的力矩和位置饱和比例。"""
+    """绘制窗口方法相对 ``secant_ewma`` 的 RMSE 变化。"""
     if not aggregates:
         raise ValueError("cannot plot empty aggregates")
     plt = _science_pyplot()
-    controllers = tuple(controller_order)
-    task_materials = tuple(
-        dict.fromkeys((str(row["task_name"]), str(row["object_material"])) for row in aggregates)
+    estimators = tuple(
+        estimator for estimator in estimator_order if estimator != BASELINE_ESTIMATOR
     )
-    lookup = {
-        (str(row["controller_variant"]), str(row["task_name"]), str(row["object_material"])): row
-        for row in aggregates
-    }
-    figure, axes = plt.subplots(1, 2, figsize=(9.2, 3.7), layout="constrained")
-    for axis, metric, title in (
-        (axes[0], "torque_saturation_ratio", "Torque saturation"),
-        (axes[1], "position_saturation_ratio", "Position saturation"),
-    ):
-        values = []
-        errors = []
-        for controller in controllers:
-            condition_values = []
-            for task_name, material in task_materials:
-                row = lookup.get((controller, task_name, material))
-                if row is not None and row.get(f"{metric}_mean") is not None:
-                    condition_values.append(float(row[f"{metric}_mean"]))
-            values.append(fmean(condition_values) if condition_values else math.nan)
-            errors.append(stdev(condition_values) if len(condition_values) >= 2 else 0.0)
-        axis.bar(controllers, values, yerr=errors, capsize=2, color="#0072B2")
-        axis.set_title(title)
-        axis.set_ylabel("Ratio")
-        axis.tick_params(axis="x", rotation=20)
-        axis.grid(True, axis="y", linewidth=0.3, alpha=0.5)
-    pdf_path = _save_publication_figure(figure, output)
-    plt.close(figure)
-    return pdf_path
-
-
-def plot_ablation_delta(
-    aggregates: list[dict[str, object]],
-    output: Path,
-    *,
-    controller_order: Iterable[str],
-) -> Path:
-    """绘制各消融变体相对 ``full`` 的 RMSE 变化。"""
-    if not aggregates:
-        raise ValueError("cannot plot empty aggregates")
-    plt = _science_pyplot()
-    controllers = tuple(controller for controller in controller_order if controller != "full")
     tasks = tuple(dict.fromkeys(str(row["task_name"]) for row in aggregates))
     materials = tuple(dict.fromkeys(str(row["object_material"]) for row in aggregates))
     lookup = {
-        (str(row["controller_variant"]), str(row["task_name"]), str(row["object_material"])): row
+        (
+            str(row["stiffness_estimator_method"]),
+            str(row["task_name"]),
+            str(row["object_material"]),
+        ): row
         for row in aggregates
     }
     figure, axes = plt.subplots(1, len(tasks), figsize=(4.2 * len(tasks), 3.8), squeeze=False)
-    x = np.arange(len(controllers), dtype=np.float64)
+    x = np.arange(len(estimators), dtype=np.float64)
     width = 0.8 / max(1, len(materials))
     colors = ("#0072B2", "#E69F00", "#009E73")
     for task_index, task_name in enumerate(tasks):
         axis = axes[0][task_index]
         for material_index, material in enumerate(materials):
-            baseline = lookup.get(("full", task_name, material))
+            baseline = lookup.get((BASELINE_ESTIMATOR, task_name, material))
             baseline_rmse = (
                 math.nan
                 if baseline is None or baseline.get("rmse_n_mean") is None
                 else float(baseline["rmse_n_mean"])
             )
             deltas = []
-            for controller in controllers:
-                row = lookup.get((controller, task_name, material))
+            for estimator in estimators:
+                row = lookup.get((estimator, task_name, material))
                 value = (
                     math.nan
                     if row is None or row.get("rmse_n_mean") is None
@@ -268,9 +230,9 @@ def plot_ablation_delta(
                 label=material,
             )
         axis.axhline(0.0, color="black", linewidth=0.8)
-        axis.set_xticks(x, controllers, rotation=20, ha="right")
+        axis.set_xticks(x, estimators, rotation=20, ha="right")
         axis.set_title(task_name)
-        axis.set_ylabel("RMSE change relative to full (N)")
+        axis.set_ylabel("RMSE change relative to secant (N)")
         axis.grid(True, axis="y", linewidth=0.3, alpha=0.5)
         if task_index == len(tasks) - 1:
             axis.legend(frameon=False, title="Material")
@@ -288,20 +250,16 @@ def _read_tracking_rows(path: Path) -> list[dict[str, str]]:
     return rows
 
 
-def plot_tracking_overlays(
+def plot_tracking_and_stiffness_overlays(
     rows: list[dict[str, object]],
     study_dir: Path,
     figures_dir: Path,
     *,
-    controller_order: Iterable[str],
+    estimator_order: Iterable[str],
 ) -> list[Path]:
-    """为有效条件绘制最小共同 seed 的控制器轨迹。
-
-    未建立可跟踪接触的运行会保留在 summary 中作为失败条件，但不参与轨迹叠加，
-    因为它们没有 ``track_reference`` 样本可供公平比较。
-    """
+    """为共同有效 seed 叠加目标力、实际力和刚度估计轨迹。"""
     plt = _science_pyplot()
-    controllers = tuple(controller_order)
+    estimators = tuple(estimator_order)
     groups: dict[tuple[str, str], list[dict[str, object]]] = {}
     for row in rows:
         key = (str(row["task_name"]), str(row["object_material"]))
@@ -315,26 +273,27 @@ def plot_tracking_overlays(
                 {
                     int(row["sensor_noise_seed"])
                     for row in valid_group
-                    if row["controller_variant"] == controller
+                    if row["stiffness_estimator_method"] == estimator
                 }
-                for controller in controllers
+                for estimator in estimators
             )
         )
         if not common_seeds:
             continue
         seed = min(common_seeds)
-        figure, axis = plt.subplots(figsize=(7.16, 3.8), layout="constrained")
+        figure, axes = plt.subplots(2, 1, figsize=(7.16, 5.6), sharex=True, layout="constrained")
         target_drawn = False
-        for controller in controllers:
+        for estimator in estimators:
             selected = next(
                 row
                 for row in valid_group
-                if row["controller_variant"] == controller and int(row["sensor_noise_seed"]) == seed
+                if row["stiffness_estimator_method"] == estimator
+                and int(row["sensor_noise_seed"]) == seed
             )
             trace = _read_tracking_rows(study_dir / str(selected["run_directory"]) / "trace.csv")
             time_s = [float(item["tracking_time_s"]) for item in trace]
             if not target_drawn:
-                axis.plot(
+                axes[0].plot(
                     time_s,
                     [float(item["target_normal_force_n"]) for item in trace],
                     color="black",
@@ -343,19 +302,28 @@ def plot_tracking_overlays(
                     label="target",
                 )
                 target_drawn = True
-            axis.plot(
+            axes[0].plot(
                 time_s,
                 [float(item["filtered_normal_force_n"]) for item in trace],
                 linewidth=1.0,
-                label=controller,
+                label=estimator,
             )
-        axis.set_xlabel("Tracking time (s)")
-        axis.set_ylabel("Mean side normal force (N)")
-        axis.set_title(f"{task_name} / {material} / seed {seed}")
-        axis.grid(True, linewidth=0.3, alpha=0.5)
-        axis.legend(frameon=False, ncol=2)
+            axes[1].plot(
+                time_s,
+                [float(item["estimated_contact_stiffness_n_per_m"]) for item in trace],
+                linewidth=1.0,
+                label=estimator,
+            )
+        axes[0].set_ylabel("Mean side normal force (N)")
+        axes[0].set_title(f"{task_name} / {material} / seed {seed}")
+        axes[1].set_xlabel("Tracking time (s)")
+        axes[1].set_ylabel("K estimate (N/m)")
+        for axis in axes:
+            axis.grid(True, linewidth=0.3, alpha=0.5)
+        axes[0].legend(frameon=False, ncol=2)
+        axes[1].legend(frameon=False, ncol=2)
         safe_task = task_name.replace(" ", "_").replace("/", "_")
-        output = figures_dir / f"tracking_{safe_task}_{material}.png"
+        output = figures_dir / f"tracking_and_stiffness_{safe_task}_{material}.png"
         pdf_path = _save_publication_figure(figure, output)
         plt.close(figure)
         outputs.extend((output, pdf_path))
@@ -367,83 +335,70 @@ def render_study_figures(
     aggregates: list[dict[str, object]],
     study_dir: Path,
     *,
-    controller_order: Iterable[str],
+    estimator_order: Iterable[str],
 ) -> list[Path]:
     """从已保存 summary 与子 run trace 生成或刷新论文级对比图。"""
     figures_dir = study_dir / "figures"
     figures_dir.mkdir(exist_ok=True)
-    metric_plot = figures_dir / "metrics_by_controller.png"
-    saturation_plot = figures_dir / "saturation_comparison.png"
-    delta_plot = figures_dir / "ablation_delta.png"
-    metric_pdf = plot_metric_summary(aggregates, metric_plot, controller_order=controller_order)
-    saturation_pdf = plot_saturation_summary(
-        aggregates, saturation_plot, controller_order=controller_order
+    metric_plot = figures_dir / "metrics_by_estimator.png"
+    delta_plot = figures_dir / "delta_vs_secant.png"
+    metric_pdf = plot_metric_summary(aggregates, metric_plot, estimator_order=estimator_order)
+    delta_pdf = plot_delta_vs_secant(aggregates, delta_plot, estimator_order=estimator_order)
+    trace_plots = plot_tracking_and_stiffness_overlays(
+        rows, study_dir, figures_dir, estimator_order=estimator_order
     )
-    delta_pdf = plot_ablation_delta(aggregates, delta_plot, controller_order=controller_order)
-    trace_plots = plot_tracking_overlays(
-        rows,
-        study_dir,
-        figures_dir,
-        controller_order=controller_order,
-    )
-    return [
-        metric_plot,
-        metric_pdf,
-        saturation_plot,
-        saturation_pdf,
-        delta_plot,
-        delta_pdf,
-        *trace_plots,
-    ]
+    return [metric_plot, metric_pdf, delta_plot, delta_pdf, *trace_plots]
 
 
-def _create_study_directory(config: ForceTrackingComparisonConfig) -> Path:
-    """为一次 comparison protocol 创建独占目录。"""
+def _create_study_directory(config: ForceTrackingStiffnessEstimatorComparisonConfig) -> Path:
+    """为一次估计器 comparison protocol 创建独占目录。"""
     identifier = f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}-{uuid4().hex[:8]}"
     directory = config.output_root / config.name / identifier
     directory.mkdir(parents=True, exist_ok=False)
     return directory
 
 
-def validate_inputs(config: ForceTrackingComparisonConfig) -> dict[Path, ForceTrackingTask]:
+def validate_inputs(
+    config: ForceTrackingStiffnessEstimatorComparisonConfig,
+) -> dict[Path, ForceTrackingTask]:
     """加载 profile 和所有任务，确保 dry-run 也完成输入校验。"""
     load_profile(config.profile)
     return {task_path: ForceTrackingTask.load(task_path) for task_path in config.tasks}
 
 
-def describe_conditions(config: ForceTrackingComparisonConfig) -> str:
+def describe_conditions(config: ForceTrackingStiffnessEstimatorComparisonConfig) -> str:
     """返回稳定、可审阅的条件矩阵文本。"""
     lines = [
         f"Study: {config.name}",
         f"Profile: {config.profile}",
-        f"Stiffness estimator: {config.stiffness_estimator_method}",
+        "Controller: pid-stiffness-ff",
         f"Conditions: {len(config.conditions())}",
     ]
-    for index, (controller, task_path, material, seed) in enumerate(config.conditions(), start=1):
+    for index, (estimator, task_path, material, seed) in enumerate(config.conditions(), start=1):
         lines.append(
-            f"{index:03d} controller={controller} task={task_path.name} "
+            f"{index:03d} estimator={estimator} task={task_path.name} "
             f"material={material} seed={seed}"
         )
     return "\n".join(lines)
 
 
 def run_study(
-    config: ForceTrackingComparisonConfig,
+    config: ForceTrackingStiffnessEstimatorComparisonConfig,
     *,
     config_source: Path | None = None,
 ) -> Path:
-    """执行完整 comparison protocol 并返回 study 目录。"""
+    """执行完整估计器 comparison protocol 并返回 study 目录。"""
     tasks = validate_inputs(config)
     study_dir = _create_study_directory(config)
     if config_source is not None:
         (study_dir / "study.yaml").write_bytes(config_source.read_bytes())
     else:
-        raise ValueError("config_source is required for a reproducible comparison study")
+        raise ValueError("config_source is required for a reproducible stiffness estimator study")
 
     rows: list[dict[str, object]] = []
-    for controller, task_path, material, seed in config.conditions():
+    for estimator, task_path, material, seed in config.conditions():
         task = tasks[task_path]
-        condition = f"{controller}-{task_path.stem}-{material}-seed{seed:03d}"
+        condition = f"pid-stiffness-ff-{estimator}-{task_path.stem}-{material}-seed{seed:03d}"
         run, result = execute_force_tracking(
             profile=config.profile,
             task_path=task_path,
@@ -451,14 +406,14 @@ def run_study(
             output_root=study_dir / "runs",
             run_prefix=condition,
             object_material=material,
-            controller_variant=controller,
-            stiffness_estimator_method=config.stiffness_estimator_method,
+            controller_variant="pid-stiffness-ff",
+            stiffness_estimator_method=estimator,
             sensor_noise_seed=seed,
         )
         rows.append(
             {
-                "controller_variant": controller,
-                "stiffness_estimator_method": config.stiffness_estimator_method,
+                "controller_variant": "pid-stiffness-ff",
+                "stiffness_estimator_method": estimator,
                 "task_name": task.name,
                 "task_path": str(task_path),
                 "object_material": material,
@@ -477,16 +432,13 @@ def run_study(
     _write_rows_csv(aggregate_csv, aggregates)
     summary_json.write_text(
         json.dumps(
-            _json_compatible({"runs": rows, "aggregates": aggregates}),
-            indent=2,
-            sort_keys=True,
+            _json_compatible({"runs": rows, "aggregates": aggregates}), indent=2, sort_keys=True
         )
         + "\n",
         encoding="utf-8",
     )
-
     figure_artifacts = render_study_figures(
-        rows, aggregates, study_dir, controller_order=config.controllers
+        rows, aggregates, study_dir, estimator_order=config.estimators
     )
     artifacts = [summary_csv, aggregate_csv, summary_json, *figure_artifacts]
     (study_dir / "study_manifest.json").write_text(
@@ -526,12 +478,11 @@ def render_existing_study(study_dir: Path) -> list[Path]:
         raise ValueError(f"study summary rows must be objects: {summary_path}")
     typed_rows = [dict(row) for row in rows]
     typed_aggregates = [dict(row) for row in aggregates]
-    controller_order = tuple(dict.fromkeys(str(row["controller_variant"]) for row in typed_rows))
+    estimator_order = tuple(
+        dict.fromkeys(str(row["stiffness_estimator_method"]) for row in typed_rows)
+    )
     figure_artifacts = render_study_figures(
-        typed_rows,
-        typed_aggregates,
-        study_dir,
-        controller_order=controller_order,
+        typed_rows, typed_aggregates, study_dir, estimator_order=estimator_order
     )
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -578,7 +529,7 @@ def main() -> None:
         return
     assert arguments.config is not None
     config_path = arguments.config.resolve()
-    config = load_comparison_config(config_path)
+    config = load_stiffness_estimator_comparison_config(config_path)
     validate_inputs(config)
     if arguments.dry_run:
         print(describe_conditions(config))

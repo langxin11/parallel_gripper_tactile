@@ -73,6 +73,9 @@ def test_custom_profile_defines_bounded_mit_torque_control() -> None:
     assert profile.normal_force.geometry.link_length_m == pytest.approx(0.04)
     assert profile.normal_force.geometry.offset_m == pytest.approx(0.03 / 2**0.5)
     assert profile.normal_force.stiffness is not None
+    assert profile.normal_force.stiffness.method == "window_linear"
+    assert profile.normal_force.stiffness.window_size == 25
+    assert profile.normal_force.stiffness.min_samples == 8
     # The force loop is expressed in mean single-side force.  These values are
     # the corresponding conversion of the former total-force-tuned baseline.
     assert profile.normal_force.kp == pytest.approx(0.016)
@@ -83,6 +86,24 @@ def test_custom_profile_defines_bounded_mit_torque_control() -> None:
     assert profile.normal_force.stiffness.min_delta_force_n == pytest.approx(0.025)
     assert profile.normal_force.stiffness.position_feedforward_gain == pytest.approx(0.25)
     assert profile.normal_force.stiffness.torque_feedforward_gain == pytest.approx(1.0)
+
+
+def test_stiffness_profile_validates_window_method_requirements() -> None:
+    """窗口拟合方法必须配置足够且不超过窗口大小的样本数。"""
+    profile = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    assert profile.normal_force is not None
+    assert profile.normal_force.stiffness is not None
+
+    values = profile.normal_force.stiffness.model_dump()
+    with pytest.raises(ValidationError, match="enough samples"):
+        type(profile.normal_force.stiffness).model_validate(
+            values | {"method": "window_quadratic", "min_samples": 2}
+        )
+
+    with pytest.raises(ValidationError, match="must not exceed window_size"):
+        type(profile.normal_force.stiffness).model_validate(
+            values | {"window_size": 3, "min_samples": 4}
+        )
 
 
 def test_touch_grid_profile_reads_dimensions_from_plugin_configuration() -> None:

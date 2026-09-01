@@ -21,7 +21,13 @@ from ..control import (
     ForceTrackingController,
     NormalForceController,
 )
-from ..profiles import GripperProfile, MITTorqueControl, load_profile
+from ..profiles import (
+    STIFFNESS_ESTIMATOR_METHODS,
+    GripperProfile,
+    MITTorqueControl,
+    StiffnessEstimatorMethod,
+    load_profile,
+)
 from ..scenes.custom import (
     CUBE_PREFIX,
     DEFAULT_CUBE_HALF_CONTACT_SIDE,
@@ -58,6 +64,7 @@ def configure_force_controller(
     profile: GripperProfile,
     *,
     variant: ControllerVariant = "full",
+    stiffness_estimator_method: StiffnessEstimatorMethod | None = None,
     sensor_noise_seed: int | None = None,
 ) -> GripperProfile:
     """返回用于公平消融的力控 profile 副本，不修改磁盘源配置。"""
@@ -66,6 +73,12 @@ def configure_force_controller(
         raise ValueError(f"controller_variant must be one of: {choices}")
     if sensor_noise_seed is not None and sensor_noise_seed < 0:
         raise ValueError("sensor_noise_seed must be non-negative")
+    if (
+        stiffness_estimator_method is not None
+        and stiffness_estimator_method not in STIFFNESS_ESTIMATOR_METHODS
+    ):
+        choices = ", ".join(STIFFNESS_ESTIMATOR_METHODS)
+        raise ValueError(f"stiffness_estimator_method must be one of: {choices}")
     if not isinstance(profile.control, MITTorqueControl) or profile.normal_force is None:
         raise ValueError("controller ablation requires MIT torque control with control.force")
     force = profile.normal_force
@@ -79,6 +92,11 @@ def configure_force_controller(
         stiffness = stiffness.model_copy(update={"enabled": True, "position_feedforward_gain": 0.0})
     elif variant == "pid-stiffness-ff" and stiffness is not None:
         stiffness = stiffness.model_copy(update={"enabled": True, "torque_feedforward_gain": 0.0})
+
+    if stiffness_estimator_method is not None:
+        if stiffness is None:
+            raise ValueError("stiffness_estimator_method requires control.force.stiffness")
+        stiffness = stiffness.model_copy(update={"method": stiffness_estimator_method})
 
     force_updates: dict[str, object] = {}
     if stiffness is not None:
@@ -314,6 +332,7 @@ def run_force_tracking(
     multiccd_enabled: bool = True,
     force_semantics: ForceSemantics = "average_side",
     controller_variant: ControllerVariant = "full",
+    stiffness_estimator_method: StiffnessEstimatorMethod | None = None,
     sensor_noise_seed: int | None = None,
     output_csv: Path | None = None,
     output_plot: Path | None = None,
@@ -325,6 +344,7 @@ def run_force_tracking(
     profile = configure_force_controller(
         load_profile(profile_path),
         variant=controller_variant,
+        stiffness_estimator_method=stiffness_estimator_method,
         sensor_noise_seed=sensor_noise_seed,
     )
     if profile.normal_force is None or profile.mit is None:

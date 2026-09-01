@@ -54,6 +54,7 @@ control:
     stiffness:
       # 在线估计等效接触刚度 K=df_n/dc，单位 N/m；估计的是夹爪-触觉层-物体-接触模型组合刚度。
       enabled: true
+      method: window_linear
       initial_n_per_m: 3000
       min_n_per_m: 250
       max_n_per_m: 25000
@@ -62,6 +63,9 @@ control:
       # secant 样本门限：闭合行程和法向力变化太小时不更新刚度，避免噪声主导估计。
       min_delta_closure_m: 0.00005
       min_delta_force_n: 0.025
+      # 滑动窗口样本数与拟合所需最小样本数；窗口方法使用全部最近样本。
+      window_size: 25
+      min_samples: 8
       # 位置前馈用平均单侧力误差除以 K*Jc；力矩前馈用 f_target*Jc，两个增益用于保守缩放。
       position_feedforward_gain: 0.25
       torque_feedforward_gain: 1.0

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 import math
 from typing import Literal, Protocol
@@ -93,6 +94,7 @@ class ContactStiffnessEstimator:
         """保存估计参数和几何模型，并初始化估计状态。"""
         self._config = config
         self._kinematics = kinematics
+        self._samples: deque[tuple[float, float]] = deque(maxlen=config.window_size)
         self.reset()
 
     @property
@@ -108,15 +110,31 @@ class ContactStiffnessEstimator:
     ) -> None:
         """重置估计，并可选记录新的接触参考点。"""
         self._estimate_n_per_m = float(self._config.initial_n_per_m)
+        self._samples.clear()
         if position_rad is None or normal_force_n is None:
             self._last_closure_m = None
             self._last_force_n = None
             return
-        self._last_closure_m = self._kinematics.closure(float(position_rad))
-        self._last_force_n = max(0.0, float(normal_force_n))
+        closure_m = self._kinematics.closure(float(position_rad))
+        force_n = max(0.0, float(normal_force_n))
+        self._last_closure_m = closure_m
+        self._last_force_n = force_n
+        if (
+            self._config.method != "secant_ewma"
+            and math.isfinite(closure_m)
+            and math.isfinite(force_n)
+        ):
+            self._samples.append((closure_m, force_n))
 
     def update(self, *, position_rad: float, normal_force_n: float) -> float:
         """用新的接触样本更新刚度估计，并返回当前估计值。"""
+        if self._config.method != "secant_ewma":
+            return self._update_window(position_rad=position_rad, normal_force_n=normal_force_n)
+
+        return self._update_secant(position_rad=position_rad, normal_force_n=normal_force_n)
+
+    def _update_secant(self, *, position_rad: float, normal_force_n: float) -> float:
+        """用相邻有效样本的割线更新刚度，保留历史算法行为。"""
         closure_m = self._kinematics.closure(float(position_rad))
         force_n = max(0.0, float(normal_force_n))
         if self._last_closure_m is None or self._last_force_n is None:
@@ -140,6 +158,50 @@ class ContactStiffnessEstimator:
 
         self._last_closure_m = closure_m
         self._last_force_n = force_n
+        return self._estimate_n_per_m
+
+    def _update_window(self, *, position_rad: float, normal_force_n: float) -> float:
+        """用最近窗口的局部一次或二次拟合更新刚度。"""
+        closure_m = self._kinematics.closure(float(position_rad))
+        raw_force_n = float(normal_force_n)
+        if not math.isfinite(closure_m) or not math.isfinite(raw_force_n):
+            return self._estimate_n_per_m
+        force_n = max(0.0, raw_force_n)
+
+        self._samples.append((closure_m, force_n))
+        if len(self._samples) < self._config.min_samples:
+            return self._estimate_n_per_m
+
+        closures = np.asarray([sample[0] for sample in self._samples], dtype=float)
+        forces = np.asarray([sample[1] for sample in self._samples], dtype=float)
+        closure_span = float(np.ptp(closures))
+        force_span = float(np.ptp(forces))
+        if (
+            not math.isfinite(closure_span)
+            or not math.isfinite(force_span)
+            or closure_span < self._config.min_delta_closure_m
+            or force_span < self._config.min_delta_force_n
+        ):
+            return self._estimate_n_per_m
+
+        degree = 1 if self._config.method == "window_linear" else 2
+        scale = max(closure_span, float(self._config.min_delta_closure_m))
+        coordinate = (closures - closures[-1]) / scale
+        design = np.column_stack([coordinate**power for power in range(degree + 1)])
+        try:
+            coefficients, _, rank, _ = np.linalg.lstsq(design, forces, rcond=None)
+        except (np.linalg.LinAlgError, ValueError):
+            return self._estimate_n_per_m
+        if rank < degree + 1:
+            return self._estimate_n_per_m
+
+        slope = float(coefficients[1] / scale)
+        if not math.isfinite(slope) or slope <= 0.0:
+            return self._estimate_n_per_m
+
+        sample = float(np.clip(slope, self._config.min_n_per_m, self._config.max_n_per_m))
+        alpha = float(self._config.filter_alpha)
+        self._estimate_n_per_m += alpha * (sample - self._estimate_n_per_m)
         return self._estimate_n_per_m
 
 

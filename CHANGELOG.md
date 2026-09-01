@@ -13,6 +13,9 @@
   平台—平滑斜坡综合测试
 - `force_tracking_controller_comparison` study：固定展开 controller × task × material × seed，支持
   `--dry-run` 审阅矩阵，并生成聚合指标、饱和比例、消融增量和同 seed 轨迹对比图
+- `force_tracking_stiffness_estimator_comparison` study：固定 `pid-stiffness-ff`，比较
+  `secant_ewma`、`window_linear` 与 `window_quadratic` 三种刚度估计器，并输出聚合结果和同 seed
+  力—刚度对比图
 - 新增 `stiff=(-2500,-15)` 显式接触 preset；默认批量研究改用 `medium/hard/stiff`，原
   `soft=(-250,-5)` 仅保留用于兼容和专项标定
 - `docs/custom-gripper-next-phase.md`：自研平行夹爪下一阶段实施路线图（Pillars 触觉反馈实验）

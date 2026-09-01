@@ -77,6 +77,30 @@ def test_controller_variant_rejects_unknown_name_and_negative_seed() -> None:
         configure_force_controller(profile, variant="unknown")  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="non-negative"):
         configure_force_controller(profile, sensor_noise_seed=-1)
+    with pytest.raises(ValueError, match="stiffness_estimator_method"):
+        configure_force_controller(
+            profile,
+            stiffness_estimator_method="unknown",  # type: ignore[arg-type]
+        )
+
+
+def test_stiffness_estimator_method_is_a_runtime_profile_override() -> None:
+    """估计器对比可覆盖方法而不修改源 profile。"""
+    source = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+
+    configured = configure_force_controller(
+        source,
+        variant="pid-stiffness-ff",
+        stiffness_estimator_method="window_quadratic",
+    )
+
+    assert configured.normal_force is not None
+    assert configured.normal_force.stiffness is not None
+    assert configured.normal_force.stiffness.method == "window_quadratic"
+    assert configured.normal_force.stiffness.torque_feedforward_gain == 0.0
+    assert source.normal_force is not None
+    assert source.normal_force.stiffness is not None
+    assert source.normal_force.stiffness.method == "window_linear"
 
 
 def test_force_tracking_run_writes_dynamic_reference_trace(tmp_path: Path) -> None:

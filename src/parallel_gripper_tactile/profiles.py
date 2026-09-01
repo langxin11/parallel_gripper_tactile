@@ -56,6 +56,12 @@ class TouchGridTactileLayout(_FrozenModel):
 
 
 TactileLayout: TypeAlias = TaxelTactileLayout | TouchGridTactileLayout
+StiffnessEstimatorMethod: TypeAlias = Literal["secant_ewma", "window_linear", "window_quadratic"]
+STIFFNESS_ESTIMATOR_METHODS: tuple[StiffnessEstimatorMethod, ...] = (
+    "secant_ewma",
+    "window_linear",
+    "window_quadratic",
+)
 
 
 class MITControl(_FrozenModel):
@@ -92,12 +98,15 @@ class ContactStiffnessControl(_FrozenModel):
     """在线接触刚度估计和前馈控制参数。"""
 
     enabled: bool = True
+    method: StiffnessEstimatorMethod = "window_linear"
     initial_n_per_m: Annotated[FiniteFloat, Field(gt=0)]
     min_n_per_m: Annotated[FiniteFloat, Field(gt=0)]
     max_n_per_m: Annotated[FiniteFloat, Field(gt=0)]
     filter_alpha: Annotated[FiniteFloat, Field(gt=0, le=1)]
     min_delta_closure_m: Annotated[FiniteFloat, Field(gt=0)]
     min_delta_force_n: Annotated[FiniteFloat, Field(gt=0)]
+    window_size: Annotated[int, Field(gt=0)] = 25
+    min_samples: Annotated[int, Field(gt=0)] = 8
     position_feedforward_gain: Annotated[FiniteFloat, Field(ge=0, le=1)] = 0.25
     torque_feedforward_gain: Annotated[FiniteFloat, Field(ge=0, le=1)] = 1.0
 
@@ -108,6 +117,11 @@ class ContactStiffnessControl(_FrozenModel):
             raise ValueError("min_n_per_m must be smaller than max_n_per_m")
         if not self.min_n_per_m <= self.initial_n_per_m <= self.max_n_per_m:
             raise ValueError("initial_n_per_m must lie within stiffness limits")
+        if self.min_samples > self.window_size:
+            raise ValueError("min_samples must not exceed window_size")
+        degree = {"window_linear": 1, "window_quadratic": 2}.get(self.method)
+        if degree is not None and self.min_samples < degree + 1:
+            raise ValueError("min_samples must provide enough samples for the selected method")
         return self
 
 

@@ -47,12 +47,13 @@ output_root: results
 
 
 def test_default_comparison_uses_shifted_contact_presets() -> None:
-    """默认正式矩阵排除旧 soft，并加入更高刚度 stiff。"""
+    """默认正式矩阵排除旧 soft，并锁定历史 benchmark 的割线估计器。"""
     config = load_comparison_config(
         ROOT / "configs/studies/force_tracking_controller_comparison.yaml"
     )
 
     assert config.materials == ("medium", "hard", "stiff")
+    assert config.stiffness_estimator_method == "secant_ewma"
 
 
 @pytest.mark.parametrize(

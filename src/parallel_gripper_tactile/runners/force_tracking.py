@@ -14,7 +14,7 @@ from ..experiments.force_tracking import (
     run_force_tracking,
 )
 from ..control import ForceSemantics
-from ..profiles import load_profile
+from ..profiles import StiffnessEstimatorMethod, load_profile
 from ..run_artifacts import RunDirectory
 from ..scenes.custom import ObjectContactModel, ObjectMaterial
 
@@ -33,6 +33,7 @@ def execute_force_tracking(
     multiccd_enabled: bool = True,
     force_semantics: ForceSemantics = "average_side",
     controller_variant: ControllerVariant = "full",
+    stiffness_estimator_method: StiffnessEstimatorMethod | None = None,
     sensor_noise_seed: int | None = None,
     viewer: bool = False,
     render_fps: float = 30.0,
@@ -59,6 +60,7 @@ def execute_force_tracking(
             "multiccd_enabled": multiccd_enabled,
             "force_semantics": force_semantics,
             "controller_variant": controller_variant,
+            "stiffness_estimator_method": stiffness_estimator_method,
             "sensor_noise_seed": sensor_noise_seed,
         },
         run_name=run_name,
@@ -84,6 +86,7 @@ def execute_force_tracking(
             multiccd_enabled=multiccd_enabled,
             force_semantics=force_semantics,
             controller_variant=controller_variant,
+            stiffness_estimator_method=stiffness_estimator_method,
             sensor_noise_seed=sensor_noise_seed,
         )
         run.register_artifact(csv_path)

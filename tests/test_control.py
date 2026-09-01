@@ -1,5 +1,6 @@
 """验证 MIT 力矩控制律、命令限幅与 MJCF 执行器契约。"""
 
+import math
 from pathlib import Path
 
 import mujoco
@@ -103,7 +104,8 @@ def test_contact_stiffness_estimator_tracks_force_over_closure() -> None:
     assert profile.normal_force.geometry is not None
     assert profile.normal_force.stiffness is not None
     kinematics = CrankSliderKinematics.from_config(profile.normal_force.geometry)
-    estimator = ContactStiffnessEstimator(profile.normal_force.stiffness, kinematics)
+    config = profile.normal_force.stiffness.model_copy(update={"method": "secant_ewma"})
+    estimator = ContactStiffnessEstimator(config, kinematics)
 
     q0 = 0.4
     q1 = 0.5
@@ -117,6 +119,84 @@ def test_contact_stiffness_estimator_tracks_force_over_closure() -> None:
     initial = profile.normal_force.stiffness.initial_n_per_m
     expected = initial + 0.15 * (10000.0 - initial)
     assert estimate == pytest.approx(expected)
+
+
+def test_contact_stiffness_estimator_window_linear_uses_all_samples() -> None:
+    """滑动窗口一次拟合用多个样本恢复线性接触刚度。"""
+    profile = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+
+    assert profile.normal_force is not None
+    assert profile.normal_force.geometry is not None
+    assert profile.normal_force.stiffness is not None
+    kinematics = CrankSliderKinematics.from_config(profile.normal_force.geometry)
+    config = profile.normal_force.stiffness.model_copy(
+        update={"method": "window_linear", "filter_alpha": 1.0, "min_samples": 4}
+    )
+    estimator = ContactStiffnessEstimator(config, kinematics)
+
+    q_values = [0.4 + 0.02 * index for index in range(7)]
+    reference_closure = kinematics.closure(q_values[0])
+    estimator.reset(position_rad=q_values[0], normal_force_n=1.0)
+    for q in q_values:
+        closure = kinematics.closure(q)
+        estimate = estimator.update(
+            position_rad=q,
+            normal_force_n=1.0 + 10000.0 * (closure - reference_closure),
+        )
+
+    assert estimate == pytest.approx(10000.0, rel=1e-6)
+
+
+def test_contact_stiffness_estimator_window_quadratic_returns_current_slope() -> None:
+    """滑动窗口二次拟合返回当前闭合量处的局部导数。"""
+    profile = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+
+    assert profile.normal_force is not None
+    assert profile.normal_force.geometry is not None
+    assert profile.normal_force.stiffness is not None
+    kinematics = CrankSliderKinematics.from_config(profile.normal_force.geometry)
+    config = profile.normal_force.stiffness.model_copy(
+        update={"method": "window_quadratic", "filter_alpha": 1.0, "min_samples": 5}
+    )
+    estimator = ContactStiffnessEstimator(config, kinematics)
+
+    q_values = [0.4 + 0.02 * index for index in range(8)]
+    initial_closure = kinematics.closure(q_values[0])
+    estimator.reset(
+        position_rad=q_values[0],
+        normal_force_n=1.0 + 6000.0 * initial_closure + 200000.0 * initial_closure**2,
+    )
+    final_closure = kinematics.closure(q_values[-1])
+    for q in q_values:
+        closure = kinematics.closure(q)
+        estimator.update(
+            position_rad=q,
+            normal_force_n=1.0 + 6000.0 * closure + 200000.0 * closure**2,
+        )
+
+    expected = 6000.0 + 400000.0 * final_closure
+    assert estimator.estimate_n_per_m == pytest.approx(expected, rel=1e-6)
+
+
+def test_contact_stiffness_estimator_window_keeps_last_estimate_for_invalid_fit() -> None:
+    """样本不足或闭合/力跨度不足时，窗口估计保持上次结果。"""
+    profile = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+
+    assert profile.normal_force is not None
+    assert profile.normal_force.geometry is not None
+    assert profile.normal_force.stiffness is not None
+    kinematics = CrankSliderKinematics.from_config(profile.normal_force.geometry)
+    config = profile.normal_force.stiffness.model_copy(
+        update={"method": "window_linear", "filter_alpha": 1.0, "min_samples": 4}
+    )
+    estimator = ContactStiffnessEstimator(config, kinematics)
+    estimator.reset(position_rad=0.4, normal_force_n=1.0)
+
+    for _ in range(3):
+        assert estimator.update(position_rad=0.4, normal_force_n=1.0) == pytest.approx(3000.0)
+
+    assert estimator.update(position_rad=0.4, normal_force_n=1.1) == pytest.approx(3000.0)
+    assert estimator.update(position_rad=0.5, normal_force_n=math.nan) == pytest.approx(3000.0)
 
 
 def test_normal_force_controller_switches_after_bilateral_contact() -> None:

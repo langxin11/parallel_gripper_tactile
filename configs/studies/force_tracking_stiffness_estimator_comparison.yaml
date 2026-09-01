@@ -1,16 +1,13 @@
-name: force_tracking_controller_comparison
+name: force_tracking_stiffness_estimator_comparison
 profile: ../custom_parallel_gripper.yaml
 tasks:
   - ../force_tracking/step.yaml
   - ../force_tracking/ramp.yaml
   - ../force_tracking/mixed_waypoints.yaml
-controllers:
-  - pid-only
-  - pid-torque-ff
-  - pid-stiffness-ff
-  - full
-# 2026-09-01 的 108-run 基准使用相邻点割线估计；显式锁定以保证结果可复现。
-stiffness_estimator_method: secant_ewma
+estimators:
+  - secant_ewma
+  - window_linear
+  - window_quadratic
 materials:
   - medium
   - hard

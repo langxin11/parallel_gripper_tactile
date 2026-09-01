@@ -46,12 +46,14 @@ def test_execute_force_tracking_writes_complete_run_artifacts(tmp_path: Path, mo
         run_name="runner-test",
         object_material="soft",
         controller_variant="pid-only",
+        stiffness_estimator_method="window_quadratic",
         sensor_noise_seed=7,
     )
 
     assert returned == result
     manifest = json.loads((run.path / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["parameters"]["controller_variant"] == "pid-only"
+    assert manifest["parameters"]["stiffness_estimator_method"] == "window_quadratic"
     assert manifest["parameters"]["object_material"] == "soft"
     assert manifest["parameters"]["multiccd_enabled"] is True
     assert manifest["parameters"]["force_semantics"] == "average_side"
