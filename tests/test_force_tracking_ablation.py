@@ -14,6 +14,9 @@ from parallel_gripper_tactile.studies.force_tracking_ablation import (
 )
 
 
+ROOT = Path(__file__).resolve().parents[1]
+
+
 def _protocol_module() -> object:
     path = Path(__file__).parents[1] / "scripts" / "experiments" / "force_tracking_ablation.py"
     spec = importlib.util.spec_from_file_location("force_tracking_ablation_protocol", path)
@@ -61,6 +64,13 @@ output_root: results
     assert config.output_root == tmp_path / "results"
     assert len(config.conditions()) == 24
     assert config.conditions()[0] == ("pid-only", "soft", 2)
+
+
+def test_default_ablation_uses_shifted_contact_presets() -> None:
+    """默认消融矩阵排除旧 soft，并加入 stiff。"""
+    config = load_study_config(ROOT / "configs/studies/force_tracking_ablation.yaml")
+
+    assert config.materials == ("medium", "hard", "stiff")
 
 
 @pytest.mark.parametrize(

@@ -62,6 +62,15 @@ MIT 前馈力矩、测量力、滤波力和诊断量。
 
 这一层接口稳定后，PID、ADRC、自适应刚度控制器就可以在同一个仿真任务里互换。
 
+当前第一阶段已经落地：`step.yaml`、`ramp.yaml`、`mixed_waypoints.yaml` 三类标准任务，以及
+`controller × task × material × seed` 的显式 comparison schema、`--dry-run` 条件审阅、结构化聚合和
+study 级对比图。现阶段矩阵仍只包含四个 PID 系变体；Direct torque 与 ADRC 属于下一阶段。
+
+正式批量研究的接触 preset 已整体上移一档：使用 `medium=(-650,-8)`、`hard=(-1200,-10)` 和
+`stiff=(-2500,-15)`。其中日常语义依次更接近 compliant、firm 与 stiff；这些参数是单个显式
+contact pair 的求解器参数，不是物体弹性模量或整套系统的实测等效刚度。旧 `soft=(-250,-5)` 只为历史
+配置和专项接触建立标定保留，不进入默认消融、控制器对比或诊断矩阵。
+
 ### 阶段三：把纯算法沉淀回 `tactile-contact-control`
 
 当控制器接口不再频繁变化时，把与 MuJoCo、MJCF、profile 路径、viewer、plot 无关的算法代码迁回
@@ -151,9 +160,104 @@ controller command -> 达妙电机 CAN/串口命令
 对于直接力矩式力控，还应额外关注力矩抖动、力矩变化率、积分项是否 windup，以及脱离接触时是否仍有
 持续闭合力矩。该模式建议先在仿真中作为对照组使用，不应直接跳到硬件。
 
+### 6.1 2026-09-01 控制器对比结果
+
+完整 study 位于
+[`outputs/studies/force_tracking_controller_comparison/20260901T125358Z-0a777c0f`](../outputs/studies/force_tracking_controller_comparison/20260901T125358Z-0a777c0f/aggregate.csv)。
+本次矩阵包含 4 个控制器变体、3 类目标力任务、3 个正式接触 preset 和 3 个噪声 seed，共 108 次运行。
+所有运行均成功完成，且力矩与位置饱和比例均为 0，因此当前差异没有被执行器限幅主导。
+
+跨 `medium`、`hard`、`stiff` 三种 preset 对 RMSE 取平均后，相对 `pid-only` 的降幅为：
+
+| 控制器 | Step | Ramp | Mixed |
+| --- | ---: | ---: | ---: |
+| `pid-torque-ff` | 11.8% | 22.1% | 22.6% |
+| `pid-stiffness-ff` | 3.2% | 0.1% | 0.5% |
+| `full` | **14.2%** | **22.2%** | **23.1%** |
+
+`full` 在 9 个 task × preset 组合中有 8 个取得最低 RMSE。主要性能增益来自基于机构雅可比的力矩前馈；
+刚度位置前馈在 Step 中提供少量额外改善，而在 Ramp 和 Mixed 中未显示明显额外收益。当前只有 3 个 seed，
+且 Ramp 中 `full` 与 `pid-torque-ff` 的差异很小，因此不应把这一结果表述为统计显著性结论。
+
+接触时间只由 preset 和噪声 seed 决定；按三个唯一 seed 统计为：
+
+| Preset | 接触时间 |
+| --- | ---: |
+| `medium` | 1.207 ± 0.025 s |
+| `hard` | 1.092 ± 0.006 s |
+| `stiff` | 1.058 ± 0.002 s |
+
+更高的接触 preset 在当前相同几何条件下更早达到接触阈值，且 RMSE 整体下降。例如 `full` 的 Step RMSE
+由 `medium` 的 0.405 N 降至 `stiff` 的 0.372 N，Ramp 由 0.071 N 降至 0.061 N。这只能解释为
+当前显式接触条件下的系统响应趋势，不能推广为真实材料本体越硬，控制效果必然越好。
+
+`full` 在 Ramp 中的平均刚度估计随 preset 呈单调上升：`medium`、`hard`、`stiff` 分别约为
+2929、3130、3241 N/m。估计器能够区分相对刚柔趋势，但输出是夹爪—Pillar—物体—接触求解器共同形成的
+局部等效刚度，不能解释为材料弹性模量，也不能与单个 contact pair 的 `solref` 数值直接对应。
+
+当前结果还有两个指标边界：
+
+1. Step 的 `peak_abs_error_n` 对所有控制器都约为 5 N，主要来自目标由 1 N 瞬间跳到 6 N 时的初始误差，
+   不适合用于控制器排名；后续应增加上升时间、超调量和 ±5% 稳定时间。
+2. Ramp 结束时的误差约为 -0.15 至 -0.20 N，但当前卸载到 1 N 后没有终端保持段；该值更接近动态滞后，
+   不能视为严格稳态误差。后续应增加 1 至 2 s terminal hold。
+
+### 6.2 当前刚度估计器的原理与定位
+
+当前 `ContactStiffnessEstimator` 是轻量级局部割线估计器，不属于先进的概率状态估计或系统辨识算法。
+它适合作为计算量小、容易解释的工程基线，其详细力学关系也见[曲柄滑块力控模型](crank-slider-force-control.md)。
+
+对每个控制周期，先用曲柄滑块运动学把电机位置 (q) 转换为总闭合行程 (c(q))，再计算自上一个有效参考点
+以来的增量：
+
+\[
+\Delta c=c(q_k)-c(q_{k-1}),\qquad
+\Delta f=f_{n,k}-f_{n,k-1}.
+\]
+
+只有当 \(|\Delta c|\) 和 \(|\Delta f|\) 均超过配置门限，且二者同号时，才构造局部割线样本：
+
+\[
+k_{\mathrm{sample}}=
+\operatorname{clip}\left(
+\left|\frac{\Delta f}{\Delta c}\right|,
+k_{\min},k_{\max}
+\right).
+\]
+
+随后用指数加权移动平均更新估计：
+
+\[
+\hat k_k=\hat k_{k-1}+\alpha(k_{\mathrm{sample}}-\hat k_{k-1}).
+\]
+
+当前 profile 使用 `initial=3000 N/m`、`min=250 N/m`、`max=25000 N/m`、`alpha=0.15`、
+`min_delta_closure=0.05 mm` 和 `min_delta_force=0.025 N`。估计器在双侧接触确认时以当前位置和滤波力重置；
+控制器随后把它换算为 \(\hat J_f=\hat kJ_c(q)\)，并生成受限的位置前馈：
+
+\[
+\Delta q_{\mathrm{stiff}}=
+\gamma\frac{f_{\mathrm{ref}}-f_n}{\hat kJ_c(q)}.
+\]
+
+该实现的优点是每步只需常数时间和常数内存，带有增量门限、符号检查、上下限与 EWMA，适合实时控制和
+当前可复现 benchmark。它的主要局限是：
+
+- 仅使用两个参考点之间的割线，没有利用一段时间窗内的全部样本；
+- 不估计置信度或噪声协方差，也没有遗忘因子的正规最小二乘模型；
+- 没有显式辨识接触阻尼、迟滞、粘弹性或非线性刚度；
+- 无法分离 Pillar、物体、机构和 MuJoCo 接触参数各自的贡献；
+- 当前控制器没有依据活跃 taxel 集合变化、滑移等事件专门冻结估计，主要依赖接触状态、门限和符号检查。
+
+因此论文中宜称为“在线局部割线刚度估计（EWMA-filtered secant estimate）”，而不宜笼统称为先进自适应
+辨识。若后续希望提高算法层级，可依次比较滑动窗鲁棒回归、带遗忘因子的递推最小二乘（RLS）、联合估计
+刚度与阻尼的 EKF/UKF，以及显式处理接触模式切换的多模型估计器。已有研究中，RLS 可结合残差模型在线拟合
+非线性刚度，[Flacco 等](https://doi.org/10.1177/0278364912461813)；也有工作使用双候选力观测器在缺少可靠
+接触位置时估计环境刚度，[Online stiffness estimation for robotic tasks with force observers](https://doi.org/10.1016/j.conengprac.2013.11.002)。这些方法模型更完整，但辨识条件、调参与验证成本也更高。
+
 ## 7. 配置组织建议
 
-短期可以在当前项目中按如下方式组织：
+当前项目按如下方式组织：
 
 ```text
 configs/
@@ -162,17 +266,14 @@ configs/
 │   ├── step.yaml
 │   ├── ramp.yaml
 │   └── mixed_waypoints.yaml
-└── controller_ablations/
-    ├── full.yaml
-    ├── pid_only.yaml
-    ├── no_approach_ff.yaml
-    ├── no_torque_ff.yaml
-    ├── no_stiffness_position_ff.yaml
-    └── no_stiffness_estimator.yaml
+└── studies/
+    ├── force_tracking_ablation.yaml
+    └── force_tracking_controller_comparison.yaml
 ```
 
-如果当前 CLI 还不支持单独加载 controller override，可以先复制完整 profile 形成可运行配置；
-等实验矩阵稳定后，再增加 `--controller-config` 或 `--override`，减少重复配置。
+控制器变体通过运行时的不可变 profile 副本实现，不复制完整 profile。study schema 只展开条件矩阵，
+`scripts/experiments` 直接调用 Python runner；控制器、仿真循环和单次运行产物仍分别由 `control.py`、
+`experiments/force_tracking.py` 与 `runners/force_tracking.py` 管理。
 
 ## 8. 推荐命令形式
 
@@ -185,24 +286,24 @@ uv run pgt run force-track \
   --viewer
 </code></pre>
 
-批量对比时不建议打开 viewer，应使用 headless：
+批量对比先执行 dry-run，校验 profile、三类 task 和完整条件矩阵，不创建输出目录：
 
 <pre><code class="language-bash">
-uv run pgt run force-track \
-  --profile configs/custom_parallel_gripper.yaml \
-  --task configs/force_tracking/default_waypoints.yaml \
-  --run-name full_default
+uv run python scripts/experiments/force_tracking_controller_comparison.py \
+  --config configs/studies/force_tracking_controller_comparison.yaml \
+  --dry-run
 </code></pre>
 
-后续若加入 sweep 命令，理想形式可以是：
+确认矩阵后以 headless 方式执行完整 study：
 
 <pre><code class="language-bash">
-uv run pgt compare force-track \
-  --profiles configs/controller_ablations/*.yaml \
-  --task configs/force_tracking/mixed_waypoints.yaml
+uv run python scripts/experiments/force_tracking_controller_comparison.py \
+  --config configs/studies/force_tracking_controller_comparison.yaml
 </code></pre>
 
-该命令尚未实现，当前应先用单次运行产物保证指标和配置字段稳定。
+默认配置展开 4 个 PID 系变体 × 3 个 task × 3 个正式接触 preset × 3 个 seed，共 108 个条件。每个条件保留独立
+run，study 父目录生成 `summary.csv`、`aggregate.csv`、`summary.json`、对比图和
+`study_manifest.json`。脚本顺序调用 runner，不通过 CLI 子进程启动单次实验。
 
 ## 9. 决策原则
 

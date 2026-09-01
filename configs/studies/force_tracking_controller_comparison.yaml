@@ -1,6 +1,9 @@
-name: force_tracking_ablation
+name: force_tracking_controller_comparison
 profile: ../custom_parallel_gripper.yaml
-task: ../force_tracking/default_waypoints.yaml
+tasks:
+  - ../force_tracking/step.yaml
+  - ../force_tracking/ramp.yaml
+  - ../force_tracking/mixed_waypoints.yaml
 controllers:
   - pid-only
   - pid-torque-ff

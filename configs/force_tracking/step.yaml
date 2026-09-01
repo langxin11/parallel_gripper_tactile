@@ -1,0 +1,28 @@
+schema_version: 1
+name: step_force_tracking
+
+approach:
+  # 先以保守的平均单侧力建立稳定接触，再开始目标力跟踪。
+  duration_s: 1.0
+  timeout_s: 3.0
+  settle_after_contact_s: 0.2
+  feedforward_force_n: 1.0
+
+reference:
+  # 阶跃曲线用于测量上升时间、超调和稳态误差。
+  interpolation: hold
+  # force_n 始终表示平均单侧法向力，而不是左右两侧力之和。
+  # 重复 waypoint 保留平台段；峰值 6 N/侧，先避免限幅主导结果。
+  waypoints:
+    - {t_s: 0.0, force_n: 1.0}
+    - {t_s: 1.0, force_n: 1.0} # 初始平台
+    - {t_s: 1.01, force_n: 6.0} # 加载阶跃
+    - {t_s: 3.0, force_n: 6.0} # 峰值平台
+    - {t_s: 3.01, force_n: 1.0} # 卸载阶跃
+    - {t_s: 4.0, force_n: 1.0}
+
+metrics:
+  ignore_initial_s: 0.2
+
+control_period_s: 0.002
+release_support_on_tracking: false

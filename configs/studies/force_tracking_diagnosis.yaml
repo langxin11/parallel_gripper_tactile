@@ -13,9 +13,9 @@ controllers:
   - pid-stiffness-ff
   - full
 materials:
-  - soft
   - medium
   - hard
+  - stiff
 
 # Diagnostic load sweep only: factors scale average-side task references and do
 # not change the waypoint or feedback force semantics.

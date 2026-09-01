@@ -21,8 +21,13 @@ uv run pgt run force-track \
 默认 viewer 按 1 倍实时速度播放。若需要慢放或改变刷新率，可使用 `--realtime-factor`
 和 `--render-fps`。
 
-默认任务配置位于 `configs/force_tracking/default_waypoints.yaml`。该配置只描述任务流程和目标力曲线；
-夹爪结构、执行器限幅、触觉传感器和控制器参数仍来自 `--profile` 指定的 YAML。
+`--disable-multiccd` 只用于碰撞流形诊断：它保留 profile 指向的碰撞模型，但将 MuJoCo 的
+`multiccd` 求解选项关闭。默认 profile 已采用共面球体碰撞近似，常规力跟踪不需要这个开关。
+
+默认任务配置位于 `configs/force_tracking/default_waypoints.yaml`。标准控制器比较还提供
+`step.yaml`、`ramp.yaml` 与 `mixed_waypoints.yaml`，分别使用 `hold`、`linear` 和 `smoothstep`
+插值。任务配置只描述流程和目标力曲线；夹爪结构、执行器限幅、触觉传感器和控制器参数仍来自
+`--profile` 指定的 YAML。
 
 ## 1. 两阶段流程
 
@@ -38,7 +43,7 @@ uv run pgt run force-track \
 \tau_{\mathrm{ff}}(q)\simeq f_{\mathrm{ff}}J_c(q)
 \]
 
-例如 `feedforward_force_n: 2.0` 表示平均单侧法向力前馈为 2 N，也就是理想对称接触下总法向力约 4 N。
+例如默认的 `feedforward_force_n: 1.0` 表示平均单侧法向力前馈为 1 N，也就是理想对称接触下总法向力约 2 N。
 由于 \(J_c(q)\) 随关节角变化，最终写入 `t_ff` 的力矩也会随当前姿态变化。
 
 接近阶段常用字段如下：
@@ -125,11 +130,11 @@ waypoint 的 `t_s` 应严格递增，`force_n` 应为非负值。任务总跟踪
 | `measured_normal_force_n` | 触觉测得的平均单侧法向力。 |
 | `filtered_normal_force_n` | 低通滤波后的平均单侧法向力。 |
 | `tracking_error_n` | 目标力减测量力。 |
-| `force_feedforward_torque` | 根据目标力和机构雅可比计算的力矩前馈。 |
-| `mit_feedforward_torque` | 最终送入 MIT 命令的前馈力矩。 |
-| `estimated_contact_stiffness` | 在线估计的整体等效刚度 `k_pair`。 |
-| `closure_jacobian` | 当前关节角下的闭合行程雅可比 \(J_c(q)\)。 |
-| `aperture` | 由开度公式计算的当前夹爪开口。 |
+| `force_feedforward_torque_n_m` | 根据目标力和机构雅可比计算的力矩前馈。 |
+| `mit_feedforward_torque_n_m` | 最终送入 MIT 命令的前馈力矩。 |
+| `estimated_contact_stiffness_n_per_m` | 在线估计的整体等效刚度 `k_pair`。 |
+| `closure_jacobian_m_per_rad` | 当前关节角下的闭合行程雅可比 \(J_c(q)\)。 |
+| `aperture_m` | 由开度公式计算的当前夹爪开口。 |
 
 ## 5. 指标解读
 
@@ -159,3 +164,18 @@ waypoint 的 `t_s` 应严格递增，`force_n` 应为非负值。任务总跟踪
 需要注意，在线估计得到的是“Pillar—物体—机构/接触链路”共同形成的整体等效 `k_pair`，
 不是材料弹性模量，也不用于反推物体材料参数。它只服务于控制器前馈、增益调度和实验比较；
 实机传感器直接输出力，仿真则从 taxel/Pillar 接触读取后统一为 `F_L`、`F_R` 和 `f_n`。
+
+## 7. 碰撞几何诊断
+
+高载荷振荡的五条件对照由独立 diagnosis protocol 保存，避免把因果诊断开关混入默认任务：
+
+<pre><code class="language-bash">
+uv run python scripts/experiments/force_tracking_diagnosis.py \
+  --config configs/studies/force_tracking_diagnosis.yaml \
+  --phase collision-geometry
+</code></pre>
+
+该阶段分别控制 Pillar 高度共面性、mesh/sphere 拓扑和 `multiccd`。当前证据表明，问题来自原始非共面
+mesh 与 `multiccd` 的组合导致接触流形在 18 与 72 个活跃接触之间切换；并不能归因于 PID、平均单侧
+力语义、非共面性、mesh 拓扑或“72 个接触”中的任一单独因素。默认碰撞近似和完整结果见
+[触觉读数约定](tactile-conventions.md#2026-08-31-ab)。

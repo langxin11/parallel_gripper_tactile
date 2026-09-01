@@ -1,6 +1,9 @@
 # 🚀 常用工作流
 
-使用单一 `pgt` 入口。Profile 为 YAML，并在模型编译前完成校验。
+单次运行使用 `pgt`；需要固定条件矩阵、重复试验和聚合统计时使用 `scripts/experiments`。
+两类入口共享 Python runner 与产物格式。Profile 为 YAML，并在模型编译前完成校验。
+
+## 单次运行与交互检查
 
 <pre><code class="language-bash">
 uv run pgt validate configs/robotiq_2f85.yaml
@@ -17,8 +20,48 @@ uv run pgt run force-track \
 uv run pgt compare contact --profile configs/custom_parallel_gripper.yaml
 </code></pre>
 
+`--disable-multiccd` 是保留原碰撞模型、仅限制 convex geom pair 接触数的诊断开关；默认 profile 已使用
+稳定的共面球体碰撞近似，常规实验无需添加该开关。
+
+## 多条件研究
+
+控制器 × 材料 × 噪声种子的消融 protocol：
+
+<pre><code class="language-bash">
+uv run python scripts/experiments/force_tracking_ablation.py \
+  --config configs/studies/force_tracking_ablation.yaml
+</code></pre>
+
+跨三类目标曲线的规范化控制器对比先审阅矩阵，再运行完整 protocol：
+
+<pre><code class="language-bash">
+uv run python scripts/experiments/force_tracking_controller_comparison.py \
+  --config configs/studies/force_tracking_controller_comparison.yaml \
+  --dry-run
+uv run python scripts/experiments/force_tracking_controller_comparison.py \
+  --config configs/studies/force_tracking_controller_comparison.yaml
+</code></pre>
+
+默认矩阵为 4 个 PID 系变体 × 3 个任务 × 3 个正式接触 preset × 3 个 seed，共 108 个条件；三个
+preset 为 `medium=(-650,-8)`、`hard=(-1200,-10)` 与 `stiff=(-2500,-15)`。原
+`soft=(-250,-5)` 不进入默认矩阵。study 完成后除
+`summary.csv`、`aggregate.csv` 外，还会在 `figures/` 生成指标、饱和比例、消融增量和同 seed 轨迹图。
+
+按阶段执行因果诊断；碰撞几何阶段包含原 mesh、两种球体、共面 mesh 和关闭 `multiccd` 五个条件：
+
+<pre><code class="language-bash">
+uv run python scripts/experiments/force_tracking_diagnosis.py \
+  --config configs/studies/force_tracking_diagnosis.yaml \
+  --phase collision-geometry
+</code></pre>
+
+研究脚本直接调用 `parallel_gripper_tactile.runners.execute_force_tracking`，不会启动 CLI 子进程。
+每个条件生成独立 run，study 父目录另存 `study.yaml`、逐次 `summary`；消融和控制器对比研究还生成
+聚合统计，控制器对比图统一登记到 `study_manifest.json`。
+
 动态目标力跟踪任务的配置、两阶段流程和指标解读见[动态目标力跟踪](force-tracking.md)。
 控制算法对比、消融矩阵和项目分工见[控制算法对比与消融](control-comparison-ablation.md)。
+碰撞几何对照的结论和使用边界见[触觉读数约定](tactile-conventions.md#2026-08-31-ab)。
 
 用 `pgt runs list` 查看既有产物。用 `pgt runs clean --all` 预览要删除的目标；确认目标后
 再加 `--apply`。

@@ -49,6 +49,7 @@ def test_custom_scene_fixes_reserved_base_and_keeps_free_cube() -> None:
         ("soft", (-250.0, -5.0)),
         ("medium", (-650.0, -8.0)),
         ("hard", (-1200.0, -10.0)),
+        ("stiff", (-2500.0, -15.0)),
     ],
 )
 def test_custom_scene_adds_18_explicit_tactile_object_pairs(
@@ -75,7 +76,7 @@ def test_custom_scene_adds_18_explicit_tactile_object_pairs(
 
 
 def test_custom_scene_rejects_unknown_object_material() -> None:
-    """材料档位必须是受支持的 soft/medium/hard 之一。"""
+    """材料档位必须来自受支持的显式接触 preset。"""
     profile = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
 
     with pytest.raises(ValueError, match="object_material must be one of"):

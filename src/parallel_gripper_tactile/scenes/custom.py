@@ -26,7 +26,7 @@ MIN_CUBE_MASS = 0.050
 DEFAULT_CUBE_MASS = MIN_CUBE_MASS
 PILLAR_ALIGNMENT_OFFSET_IN_BASE = np.array((0.0, 0.0, -0.002))
 
-ObjectMaterial = Literal["soft", "medium", "hard"]
+ObjectMaterial = Literal["soft", "medium", "hard", "stiff"]
 ObjectContactModel = Literal["explicit", "legacy"]
 
 
@@ -43,7 +43,7 @@ class ContactPreset:
 _TACTILE_SOLIMP = (0.75, 0.95, 0.0025, 0.5, 2.0)
 _TACTILE_FRICTION = (0.8, 0.8, 0.02, 0.001, 0.001)
 
-# 仅用 direct-format solref 表达材料差异；其余接触参数保持一致，确保三档实验
+# 仅用 direct-format solref 表达接触 preset 差异；其余参数保持一致，确保实验
 # 可比较，同时避免结果依赖 geom priority/solmix 的隐式混合规则。
 OBJECT_CONTACT_PRESETS: dict[ObjectMaterial, ContactPreset] = {
     "soft": ContactPreset(
@@ -54,6 +54,9 @@ OBJECT_CONTACT_PRESETS: dict[ObjectMaterial, ContactPreset] = {
     ),
     "hard": ContactPreset(
         solref=(-1200.0, -10.0), solimp=_TACTILE_SOLIMP, friction=_TACTILE_FRICTION
+    ),
+    "stiff": ContactPreset(
+        solref=(-2500.0, -15.0), solimp=_TACTILE_SOLIMP, friction=_TACTILE_FRICTION
     ),
 }
 

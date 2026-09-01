@@ -94,7 +94,7 @@ def run_grasp(
     target_force: Annotated[float | None, typer.Option(min=0.001)] = None,
     video: Annotated[bool, typer.Option()] = False,
     object_material: Annotated[
-        Literal["soft", "medium", "hard"], typer.Option("--object-material")
+        Literal["soft", "medium", "hard", "stiff"], typer.Option("--object-material")
     ] = "hard",
 ) -> None:
     """运行自研夹爪抓取验收实验。"""
@@ -175,7 +175,7 @@ def run_force_track(
     render_fps: Annotated[float, typer.Option("--render-fps", min=1.0)] = 30.0,
     realtime_factor: Annotated[float, typer.Option("--realtime-factor", min=0.001)] = 1.0,
     object_material: Annotated[
-        Literal["soft", "medium", "hard"], typer.Option("--object-material")
+        Literal["soft", "medium", "hard", "stiff"], typer.Option("--object-material")
     ] = "hard",
     disable_multiccd: Annotated[
         bool,
@@ -365,7 +365,7 @@ def view_grasp(
     context: typer.Context,
     profile: Annotated[Path, typer.Option("--profile", exists=True, dir_okay=False)],
     object_material: Annotated[
-        Literal["soft", "medium", "hard"], typer.Option("--object-material")
+        Literal["soft", "medium", "hard", "stiff"], typer.Option("--object-material")
     ] = "hard",
 ) -> None:
     """打开一个可交互的自研夹爪抓取场景。"""

@@ -1,18 +1,143 @@
 # 🏗️ 项目架构
 
-仓库使用单向依赖图：
+项目把“单次可复现实验”和“多条件科研 protocol”分开：`pgt` 面向交互式单次运行，
+`scripts/experiments` 面向批量研究；二者通过 Python runner 复用同一套实验实现和运行产物约定。
 
-<pre><code>
-config → tactile / scenes / simulation → experiments / analysis / io → CLI
-</code></pre>
+```mermaid
+flowchart TB
+  subgraph Entry[入口层]
+    CLI["pgt CLI<br/>单次运行与交互检查"]
+    Scripts["scripts/experiments<br/>批量研究 protocol"]
+  end
 
-`parallel_gripper_tactile.config` 由 `profiles.py` 中的 Pydantic 模型表示。YAML profile 是
-冻结的（frozen）、拒绝未知字段、按 `mode` 区分控制与触觉后端，并以自身所在目录解析路径。
+  subgraph Orchestration[编排层]
+    Study["studies<br/>study schema 与条件矩阵"]
+    Runner["runners<br/>一次运行的生命周期"]
+    Artifacts["run_artifacts<br/>快照、manifest 与目录"]
+  end
 
-`tactile.py` 定义力传感器、接触几何与 touch-grid 传感器共用的读取器协议。每个读取器返回局部
-`(3, rows, cols)` 数组，正的 `Fz` 表示压缩。
+  subgraph Domain[实验与领域层]
+    Experiments["experiments<br/>阶段机、步进循环与指标"]
+    Control["control<br/>MIT 与法向力控制"]
+    Tactile["tactile / contact_taxels<br/>统一触觉读数"]
+    Scenes["scenes<br/>模型装配与接触选项"]
+    Profiles["profiles<br/>YAML schema 与路径解析"]
+    Shared["simulation / timing / analysis / recording<br/>共享能力"]
+  end
 
-`simulation.py` 独占 MuJoCo 步进，并维护相互独立的物理、控制、采样与渲染节奏。实验产出共享
-样本，因此无界面校验、绘图与录制使用同一条状态轨迹。
+  CLI --> Runner
+  Scripts --> Study
+  Scripts --> Runner
+  Runner --> Artifacts
+  Runner --> Experiments
+  Experiments --> Control
+  Experiments --> Tactile
+  Experiments --> Scenes
+  Experiments --> Profiles
+  Experiments --> Shared
+  Scenes --> Profiles
+  Tactile --> Profiles
+```
 
-CLI 只负责展示。它创建独占运行目录并生成 Rich 诊断；不提供被包内模块消费的 API。
+箭头表示调用或配置依赖，不表示每个模块都必须经过图中的所有节点。例如，轻量的静态查看命令可以
+直接装配 scene；需要保存结果的力跟踪则由 runner 统一创建目录、调用 experiment、登记产物并完成
+manifest。
+
+## 模块职责
+
+| 区域 | 主要职责 | 不应承担的职责 |
+| --- | --- | --- |
+| `profiles.py` | 用冻结的 Pydantic 模型校验 YAML，并以 YAML 所在目录解析相对路径 | 启动 MuJoCo 或写运行结果 |
+| `scenes/` | 装配 MJCF、物体材料、碰撞几何和求解选项 | 控制算法、指标统计 |
+| `tactile.py`、`contact_taxels.py` | 把不同后端统一为局部 `(3, rows, cols)` 力数组 | 决定目标力或控制状态 |
+| `control.py` | 接触状态、力语义、MIT 命令与法向力外环 | 创建输出目录或解析 CLI |
+| `experiments/` | 定义阶段机、仿真循环、trace 字段和指标 | 组织跨条件批量研究 |
+| `runners/` | 管理一次运行的输入快照、experiment 调用、产物登记和失败保留 | 展示 Rich 表格或展开 study 矩阵 |
+| `studies/` | 定义可校验的研究配置与条件矩阵 | 通过子进程调用 CLI |
+| `scripts/experiments/` | 执行 study、聚合多次结果 | 复制单次实验物理逻辑 |
+| `cli/` | 参数适配、面向人的诊断和结果展示 | 作为包内模块的反向依赖 |
+
+## 仿真循环所有权
+
+任一实验运行中只能有一个组件推进对应的 `MjData`。`SimulationSession` 提供物理、控制与采样时钟
+解耦的通用循环；力跟踪、抓取验收、录制和对比实验因各自的阶段机、双模型同步或 viewer 节奏而持有
+专用循环。它们遵守相同的不变量：控制发生在物理步之前，测量发生在物理步之后，并且控制周期不得小于
+MuJoCo 物理步长。
+
+## 触觉与碰撞边界
+
+触觉读取器返回局部 `(3, rows, cols)` 数组，正 `Fz` 表示压缩。控制器只消费统一后的
+`F_L`、`F_R` 与平均单侧法向力 `f_n=(F_L+F_R)/2`，不依赖 Pillar 是 mesh 还是球体。
+
+Pillar 碰撞几何属于 asset/profile，`scenes.custom` 负责把它装配进实验，并可为诊断切换
+`multiccd`。碰撞近似的当前默认、五条件因果对照与适用范围见
+[触觉读数约定](tactile-conventions.md#2026-08-31-ab)。
+
+## 运行产物流
+
+```mermaid
+sequenceDiagram
+  participant E as CLI 或 study script
+  participant R as execute_force_tracking
+  participant A as RunDirectory
+  participant X as force_tracking experiment
+
+  E->>R: profile、task 与实验参数
+  R->>A: 创建独占目录并快照 profile
+  R->>A: 快照 task
+  R->>X: 传入已校验配置与产物路径
+  X-->>R: trace、plot 与结构化 metrics
+  R->>A: 登记产物并 finalize manifest
+  R-->>E: RunDirectory 与结果
+```
+
+单次结果目录的典型结构为：
+
+```text
+outputs/<profile>/<experiment>/<UTC timestamp>-<id>/
+├── manifest.json
+├── profile.yaml
+├── task.yaml        # 仅需要 task 的实验
+├── trace.csv
+├── metrics.json
+├── plot.png
+└── video.mp4        # 仅请求录制时
+```
+
+`manifest.json` 只列出实际生成并登记的文件，同时记录 profile 哈希、Git 状态、依赖版本、参数和
+创建时间。失败的运行目录会保留输入快照，便于复现诊断。
+
+study 在单次运行之上增加一层父目录；每个条件仍使用相同 runner：
+
+```text
+outputs/studies/<study>/<UTC timestamp>-<id>/
+├── study.yaml
+├── runs/
+│   └── <profile>/force-track/<condition>-<UTC timestamp>-<id>/
+├── summary.csv
+├── summary.json
+├── aggregate.csv         # 需要跨重复统计的批量研究提供
+├── figures/              # study 级跨条件对比图
+│   ├── metrics_by_controller.png
+│   ├── metrics_by_controller.pdf
+│   ├── saturation_comparison.png
+│   ├── saturation_comparison.pdf
+│   ├── ablation_delta.png
+│   ├── ablation_delta.pdf
+│   ├── tracking_<task>_<material>.png
+│   └── tracking_<task>_<material>.pdf
+└── study_manifest.json   # 登记子 run 与 study 级产物
+```
+
+单次 run 的 `plot.png` 由 experiment 从本次 trace 生成；跨 run 的统计图由
+`scripts/experiments` 在所有条件结束后从 `summary`、`aggregate` 和子 run trace 生成 600 DPI PNG 与
+矢量 PDF，并登记到 `study_manifest.json`。未建立 `track_reference` 的条件会在 summary 与 manifest 的 `failed_runs` 中保留，
+但不会参与同 seed 轨迹叠加。绘图层不推进 MuJoCo，也不重新计算控制命令。
+
+## 依赖规则
+
+1. `src/parallel_gripper_tactile` 不依赖 `scripts/` 或 CLI 输出格式；
+2. study 直接调用 runner，不通过子进程拼接 `pgt` 命令；
+3. scene 不读取控制目标，controller 不选择碰撞 asset；
+4. experiment 返回结构化结果，入口层决定如何展示；
+5. 任何新增结果文件必须先写入独占 run 目录，再登记到 manifest。

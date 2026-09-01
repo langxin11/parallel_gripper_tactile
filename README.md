@@ -12,7 +12,7 @@ uv run pgt validate configs/custom_parallel_gripper.yaml
 uv run pgt run demo --profile configs/robotiq_2f85.yaml
 uv run pgt run grasp --profile configs/custom_parallel_gripper.yaml
 uv run pgt run force-track --profile configs/custom_parallel_gripper.yaml --task configs/force_tracking/default_waypoints.yaml
-# 自研夹爪可选 soft / medium / hard 显式触觉接触材料（默认 hard）
+# 自研夹爪可选 soft / medium / hard / stiff 显式触觉接触 preset（默认 hard）
 uv run pgt run grasp --profile configs/custom_parallel_gripper.yaml --object-material soft
 uv run pgt run force-track --profile configs/custom_parallel_gripper.yaml --task configs/force_tracking/default_waypoints.yaml --object-material medium
 uv run pgt run force-track --profile configs/custom_parallel_gripper.yaml --task configs/force_tracking/default_waypoints.yaml --controller-variant full --object-material hard --sensor-noise-seed 0
@@ -29,12 +29,13 @@ pgt assets generate-taxels [--shape sphere|box]
 pgt assets generate-touch-grid
 pgt assets prepare-onshape INPUT OUTPUT
 pgt run demo --profile PROFILE
-pgt run grasp --profile PROFILE [--video] [--object-material soft|medium|hard]
-pgt run force-track --profile PROFILE --task TASK.yaml [--viewer] [--object-material soft|medium|hard]
+pgt run grasp --profile PROFILE [--video] [--object-material soft|medium|hard|stiff]
+pgt run force-track --profile PROFILE --task TASK.yaml [--viewer] [--disable-multiccd]
+                    [--object-material soft|medium|hard|stiff]
 pgt compare tactile --left-profile A --right-profile B
 pgt compare contact --profile PROFILE
 pgt view taxels --profile PROFILE
-pgt view grasp --profile PROFILE [--object-material soft|medium|hard]
+pgt view grasp --profile PROFILE [--object-material soft|medium|hard|stiff]
 pgt runs list
 pgt runs clean (--older-than-days N | --all | --cache) [--apply]
 ```
@@ -72,6 +73,27 @@ uv run python scripts/experiments/force_tracking_ablation.py \
 该 study 直接调用 Python runner，而非通过子进程调用 CLI。它会在 `outputs/studies` 创建独立父目录，
 保存 study 配置、逐次结果、聚合统计和每个子 run 的可复现工件。
 
+跨 `step`、`ramp`、`mixed_waypoints` 三类任务的规范化控制器对比先用 `--dry-run` 审阅 108 个条件，
+确认后再执行完整 study：
+
+```bash
+uv run python scripts/experiments/force_tracking_controller_comparison.py \
+    --config configs/studies/force_tracking_controller_comparison.yaml \
+    --dry-run
+uv run python scripts/experiments/force_tracking_controller_comparison.py \
+    --config configs/studies/force_tracking_controller_comparison.yaml
+```
+
+该 protocol 额外生成按控制器分组的误差、饱和比例、相对 Full 的消融增量和同 seed 轨迹对比图。
+每张图同时保存为 600 DPI PNG 和嵌入 TrueType 字体的矢量 PDF。已完成的 study 可不重新仿真，直接重绘：
+
+```bash
+uv run python scripts/experiments/force_tracking_controller_comparison.py \
+    --render-study-dir outputs/studies/force_tracking_controller_comparison/<study-id>
+```
+默认正式矩阵使用 `medium=(-650,-8)`、`hard=(-1200,-10)` 和新增的
+`stiff=(-2500,-15)`；`soft=(-250,-5)` 仅保留用于兼容和专项接触标定，不进入默认批量研究。
+
 ## 🧩 Profiles
 
 | Profile | 控制 | 触觉后端 |
@@ -104,12 +126,20 @@ outputs/<profile>/<experiment>/<UTC timestamp>-<id>/
 
 ## 🏗️ 架构
 
-```text
-config → tactile / scenes / simulation → experiments / analysis / io → CLI
+```mermaid
+flowchart LR
+  CLI["pgt CLI"] --> Runner["Python runner"]
+  Scripts["研究脚本"] --> Study["study schema"]
+  Scripts --> Runner
+  Runner --> Experiment["实验内核"]
+  Runner --> Artifacts["可复现产物"]
+  Experiment --> Domain["profiles / scenes / tactile / control"]
 ```
 
-`SimulationSession` 独占 `mj_step`；控制时钟与采样时钟相互独立。所有触觉读取器在不可变坐标系中
-返回局部 `(3, rows, cols)` 力数组，压缩以正的 `Fz` 表示。
+`pgt` 与 `scripts/experiments` 是两个入口：前者执行单次实验，后者编排多条件 protocol；二者直接复用
+Python runner，不通过 CLI 子进程互相调用。一次实验内只有一个步进循环拥有对应的 `MjData`。所有触觉
+读取器在不可变坐标系中返回局部 `(3, rows, cols)` 力数组，压缩以正的 `Fz` 表示。完整边界、运行产物
+数据流和依赖规则见[项目架构](docs/architecture.md)。
 
 ## 🧲 接触模型决策
 

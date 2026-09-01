@@ -9,6 +9,12 @@
 
 ### 新增
 
+- 三类标准力跟踪任务 `step.yaml`、`ramp.yaml` 与 `mixed_waypoints.yaml`，分别覆盖阶跃、线性加载/卸载和
+  平台—平滑斜坡综合测试
+- `force_tracking_controller_comparison` study：固定展开 controller × task × material × seed，支持
+  `--dry-run` 审阅矩阵，并生成聚合指标、饱和比例、消融增量和同 seed 轨迹对比图
+- 新增 `stiff=(-2500,-15)` 显式接触 preset；默认批量研究改用 `medium/hard/stiff`，原
+  `soft=(-250,-5)` 仅保留用于兼容和专项标定
 - `docs/custom-gripper-next-phase.md`：自研平行夹爪下一阶段实施路线图（Pillars 触觉反馈实验）
 - `parallel_gripper_tactile.protocols`：统一的实验时序协议
   `DisturbanceProtocol`（含支撑释放、无支撑保持、切向扰动状态设置）
