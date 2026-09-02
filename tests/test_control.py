@@ -12,20 +12,20 @@ from parallel_gripper_tactile import (
     CrankSliderKinematics,
     ForceControlObservation,
     ForceControlReference,
+    GripperProfile,
     MITTorqueController,
     NormalForceController,
     load_profile,
 )
+from parallel_gripper_tactile.control import (
+    DAMIAO_DAMPING_RANGE,
+    DAMIAO_GAIN_BITS,
+    DAMIAO_STIFFNESS_RANGE,
+    _roundtrip_unsigned,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
-
-
-def _roundtrip_unsigned(value: float, lower: float, upper: float, bits: int) -> float:
-    levels = (1 << bits) - 1
-    clipped = min(max(value, lower), upper)
-    encoded = round((clipped - lower) / (upper - lower) * levels)
-    return lower + encoded / levels * (upper - lower)
 
 
 def test_mit_controller_clamps_position_velocity_and_torque() -> None:
@@ -308,3 +308,134 @@ def test_normal_force_controller_exposes_force_tracking_interface() -> None:
     assert command.force_feedforward_torque == pytest.approx(
         2.0 * command.closure_jacobian_m_per_rad
     )
+
+
+def test_damiao_gain_quantization_roundtrips_exact_zero() -> None:
+    """直接力矩路径依赖 0 增益经达妙无符号量化往返后仍精确为 0。"""
+    for lower, upper in (DAMIAO_STIFFNESS_RANGE, DAMIAO_DAMPING_RANGE):
+        assert _roundtrip_unsigned(0.0, lower, upper, DAMIAO_GAIN_BITS) == 0.0
+
+
+def test_mit_controller_gain_overrides_act_for_one_command_only() -> None:
+    """单周期 kp/kd 覆盖参与达妙量化，之后的命令仍沿用 profile 增益。"""
+    profile = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    model = mujoco.MjModel.from_xml_path(str(profile.model_path))
+    data = mujoco.MjData(model)
+    controller = MITTorqueController.from_profile(model, profile)
+
+    overridden = controller.apply(
+        data,
+        target_position=0.1,
+        target_velocity=1.0,
+        feedforward_torque=0.2,
+        stiffness_override=0.0,
+        damping_override=0.0,
+    )
+
+    # kp/kd 覆盖为 0 后，输出力矩只剩量化前馈项。
+    assert overridden.torque == pytest.approx(overridden.feedforward_torque)
+    assert data.ctrl[controller.actuator_id] == pytest.approx(overridden.feedforward_torque)
+
+    baseline = controller.apply(
+        data,
+        target_position=0.1,
+        target_velocity=1.0,
+        feedforward_torque=0.2,
+    )
+
+    # 不传覆盖时恢复 profile kp/kd，位置弹簧项重新出现。
+    assert baseline.torque > baseline.feedforward_torque
+    assert baseline.torque == pytest.approx(
+        _roundtrip_unsigned(float(profile.mit.kp), *DAMIAO_STIFFNESS_RANGE, DAMIAO_GAIN_BITS)
+        * (baseline.target_position - baseline.position)
+        + _roundtrip_unsigned(float(profile.mit.kd), *DAMIAO_DAMPING_RANGE, DAMIAO_GAIN_BITS)
+        * (baseline.target_velocity - baseline.velocity)
+        + baseline.feedforward_torque
+    )
+
+
+def _profile_with_torque_feedback_gain(profile: GripperProfile, value: float) -> GripperProfile:
+    """返回仅覆盖 force.torque_feedback_gain 的不可变 profile 副本。"""
+    assert profile.normal_force is not None
+    force = profile.normal_force.model_copy(update={"torque_feedback_gain": value})
+    return profile.model_copy(
+        update={"control": profile.control.model_copy(update={"force": force})}
+    )
+
+
+def test_normal_force_controller_direct_torque_branch_assembles_feedforward() -> None:
+    """torque_feedback_gain>0 时跟踪阶段走直接力矩路径，位置修正与 MIT kp/kd 置零。"""
+    profile = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    direct_profile = _profile_with_torque_feedback_gain(profile, 1.0)
+    model = mujoco.MjModel.from_xml_path(str(profile.model_path))
+    data = mujoco.MjData(model)
+    controller = NormalForceController.from_profile(model, direct_profile)
+
+    for _ in range(5):
+        command = controller.apply(
+            data,
+            approach_position=0.5,
+            total_normal_force_n=0.4,
+            left_normal_force_n=0.2,
+            right_normal_force_n=0.2,
+            dt=0.002,
+        )
+
+    assert command.state == "force_tracking"
+    # PID 与刚度位置修正不进入命令。
+    assert command.pid_position_adjustment == 0.0
+    assert command.stiffness_position_adjustment == 0.0
+    assert command.position_adjustment == 0.0
+    assert command.mit.target_position == pytest.approx(command.mit.position, abs=1e-9)
+    # t_ff = 1.0 * (8.0-0.2) * Jc + 1.0 * 8.0 * Jc（average_side 语义缩放为 1）。
+    assert command.closure_jacobian_m_per_rad is not None
+    jacobian = command.closure_jacobian_m_per_rad
+    assert command.force_feedforward_torque == pytest.approx((7.8 + 8.0) * jacobian)
+    # MIT kp/kd 逐周期覆盖为 0，输出力矩只剩量化前馈。
+    assert command.mit.torque == pytest.approx(command.mit.feedforward_torque)
+    assert data.ctrl[controller.actuator_id] == pytest.approx(command.mit.feedforward_torque)
+    # 刚度估计器照常运行，trace 中刚度曲线保持可比。
+    assert profile.normal_force is not None
+    assert profile.normal_force.stiffness is not None
+    assert command.estimated_contact_stiffness_n_per_m == pytest.approx(
+        profile.normal_force.stiffness.initial_n_per_m
+    )
+
+
+def test_default_torque_feedback_gain_keeps_positional_tracking_path() -> None:
+    """torque_feedback_gain 默认 0；显式 0.0 与未设置的输出完全一致。"""
+    source = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    zeroed_profile = _profile_with_torque_feedback_gain(source, 0.0)
+    model = mujoco.MjModel.from_xml_path(str(source.model_path))
+    default_controller = NormalForceController.from_profile(model, source)
+    zeroed_controller = NormalForceController.from_profile(model, zeroed_profile)
+    default_data = mujoco.MjData(model)
+    zeroed_data = mujoco.MjData(model)
+
+    forces = [(0.2, 0.2)] * 8 + [(3.0, 2.6), (4.2, 3.6), (4.0, 4.0)]
+    default_command = None
+    zeroed_command = None
+    for left, right in forces:
+        default_command = default_controller.apply(
+            default_data,
+            approach_position=0.5,
+            total_normal_force_n=left + right,
+            left_normal_force_n=left,
+            right_normal_force_n=right,
+            dt=0.002,
+        )
+        zeroed_command = zeroed_controller.apply(
+            zeroed_data,
+            approach_position=0.5,
+            total_normal_force_n=left + right,
+            left_normal_force_n=left,
+            right_normal_force_n=right,
+            dt=0.002,
+        )
+
+    assert default_command is not None
+    assert zeroed_command is not None
+    assert default_command == zeroed_command
+    # 位置式路径未被旁路：PID 修正非零，MIT 力矩仍含位置弹簧项。
+    assert default_command.pid_position_adjustment > 0.0
+    assert default_command.mit.torque != pytest.approx(default_command.mit.feedforward_torque)

@@ -304,8 +304,24 @@ class MITTorqueController:
         target_position: float,
         target_velocity: float = 0.0,
         feedforward_torque: float | None = None,
+        stiffness_override: float | None = None,
+        damping_override: float | None = None,
     ) -> MITControlCommand:
-        """计算、按达妙协议量化、饱和、写入并返回一个 MIT 力矩命令。"""
+        """计算、按达妙协议量化、饱和、写入并返回一个 MIT 力矩命令。
+
+        Args:
+            data: 当前 ``MjData``，最终力矩会写入其 ``ctrl`` 数组。
+            target_position: 目标位置，会先按达妙位置编码量化。
+            target_velocity: 目标速度，默认 0。
+            feedforward_torque: 本周期前馈力矩；``None`` 时沿用 ``config.t_ff``。
+            stiffness_override: 仅本周期生效的 MIT kp 覆盖；``None`` 时沿用
+                ``config.kp``。直接力矩式力控在跟踪阶段传 0.0 以旁路位置弹簧。
+            damping_override: 仅本周期生效的 MIT kd 覆盖；``None`` 时沿用
+                ``config.kd``。语义与 ``stiffness_override`` 一致。
+
+        Returns:
+            量化与饱和后的 ``MITControlCommand``。
+        """
         config = self._config
         desired_position = _roundtrip_unsigned(
             target_position,
@@ -326,13 +342,13 @@ class MITTorqueController:
             DAMIAO_TORQUE_BITS,
         )
         stiffness = _roundtrip_unsigned(
-            config.kp,
+            config.kp if stiffness_override is None else stiffness_override,
             DAMIAO_STIFFNESS_RANGE[0],
             DAMIAO_STIFFNESS_RANGE[1],
             DAMIAO_GAIN_BITS,
         )
         damping = _roundtrip_unsigned(
-            config.kd,
+            config.kd if damping_override is None else damping_override,
             DAMIAO_DAMPING_RANGE[0],
             DAMIAO_DAMPING_RANGE[1],
             DAMIAO_GAIN_BITS,
@@ -538,7 +554,18 @@ class NormalForceController:
         target_force_n: float,
         dt: float,
     ) -> _ForceTrackingStep:
-        """生成力跟踪阶段的组合位置修正和力矩前馈。"""
+        """生成力跟踪阶段的组合位置修正和力矩前馈。
+
+        当 ``config.torque_feedback_gain > 0`` 时改走直接力矩路径：PID 与刚度
+        位置修正置零，力误差经 ``torque_feedback_gain`` 放大后与既有模型前馈
+        （``torque_feedforward_gain`` 路径、以目标力计算）合并为 MIT 前馈力矩，
+        并仅在本周期以 override 把 MIT kp、kd 覆盖为 0。刚度估计器两条路径都
+        照常更新，保持 trace 中刚度曲线可比。
+
+        Returns:
+            ``_ForceTrackingStep``；两条路径的 ``force_feedforward_torque`` 均填
+            送入 MIT 内环的前馈力矩总值（直接力矩路径下为力误差项与模型前馈之和）。
+        """
         config = self._config
         current_position = self._inner.position(data)
         force_error = target_force_n - measured_force_n
@@ -572,6 +599,44 @@ class NormalForceController:
             force_feedforward_torque, closure_jacobian, aperture = self._force_feedforward_torque(
                 position_rad=current_position,
                 target_force_n=target_force_n,
+            )
+
+        if config.torque_feedback_gain > 0:
+            # 直接力矩式力控：力误差直接进入 MIT 前馈力矩，位置修正不进入命令，
+            # 且仅在本跟踪周期把 MIT 位置环 kp/kd 覆盖为 0（接近阶段不受影响）。
+            if self._kinematics is not None:
+                assert closure_jacobian is not None
+                semantic_scale = 1.0 if self._force_semantics == "average_side" else 0.5
+                force_error_torque = (
+                    float(config.torque_feedback_gain)
+                    * force_error
+                    * semantic_scale
+                    * closure_jacobian
+                )
+                model_feedforward, closure_jacobian, aperture = self._force_feedforward_torque(
+                    position_rad=current_position,
+                    target_force_n=target_force_n,
+                )
+            else:
+                force_error_torque = 0.0
+                model_feedforward = 0.0
+            force_feedforward_torque = force_error_torque + model_feedforward
+            mit = self._inner.apply(
+                data,
+                target_position=self._contact_position,
+                feedforward_torque=force_feedforward_torque,
+                stiffness_override=0.0,
+                damping_override=0.0,
+            )
+            return _ForceTrackingStep(
+                mit=mit,
+                position_adjustment=0.0,
+                pid_position_adjustment=0.0,
+                stiffness_position_adjustment=0.0,
+                force_feedforward_torque=force_feedforward_torque,
+                estimated_contact_stiffness_n_per_m=stiffness_estimate,
+                closure_jacobian_m_per_rad=closure_jacobian,
+                aperture_m=aperture,
             )
 
         self._pid.setpoint = target_force_n

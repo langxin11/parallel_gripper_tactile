@@ -1,6 +1,7 @@
 """验证 waypoint 目标力跟踪任务。"""
 
 import csv
+import math
 from pathlib import Path
 
 import pytest
@@ -39,12 +40,13 @@ def test_force_tracking_task_loads_default_waypoint_config() -> None:
 
 
 @pytest.mark.parametrize(
-    ("variant", "enabled", "position_gain", "torque_gain"),
+    ("variant", "enabled", "position_gain", "torque_gain", "feedback_gain"),
     [
-        ("pid-only", False, 0.25, 1.0),
-        ("pid-torque-ff", True, 0.0, 1.0),
-        ("pid-stiffness-ff", True, 0.25, 0.0),
-        ("full", True, 0.25, 1.0),
+        ("pid-only", False, 0.25, 1.0, 0.0),
+        ("pid-torque-ff", True, 0.0, 1.0, 0.0),
+        ("pid-stiffness-ff", True, 0.25, 0.0, 0.0),
+        ("full", True, 0.25, 1.0, 0.0),
+        ("direct-torque", True, 0.0, 1.0, 1.0),
     ],
 )
 def test_controller_variants_apply_reproducible_ablation_settings(
@@ -52,8 +54,9 @@ def test_controller_variants_apply_reproducible_ablation_settings(
     enabled: bool,
     position_gain: float,
     torque_gain: float,
+    feedback_gain: float,
 ) -> None:
-    """四种控制器档位只修改对应的刚度估计与前馈开关。"""
+    """各控制器档位只修改对应的刚度估计与前馈开关。"""
     source = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
     configured = configure_force_controller(  # type: ignore[arg-type]
         source, variant=variant, sensor_noise_seed=17
@@ -61,12 +64,27 @@ def test_controller_variants_apply_reproducible_ablation_settings(
 
     assert configured.normal_force is not None
     assert configured.normal_force.sensor_noise_seed == 17
+    assert configured.normal_force.torque_feedback_gain == feedback_gain
     assert configured.normal_force.stiffness is not None
     assert configured.normal_force.stiffness.enabled is enabled
     assert configured.normal_force.stiffness.position_feedforward_gain == position_gain
     assert configured.normal_force.stiffness.torque_feedforward_gain == torque_gain
     assert source.normal_force is not None
     assert source.normal_force.sensor_noise_seed == 20260814
+    assert source.normal_force.torque_feedback_gain == 0.0
+
+
+def test_direct_torque_variant_keeps_mit_gains_for_approach_servo() -> None:
+    """direct-torque 不在 profile 层清零 MIT kp/kd，接近阶段保持位置伺服。"""
+    source = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    configured = configure_force_controller(source, variant="direct-torque")
+
+    assert source.mit is not None
+    assert configured.mit is not None
+    assert configured.mit.kp == source.mit.kp
+    assert configured.mit.kd == source.mit.kd
+    assert configured.normal_force is not None
+    assert configured.normal_force.torque_feedback_gain == 1.0
 
 
 def test_controller_variant_rejects_unknown_name_and_negative_seed() -> None:
@@ -135,3 +153,42 @@ def test_force_tracking_run_writes_dynamic_reference_trace(tmp_path: Path) -> No
     assert len({round(float(row["target_normal_force_n"]), 3) for row in tracking_rows}) > 1
     assert float(tracking_rows[0]["force_feedforward_torque_n_m"]) > 0.0
     assert float(tracking_rows[0]["estimated_contact_stiffness_n_per_m"]) > 0.0
+
+
+def test_force_tracking_direct_torque_run_tracks_reference(tmp_path: Path) -> None:
+    """direct-torque 短版运行完成跟踪：位置修正诊断为 0，前馈力矩仍写入命令。"""
+    task = ForceTrackingTask(
+        schema_version=1,
+        name="short_direct_torque",
+        reference=ForceReference(
+            interpolation="linear",
+            waypoints=(
+                ForceWaypoint(t_s=0.0, force_n=2.0),
+                ForceWaypoint(t_s=0.4, force_n=6.0),
+                ForceWaypoint(t_s=0.8, force_n=4.0),
+            ),
+        ),
+    )
+    output_csv = tmp_path / "direct_torque.csv"
+
+    result = run_force_tracking(
+        ROOT / "configs/custom_parallel_gripper.yaml",
+        task=task,
+        controller_variant="direct-torque",
+        output_csv=output_csv,
+    )
+
+    assert result.passed
+    assert math.isfinite(result.rmse_n)
+    assert output_csv.is_file()
+    with output_csv.open(newline="", encoding="utf-8") as stream:
+        rows = list(csv.DictReader(stream))
+    tracking_rows = [row for row in rows if row["phase"] == "track_reference"]
+    assert tracking_rows
+    # 直接力矩路径：PID 与刚度位置修正诊断字段为 0，刚度估计仍在运行。
+    assert all(float(row["pid_position_adjustment_rad"]) == 0.0 for row in tracking_rows)
+    assert all(float(row["stiffness_position_adjustment_rad"]) == 0.0 for row in tracking_rows)
+    assert all(
+        math.isfinite(float(row["estimated_contact_stiffness_n_per_m"])) for row in tracking_rows
+    )
+    assert any(float(row["force_feedforward_torque_n_m"]) != 0.0 for row in tracking_rows)

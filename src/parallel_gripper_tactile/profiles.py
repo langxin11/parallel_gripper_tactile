@@ -147,6 +147,9 @@ class NormalForceControl(_FrozenModel):
     sensor_noise_seed: Annotated[int, Field(ge=0)] = 0
     geometry: CrankSliderGeometry | None = None
     stiffness: ContactStiffnessControl | None = None
+    # 直接力矩式力控增益：大于 0 时跟踪阶段把力误差直接注入 MIT 前馈力矩
+    # （并将 MIT kp/kd 逐周期覆盖为 0）；默认 0 保持位置式行为。
+    torque_feedback_gain: Annotated[FiniteFloat, Field(ge=0)] = 0.0
 
     @model_validator(mode="after")
     def validate_force_control(self) -> "NormalForceControl":
