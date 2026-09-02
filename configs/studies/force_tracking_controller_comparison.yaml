@@ -12,6 +12,8 @@ controllers:
   # direct-torque 为位置式 MIT 力控的直接力矩式对照；矩阵由 108 扩至 135 条。
   # 2026-09-01 历史 108-run 基准的复现以当时 manifest 与本文件 git 历史为准。
   - direct-torque
+  # adrc 以一阶 LADRC 外环替换 PID 位置修正；矩阵由 135 扩至 162 条。
+  - adrc
 # 2026-09-01 的 108-run 基准使用相邻点割线估计；显式锁定以保证结果可复现。
 stiffness_estimator_method: secant_ewma
 materials:
