@@ -24,6 +24,14 @@
 - `parallel_gripper_tactile.video`：渲染级力箭头、像素保存与 MP4 编码共享工具
 - `recording.run_demo_loop`：两个触觉演示共用的驱动循环（viewer 节流、物理推进、采样与记录）
 - `AGENTS.md`：面向 AI 编码代理的仓库协作约定入口，汇总语言策略、提交信息规范与验证门禁
+- `metrics.json` 新增 `rise_time_s`、`overshoot_ratio`、`settling_time_s` 三个阶跃瞬态指标；
+  仅在 `hold` 任务存在合格加载阶跃（跳变不低于 1 N、平台段不低于 0.5 s）时计算，
+  无法判定时输出 `null`，study 聚合按 NaN 感知口径统计
+
+### 变更
+
+- `ramp.yaml` 任务在卸载终点后新增 2 s 终端保持段（保持 1 N），tracking 时长由 6 s 延长至
+  8 s，用于终端稳态误差统计
 
 ### 修复
 
