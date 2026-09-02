@@ -68,6 +68,12 @@ uv run pgt run force-track \
 进入跟踪阶段后，任务时间 `tracking_time_s` 从 0 开始。控制器读取目标力 \(f_{\mathrm{ref}}(t)\)，
 结合触觉测得的平均单侧法向力 \(f_n=(F_L+F_R)/2\)、接触刚度估计、位置修正和力矩前馈生成执行器命令。
 
+默认为位置式力控：PID 位置修正与刚度位置前馈修正目标位置，模型力矩前馈进入 MIT `t_ff`。
+若把 profile 字段 `control.force.torque_feedback_gain` 设为大于 0（`direct-torque` 控制器变体
+即取 1.0，可用 `--controller-variant direct-torque` 运行），跟踪阶段切换为直接力矩式对照：
+力误差直接进入 MIT 前馈力矩，PID 与刚度位置修正置零，MIT 位置环 kp/kd 逐周期覆盖为 0；
+接近与释放阶段不受影响，仍走共享的位置伺服轨迹。
+
 若需要测试撤掉支撑后的真实夹持能力，可以把 `release_support_on_tracking` 设为 `true`。
 若只想先评估力控曲线本身，保持默认支撑更利于排除掉落和姿态变化的干扰。
 

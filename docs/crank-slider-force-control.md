@@ -179,8 +179,12 @@ K_d^F\frac{de_f}{dt},
 - `ContactStiffnessEstimator` 用 secant 样本 \(\Delta f_n/\Delta c\) 加 EWMA 滤波估计 \(\hat k_{\mathrm{pair}}\)；
 - `NormalForceController` 将 \(\Delta q_{\mathrm{ff}}\)、PI 修正和 \(\tau_{\mathrm{ff}}\) 合并后交给 MIT 力矩内环。
 
-直接力矩式力控尚未作为独立控制器实现。后续可在统一控制器接口下增加
-`DirectTorqueForceController`，使其与当前位置式控制器共享同一个 `force-track` benchmark。
+直接力矩式力控已实现为 `direct-torque` 控制器变体，profile 入口是
+`control.force.torque_feedback_gain`（大于 0 时启用，`direct-torque` 变体取 1.0）。
+跟踪阶段由控制器逐周期把 MIT kp/kd 覆盖为 0（profile 增益不动，接近阶段仍用同一组增益
+做位置伺服闭合），力误差与模型前馈按上式合成 `t_ff`，仍经达妙量化与 `T_MAX` 限幅；
+刚度估计器照常运行以保持 trace 中刚度曲线可比。该变体与当前位置式控制器共享同一个
+`force-track` benchmark，见 [控制器对比研究](control-comparison-ablation.md)。
 
 ## 5. 刚度辨识与 MuJoCo 模型解释
 

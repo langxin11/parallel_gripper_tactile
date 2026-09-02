@@ -64,7 +64,8 @@ MIT 前馈力矩、测量力、滤波力和诊断量。
 
 当前第一阶段已经落地：`step.yaml`、`ramp.yaml`、`mixed_waypoints.yaml` 三类标准任务，以及
 `controller × task × material × seed` 的显式 comparison schema、`--dry-run` 条件审阅、结构化聚合和
-study 级对比图。现阶段矩阵仍只包含四个 PID 系变体；Direct torque 与 ADRC 属于下一阶段。
+study 级对比图。2026-09-02 起 `direct-torque` 变体已实现（入口 `--controller-variant direct-torque`，
+profile 字段 `control.force.torque_feedback_gain`），默认矩阵扩为 5 个变体共 135 条；ADRC 仍属下一阶段。
 
 正式批量研究的接触 preset 已整体上移一档：使用 `medium=(-650,-8)`、`hard=(-1200,-10)` 和
 `stiff=(-2500,-15)`。其中日常语义依次更接近 compliant、firm 与 stiff；这些参数是单个显式
@@ -102,7 +103,7 @@ controller command -> 达妙电机 CAN/串口命令
 | --- | --- | --- |
 | Full | 默认配置 | 完整算法基线 |
 | PID only | 关闭刚度估计与力矩前馈 | 最朴素反馈控制基线 |
-| Direct torque | `MIT kp=0, kd=0`，力误差和模型前馈直接进入 `t_ff` | 对照位置式力控和直接力矩式力控 |
+| Direct torque | `direct-torque` 变体：跟踪阶段 MIT kp/kd 逐周期覆盖为 0，力误差和模型前馈直接进入 `t_ff` | 对照位置式力控和直接力矩式力控 |
 | No approach FF | `approach.feedforward_force_n: 0.0` | 评估低速闭合前馈对接触建立的影响 |
 | No torque FF | `torque_feedforward_gain: 0.0` | 评估开度公式力矩前馈的贡献 |
 | No stiffness position FF | `position_feedforward_gain: 0.0` | 评估刚度估计用于位置前馈的贡献 |
@@ -383,7 +384,8 @@ uv run python scripts/experiments/force_tracking_controller_comparison.py \
   --config configs/studies/force_tracking_controller_comparison.yaml
 </code></pre>
 
-默认配置展开 4 个 PID 系变体 × 3 个 task × 3 个正式接触 preset × 3 个 seed，共 108 个条件。每个条件保留独立
+默认配置展开 5 个控制器变体（四个 PID 系加 `direct-torque`）× 3 个 task × 3 个正式接触 preset × 3 个 seed，
+共 135 个条件（2026-09-02 前的旧配置为 4 变体 108 条）。每个条件保留独立
 run，study 父目录生成 `summary.csv`、`aggregate.csv`、`summary.json`、对比图和
 `study_manifest.json`。脚本顺序调用 runner，不通过 CLI 子进程启动单次实验。
 

@@ -9,6 +9,13 @@
 
 ### 新增
 
+- `direct-torque` 控制器变体（`--controller-variant direct-torque`）：位置式 MIT 力控的
+  直接力矩式对照。跟踪阶段力误差经 `torque_feedback_gain` 直接进入 MIT 前馈力矩，
+  MIT kp/kd 由控制器逐周期覆盖为 0（接近阶段仍共享 profile 位置伺服增益），PID 与
+  刚度位置修正诊断为 0、刚度估计器照常运行；`force_tracking_controller_comparison`
+  默认矩阵由 108 扩至 135 条
+- profile 新增字段 `control.force.torque_feedback_gain`（默认 0.0，保持位置式行为；
+  大于 0 时跟踪阶段启用直接力矩式力控）
 - 三类标准力跟踪任务 `step.yaml`、`ramp.yaml` 与 `mixed_waypoints.yaml`，分别覆盖阶跃、线性加载/卸载和
   平台—平滑斜坡综合测试
 - `force_tracking_controller_comparison` study：固定展开 controller × task × material × seed，支持
