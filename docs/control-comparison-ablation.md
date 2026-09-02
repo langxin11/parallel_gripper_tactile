@@ -215,6 +215,45 @@ controller command -> 达妙电机 CAN/串口命令
    `ramp.yaml` 已附加 2 s 终端保持段，复跑后 `final_error_n` 可按终端稳态误差解读；本节基准使用旧版
    6 s 曲线。
 
+#### 6.1.1 2026-09-02 加入 direct-torque 的 135 条复跑
+
+完整 study 位于
+[`outputs/studies/force_tracking_controller_comparison/20260902T054121Z-09334c18`](../outputs/studies/force_tracking_controller_comparison/20260902T054121Z-09334c18/aggregate.csv)。
+矩阵在 6.1 基础上加入 `direct-torque` 变体：5 个控制器 × 3 类任务 × 3 个 preset × 3 个 seed，共 135 次运行，
+全部成功，力矩与位置饱和比例在全矩阵均为 0；估计器仍锁定 `secant_ewma`。本次复跑使用带终端保持段的
+新 `ramp.yaml`（8 s），Ramp 数值与 6.1 历史基准不可逐项直接对比，Step 与 Mixed 则不受影响。
+
+四个 PID 系变体在 Step 与 Mixed 中逐项复现了 6.1 的降幅（`full` 为 -14.2% 与 -23.1%），说明瞬态指标与
+终端保持段的引入没有改变既有结论的口径可比性。跨 preset 平均的 RMSE 相对 `pid-only` 变化为：
+
+| 控制器 | Step | Ramp | Mixed |
+| --- | ---: | ---: | ---: |
+| `pid-torque-ff` | -11.8% | -21.9% | -22.6% |
+| `pid-stiffness-ff` | -3.2% | -0.1% | -0.5% |
+| `full` | **-14.2%** | **-22.0%** | **-23.1%** |
+| `direct-torque` | +37.7% | +204.5% | +121.0% |
+
+`direct-torque` 在全部三类任务中的 RMSE 均高于最朴素的 `pid-only`，且零饱和——差距来自控制结构本身，
+不是执行器限幅。Step 任务的瞬态指标（跨 preset 平均）给出了机制层面的解释：
+
+| 控制器 | 上升时间 (s) | 超调比 | ±5% 稳定时间 (s) |
+| --- | ---: | ---: | ---: |
+| `pid-only` | 0.071 | 0.9% | 0.249 |
+| `pid-torque-ff` | 0.063 | 7.5% | 0.206 |
+| `pid-stiffness-ff` | 0.070 | 0.7% | 0.252 |
+| `full` | 0.063 | 7.2% | 0.238 |
+| `direct-torque` | 0.048 | 64.4% | 0.513 |
+
+直接力矩式响应最快，但呈明显欠阻尼：超调 64.4%、稳定时间最长，且超调随 preset 变硬单调恶化
+（`medium`、`hard`、`stiff` 分别为 42%、67%、84%），Step RMSE 同步由 0.546 N 升至 0.687 N。这说明
+MIT 位置内环的位置弹簧为接触力回路提供了直接力矩式不具备的阻尼整形；6.1 中机构力矩前馈的收益是在
+位置式架构内兑现的，而不是绕过它获得的。终端保持段下 Ramp 的 `final_error_n` 均可按终端稳态误差解读：
+四个 PID 系变体约 +0.0003 N，`direct-torque` 为 -0.0017 N。
+
+边界：仍然只有 3 个 seed，不构成显著性结论；`direct-torque` 采用 `torque_feedback_gain=1.0` 的纯比例
+力矩环加模型前馈，未做增益或阻尼项搜索，其表现是力矩式力控的基线下限，不能代表该架构调参后的上限；
+结论仅对当前显式接触条件成立。
+
 ### 6.2 历史割线估计器的原理与定位
 
 上述 108-run benchmark 使用的 `secant_ewma` 是轻量级局部割线估计器，不属于先进的概率状态估计或系统
