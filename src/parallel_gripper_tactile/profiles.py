@@ -125,6 +125,22 @@ class ContactStiffnessControl(_FrozenModel):
         return self
 
 
+class AdrcControl(_FrozenModel):
+    """一阶线性自抗扰（LADRC）外环参数。
+
+    被控假设为 ``df/dt = f + b0·u``：f 为滤波后的法向力 [N]，u 为闭合速度
+    [m/s]，b0 为名义输入增益 [N/m]，量级约等于接触等效刚度。带宽默认值在
+    step 任务、medium 材料上按“饱和比例不超 5% 中 rmse 最小”选定
+    （ω_c ∈ {10, 20, 40}、ω_o = 3ω_c）。``NormalForceControl.adrc``
+    默认 ``None`` 表示不启用；一旦配置，跟踪阶段由 LADRC 外环替换 PID 位置修正。
+    """
+
+    b0_n_per_m: Annotated[FiniteFloat, Field(gt=0)] = 2700.0
+    controller_bandwidth_rad_s: Annotated[FiniteFloat, Field(gt=0)] = 40.0
+    observer_bandwidth_rad_s: Annotated[FiniteFloat, Field(gt=0)] = 120.0
+    max_closing_velocity_m_s: Annotated[FiniteFloat, Field(gt=0)] = 0.02
+
+
 class NormalForceControl(_FrozenModel):
     """外环法向力跟踪参数。"""
 
@@ -150,6 +166,9 @@ class NormalForceControl(_FrozenModel):
     # 直接力矩式力控增益：大于 0 时跟踪阶段把力误差直接注入 MIT 前馈力矩
     # （并将 MIT kp/kd 逐周期覆盖为 0）；默认 0 保持位置式行为。
     torque_feedback_gain: Annotated[FiniteFloat, Field(ge=0)] = 0.0
+    # 一阶 LADRC 外环参数：非 None 时跟踪阶段以 LADRC 替换 PID 位置修正外环，
+    # 输出的闭合速度逐周期积分进位置修正；默认 None 表示不启用。
+    adrc: AdrcControl | None = None
 
     @model_validator(mode="after")
     def validate_force_control(self) -> "NormalForceControl":
@@ -358,6 +377,7 @@ def load_profile(path: str | Path, *, repository_root: str | Path | None = None)
 
 
 __all__ = [
+    "AdrcControl",
     "ControlLayout",
     "GripperProfile",
     "ContactStiffnessControl",

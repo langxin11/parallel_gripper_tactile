@@ -14,6 +14,7 @@ from .control import (
     NormalForceController,
 )
 from .profiles import (
+    AdrcControl,
     ContactStiffnessControl,
     CrankSliderGeometry,
     GripperProfile,
@@ -26,6 +27,7 @@ from .protocols import DisturbanceProtocol
 from .timing import RealtimePacer, SimulationTimer
 
 __all__ = [
+    "AdrcControl",
     "ContactTaxelFrame",
     "ContactTaxelReader",
     "ContactStiffnessControl",

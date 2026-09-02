@@ -435,7 +435,27 @@ class NormalForceController:
         *,
         force_semantics: ForceSemantics = "average_side",
     ) -> None:
-        """创建 simple-pid 外环与接触状态机。"""
+        """创建 simple-pid 外环与接触状态机。
+
+        Args:
+            inner: MIT 力矩内环控制器。
+            config: 外环法向力跟踪配置；``config.adrc`` 非 ``None`` 时跟踪阶段
+                以一阶 LADRC 外环替换 PID 位置修正。
+            force_semantics: 目标力的语义（平均单侧力或总力）。
+
+        Raises:
+            ValueError: ``config.adrc`` 与 ``config.torque_feedback_gain > 0``
+                同时启用时抛出；两条路径互斥，本文假设不同时配置。``config.adrc``
+                非 ``None`` 但未配置曲柄滑块几何时抛出（速度到位置修正的换算
+                依赖闭合雅可比）。
+        """
+        if config.adrc is not None and config.torque_feedback_gain > 0:
+            raise ValueError(
+                "adrc and torque_feedback_gain are mutually exclusive; "
+                "enable at most one force-tracking outer loop"
+            )
+        if config.adrc is not None and config.geometry is None:
+            raise ValueError("adrc requires crank-slider geometry for closure-jacobian conversion")
         self._inner = inner
         self._config = config
         self._force_semantics = force_semantics
@@ -461,6 +481,12 @@ class NormalForceController:
             output_limits=(-adjustment, adjustment),
             auto_mode=False,
         )
+        # LADRC 外环状态（z1/z2 为扩张状态观测器，u 为上一周期闭合速度，
+        # adjustment 为 u 逐周期积分出的持久位置修正）；adrc 为 None 时不被读取。
+        self._adrc_z1 = 0.0
+        self._adrc_z2 = 0.0
+        self._adrc_u = 0.0
+        self._adrc_adjustment = 0.0
         self.reset()
 
     @classmethod
@@ -491,6 +517,20 @@ class NormalForceController:
         """返回 ``approach`` 或 ``force_tracking``。"""
         return self._state
 
+    def _reset_adrc(self, filtered_force_n: float | None = None) -> None:
+        """把 LADRC 外环状态复位到跟踪起点。
+
+        ``z1`` 初始化为当前滤波法向力（缺失时置 0，待接触确认时再对齐），
+        ``z2``（总扰动估计）与积分位置修正清零，上一周期闭合速度一并复位。
+
+        Args:
+            filtered_force_n: 跟踪起点处的滤波法向力，单位 N。
+        """
+        self._adrc_z1 = 0.0 if filtered_force_n is None else float(filtered_force_n)
+        self._adrc_z2 = 0.0
+        self._adrc_u = 0.0
+        self._adrc_adjustment = 0.0
+
     def reset(self) -> None:
         """返回接近模式，并清除滤波器、计数器和 PID 历史。"""
         self._state = "approach"
@@ -502,6 +542,7 @@ class NormalForceController:
             self._stiffness_estimator.reset()
         self._pid.set_auto_mode(False)
         self._pid.reset()
+        self._reset_adrc()
 
     def step(
         self,
@@ -562,8 +603,17 @@ class NormalForceController:
         并仅在本周期以 override 把 MIT kp、kd 覆盖为 0。刚度估计器两条路径都
         照常更新，保持 trace 中刚度曲线可比。
 
+        当 ``config.adrc`` 非 ``None`` 时改走一阶 LADRC 路径（与直接力矩路径
+        互斥，构造时已校验）：PID 与刚度位置修正均不参与，扩张状态观测器
+        （LESO）估计滤波力 ``z1`` 与总扰动 ``z2``，控制律输出闭合速度 ``u``
+        并逐周期积分成持久位置修正（裁剪到 ``±max_position_adjustment``）。
+        每周期先用上一周期的 ``u`` 更新 LESO，再计算本周期 ``u``。MIT 内环
+        kp/kd 不做 override，位置弹簧阻尼保留——这是与直接力矩路径的本质
+        区别；模型力矩前馈照常经 ``torque_feedforward_gain`` 路径进入 MIT
+        前馈力矩，刚度估计器照常更新。
+
         Returns:
-            ``_ForceTrackingStep``；两条路径的 ``force_feedforward_torque`` 均填
+            ``_ForceTrackingStep``；三条路径的 ``force_feedforward_torque`` 均填
             送入 MIT 内环的前馈力矩总值（直接力矩路径下为力误差项与模型前馈之和）。
         """
         config = self._config
@@ -631,6 +681,61 @@ class NormalForceController:
             return _ForceTrackingStep(
                 mit=mit,
                 position_adjustment=0.0,
+                pid_position_adjustment=0.0,
+                stiffness_position_adjustment=0.0,
+                force_feedforward_torque=force_feedforward_torque,
+                estimated_contact_stiffness_n_per_m=stiffness_estimate,
+                closure_jacobian_m_per_rad=closure_jacobian,
+                aperture_m=aperture,
+            )
+
+        if config.adrc is not None:
+            # 一阶 LADRC 外环：被控假设 df/dt = f + b0·u（f 为滤波法向力，
+            # u 为闭合速度，b0 为名义增益，量级约等于接触等效刚度）。
+            adrc = config.adrc
+            # 先用上一周期的闭合速度 u_prev 更新 LESO；innovation 为滤波力
+            # 相对观测值的残差，β1 = 2ω_o、β2 = ω_o²。
+            innovation = measured_force_n - self._adrc_z1
+            beta_1 = 2.0 * adrc.observer_bandwidth_rad_s
+            beta_2 = adrc.observer_bandwidth_rad_s**2
+            self._adrc_z1 += dt * (
+                self._adrc_z2 + adrc.b0_n_per_m * self._adrc_u + beta_1 * innovation
+            )
+            self._adrc_z2 += dt * (beta_2 * innovation)
+            # 控制律：带宽比例误差项扣除扰动估计后除以 b0，得到本周期闭合速度并裁剪。
+            raw_closing_velocity = (
+                adrc.controller_bandwidth_rad_s * (target_force_n - self._adrc_z1) - self._adrc_z2
+            ) / adrc.b0_n_per_m
+            self._adrc_u = float(
+                np.clip(
+                    raw_closing_velocity,
+                    -adrc.max_closing_velocity_m_s,
+                    adrc.max_closing_velocity_m_s,
+                )
+            )
+            # 闭合速度经闭合雅可比换算为电机侧角速度后，逐周期积分成持久位置
+            # 修正（u 单位 m/s，closure_jacobian 单位 m/rad），并裁剪到
+            # ±max_position_adjustment。
+            motor_rate_rad_s = self._adrc_u / max(closure_jacobian, 1e-12)
+            self._adrc_adjustment = float(
+                np.clip(
+                    self._adrc_adjustment + motor_rate_rad_s * dt,
+                    -config.max_position_adjustment,
+                    config.max_position_adjustment,
+                )
+            )
+            force_feedforward_torque, closure_jacobian, aperture = self._force_feedforward_torque(
+                position_rad=current_position,
+                target_force_n=target_force_n,
+            )
+            mit = self._inner.apply(
+                data,
+                target_position=self._contact_position + self._adrc_adjustment,
+                feedforward_torque=force_feedforward_torque,
+            )
+            return _ForceTrackingStep(
+                mit=mit,
+                position_adjustment=self._adrc_adjustment,
                 pid_position_adjustment=0.0,
                 stiffness_position_adjustment=0.0,
                 force_feedforward_torque=force_feedforward_torque,
@@ -730,6 +835,9 @@ class NormalForceController:
                         position_rad=mit.position,
                         normal_force_n=self._filtered_force,
                     )
+                # LADRC 外环与刚度估计器同一处复位：z1 对齐当前滤波力，
+                # z2 与积分位置修正清零。
+                self._reset_adrc(self._filtered_force)
                 self._pid.reset()
                 self._pid.set_auto_mode(True, last_output=0.0)
                 tracking = self._tracking_command(

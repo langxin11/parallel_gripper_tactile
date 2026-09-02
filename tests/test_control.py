@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from parallel_gripper_tactile import (
+    AdrcControl,
     ContactStiffnessEstimator,
     CrankSliderKinematics,
     ForceControlObservation,
@@ -439,3 +440,202 @@ def test_default_torque_feedback_gain_keeps_positional_tracking_path() -> None:
     # 位置式路径未被旁路：PID 修正非零，MIT 力矩仍含位置弹簧项。
     assert default_command.pid_position_adjustment > 0.0
     assert default_command.mit.torque != pytest.approx(default_command.mit.feedforward_torque)
+
+
+def _profile_with_adrc(profile: GripperProfile, adrc: AdrcControl | None) -> GripperProfile:
+    """返回仅覆盖 force.adrc 的不可变 profile 副本。"""
+    assert profile.normal_force is not None
+    force = profile.normal_force.model_copy(update={"adrc": adrc})
+    return profile.model_copy(
+        update={"control": profile.control.model_copy(update={"force": force})}
+    )
+
+
+_ADRC_TEST_CONFIG = AdrcControl(
+    b0_n_per_m=780.0,
+    controller_bandwidth_rad_s=10.0,
+    observer_bandwidth_rad_s=30.0,
+    max_closing_velocity_m_s=0.02,
+)
+
+
+def test_normal_force_controller_adrc_branch_integrates_velocity_into_adjustment() -> None:
+    """adrc 分支：LESO 闭合速度裁剪后积分进位置修正，MIT kp/kd 不被覆盖。"""
+    source = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    adrc_profile = _profile_with_adrc(source, _ADRC_TEST_CONFIG)
+    model = mujoco.MjModel.from_xml_path(str(source.model_path))
+    data = mujoco.MjData(model)
+    controller = NormalForceController.from_profile(model, adrc_profile)
+
+    for _ in range(5):
+        command = controller.apply(
+            data,
+            approach_position=0.5,
+            total_normal_force_n=0.4,
+            left_normal_force_n=0.2,
+            right_normal_force_n=0.2,
+            dt=0.002,
+        )
+
+    assert command.state == "force_tracking"
+    # 接触确认时 LADRC 复位：z1 对齐滤波力 0.2，z2 与积分修正清零。
+    assert controller._adrc_z1 == pytest.approx(0.2)
+    assert controller._adrc_z2 == 0.0
+    # 未裁剪控制律 u = ω_c·(f_ref−z1)/b0 = 10·(8−0.2)/780 ≈ 0.1，超出 ±0.02 被裁剪。
+    assert controller._adrc_u == pytest.approx(0.02)
+    # 闭合速度经闭合雅可比换算为电机角速度后积分：u_max/J_c·dt。
+    jacobian = command.closure_jacobian_m_per_rad
+    assert jacobian is not None and jacobian > 0.0
+    assert command.position_adjustment == pytest.approx(0.02 / jacobian * 0.002)
+    assert command.pid_position_adjustment == 0.0
+    assert command.stiffness_position_adjustment == 0.0
+    # MIT 内环增益未被 override：输出力矩仍含位置弹簧项（目标位置高于当前位形）。
+    assert command.mit.target_position > command.mit.position
+    assert command.mit.torque != pytest.approx(command.mit.feedforward_torque)
+    assert data.ctrl[controller.actuator_id] == pytest.approx(command.mit.torque)
+    # 模型力矩前馈照常走 torque_feedforward_gain 路径（average_side 语义缩放为 1）。
+    assert command.closure_jacobian_m_per_rad is not None
+    assert command.force_feedforward_torque == pytest.approx(
+        8.0 * command.closure_jacobian_m_per_rad
+    )
+    # 刚度估计器照常运行，trace 中刚度曲线保持可比。
+    assert source.normal_force is not None
+    assert source.normal_force.stiffness is not None
+    assert command.estimated_contact_stiffness_n_per_m == pytest.approx(
+        source.normal_force.stiffness.initial_n_per_m
+    )
+
+    # 第二个跟踪周期：滤波力不变（innovation 为 0，z2 保持 0），积分修正继续累加。
+    command = controller.apply(
+        data,
+        approach_position=0.5,
+        total_normal_force_n=0.4,
+        left_normal_force_n=0.2,
+        right_normal_force_n=0.2,
+        dt=0.002,
+    )
+    assert controller._adrc_z2 == 0.0
+    assert controller._adrc_u == pytest.approx(0.02)
+    assert command.position_adjustment == pytest.approx(2 * 0.02 / jacobian * 0.002)
+
+    # 力升高后 innovation 非零，LESO 的扰动估计 z2 开始积累。
+    controller.apply(
+        data,
+        approach_position=0.5,
+        total_normal_force_n=0.8,
+        left_normal_force_n=0.4,
+        right_normal_force_n=0.4,
+        dt=0.002,
+    )
+    assert controller._adrc_z2 > 0.0
+
+
+def test_normal_force_controller_resets_adrc_state_on_release_and_recontact() -> None:
+    """释放退出跟踪与重新确认接触都会把 LADRC 状态复位回跟踪起点。"""
+    source = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    adrc_profile = _profile_with_adrc(source, _ADRC_TEST_CONFIG)
+    model = mujoco.MjModel.from_xml_path(str(source.model_path))
+    data = mujoco.MjData(model)
+    controller = NormalForceController.from_profile(model, adrc_profile)
+
+    for _ in range(8):
+        controller.apply(
+            data,
+            approach_position=0.5,
+            total_normal_force_n=0.4,
+            left_normal_force_n=0.2,
+            right_normal_force_n=0.2,
+            dt=0.002,
+        )
+    assert controller.state == "force_tracking"
+    assert controller._adrc_adjustment > 0.0
+
+    assert source.normal_force is not None
+    for _ in range(source.normal_force.release_confirm_steps):
+        command = controller.apply(
+            data,
+            approach_position=0.5,
+            total_normal_force_n=0.0,
+            left_normal_force_n=0.0,
+            right_normal_force_n=0.0,
+            dt=0.002,
+        )
+    assert command.state == "approach"
+    # 释放复位：z1/z2 与积分位置修正全部清零。
+    assert controller._adrc_z1 == 0.0
+    assert controller._adrc_z2 == 0.0
+    assert controller._adrc_adjustment == 0.0
+
+    # 重新确认接触后，LADRC 再次从当前滤波力起步，积分修正从零重新累积。
+    for _ in range(5):
+        command = controller.apply(
+            data,
+            approach_position=0.5,
+            total_normal_force_n=0.4,
+            left_normal_force_n=0.2,
+            right_normal_force_n=0.2,
+            dt=0.002,
+        )
+    assert command.state == "force_tracking"
+    assert controller._adrc_z1 == pytest.approx(0.2)
+    assert controller._adrc_z2 == 0.0
+    jacobian = command.closure_jacobian_m_per_rad
+    assert jacobian is not None and jacobian > 0.0
+    assert command.position_adjustment == pytest.approx(0.02 / jacobian * 0.002)
+
+
+def test_adrc_none_keeps_pid_tracking_path() -> None:
+    """adrc=None（默认与显式置空）时跟踪输出仍走原 PID 路径且完全一致。"""
+    source = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    assert source.normal_force is not None
+    assert source.normal_force.adrc is None
+    explicit_none_profile = _profile_with_adrc(source, None)
+    model = mujoco.MjModel.from_xml_path(str(source.model_path))
+    default_controller = NormalForceController.from_profile(model, source)
+    explicit_controller = NormalForceController.from_profile(model, explicit_none_profile)
+    default_data = mujoco.MjData(model)
+    explicit_data = mujoco.MjData(model)
+
+    forces = [(0.2, 0.2)] * 8 + [(3.0, 2.6), (4.2, 3.6), (4.0, 4.0)]
+    default_command = None
+    explicit_command = None
+    for left, right in forces:
+        default_command = default_controller.apply(
+            default_data,
+            approach_position=0.5,
+            total_normal_force_n=left + right,
+            left_normal_force_n=left,
+            right_normal_force_n=right,
+            dt=0.002,
+        )
+        explicit_command = explicit_controller.apply(
+            explicit_data,
+            approach_position=0.5,
+            total_normal_force_n=left + right,
+            left_normal_force_n=left,
+            right_normal_force_n=right,
+            dt=0.002,
+        )
+
+    assert default_command is not None
+    assert explicit_command is not None
+    assert default_command == explicit_command
+    # PID 外环照常参与：PID 修正非零，位置弹簧项保留在 MIT 力矩中。
+    assert default_command.pid_position_adjustment > 0.0
+    assert default_command.mit.torque != pytest.approx(default_command.mit.feedforward_torque)
+
+
+def test_adrc_and_direct_torque_are_mutually_exclusive() -> None:
+    """adrc 与 torque_feedback_gain>0 同时启用时，控制器构造直接拒绝。"""
+    source = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    assert source.normal_force is not None
+    force = source.normal_force.model_copy(
+        update={"adrc": _ADRC_TEST_CONFIG, "torque_feedback_gain": 1.0}
+    )
+    conflicting = source.model_copy(
+        update={"control": source.control.model_copy(update={"force": force})}
+    )
+    model = mujoco.MjModel.from_xml_path(str(source.model_path))
+
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        NormalForceController.from_profile(model, conflicting)

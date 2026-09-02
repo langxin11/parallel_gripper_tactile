@@ -13,7 +13,7 @@ from parallel_gripper_tactile.experiments.force_tracking import (
     configure_force_controller,
     run_force_tracking,
 )
-from parallel_gripper_tactile.profiles import load_profile
+from parallel_gripper_tactile.profiles import AdrcControl, load_profile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -47,6 +47,7 @@ def test_force_tracking_task_loads_default_waypoint_config() -> None:
         ("pid-stiffness-ff", True, 0.25, 0.0, 0.0),
         ("full", True, 0.25, 1.0, 0.0),
         ("direct-torque", True, 0.0, 1.0, 1.0),
+        ("adrc", True, 0.0, 1.0, 0.0),
     ],
 )
 def test_controller_variants_apply_reproducible_ablation_settings(
@@ -85,6 +86,35 @@ def test_direct_torque_variant_keeps_mit_gains_for_approach_servo() -> None:
     assert configured.mit.kd == source.mit.kd
     assert configured.normal_force is not None
     assert configured.normal_force.torque_feedback_gain == 1.0
+
+
+def test_adrc_variant_enables_ladrc_outer_loop_with_default_parameters() -> None:
+    """adrc 变体注入默认 LADRC 参数，位置前馈置 0，力矩前馈与 MIT 增益不动。"""
+    source = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    configured = configure_force_controller(source, variant="adrc")
+
+    assert configured.normal_force is not None
+    # LADRC 外环以代码与 AdrcControl 默认值生效，profile 无需显式配置。
+    assert configured.normal_force.adrc is not None
+    assert configured.normal_force.adrc == AdrcControl()
+    assert configured.normal_force.torque_feedback_gain == 0.0
+    assert configured.normal_force.stiffness is not None
+    # 刚度估计照常运行（trace 可比），位置前馈由 LADRC 取代，力矩前馈对标 full。
+    assert configured.normal_force.stiffness.enabled is True
+    assert configured.normal_force.stiffness.position_feedforward_gain == 0.0
+    assert source.normal_force is not None
+    assert source.normal_force.stiffness is not None
+    assert (
+        configured.normal_force.stiffness.torque_feedforward_gain
+        == source.normal_force.stiffness.torque_feedforward_gain
+    )
+    # MIT kp/kd 不在 profile 层改动，接近阶段与各变体共享位置伺服。
+    assert source.mit is not None
+    assert configured.mit is not None
+    assert configured.mit.kp == source.mit.kp
+    assert configured.mit.kd == source.mit.kd
+    # 源 profile 不携带 adrc 配置，默认行为保持不变。
+    assert source.normal_force.adrc is None
 
 
 def test_controller_variant_rejects_unknown_name_and_negative_seed() -> None:

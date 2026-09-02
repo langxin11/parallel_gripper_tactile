@@ -23,6 +23,7 @@ from ..control import (
 )
 from ..profiles import (
     STIFFNESS_ESTIMATOR_METHODS,
+    AdrcControl,
     GripperProfile,
     MITTorqueControl,
     StiffnessEstimatorMethod,
@@ -52,7 +53,7 @@ from .grasp import (
 
 
 ControllerVariant = Literal[
-    "pid-only", "pid-torque-ff", "pid-stiffness-ff", "full", "direct-torque"
+    "pid-only", "pid-torque-ff", "pid-stiffness-ff", "full", "direct-torque", "adrc"
 ]
 CONTROLLER_VARIANTS: tuple[ControllerVariant, ...] = (
     "pid-only",
@@ -60,6 +61,7 @@ CONTROLLER_VARIANTS: tuple[ControllerVariant, ...] = (
     "pid-stiffness-ff",
     "full",
     "direct-torque",
+    "adrc",
 )
 
 
@@ -100,6 +102,10 @@ def configure_force_controller(
         # 力矩前馈增益不动。MIT kp/kd 不在 profile 层清零——接近阶段共享同一组
         # 位置伺服增益建立接触，清零动作由控制器在跟踪阶段逐周期 override。
         stiffness = stiffness.model_copy(update={"enabled": True, "position_feedforward_gain": 0.0})
+    elif variant == "adrc" and stiffness is not None:
+        # LADRC 外环取代刚度位置前馈的角色：保留刚度估计（trace 中刚度曲线
+        # 可比），位置前馈置 0，力矩前馈增益不动（对标 full 变体）。
+        stiffness = stiffness.model_copy(update={"enabled": True, "position_feedforward_gain": 0.0})
 
     if stiffness_estimator_method is not None:
         if stiffness is None:
@@ -112,6 +118,9 @@ def configure_force_controller(
     if variant == "direct-torque":
         # 力误差直接进入 MIT 前馈力矩的增益；1.0 表示误差力矩全额注入。
         force_updates["torque_feedback_gain"] = 1.0
+    if variant == "adrc":
+        # 变体默认值集中在此处代码与 AdrcControl 默认值中，profile 无需显式配置。
+        force_updates["adrc"] = AdrcControl()
     if sensor_noise_seed is not None:
         force_updates["sensor_noise_seed"] = sensor_noise_seed
     configured_force = force.model_copy(update=force_updates)

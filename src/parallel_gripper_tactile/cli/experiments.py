@@ -192,7 +192,14 @@ def run_force_track(
         typer.Option("--disable-multiccd", help="Use one contact per convex geom pair."),
     ] = False,
     controller_variant: Annotated[
-        Literal["pid-only", "pid-torque-ff", "pid-stiffness-ff", "full", "direct-torque"],
+        Literal[
+            "pid-only",
+            "pid-torque-ff",
+            "pid-stiffness-ff",
+            "full",
+            "direct-torque",
+            "adrc",
+        ],
         typer.Option("--controller-variant"),
     ] = "full",
     sensor_noise_seed: Annotated[int | None, typer.Option("--sensor-noise-seed", min=0)] = None,
