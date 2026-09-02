@@ -74,6 +74,16 @@ uv run pgt run force-track \
 力误差直接进入 MIT 前馈力矩，PID 与刚度位置修正置零，MIT 位置环 kp/kd 逐周期覆盖为 0；
 接近与释放阶段不受影响，仍走共享的位置伺服轨迹。
 
+若配置 `control.force.adrc` 段（`adrc` 控制器变体自动注入默认参数，可用
+`--controller-variant adrc` 运行），跟踪阶段切换为一阶线性自抗扰（LADRC）外环：
+扩张状态观测器（LESO）估计滤波力与总扰动，控制律输出闭合速度命令 `u`（m/s），经当前
+闭合雅可比换算为电机角速度后逐周期积分成持久的位置修正（裁剪到
+`max_position_adjustment`），以此替换 PID 位置修正与刚度位置前馈。
+与 `direct-torque` 的本质区别在于 LADRC 不旁路位置环：MIT kp/kd 保持 profile 值，
+位置弹簧阻尼照常参与力矩合成；模型力矩前馈仍走 `torque_feedforward_gain` 路径，
+刚度估计器照常运行以保持 trace 中刚度曲线可比。`adrc` 与 `torque_feedback_gain > 0`
+互斥，同时启用会在控制器构造时抛出 `ValueError`。
+
 若需要测试撤掉支撑后的真实夹持能力，可以把 `release_support_on_tracking` 设为 `true`。
 若只想先评估力控曲线本身，保持默认支撑更利于排除掉落和姿态变化的干扰。
 

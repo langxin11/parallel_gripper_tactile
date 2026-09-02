@@ -9,6 +9,18 @@
 
 ### 新增
 
+- `adrc` 控制器变体（`--controller-variant adrc`）：跟踪阶段以一阶线性自抗扰
+  （LADRC）外环替换 PID 位置修正——扩张状态观测器估计滤波力与总扰动，控制律输出
+  闭合速度并逐周期积分成位置修正（裁剪到 `max_position_adjustment`）；MIT kp/kd
+  不被覆盖（位置弹簧阻尼保留，与 `direct-torque` 的本质区别），模型力矩前馈照常、
+  刚度估计器照常运行；`force_tracking_controller_comparison` 默认矩阵由 135 扩至
+  162 条
+- profile 新增可选配置段 `control.force.adrc`（`AdrcControl`：`b0_n_per_m`、
+  `controller_bandwidth_rad_s`、`observer_bandwidth_rad_s`、
+  `max_closing_velocity_m_s`；默认 `None` 表示不启用，与
+  `control.force.torque_feedback_gain > 0` 互斥，同时启用会在控制器构造时抛
+  `ValueError`；默认带宽 (40, 120) rad/s 在 step 任务、默认 profile 上按
+  “饱和比例不超 5% 中 rmse 最小”从五档候选中选定）
 - `direct-torque` 控制器变体（`--controller-variant direct-torque`）：位置式 MIT 力控的
   直接力矩式对照。跟踪阶段力误差经 `torque_feedback_gain` 直接进入 MIT 前馈力矩，
   MIT kp/kd 由控制器逐周期覆盖为 0（接近阶段仍共享 profile 位置伺服增益），PID 与
