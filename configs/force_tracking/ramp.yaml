@@ -17,6 +17,7 @@ reference:
     - {t_s: 2.0, force_n: 3.0} # 缓慢加载
     - {t_s: 4.0, force_n: 6.0} # 峰值
     - {t_s: 6.0, force_n: 1.0} # 匀速卸载
+    - {t_s: 8.0, force_n: 1.0} # 终端保持段，用于终端稳态误差统计
 
 metrics:
   ignore_initial_s: 0.2

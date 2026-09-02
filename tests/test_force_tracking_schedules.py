@@ -14,7 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
     ("filename", "name", "interpolation", "duration"),
     [
         ("step.yaml", "step_force_tracking", "hold", 4.0),
-        ("ramp.yaml", "ramp_force_tracking", "linear", 6.0),
+        ("ramp.yaml", "ramp_force_tracking", "linear", 8.0),
         ("mixed_waypoints.yaml", "mixed_waypoint_force_tracking", "smoothstep", 7.5),
     ],
 )
@@ -39,13 +39,16 @@ def test_step_schedule_has_hold_platform_and_steps() -> None:
     assert reference.target_at(3.5) == pytest.approx(1.0)
 
 
-def test_ramp_schedule_is_linear() -> None:
-    """斜坡曲线中点目标按线性插值计算。"""
+def test_ramp_schedule_is_linear_with_terminal_hold() -> None:
+    """斜坡曲线中点目标按线性插值计算，并在末尾保持终端目标。"""
     reference = ForceTrackingTask.load(ROOT / "configs/force_tracking/ramp.yaml").reference
 
     assert reference.target_at(1.0) == pytest.approx(2.0)
     assert reference.target_at(3.0) == pytest.approx(4.5)
     assert reference.target_at(5.0) == pytest.approx(3.5)
+    # 卸载终点后附加 2 s 终端保持段，用于终端稳态误差统计。
+    assert reference.target_at(7.0) == pytest.approx(1.0)
+    assert reference.target_at(7.9) == pytest.approx(1.0)
 
 
 def test_mixed_schedule_has_platform_ramp_and_unload() -> None:
