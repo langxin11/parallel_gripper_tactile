@@ -54,7 +54,7 @@ observation + reference + dt -> command
 
 当前项目中这一层接口由 `ForceControlObservation`、`ForceControlReference` 和
 `ForceTrackingController.step(...)` 表达。`NormalForceController` 是第一个实现；
-后续 ADRC 控制器应实现同一个 `step(...)` 入口。
+后续 ADRC 控制器应实现同一个 `step(...)` 入口（2026-09-02 已以 `adrc` 变体落地）。
 
 其中 observation 至少包含当前法向力、双侧法向力、接近目标位置和控制周期；
 reference 至少包含目标法向力和接近阶段前馈力；command 至少包含目标位置修正、
@@ -64,8 +64,9 @@ MIT 前馈力矩、测量力、滤波力和诊断量。
 
 当前第一阶段已经落地：`step.yaml`、`ramp.yaml`、`mixed_waypoints.yaml` 三类标准任务，以及
 `controller × task × material × seed` 的显式 comparison schema、`--dry-run` 条件审阅、结构化聚合和
-study 级对比图。2026-09-02 起 `direct-torque` 变体已实现（入口 `--controller-variant direct-torque`，
-profile 字段 `control.force.torque_feedback_gain`），默认矩阵扩为 5 个变体共 135 条；ADRC 仍属下一阶段。
+study 级对比图。2026-09-02 起 `direct-torque` 与 `adrc` 变体均已实现（入口分别为
+`--controller-variant direct-torque` 与 `--controller-variant adrc`，profile 字段
+`control.force.torque_feedback_gain` 与 `control.force.adrc`），默认矩阵扩为 6 个变体共 162 条。
 
 正式批量研究的接触 preset 已整体上移一档：使用 `medium=(-650,-8)`、`hard=(-1200,-10)` 和
 `stiff=(-2500,-15)`。其中日常语义依次更接近 compliant、firm 与 stiff；这些参数是单个显式
@@ -117,7 +118,7 @@ controller command -> 达妙电机 CAN/串口命令
 | PID + feedforward | PID 加机构力矩前馈 | 跟踪误差和力矩饱和变化 |
 | Adaptive stiffness | PID 加在线刚度估计 | 不同物体刚度下的泛化能力 |
 | Direct torque force | `t_ff = τ_force_feedback + τ_model_feedforward` | 不经过位置刚度的力矩式力控 |
-| ADRC | 扩张状态观测器控制 | 扰动、模型误差和延迟下的鲁棒性 |
+| ADRC | `adrc` 变体：一阶 LADRC 外环替换 PID 位置修正 | 扰动、模型误差和延迟下的鲁棒性 |
 
 所有组别应使用相同目标力曲线、相同物体、相同接触参数和相同噪声种子。只改变待评估的控制模块。
 
@@ -423,8 +424,8 @@ uv run python scripts/experiments/force_tracking_controller_comparison.py \
   --config configs/studies/force_tracking_controller_comparison.yaml
 </code></pre>
 
-默认配置展开 5 个控制器变体（四个 PID 系加 `direct-torque`）× 3 个 task × 3 个正式接触 preset × 3 个 seed，
-共 135 个条件（2026-09-02 前的旧配置为 4 变体 108 条）。每个条件保留独立
+默认配置展开 6 个控制器变体（四个 PID 系加 `direct-torque` 与 `adrc`）× 3 个 task × 3 个正式接触 preset × 3 个 seed，
+共 162 个条件（2026-09-02 前的旧配置为 4 变体 108 条、5 变体 135 条）。每个条件保留独立
 run，study 父目录生成 `summary.csv`、`aggregate.csv`、`summary.json`、对比图和
 `study_manifest.json`。脚本顺序调用 runner，不通过 CLI 子进程启动单次实验。
 
