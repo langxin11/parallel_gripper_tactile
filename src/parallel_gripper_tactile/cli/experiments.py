@@ -33,6 +33,16 @@ compare_app = typer.Typer(help="Compare tactile/contact representations.", no_ar
 view_app = typer.Typer(help="Open interactive MuJoCo views.", no_args_is_help=True)
 
 
+def _format_optional_seconds(value: float | None) -> str:
+    """把可能缺失的瞬态时间格式化为表格文本。"""
+    return "n/a" if value is None else f"{value:.3f} s"
+
+
+def _format_optional_ratio(value: float | None) -> str:
+    """把可能缺失的瞬态比例格式化为表格文本。"""
+    return "n/a" if value is None else f"{100.0 * value:.1f}%"
+
+
 def _run_directory(
     profile: Path,
     experiment: str,
@@ -217,6 +227,9 @@ def run_force_track(
     table.add_row("RMSE", f"{result.rmse_n:.3f} N")
     table.add_row("MAE", f"{result.mae_n:.3f} N")
     table.add_row("Peak error", f"{result.peak_abs_error_n:.3f} N")
+    table.add_row("Rise time", _format_optional_seconds(result.rise_time_s))
+    table.add_row("Overshoot", _format_optional_ratio(result.overshoot_ratio))
+    table.add_row("Settling time", _format_optional_seconds(result.settling_time_s))
     table.add_row("Torque saturation", f"{100.0 * result.torque_saturation_ratio:.1f}%")
     state(context).console.print(table)
     state(context).console.print(f"Run: [cyan]{run.path}[/cyan]")

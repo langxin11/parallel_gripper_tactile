@@ -26,6 +26,9 @@ def test_execute_force_tracking_writes_complete_run_artifacts(tmp_path: Path, mo
         torque_saturation_ratio=0.0,
         position_saturation_ratio=0.0,
         mean_estimated_stiffness_n_per_m=100.0,
+        rise_time_s=0.12,
+        overshoot_ratio=0.04,
+        settling_time_s=0.35,
         simulation_stable=True,
     )
 

@@ -227,6 +227,9 @@ class ForceTrackingResult:
     torque_saturation_ratio: float
     position_saturation_ratio: float
     mean_estimated_stiffness_n_per_m: float
+    rise_time_s: float | None
+    overshoot_ratio: float | None
+    settling_time_s: float | None
     simulation_stable: bool
 
     @property
@@ -318,6 +321,80 @@ def _evaluate_tracking(
         position_saturation,
         float(np.mean(stiffness)) if stiffness.size else math.nan,
     )
+
+
+def _evaluate_step_transients(
+    rows: list[dict[str, float | str]],
+    *,
+    waypoints: tuple[ForceWaypoint, ...],
+    interpolation: str,
+    ignore_initial_s: float,
+) -> tuple[float | None, float | None, float | None]:
+    """计算加载阶跃的上升时间、超调比与稳定时间。
+
+    仅 ``hold`` 插值任务存在可评估的加载阶跃；在相邻 waypoint 中取力上升量最大
+    （且不低于 1 N）的一对作为阶跃，统计滤波后法向力在其后平台段内的瞬态指标。
+    任一前提不满足时返回 ``(None, None, None)``。
+
+    Args:
+        rows: 实验逐步 trace 行，字段与 ``trace.csv`` 一致。
+        waypoints: 任务的目标力 waypoint 序列。
+        interpolation: 任务的目标力插值方式。
+        ignore_initial_s: 跟踪阶段开头需跳过的秒数。
+
+    Returns:
+        ``(rise_time_s, overshoot_ratio, settling_time_s)``，无法判定时对应项为
+        ``None``。
+    """
+    if interpolation != "hold":
+        return (None, None, None)
+    step_index: int | None = None
+    step_delta = 0.0
+    for index, (start, end) in enumerate(zip(waypoints, waypoints[1:])):
+        delta = float(end.force_n) - float(start.force_n)
+        if delta >= 1.0 and delta > step_delta:
+            step_delta = delta
+            step_index = index
+    if step_index is None:
+        return (None, None, None)
+    step_waypoint = waypoints[step_index + 1]
+    t_0 = float(step_waypoint.t_s)
+    f_low = float(waypoints[step_index].force_n)
+    f_high = float(step_waypoint.force_n)
+    # 平台段延伸到下一个力值发生变化的 waypoint；若直至曲线终点都保持不变，则以终点收尾。
+    t_end = float(waypoints[-1].t_s)
+    for waypoint in waypoints[step_index + 1 :]:
+        if float(waypoint.force_n) != f_high:
+            t_end = float(waypoint.t_s)
+            break
+    if t_end - t_0 < 0.5:
+        return (None, None, None)
+    window = [
+        row
+        for row in rows
+        if row["phase"] == "track_reference"
+        and float(row["tracking_time_s"]) >= ignore_initial_s
+        and t_0 <= float(row["tracking_time_s"]) < t_end
+    ]
+    if not window:
+        return (None, None, None)
+    times = np.asarray([float(row["tracking_time_s"]) for row in window])
+    forces = np.asarray([float(row["filtered_normal_force_n"]) for row in window])
+    delta_force = f_high - f_low
+    rise_mask = forces >= f_low + 0.9 * delta_force
+    if not bool(rise_mask.any()):
+        return (None, None, None)
+    rise_time_s = float(times[int(np.flatnonzero(rise_mask)[0])] - t_0)
+    overshoot_ratio = max(0.0, float(np.max(forces) - f_high) / delta_force)
+    outside = np.flatnonzero(np.abs(forces - f_high) > 0.05 * delta_force)
+    if outside.size == 0:
+        # 窗口首采样前就进入稳定带且从无违反，稳定时间记为首采样时刻。
+        settling_time_s: float | None = float(times[0] - t_0)
+    elif int(outside[-1]) == len(window) - 1:
+        settling_time_s = None
+    else:
+        settling_time_s = float(times[int(outside[-1]) + 1] - t_0)
+    return (rise_time_s, overshoot_ratio, settling_time_s)
 
 
 def run_force_tracking(
@@ -593,6 +670,12 @@ def run_force_tracking(
         p_min=float(profile.mit.p_min),
         p_max=float(profile.mit.p_max),
     )
+    rise_time_s, overshoot_ratio, settling_time_s = _evaluate_step_transients(
+        rows,
+        waypoints=task.reference.waypoints,
+        interpolation=task.reference.interpolation,
+        ignore_initial_s=task.metrics.ignore_initial_s,
+    )
     return ForceTrackingResult(
         contact_time_s=math.nan if contact_time_s is None else contact_time_s,
         tracking_start_time_s=math.nan if tracking_start_time_s is None else tracking_start_time_s,
@@ -605,6 +688,9 @@ def run_force_tracking(
         torque_saturation_ratio=torque_saturation_ratio,
         position_saturation_ratio=position_saturation_ratio,
         mean_estimated_stiffness_n_per_m=mean_stiffness,
+        rise_time_s=rise_time_s,
+        overshoot_ratio=overshoot_ratio,
+        settling_time_s=settling_time_s,
         simulation_stable=simulation_stable,
     )
 

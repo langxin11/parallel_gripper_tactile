@@ -12,6 +12,7 @@ from pathlib import Path
 from statistics import fmean, stdev
 from typing import Iterable
 from uuid import uuid4
+import warnings
 
 import numpy as np
 
@@ -35,7 +36,12 @@ METRICS = (
     "torque_saturation_ratio",
     "position_saturation_ratio",
     "mean_estimated_stiffness_n_per_m",
+    "rise_time_s",
+    "overshoot_ratio",
+    "settling_time_s",
 )
+# 阶跃瞬态指标在非 hold 任务或无法判定时为 None，聚合需按 NaN 感知口径统计。
+TRANSIENT_METRICS = ("rise_time_s", "overshoot_ratio", "settling_time_s")
 PLOTTED_METRICS = (
     ("rmse_n", "RMSE (N)"),
     ("mae_n", "MAE (N)"),
@@ -66,6 +72,20 @@ def _write_rows_csv(path: Path, rows: list[dict[str, object]]) -> None:
         writer.writerows(rows)
 
 
+def _transient_stats(group: list[dict[str, object]], metric: str) -> tuple[float, float]:
+    """对可能缺失的阶跃瞬态指标做 NaN 感知的均值与样本标准差。"""
+    values = np.asarray(
+        [math.nan if row.get(metric) is None else float(row[metric]) for row in group],
+        dtype=np.float64,
+    )
+    with warnings.catch_warnings():
+        # 全 NaN 切片或单样本 ddof=1 时 numpy 会发 RuntimeWarning，结果按 NaN 输出即可。
+        warnings.simplefilter("ignore", RuntimeWarning)
+        mean = float(np.nanmean(values))
+        std = float(np.nanstd(values, ddof=1))
+    return mean, std
+
+
 def aggregate_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
     """按估计器、任务和材料计算有限指标的均值与样本标准差。"""
     groups: dict[tuple[str, str, str], list[dict[str, object]]] = {}
@@ -87,6 +107,11 @@ def aggregate_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
             "passed_runs": sum(bool(row["passed"]) for row in group),
         }
         for metric in METRICS:
+            if metric in TRANSIENT_METRICS:
+                mean, std = _transient_stats(group, metric)
+                aggregate[f"{metric}_mean"] = mean
+                aggregate[f"{metric}_std"] = std
+                continue
             finite = [float(row[metric]) for row in group if math.isfinite(float(row[metric]))]
             aggregate[f"{metric}_mean"] = fmean(finite) if finite else None
             aggregate[f"{metric}_std"] = stdev(finite) if len(finite) >= 2 else None
