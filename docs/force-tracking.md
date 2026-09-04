@@ -105,9 +105,9 @@ s_b\frac{\hat K J_c(q)}{I_{eq}}, b_{min}, b_{max}
 
 LESO 不直接使用完全原始的触觉力，也不复用 PID、刚度估计与评价指标使用的 20 Hz 公共低通。
 它使用独立的 40 Hz 一阶低通做轻度预处理：该通道只负责抑制高频尖峰，力与力变化率的主要估计
-仍由 LESO 完成。默认截止频率在 step、ramp、mixed 三类目标和 medium、hard、stiff 三种材料的
-小范围扫描中，从 `{40, 60, 80, 100, 120}` Hz 选择；40 Hz 的综合误差与超调更稳，且扫描组合均未
-出现力矩饱和。实机仍应依据传感器采样率、噪声谱和闭环时延重新标定。
+仍由 LESO 完成。当前 40 Hz 截止频率是小范围仿真扫描得到的工程起点：连续任务表现稳定且未观察到
+力矩饱和，但仍应与控制器带宽、传感器噪声和闭环时延联合复核。实机必须依据传感器采样率、噪声谱和
+闭环时延重新标定。
 
 profile 可选段 `control.force.torque_adrc` 提供 `equivalent_inertia_kg_m2`、`input_gain_scale`、
 `controller_bandwidth_rad_s`、`observer_bandwidth_rad_s`、
@@ -115,8 +115,9 @@ profile 可选段 `control.force.torque_adrc` 提供 `equivalent_inertia_kg_m2`�
 模型的仿真起点，不是实机标定结果；迁移到硬件前必须
 通过自由空间 `τ→q̈`、准静态 `c→F` 和接触状态 `τ→F` 三组辨识重新确认惯量、增益尺度与带宽。
 `torque_adrc` 要求启用机构几何与接触刚度估计，并与一阶 `adrc`、`torque_feedback_gain > 0` 互斥。
-当前仿真默认值 `fc=40 Hz、ωc=60 rad/s、ωo=240 rad/s` 来自三种材料、三个 seed 的确认 study；
-相比原 `ωo=180 rad/s` 基线，连续任务误差更低且 Step 超调有所下降。
+当前仿真默认值 `fc=40 Hz、ωc=60 rad/s、ωo=240 rad/s` 是专用调参 study 在连续任务约束下确认的
+可行参考点。它改善连续参考跟踪，但 Step 超调仍是需要单独权衡和继续调参的指标；不应把它描述为对所有
+任务都更优的通用参数组合。
 
 `--controller-variant adrc-torque-td` 是独立的工程增强对照：它在 `adrc-torque` 前增加带宽为
 180 rad/s 的临界阻尼线性 TD，将参考力整形成连续的力、力变化率和力加速度；机构模型前馈同步使用
@@ -180,12 +181,28 @@ waypoint 的 `t_s` 应严格递增，`force_n` 应为非负值。任务总跟踪
 | --- | --- |
 | `profile.yaml` | 本次运行使用的夹爪 profile 快照。 |
 | `task.yaml` | 本次运行使用的 force tracking task 快照。 |
-| `trace.csv` | 每个控制周期的状态、目标力、测量力和控制量。 |
-| `plot.png` | 目标力与测量力曲线图。 |
+| `effective_parameters.json` | 解析后的完整 profile、task 与本次实际生效的运行时覆盖。 |
+| `trace.parquet` | 使用 Zstd 压缩、事件感知降采样的状态、目标力、测量力和控制量。 |
+| `plot.png` / `plot.pdf` | 600 DPI 位图与矢量版任务诊断图。 |
 | `metrics.json` | 跟踪误差、饱和比例、接触时间等摘要指标。 |
 | `manifest.json` | 运行命令、时间戳和产物索引。 |
 
-`trace.csv` 中最常用的列包括：
+profile、task 等人工输入继续采用 YAML。`effective_parameters.json` 是 force-track run 的有效参数快照，
+用于区分原始输入与解析、覆盖后的实际运行语义。默认 `trace.parquet` 对常规区段进行事件感知降采样：
+普通控制器为 100 Hz，`adrc-torque` / `adrc-torque-td` 为 250 Hz；首尾样本、阶段与控制状态切换、
+限幅状态变化以及 waypoint 前后 0.2 s 保留完整控制频率。误差指标和图像均在降采样前计算/生成，
+不会因存储采样率改变。实际采样周期和事件窗口记录在 Parquet metadata、manifest 与
+`effective_parameters.json` 中。读取接口继续兼容旧 CSV API 及历史 `trace.csv` 产物。
+需要覆盖默认策略时，可使用 `--trace-period` 和 `--event-window`；采样周期必须不小于
+且为任务控制周期的整数倍，设置为控制周期等价于全频记录常规区段。
+
+单次图的公共面板包括目标/测量/滤波力、跟踪误差、力矩和在线刚度；任务专用面板为：
+
+- Step/hold：标出阶跃时刻和短时瞬态窗口，展示绝对瞬态误差；
+- Ramp/linear：用目标力—滤波力加载/卸载曲线检查跟踪滞后与回差；
+- Mixed/Smoothstep：逐 waypoint 展示误差，便于定位复杂参考中的局部失配。
+
+`trace.parquet` 中最常用的列包括：
 
 | 列 | 含义 |
 | --- | --- |

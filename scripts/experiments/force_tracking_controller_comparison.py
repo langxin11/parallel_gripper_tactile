@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import argparse
-import csv
 from dataclasses import asdict
 from datetime import UTC, datetime
 import json
@@ -22,6 +21,11 @@ from parallel_gripper_tactile.runners import execute_force_tracking
 from parallel_gripper_tactile.studies.force_tracking_comparison import (
     ForceTrackingComparisonConfig,
     load_comparison_config,
+)
+from parallel_gripper_tactile.studies.tabular import (
+    read_trace_rows,
+    write_resolved_config,
+    write_rows_csv_and_parquet,
 )
 
 
@@ -59,16 +63,6 @@ def _json_compatible(value: object) -> object:
     if isinstance(value, (list, tuple)):
         return [_json_compatible(item) for item in value]
     return value
-
-
-def _write_rows_csv(path: Path, rows: list[dict[str, object]]) -> None:
-    """把同构结果行写入 CSV。"""
-    if not rows:
-        raise ValueError("cannot write an empty study summary")
-    with path.open("w", newline="", encoding="utf-8") as stream:
-        writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
-        writer.writeheader()
-        writer.writerows(rows)
 
 
 def _transient_stats(group: list[dict[str, object]], metric: str) -> tuple[float, float]:
@@ -304,12 +298,11 @@ def plot_ablation_delta(
     return pdf_path
 
 
-def _read_tracking_rows(path: Path) -> list[dict[str, str]]:
+def _read_tracking_rows(run_directory: Path) -> list[dict[str, object]]:
     """读取单次 run 的跟踪阶段 trace。"""
-    with path.open(newline="", encoding="utf-8") as stream:
-        rows = [row for row in csv.DictReader(stream) if row["phase"] == "track_reference"]
+    rows = [row for row in read_trace_rows(run_directory) if row["phase"] == "track_reference"]
     if not rows:
-        raise ValueError(f"trace has no tracking rows: {path}")
+        raise ValueError(f"trace 没有跟踪阶段行：{run_directory}")
     return rows
 
 
@@ -356,7 +349,7 @@ def plot_tracking_overlays(
                 for row in valid_group
                 if row["controller_variant"] == controller and int(row["sensor_noise_seed"]) == seed
             )
-            trace = _read_tracking_rows(study_dir / str(selected["run_directory"]) / "trace.csv")
+            trace = _read_tracking_rows(study_dir / str(selected["run_directory"]))
             time_s = [float(item["tracking_time_s"]) for item in trace]
             if not target_drawn:
                 axis.plot(
@@ -464,6 +457,7 @@ def run_study(
         (study_dir / "study.yaml").write_bytes(config_source.read_bytes())
     else:
         raise ValueError("config_source is required for a reproducible comparison study")
+    resolved_config = write_resolved_config(study_dir / "study.resolved.json", config)
 
     rows: list[dict[str, object]] = []
     for controller, task_path, material, seed in config.conditions():
@@ -498,8 +492,8 @@ def run_study(
     summary_csv = study_dir / "summary.csv"
     aggregate_csv = study_dir / "aggregate.csv"
     summary_json = study_dir / "summary.json"
-    _write_rows_csv(summary_csv, rows)
-    _write_rows_csv(aggregate_csv, aggregates)
+    _, summary_parquet = write_rows_csv_and_parquet(summary_csv, rows)
+    _, aggregate_parquet = write_rows_csv_and_parquet(aggregate_csv, aggregates)
     summary_json.write_text(
         json.dumps(
             _json_compatible({"runs": rows, "aggregates": aggregates}),
@@ -513,13 +507,22 @@ def run_study(
     figure_artifacts = render_study_figures(
         rows, aggregates, study_dir, controller_order=config.controllers
     )
-    artifacts = [summary_csv, aggregate_csv, summary_json, *figure_artifacts]
+    artifacts = [
+        summary_csv,
+        summary_parquet,
+        aggregate_csv,
+        aggregate_parquet,
+        summary_json,
+        resolved_config,
+        *figure_artifacts,
+    ]
     (study_dir / "study_manifest.json").write_text(
         json.dumps(
             {
                 "schema_version": 1,
                 "name": config.name,
                 "config": "study.yaml",
+                "resolved_config": str(resolved_config.relative_to(study_dir)),
                 "runs": [row["run_directory"] for row in rows],
                 "failed_runs": [row["run_directory"] for row in rows if not bool(row["passed"])],
                 "artifacts": [str(path.relative_to(study_dir)) for path in artifacts],

@@ -118,3 +118,54 @@ def test_rank_candidates_prefers_lower_step_overshoot_with_continuous_constraint
         next(row for row in ranking if row["candidate_id"] == rejected.identifier)["feasible"]
         == "false"
     )
+
+
+def test_tuning_figures_render_with_missing_step_metrics(tmp_path: Path) -> None:
+    """coarse 或 confirm 缺少部分瞬态指标时，调参图仍保留可用性能点。"""
+    protocol = _protocol_module()
+    baseline = TorqueAdrcCandidate(40.0, 60.0, 3.0)
+    candidate = TorqueAdrcCandidate(50.0, 50.0, 3.0)
+    aggregates = []
+    for item, step_rmse, overshoot in ((baseline, 0.50, 0.25), (candidate, 0.42, None)):
+        for task_name, rmse in (
+            ("step_force_tracking", step_rmse),
+            ("ramp_force_tracking", 0.06),
+            ("mixed_force_tracking", 0.05),
+        ):
+            aggregates.append(
+                {
+                    "candidate_id": item.identifier,
+                    "measurement_filter_cutoff_hz": item.measurement_filter_cutoff_hz,
+                    "controller_bandwidth_rad_s": item.controller_bandwidth_rad_s,
+                    "observer_bandwidth_ratio": item.observer_bandwidth_ratio,
+                    "observer_bandwidth_rad_s": item.observer_bandwidth_rad_s,
+                    "task_name": task_name,
+                    "object_material": "medium",
+                    "runs": 1,
+                    "passed_runs": 1,
+                    "rmse_n_mean": rmse,
+                    "overshoot_ratio_mean": overshoot if "step" in task_name else None,
+                    "settling_time_s_mean": None,
+                    "torque_saturation_ratio_mean": 0.0,
+                }
+            )
+    ranking = protocol.rank_candidates(  # type: ignore[attr-defined]
+        aggregates,
+        (baseline, candidate),
+        baseline=baseline,
+        max_torque_saturation_ratio=0.01,
+        max_ramp_rmse_ratio_to_baseline=1.10,
+        max_mixed_rmse_ratio_to_baseline=1.10,
+    )
+
+    figures = protocol.render_study_figures(  # type: ignore[attr-defined]
+        aggregates,
+        ranking,
+        tmp_path,
+        max_torque_saturation_ratio=0.01,
+        max_ramp_rmse_ratio_to_baseline=1.10,
+        max_mixed_rmse_ratio_to_baseline=1.10,
+    )
+
+    assert [path.suffix for path in figures] == [".png", ".pdf", ".png", ".pdf"]
+    assert all(path.is_file() and path.stat().st_size > 0 for path in figures)

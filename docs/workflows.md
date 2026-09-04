@@ -1,7 +1,7 @@
 # 🚀 常用工作流
 
 单次运行使用 `pgt`；需要固定条件矩阵、重复试验和聚合统计时使用 `scripts/experiments`。
-两类入口共享 Python runner 与产物格式。Profile 为 YAML，并在模型编译前完成校验。
+两类入口共享 Python runner 与产物格式。人工编写的 profile、task 与 study 配置均为 YAML，并在模型编译前完成校验。
 
 ## 单次运行与交互检查
 
@@ -46,8 +46,13 @@ uv run python scripts/experiments/force_tracking_controller_comparison.py \
 四个 PID 系变体、`direct-torque` 与二阶直接力矩 `adrc-torque`。一阶位置式 `adrc` 因控制导向模型
 阶次不匹配而保留为历史复现入口，不再参加默认正式对比。三个 preset 为
 `medium=(-650,-8)`、`hard=(-1200,-10)` 与 `stiff=(-2500,-15)`。原
-`soft=(-250,-5)` 不进入默认矩阵。study 完成后除
-`summary.csv`、`aggregate.csv` 外，还会在 `figures/` 生成指标、饱和比例、消融增量和同 seed 轨迹图。
+`soft=(-250,-5)` 不进入默认矩阵。study 完成后会同时输出 `summary.csv`、`summary.parquet`，以及适用时的
+`aggregate.csv`、`aggregate.parquet`；diagnosis study 只有 summary。图仍保存在 `figures/` 中的 PNG 与 PDF。
+
+图表按 study 的科学问题组织：控制器对比展示误差、饱和、相对 Full 增量和同 seed 轨迹；PID 消融展示
+材料分组指标以及完整 2×2 配对的主效应/交互作用；ADRC 调参展示候选排序、约束可行域和参数—性能关系；
+刚度估计器对比展示相对 secant 的增量和力/刚度轨迹；因果诊断展示扫描变量—诊断指标曲线与有效轨迹叠加。
+所有 study 图同时输出 600 DPI PNG 和矢量 PDF。
 
 二阶直接力矩 ADRC 的测量轻滤波和控制/观测器带宽采用两阶段调参：粗扫先固定 `medium` 与一个 seed，
 确认阶段再在三种 preset 与三个 seed 上复验。确认阶段读取粗扫目录中的可行候选排名：
@@ -75,8 +80,12 @@ uv run python scripts/experiments/force_tracking_diagnosis.py \
 </code></pre>
 
 研究脚本直接调用 `parallel_gripper_tactile.runners.execute_force_tracking`，不会启动 CLI 子进程。
-每个条件生成独立 run，study 父目录另存 `study.yaml`、逐次 `summary`；消融和控制器对比研究还生成
-聚合统计，控制器对比图统一登记到 `study_manifest.json`。
+每个条件生成独立 run。study 父目录同时保存人工输入 `study.yaml` 和路径、默认值均已解析的
+`study.resolved.json`。force-track run 同时保留 YAML 输入快照，并写入包含完整解析 profile、task 和实际
+运行时覆盖的 `effective_parameters.json`。时序数据默认以 Zstd 压缩的 `trace.parquet` 保存：普通控制器
+常规区段为 100 Hz，直接力矩 ADRC 为 250 Hz；阶段/控制状态/限幅状态变化以及 waypoint 前后 0.2 s
+保留完整控制频率。指标和图像使用未降采样数据。旧 CSV API 与历史 CSV 产物仍兼容读取。study 父目录另存 `study.yaml` 和逐次 summary；
+消融和控制器对比研究还生成 CSV 与 Parquet 两种聚合统计，控制器对比图统一登记到 `study_manifest.json`。
 
 动态目标力跟踪任务的配置、两阶段流程和指标解读见[动态目标力跟踪](force-tracking.md)。
 控制算法对比、消融矩阵和项目分工见[控制算法对比与消融](control-comparison-ablation.md)。

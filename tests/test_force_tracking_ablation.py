@@ -116,3 +116,59 @@ def test_single_sample_aggregate_has_no_sample_standard_deviation() -> None:
     protocol = _protocol_module()
     aggregate = protocol.aggregate_rows([_row(seed=1, rmse=0.2, stiffness=10.0)])[0]  # type: ignore[attr-defined]
     assert aggregate["rmse_n_std"] is None
+
+
+def test_ablation_figures_render_paired_factorial_effects(tmp_path: Path) -> None:
+    """小型合成数据可生成材料总览和按相同 seed 配对的 PID 效应图。"""
+    protocol = _protocol_module()
+    rows = []
+    for controller, rmse in (
+        ("pid-only", 0.50),
+        ("pid-torque-ff", 0.40),
+        ("pid-stiffness-ff", 0.45),
+        ("full", 0.32),
+    ):
+        row = _row(seed=3, rmse=rmse, stiffness=100.0)
+        row.update(
+            {
+                "controller_variant": controller,
+                "mae_n": rmse / 2.0,
+                "torque_saturation_ratio": 0.01,
+            }
+        )
+        rows.append(row)
+
+    effects = protocol.paired_pid_factorial_effects(rows)  # type: ignore[attr-defined]
+    assert effects["torque_effect"] == pytest.approx((-0.10, -0.13))
+    figures = protocol.render_study_figures(  # type: ignore[attr-defined]
+        rows,
+        protocol.aggregate_rows(rows),  # type: ignore[attr-defined]
+        tmp_path,
+        controller_order=("pid-only", "pid-torque-ff", "pid-stiffness-ff", "full"),
+    )
+
+    assert [path.suffix for path in figures] == [".png", ".pdf", ".png", ".pdf"]
+    assert all(path.is_file() and path.stat().st_size > 0 for path in figures)
+
+
+def test_factorial_effects_ignore_incomplete_material_seed_blocks() -> None:
+    """缺少任一 PID 变体的材料与 seed 组合不得进入 2×2 配对统计。"""
+    protocol = _protocol_module()
+    rows = []
+    for controller, rmse in (
+        ("pid-only", 0.50),
+        ("pid-torque-ff", 0.40),
+        ("pid-stiffness-ff", 0.45),
+        ("full", 0.32),
+    ):
+        row = _row(seed=3, rmse=rmse, stiffness=100.0)
+        row["controller_variant"] = controller
+        rows.append(row)
+    incomplete = _row(seed=4, rmse=9.0, stiffness=100.0)
+    incomplete["controller_variant"] = "pid-only"
+    rows.append(incomplete)
+
+    effects = protocol.paired_pid_factorial_effects(rows)  # type: ignore[attr-defined]
+
+    assert effects["none"] == [0.50]
+    assert effects["torque_effect"] == pytest.approx((-0.10, -0.13))

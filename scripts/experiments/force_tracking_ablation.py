@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 import argparse
-import csv
 from dataclasses import asdict
 from datetime import UTC, datetime
 import json
 import math
 from pathlib import Path
 from statistics import fmean, stdev
+from typing import Iterable
 from uuid import uuid4
 import warnings
 
@@ -21,6 +21,10 @@ from parallel_gripper_tactile.runners import execute_force_tracking
 from parallel_gripper_tactile.studies.force_tracking_ablation import (
     ForceTrackingAblationConfig,
     load_study_config,
+)
+from parallel_gripper_tactile.studies.tabular import (
+    write_resolved_config,
+    write_rows_csv_and_parquet,
 )
 
 
@@ -41,16 +45,12 @@ _METRICS = (
 )
 # 阶跃瞬态指标在非 hold 任务或无法判定时为 None，聚合需按 NaN 感知口径统计。
 _TRANSIENT_METRICS = ("rise_time_s", "overshoot_ratio", "settling_time_s")
-
-
-def _write_rows_csv(path: Path, rows: list[dict[str, object]]) -> None:
-    """写入同构的 study 结果行。."""
-    if not rows:
-        raise ValueError("cannot write an empty study summary")
-    with path.open("w", newline="", encoding="utf-8") as stream:
-        writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
-        writer.writeheader()
-        writer.writerows(rows)
+_PLOTTED_METRICS = (
+    ("rmse_n", "RMSE (N)"),
+    ("mae_n", "MAE (N)"),
+    ("torque_saturation_ratio", "Torque saturation ratio"),
+)
+_PUBLICATION_DPI = 600
 
 
 def _transient_stats(group: list[dict[str, object]], metric: str) -> tuple[float, float]:
@@ -105,6 +105,204 @@ def json_compatible(value: object) -> object:
     return value
 
 
+def _science_pyplot():
+    """加载项目统一的论文级无 LaTeX SciencePlots 样式。"""
+    try:
+        import matplotlib.pyplot as plt
+        import scienceplots  # noqa: F401 -- 导入后注册样式。
+    except ModuleNotFoundError as error:
+        raise ModuleNotFoundError("请先使用 `uv sync` 安装项目依赖。") from error
+    plt.style.use(["science", "ieee", "no-latex"])
+    plt.rcParams.update({"pdf.fonttype": 42, "ps.fonttype": 42, "savefig.dpi": _PUBLICATION_DPI})
+    return plt
+
+
+def _save_publication_figure(figure, png_path: Path, **savefig_kwargs: object) -> Path:
+    """同时保存 600 DPI PNG 与嵌入 TrueType 字体的矢量 PDF。"""
+    pdf_path = png_path.with_suffix(".pdf")
+    figure.savefig(png_path, dpi=_PUBLICATION_DPI, **savefig_kwargs)
+    figure.savefig(pdf_path, **savefig_kwargs)
+    return pdf_path
+
+
+def _finite_error(value: object) -> float:
+    """将缺失或非有限标准差转换为零误差条。"""
+    if value is None:
+        return 0.0
+    number = float(value)
+    return number if math.isfinite(number) else 0.0
+
+
+def plot_material_summary(
+    aggregates: list[dict[str, object]], output: Path, *, controller_order: Iterable[str]
+) -> Path:
+    """按材料展示 RMSE、MAE 与力矩饱和比例的总体对比。"""
+    if not aggregates:
+        raise ValueError("cannot plot empty aggregates")
+    plt = _science_pyplot()
+    controllers = tuple(controller_order)
+    materials = tuple(dict.fromkeys(str(row["object_material"]) for row in aggregates))
+    lookup = {
+        (str(row["controller_variant"]), str(row["object_material"])): row for row in aggregates
+    }
+    figure, axes = plt.subplots(
+        len(materials),
+        len(_PLOTTED_METRICS),
+        figsize=(10.5, max(3.0, 2.7 * len(materials))),
+        squeeze=False,
+    )
+    x = np.arange(len(controllers), dtype=np.float64)
+    for material_index, material in enumerate(materials):
+        for metric_index, (metric, label) in enumerate(_PLOTTED_METRICS):
+            axis = axes[material_index][metric_index]
+            values: list[float] = []
+            errors: list[float] = []
+            for controller in controllers:
+                row = lookup.get((controller, material))
+                mean = None if row is None else row.get(f"{metric}_mean")
+                values.append(math.nan if mean is None else float(mean))
+                errors.append(0.0 if row is None else _finite_error(row.get(f"{metric}_std")))
+            axis.bar(x, values, yerr=errors, capsize=2, color="#0072B2")
+            axis.set_xticks(x, controllers, rotation=20, ha="right")
+            axis.set_ylabel(label)
+            axis.grid(True, axis="y", linewidth=0.3, alpha=0.5)
+            if material_index == 0:
+                axis.set_title(label)
+            if metric_index == 0:
+                axis.text(
+                    0.01,
+                    0.94,
+                    material,
+                    transform=axis.transAxes,
+                    va="top",
+                    fontweight="bold",
+                )
+    pdf_path = _save_publication_figure(figure, output, bbox_inches="tight")
+    plt.close(figure)
+    return pdf_path
+
+
+def paired_pid_factorial_effects(rows: list[dict[str, object]]) -> dict[str, list[float]]:
+    """从相同材料和 seed 的 PID 2×2 数据提取 RMSE 主效应与交互数据。"""
+    variants = {
+        (False, False): "pid-only",
+        (True, False): "pid-torque-ff",
+        (False, True): "pid-stiffness-ff",
+        (True, True): "full",
+    }
+    by_condition = {
+        (
+            str(row["object_material"]),
+            int(row["sensor_noise_seed"]),
+            str(row["controller_variant"]),
+        ): row
+        for row in rows
+        if bool(row.get("passed"))
+        and row.get("rmse_n") is not None
+        and math.isfinite(float(row["rmse_n"]))
+    }
+    cells: dict[tuple[bool, bool], list[float]] = {key: [] for key in variants}
+    torque_effects: list[float] = []
+    stiffness_effects: list[float] = []
+    conditions = {(material, seed) for material, seed, _ in by_condition}
+    for material, seed in conditions:
+        values = {
+            factors: float(by_condition[(material, seed, variant)]["rmse_n"])
+            for factors, variant in variants.items()
+            if (material, seed, variant) in by_condition
+        }
+        if len(values) != len(variants):
+            continue
+        for factors, value in values.items():
+            cells[factors].append(value)
+        for stiffness in (False, True):
+            off = values.get((False, stiffness))
+            on = values.get((True, stiffness))
+            if off is not None and on is not None:
+                torque_effects.append(on - off)
+        for torque in (False, True):
+            off = values.get((torque, False))
+            on = values.get((torque, True))
+            if off is not None and on is not None:
+                stiffness_effects.append(on - off)
+    return {
+        "none": cells[(False, False)],
+        "torque": cells[(True, False)],
+        "stiffness": cells[(False, True)],
+        "both": cells[(True, True)],
+        "torque_effect": torque_effects,
+        "stiffness_effect": stiffness_effects,
+    }
+
+
+def _mean_and_standard_error(values: list[float]) -> tuple[float, float]:
+    """返回有限样本的均值与标准误；没有样本时返回 NaN。"""
+    if not values:
+        return math.nan, 0.0
+    return fmean(values), stdev(values) / math.sqrt(len(values)) if len(values) > 1 else 0.0
+
+
+def plot_pid_factorial_effects(rows: list[dict[str, object]], output: Path) -> Path:
+    """绘制 torque FF 与 stiffness FF 的配对主效应和 2×2 交互作用。"""
+    effects = paired_pid_factorial_effects(rows)
+    plt = _science_pyplot()
+    figure, axes = plt.subplots(1, 2, figsize=(8.8, 3.6), layout="constrained")
+    interaction = axes[0]
+    x = np.asarray((0.0, 1.0))
+    for label, off_key, on_key, color in (
+        ("stiffness FF off", "none", "torque", "#0072B2"),
+        ("stiffness FF on", "stiffness", "both", "#D55E00"),
+    ):
+        off_mean, off_error = _mean_and_standard_error(effects[off_key])
+        on_mean, on_error = _mean_and_standard_error(effects[on_key])
+        interaction.errorbar(
+            x,
+            (off_mean, on_mean),
+            yerr=(off_error, on_error),
+            marker="o",
+            capsize=2,
+            label=label,
+            color=color,
+        )
+    interaction.set_xticks(x, ("torque FF off", "torque FF on"))
+    interaction.set_ylabel("Paired RMSE (N)")
+    interaction.set_title("PID 2×2 interaction")
+    interaction.grid(True, axis="y", linewidth=0.3, alpha=0.5)
+    interaction.legend(frameon=False)
+
+    main_effect = axes[1]
+    labels = ("torque FF", "stiffness FF")
+    means, errors = zip(
+        *(_mean_and_standard_error(effects[key]) for key in ("torque_effect", "stiffness_effect")),
+        strict=True,
+    )
+    main_effect.bar(labels, means, yerr=errors, capsize=2, color=("#009E73", "#CC79A7"))
+    main_effect.axhline(0.0, color="black", linewidth=0.8)
+    main_effect.set_ylabel("Paired ΔRMSE, FF on − off (N)")
+    main_effect.set_title("Main effects")
+    main_effect.grid(True, axis="y", linewidth=0.3, alpha=0.5)
+    pdf_path = _save_publication_figure(figure, output, bbox_inches="tight")
+    plt.close(figure)
+    return pdf_path
+
+
+def render_study_figures(
+    rows: list[dict[str, object]],
+    aggregates: list[dict[str, object]],
+    study_dir: Path,
+    *,
+    controller_order: Iterable[str],
+) -> list[Path]:
+    """从 study 聚合结果生成服务消融目的的论文级图表。"""
+    figures_dir = study_dir / "figures"
+    figures_dir.mkdir(exist_ok=True)
+    summary_plot = figures_dir / "metrics_by_material.png"
+    factorial_plot = figures_dir / "pid_factorial_effects.png"
+    summary_pdf = plot_material_summary(aggregates, summary_plot, controller_order=controller_order)
+    factorial_pdf = plot_pid_factorial_effects(rows, factorial_plot)
+    return [summary_plot, summary_pdf, factorial_plot, factorial_pdf]
+
+
 def _create_study_directory(config: ForceTrackingAblationConfig) -> Path:
     """为一次 protocol 调用创建独占的父目录。."""
     identifier = f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}-{uuid4().hex[:8]}"
@@ -122,6 +320,7 @@ def run_study(config: ForceTrackingAblationConfig, *, config_source: Path | None
         (study_dir / "study.yaml").write_text(
             yaml.safe_dump(config.model_dump(mode="json"), sort_keys=False), encoding="utf-8"
         )
+    resolved_config = write_resolved_config(study_dir / "study.resolved.json", config)
     task = ForceTrackingTask.load(config.task)
     rows: list[dict[str, object]] = []
     for controller, material, seed in config.conditions():
@@ -147,14 +346,23 @@ def run_study(config: ForceTrackingAblationConfig, *, config_source: Path | None
             }
         )
     aggregates = aggregate_rows(rows)
-    _write_rows_csv(study_dir / "summary.csv", rows)
-    _write_rows_csv(study_dir / "aggregate.csv", aggregates)
-    (study_dir / "summary.json").write_text(
+    summary_csv, summary_parquet = write_rows_csv_and_parquet(study_dir / "summary.csv", rows)
+    aggregate_csv, aggregate_parquet = write_rows_csv_and_parquet(
+        study_dir / "aggregate.csv", aggregates
+    )
+    summary_json = study_dir / "summary.json"
+    summary_json.write_text(
         json.dumps(
             json_compatible({"runs": rows, "aggregates": aggregates}), indent=2, sort_keys=True
         )
         + "\n",
         encoding="utf-8",
+    )
+    figure_artifacts = render_study_figures(
+        rows,
+        aggregates,
+        study_dir,
+        controller_order=config.controllers,
     )
     (study_dir / "study_manifest.json").write_text(
         json.dumps(
@@ -162,7 +370,20 @@ def run_study(config: ForceTrackingAblationConfig, *, config_source: Path | None
                 "schema_version": 1,
                 "name": config.name,
                 "config": "study.yaml",
+                "resolved_config": str(resolved_config.relative_to(study_dir)),
                 "runs": [row["run_directory"] for row in rows],
+                "artifacts": [
+                    str(path.relative_to(study_dir))
+                    for path in (
+                        summary_csv,
+                        summary_parquet,
+                        aggregate_csv,
+                        aggregate_parquet,
+                        summary_json,
+                        resolved_config,
+                        *figure_artifacts,
+                    )
+                ],
             },
             indent=2,
             sort_keys=True,

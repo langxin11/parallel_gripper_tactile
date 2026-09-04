@@ -4,12 +4,19 @@ import csv
 import math
 from pathlib import Path
 
+import pyarrow.parquet as pq
 import pytest
+from PIL import Image
+from parallel_gripper_tactile.experiments import force_tracking as force_tracking_module
 
 from parallel_gripper_tactile.experiments.force_tracking import (
     ForceReference,
     ForceTrackingTask,
     ForceWaypoint,
+    _downsample_force_tracking_rows,
+    _evaluate_tracking,
+    _force_tracking_plot_layout,
+    _plot_force_tracking,
     configure_force_controller,
     run_force_tracking,
 )
@@ -37,6 +44,107 @@ def test_force_tracking_task_loads_default_waypoint_config() -> None:
     assert task.approach.feedforward_force_n == pytest.approx(1.0)
     assert task.reference.duration_s == pytest.approx(4.5)
     assert task.reference.target_at(3.5) == pytest.approx(10.0)
+
+
+def _plot_rows() -> list[dict[str, float | str]]:
+    """构造覆盖三个任务感知布局的轻量 trace。"""
+    rows: list[dict[str, float | str]] = []
+    for index in range(21):
+        time_s = index * 0.05
+        target = 2.0 + 4.0 * min(time_s, 0.5)
+        filtered = target - 0.15 * math.sin(2.0 * math.pi * time_s)
+        rows.append(
+            {
+                "time_s": time_s,
+                "tracking_time_s": time_s,
+                "phase": "track_reference",
+                "force_semantics": "average_side",
+                "target_normal_force_n": target,
+                "filtered_normal_force_n": filtered,
+                "measured_normal_force_n": filtered + 0.05,
+                "tracking_error_n": target - filtered,
+                "motor_torque_n_m": 0.02 * target,
+                "estimated_contact_stiffness_n_per_m": 100.0 + 10.0 * target,
+            }
+        )
+    return rows
+
+
+@pytest.mark.parametrize(
+    ("interpolation", "expected_layout"),
+    [
+        ("hold", "step_transient"),
+        ("linear", "ramp_hysteresis"),
+        ("smoothstep", "waypoint_error"),
+    ],
+)
+def test_force_tracking_plot_is_task_aware_and_writes_high_resolution_pair(
+    tmp_path: Path, interpolation: str, expected_layout: str
+) -> None:
+    """三类任务分别选择瞬态、滞后和 waypoint 误差诊断，并输出 PNG/PDF。"""
+    task = ForceTrackingTask(
+        schema_version=1,
+        name=f"{interpolation}_plot",
+        reference=ForceReference(
+            interpolation=interpolation,  # type: ignore[arg-type]
+            waypoints=(
+                ForceWaypoint(t_s=0.0, force_n=2.0),
+                ForceWaypoint(t_s=0.5, force_n=4.0),
+                ForceWaypoint(t_s=1.0, force_n=3.0),
+            ),
+        ),
+    )
+    output = tmp_path / f"{interpolation}.png"
+
+    assert _force_tracking_plot_layout(task) == expected_layout
+    _plot_force_tracking(output, _plot_rows(), task=task)
+
+    assert output.is_file()
+    assert output.with_suffix(".pdf").is_file()
+    with Image.open(output) as image:
+        assert image.size[0] >= 4_000
+        assert image.info["dpi"][0] == pytest.approx(600.0, abs=0.1)
+
+
+def test_force_tracking_trace_downsampling_preserves_events_and_boundaries() -> None:
+    """降采样保留首末、状态变化及 hold 阶跃邻域的全频行。"""
+    task = ForceTrackingTask(
+        schema_version=1,
+        name="sampled_hold",
+        control_period_s=0.01,
+        reference=ForceReference(
+            interpolation="hold",
+            waypoints=(
+                ForceWaypoint(t_s=0.0, force_n=2.0),
+                ForceWaypoint(t_s=0.5, force_n=5.0),
+                ForceWaypoint(t_s=1.0, force_n=3.0),
+            ),
+        ),
+    )
+    rows = [
+        {
+            "time_s": index * 0.01,
+            "tracking_time_s": index * 0.01,
+            "phase": "track_reference",
+            "control_state": "force_tracking" if index < 30 else "settled",
+            "torque_adrc_rate_limited": "false" if index < 70 else "true",
+            "torque_adrc_amplitude_limited": "false",
+        }
+        for index in range(101)
+    ]
+
+    sampled = _downsample_force_tracking_rows(
+        rows,
+        task=task,
+        trace_sample_period_s=0.1,
+        trace_event_window_s=0.02,
+    )
+
+    assert len(sampled) < len(rows)
+    assert sampled[0] == rows[0]
+    assert sampled[-1] == rows[-1]
+    assert all(rows[index] in sampled for index in (29, 30, 69, 70))
+    assert all(rows[index] in sampled for index in (49, 50, 51))
 
 
 @pytest.mark.parametrize(
@@ -229,7 +337,9 @@ def test_stiffness_estimator_method_is_a_runtime_profile_override() -> None:
     assert source.normal_force.stiffness.method == "window_linear"
 
 
-def test_force_tracking_run_writes_dynamic_reference_trace(tmp_path: Path) -> None:
+def test_force_tracking_run_writes_dynamic_reference_trace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """短版动态力跟踪实验写出 trace，并计算非空跟踪指标。"""
     task = ForceTrackingTask(
         schema_version=1,
@@ -244,16 +354,36 @@ def test_force_tracking_run_writes_dynamic_reference_trace(tmp_path: Path) -> No
         ),
     )
     output_csv = tmp_path / "force_track.csv"
+    output_parquet = tmp_path / "force_track.parquet"
+    output_plot = tmp_path / "force_track.png"
+    plotted_rows: list[dict[str, float | str]] = []
+
+    def capture_plot(
+        path: Path, rows: list[dict[str, float | str]], *, task: ForceTrackingTask
+    ) -> None:
+        """记录直接 API 的完整绘图输入，并继续生成输出工件。"""
+        assert path == output_plot
+        assert task.name == "short_force_track"
+        plotted_rows.extend(rows)
+        _plot_force_tracking(path, rows, task=task)
+
+    monkeypatch.setattr(force_tracking_module, "_plot_force_tracking", capture_plot)
 
     result = run_force_tracking(
         ROOT / "configs/custom_parallel_gripper.yaml",
         task=task,
         output_csv=output_csv,
+        output_parquet=output_parquet,
+        output_plot=output_plot,
+        trace_sample_period_s=0.01,
+        trace_event_window_s=0.02,
     )
 
     assert result.passed
     assert result.rmse_n >= 0.0
     assert output_csv.is_file()
+    assert output_plot.is_file()
+    assert output_plot.with_suffix(".pdf").is_file()
     with output_csv.open(newline="", encoding="utf-8") as stream:
         rows = list(csv.DictReader(stream))
     tracking_rows = [row for row in rows if row["phase"] == "track_reference"]
@@ -261,6 +391,37 @@ def test_force_tracking_run_writes_dynamic_reference_trace(tmp_path: Path) -> No
     assert len({round(float(row["target_normal_force_n"]), 3) for row in tracking_rows}) > 1
     assert float(tracking_rows[0]["force_feedforward_torque_n_m"]) > 0.0
     assert float(tracking_rows[0]["estimated_contact_stiffness_n_per_m"]) > 0.0
+    parquet = pq.ParquetFile(output_parquet)
+    assert parquet.metadata is not None
+    assert parquet.metadata.row_group(0).column(0).compression == "ZSTD"
+    schema = parquet.schema_arrow
+    assert schema.metadata is not None
+    assert schema.metadata[b"pgt.trace.schema_version"] == b"1"
+    assert schema.metadata[b"pgt.trace.compression"] == b"zstd"
+    assert schema.names == list(rows[0])
+    assert schema.field("phase").type == "string"
+    assert schema.field("multiccd_enabled").type == "bool"
+    assert schema.field("active_taxel_contacts").type == "int64"
+    assert schema.field("time_s").type == "double"
+    parquet_rows = parquet.read().to_pylist()
+    assert parquet_rows
+    assert isinstance(parquet_rows[0]["multiccd_enabled"], bool)
+    assert any(math.isnan(row["torque_adrc_measurement_n"]) for row in parquet_rows)
+    assert len(parquet_rows) == len(rows) < len(plotted_rows)
+    configured = configure_force_controller(
+        load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    )
+    assert configured.mit is not None
+    expected_metrics = _evaluate_tracking(
+        plotted_rows,
+        ignore_initial_s=task.metrics.ignore_initial_s,
+        mit_t_max=float(configured.mit.t_max),
+        p_min=float(configured.mit.p_min),
+        p_max=float(configured.mit.p_max),
+    )
+    assert result.rmse_n == pytest.approx(expected_metrics[0])
+    assert schema.metadata[b"pgt.trace.sample_period_s"] == b"0.01"
+    assert schema.metadata[b"pgt.trace.event_window_s"] == b"0.02"
 
 
 def test_force_tracking_direct_torque_run_tracks_reference(tmp_path: Path) -> None:

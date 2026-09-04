@@ -32,6 +32,7 @@ pgt run demo --profile PROFILE
 pgt run grasp --profile PROFILE [--video] [--object-material soft|medium|hard|stiff]
 pgt run force-track --profile PROFILE --task TASK.yaml [--viewer] [--disable-multiccd]
                     [--object-material soft|medium|hard|stiff]
+                    [--trace-period SECONDS] [--event-window SECONDS]
 pgt compare tactile --left-profile A --right-profile B
 pgt compare contact --profile PROFILE
 pgt view taxels --profile PROFILE
@@ -73,7 +74,7 @@ uv run python scripts/experiments/force_tracking_ablation.py \
 该 study 直接调用 Python runner，而非通过子进程调用 CLI。它会在 `outputs/studies` 创建独立父目录，
 保存 study 配置、逐次结果、聚合统计和每个子 run 的可复现工件。
 
-跨 `step`、`ramp`、`mixed_waypoints` 三类任务的规范化控制器对比先用 `--dry-run` 审阅 108 个条件，
+跨 `step`、`ramp`、`mixed_waypoints` 三类任务的规范化控制器对比先用 `--dry-run` 审阅 162 个条件，
 确认后再执行完整 study：
 
 ```bash
@@ -115,13 +116,23 @@ uv run python scripts/experiments/force_tracking_controller_comparison.py \
 outputs/<profile>/<experiment>/<UTC timestamp>-<id>/
 ├── manifest.json
 ├── profile.yaml
-├── trace.csv
+├── effective_parameters.json  # force-track
+├── trace.parquet              # force-track
 ├── metrics.json
 ├── plot.png
+├── plot.pdf
 └── video.mp4
 ```
 
 `manifest.json` 只列出实际产出的产物，并记录 profile 哈希、Git 状态、依赖版本、参数与创建时间。
+人工编写的 profile、task 与 study 继续使用 YAML；`effective_parameters.json` 则记录解析后的完整
+profile、task 以及本次实际生效的运行时覆盖，作为 force-track run 的机器可读复现实参。默认时序数据为
+使用 Zstd 压缩的 `trace.parquet`。普通控制器常规区段默认记录为 100 Hz，直接力矩 ADRC 记录为
+250 Hz；阶段切换、限幅状态变化和 waypoint 前后 0.2 s 仍保留完整控制频率。指标计算和绘图始终使用
+仿真中的完整频率数据，降采样只影响落盘 trace。读取接口仍兼容旧版 CSV API 和既有 `trace.csv` 历史产物。
+单次运行同时生成 600 DPI PNG 和矢量 PDF；Step、Ramp 与 Mixed/Smoothstep 分别突出瞬态误差、
+加载—卸载滞后和 waypoint 误差。CLI 可用 `--trace-period` 覆盖常规采样周期；该值必须是
+任务控制周期的整数倍，设为控制周期即可保留全频常规数据。
 `pgt runs clean` 默认只预览将删除的目标；需要删除时加 `--apply`。
 
 ## 🏗️ 架构

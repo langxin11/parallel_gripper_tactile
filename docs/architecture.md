@@ -85,6 +85,7 @@ sequenceDiagram
   E->>R: profile、task 与实验参数
   R->>A: 创建独占目录并快照 profile
   R->>A: 快照 task
+  R->>A: 写入解析后的有效参数与运行时覆盖
   R->>X: 传入已校验配置与产物路径
   X-->>R: trace、plot 与结构化 metrics
   R->>A: 登记产物并 finalize manifest
@@ -98,25 +99,36 @@ outputs/<profile>/<experiment>/<UTC timestamp>-<id>/
 ├── manifest.json
 ├── profile.yaml
 ├── task.yaml        # 仅需要 task 的实验
-├── trace.csv
+├── effective_parameters.json  # force-track：完整解析结果与实际覆盖
+├── trace.parquet
 ├── metrics.json
 ├── plot.png
+├── plot.pdf
 └── video.mp4        # 仅请求录制时
 ```
 
-`manifest.json` 只列出实际生成并登记的文件，同时记录 profile 哈希、Git 状态、依赖版本、参数和
-创建时间。失败的运行目录会保留输入快照，便于复现诊断。
+人工输入的 profile、task 与 study 保持 YAML，便于审阅和版本管理。每个 force-track run 额外写入
+`effective_parameters.json`，其中包含解析后的完整 profile、task 和实际运行时覆盖；它是复现运行语义的
+权威机器可读快照。默认 `trace.parquet` 使用 Zstd 压缩和事件感知降采样：普通控制器常规区段为
+100 Hz，直接力矩 ADRC 为 250 Hz，状态切换和 waypoint 邻域保留完整控制频率。指标与绘图读取内存中的
+完整频率 trace，因此存储优化不改变实验结论。旧 CSV API 与历史 `trace.csv` 仍可读取。
+
+`metrics.json` 与 `manifest.json` 继续使用 JSON。`manifest.json` 只列出实际生成并登记的文件，同时记录
+profile 哈希、Git 状态、依赖版本、参数和创建时间。失败的运行目录会保留输入快照，便于复现诊断。
 
 study 在单次运行之上增加一层父目录；每个条件仍使用相同 runner：
 
 ```text
 outputs/studies/<study>/<UTC timestamp>-<id>/
 ├── study.yaml
+├── study.resolved.json
 ├── runs/
 │   └── <profile>/force-track/<condition>-<UTC timestamp>-<id>/
 ├── summary.csv
-├── summary.json
+├── summary.parquet
+├── summary.json            # 保留兼容的结构化汇总
 ├── aggregate.csv         # 需要跨重复统计的批量研究提供
+├── aggregate.parquet     # 需要跨重复统计的批量研究提供
 ├── figures/              # study 级跨条件对比图
 │   ├── metrics_by_controller.png
 │   ├── metrics_by_controller.pdf
@@ -129,7 +141,9 @@ outputs/studies/<study>/<UTC timestamp>-<id>/
 └── study_manifest.json   # 登记子 run 与 study 级产物
 ```
 
-单次 run 的 `plot.png` 由 experiment 从本次 trace 生成；跨 run 的统计图由
+study 的 `summary` 与（适用时的）`aggregate` 同时输出 CSV 和 Parquet；diagnosis study 只输出 summary，
+不生成 aggregate。单次 run 的 `plot.png` / `plot.pdf` 由 experiment 从本次完整频率 trace 生成，并根据
+Step、Ramp、Mixed/Smoothstep 任务分别突出瞬态、滞后和 waypoint 误差；跨 run 的统计图由
 `scripts/experiments` 在所有条件结束后从 `summary`、`aggregate` 和子 run trace 生成 600 DPI PNG 与
 矢量 PDF，并登记到 `study_manifest.json`。未建立 `track_reference` 的条件会在 summary 与 manifest 的 `failed_runs` 中保留，
 但不会参与同 seed 轨迹叠加。绘图层不推进 MuJoCo，也不重新计算控制命令。

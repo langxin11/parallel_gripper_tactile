@@ -135,6 +135,7 @@ def collect_dependency_versions(
         "mujoco",
         "numpy",
         "matplotlib",
+        "pyarrow",
         "pydantic",
         "PyYAML",
         "typer",

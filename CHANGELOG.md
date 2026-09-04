@@ -9,6 +9,17 @@
 
 ### 新增
 
+- force-track run 新增 `effective_parameters.json`：记录解析后的完整 profile、task 与实际运行时覆盖，
+  在保留 YAML 人工输入快照的同时提供机器可读的有效参数复现依据
+- study 新增 `study.resolved.json`，保存路径和默认值均已解析的机器可读配置快照
+- force-track 默认时序产物改为 Zstd 压缩的 `trace.parquet`，并采用事件感知降采样：普通控制器常规
+  区段为 100 Hz，直接力矩 ADRC 为 250 Hz，状态变化与 waypoint 邻域保留完整控制频率；指标和绘图
+  仍使用完整频率数据；新增 `--trace-period` 与 `--event-window` 覆盖参数。读取接口继续
+  兼容旧 CSV API 与历史 `trace.csv` 产物。study 的 `summary` 与
+  （适用时的）`aggregate` 同时输出 CSV 和 Parquet，diagnosis study 仅输出 summary
+- 单次 force-track 按 Step、Ramp、Mixed/Smoothstep 的实验目的分别生成瞬态误差、加载—卸载滞后和
+  waypoint 误差诊断；PID 消融、控制器对比、ADRC 调参、刚度估计器对比和因果诊断分别生成专用图表。
+  所有图统一输出 600 DPI PNG 和矢量 PDF，并登记到 manifest
 - 新增 `adrc-torque-td` 工程对照变体：在论文式二阶直接力矩 ADRC 前加入临界阻尼线性 TD，
   同步整形反馈参考和机构模型前馈，并在 trace 中记录实际使用的参考力、变化率与加速度；原
   `adrc-torque` 保持无 TD，不改变触觉测量进入 LESO 的轻滤波链路，也不扩大默认正式矩阵

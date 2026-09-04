@@ -205,6 +205,22 @@ def run_force_track(
         typer.Option("--controller-variant"),
     ] = "full",
     sensor_noise_seed: Annotated[int | None, typer.Option("--sensor-noise-seed", min=0)] = None,
+    trace_sample_period_s: Annotated[
+        float | None,
+        typer.Option(
+            "--trace-period",
+            min=0.000001,
+            help="Stored trace period; omit for controller-aware default.",
+        ),
+    ] = None,
+    trace_event_window_s: Annotated[
+        float,
+        typer.Option(
+            "--event-window",
+            min=0.0,
+            help="Full-rate window retained around each waypoint.",
+        ),
+    ] = 0.2,
 ) -> None:
     """运行 waypoint 目标法向力跟踪实验。"""
     try:
@@ -221,6 +237,8 @@ def run_force_track(
             multiccd_enabled=not disable_multiccd,
             controller_variant=controller_variant,
             sensor_noise_seed=sensor_noise_seed,
+            trace_sample_period_s=trace_sample_period_s,
+            trace_event_window_s=trace_event_window_s,
             viewer=viewer,
             render_fps=render_fps,
             realtime_factor=realtime_factor,

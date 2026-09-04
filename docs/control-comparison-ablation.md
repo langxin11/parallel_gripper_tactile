@@ -10,7 +10,7 @@
 
 | 项目 | 推荐角色 | 不建议承担的内容 |
 | --- | --- | --- |
-| `parallel_gripper_tactile` | 真实 MJCF、profile、触觉读取、force tracking 任务、viewer、CSV/plot/metrics 产物、消融配置 | 维护大量与仿真无关的通用控制算法抽象 |
+| `parallel_gripper_tactile` | 真实 MJCF、profile、触觉读取、force tracking 任务、viewer、Parquet/CSV、plot/metrics 产物、消融配置 | 维护大量与仿真无关的通用控制算法抽象 |
 | `tactile-contact-control` | PID、ADRC、自适应刚度、扰动观测器等纯控制器实现与单元测试 | 作为当前真实夹爪 MJCF benchmark 的主入口 |
 | 硬件/ROS 适配层 | 传感器读取、电机协议、实时通信、安全限位 | 直接承载算法逻辑或实验指标统计 |
 
@@ -40,7 +40,7 @@
 
 1. 固定一组 `configs/force_tracking/*.yaml` 目标力曲线；
 2. 固定每组实验的 profile 或 controller 配置快照；
-3. 保留 `trace.csv`、`plot.png`、`metrics.json` 和 `manifest.json`；
+3. 保留 `trace.parquet`、`plot.png`、`plot.pdf`、`metrics.json` 和 `manifest.json`，并为每个 force-track run 保存 `effective_parameters.json`；
 4. 支持 `--viewer` 观察接触过程，默认仍 headless 批量运行；
 5. 明确每个指标的统计时间窗，例如使用 `metrics.ignore_initial_s` 跳过初始过渡。
 
@@ -169,135 +169,34 @@ controller command -> 达妙电机 CAN/串口命令
 瞬态三项仅在 `hold` 任务存在合格加载阶跃时计算，其余任务输出空值；定义与空值语义见
 [动态目标力跟踪](force-tracking.md)的指标表。
 
-如果某个算法 RMSE 更低但饱和比例明显更高，不能直接认为它更好。应同时检查 `trace.csv`
+如果某个算法 RMSE 更低但饱和比例明显更高，不能直接认为它更好。应同时检查 `trace.parquet`
 中的力矩、位置修正、接触状态和刚度估计曲线。
 
 对于直接力矩式力控，还应额外关注力矩抖动、力矩变化率、积分项是否 windup，以及脱离接触时是否仍有
 持续闭合力矩。该模式建议先在仿真中作为对照组使用，不应直接跳到硬件。
 
-### 6.1 2026-09-01 控制器对比结果
+### 6.1 当前控制器对比结论
 
-完整 study 位于
-[`outputs/studies/force_tracking_controller_comparison/20260901T125358Z-0a777c0f`](../outputs/studies/force_tracking_controller_comparison/20260901T125358Z-0a777c0f/aggregate.csv)。
-本次矩阵包含 4 个控制器变体、3 类目标力任务、3 个正式接触 preset 和 3 个噪声 seed，共 108 次运行。
-所有运行均成功完成，且力矩与位置饱和比例均为 0，因此当前差异没有被执行器限幅主导。
-本次历史 benchmark 使用 `secant_ewma`；study 配置已显式锁定该方法，避免默认估计器更新后改变复现实验。
+正式矩阵覆盖 PID 系模块消融、`direct-torque` 与二阶直接力矩 `adrc-torque`，并在三类目标、三种接触
+preset 和三个噪声 seed 下比较。所有已完成条件均未出现力矩或位置饱和，因此以下差异主要反映控制结构与
+调参，而不是执行器限幅。
 
-跨 `medium`、`hard`、`stiff` 三种 preset 对 RMSE 取平均后，相对 `pid-only` 的降幅为：
+- 在位置式 MIT 框架中，机构力矩前馈是最稳定、最明显的改善来源；`full` 与 `pid-torque-ff` 都显著优于
+  `pid-only`，刚度位置前馈只带来有限的附加变化。
+- `direct-torque` 在当前未经专门阻尼整形的设定下，通常更快但明显欠阻尼；它适合作为直接力矩架构的基线，
+  不能据此代表充分调参后的性能上限。
+- `adrc-torque` 在 Ramp、Mixed 等连续参考上优于位置式 `full`，但在 Step 上误差和超调更高。因此当前结论是
+  “连续目标具有优势，阶跃动态仍需调参”，不能表述为整体优于 `full`。
+- 一阶位置式 `adrc` 只保留作历史复现入口，不进入当前正式矩阵；其早期连续跟踪退化说明控制导向模型与实际
+  位置弹簧闭环阶次并不匹配，但不能推广为“自抗扰不适合此类力控任务”。
 
-| 控制器 | Step | Ramp | Mixed |
-| --- | ---: | ---: | ---: |
-| `pid-torque-ff` | 11.8% | 22.1% | 22.6% |
-| `pid-stiffness-ff` | 3.2% | 0.1% | 0.5% |
-| `full` | **14.2%** | **22.2%** | **23.1%** |
-
-`full` 在 9 个 task × preset 组合中有 8 个取得最低 RMSE。主要性能增益来自基于机构雅可比的力矩前馈；
-刚度位置前馈在 Step 中提供少量额外改善，而在 Ramp 和 Mixed 中未显示明显额外收益。当前只有 3 个 seed，
-且 Ramp 中 `full` 与 `pid-torque-ff` 的差异很小，因此不应把这一结果表述为统计显著性结论。
-
-接触时间只由 preset 和噪声 seed 决定；按三个唯一 seed 统计为：
-
-| Preset | 接触时间 |
-| --- | ---: |
-| `medium` | 1.207 ± 0.025 s |
-| `hard` | 1.092 ± 0.006 s |
-| `stiff` | 1.058 ± 0.002 s |
-
-更高的接触 preset 在当前相同几何条件下更早达到接触阈值，且 RMSE 整体下降。例如 `full` 的 Step RMSE
-由 `medium` 的 0.405 N 降至 `stiff` 的 0.372 N，Ramp 由 0.071 N 降至 0.061 N。这只能解释为
-当前显式接触条件下的系统响应趋势，不能推广为真实材料本体越硬，控制效果必然越好。
-
-`full` 在 Ramp 中的平均刚度估计随 preset 呈单调上升：`medium`、`hard`、`stiff` 分别约为
-2929、3130、3241 N/m。估计器能够区分相对刚柔趋势，但输出是夹爪—Pillar—物体—接触求解器共同形成的
-局部等效刚度，不能解释为材料弹性模量，也不能与单个 contact pair 的 `solref` 数值直接对应。
-
-当前结果还有两个指标边界：
-
-1. Step 的 `peak_abs_error_n` 对所有控制器都约为 5 N，主要来自目标由 1 N 瞬间跳到 6 N 时的初始误差，
-   不适合用于控制器排名。2026-09-02 起指标已增加 `rise_time_s`、`overshoot_ratio` 与
-   `settling_time_s`，后续控制器对比应同时报告这三项；本节 108-run 基准早于该指标，不含瞬态统计。
-2. Ramp 结束时的误差约为 -0.15 至 -0.20 N，该值更接近动态滞后，不能视为严格稳态误差。2026-09-02 起
-   `ramp.yaml` 已附加 2 s 终端保持段，复跑后 `final_error_n` 可按终端稳态误差解读；本节基准使用旧版
-   6 s 曲线。
-
-#### 6.1.1 2026-09-02 加入 direct-torque 的 135 条复跑
-
-完整 study 位于
-[`outputs/studies/force_tracking_controller_comparison/20260902T054121Z-09334c18`](../outputs/studies/force_tracking_controller_comparison/20260902T054121Z-09334c18/aggregate.csv)。
-矩阵在 6.1 基础上加入 `direct-torque` 变体：5 个控制器 × 3 类任务 × 3 个 preset × 3 个 seed，共 135 次运行，
-全部成功，力矩与位置饱和比例在全矩阵均为 0；估计器仍锁定 `secant_ewma`。本次复跑使用带终端保持段的
-新 `ramp.yaml`（8 s），Ramp 数值与 6.1 历史基准不可逐项直接对比，Step 与 Mixed 则不受影响。
-
-四个 PID 系变体在 Step 与 Mixed 中逐项复现了 6.1 的降幅（`full` 为 -14.2% 与 -23.1%），说明瞬态指标与
-终端保持段的引入没有改变既有结论的口径可比性。跨 preset 平均的 RMSE 相对 `pid-only` 变化为：
-
-| 控制器 | Step | Ramp | Mixed |
-| --- | ---: | ---: | ---: |
-| `pid-torque-ff` | -11.8% | -21.9% | -22.6% |
-| `pid-stiffness-ff` | -3.2% | -0.1% | -0.5% |
-| `full` | **-14.2%** | **-22.0%** | **-23.1%** |
-| `direct-torque` | +37.7% | +204.5% | +121.0% |
-
-`direct-torque` 在全部三类任务中的 RMSE 均高于最朴素的 `pid-only`，且零饱和——差距来自控制结构本身，
-不是执行器限幅。Step 任务的瞬态指标（跨 preset 平均）给出了机制层面的解释：
-
-| 控制器 | 上升时间 (s) | 超调比 | ±5% 稳定时间 (s) |
-| --- | ---: | ---: | ---: |
-| `pid-only` | 0.071 | 0.9% | 0.249 |
-| `pid-torque-ff` | 0.063 | 7.5% | 0.206 |
-| `pid-stiffness-ff` | 0.070 | 0.7% | 0.252 |
-| `full` | 0.063 | 7.2% | 0.238 |
-| `direct-torque` | 0.048 | 64.4% | 0.513 |
-
-直接力矩式响应最快，但呈明显欠阻尼：超调 64.4%、稳定时间最长，且超调随 preset 变硬单调恶化
-（`medium`、`hard`、`stiff` 分别为 42%、67%、84%），Step RMSE 同步由 0.546 N 升至 0.687 N。这说明
-MIT 位置内环的位置弹簧为接触力回路提供了直接力矩式不具备的阻尼整形；6.1 中机构力矩前馈的收益是在
-位置式架构内兑现的，而不是绕过它获得的。终端保持段下 Ramp 的 `final_error_n` 均可按终端稳态误差解读：
-四个 PID 系变体约 +0.0003 N，`direct-torque` 为 -0.0017 N。
-
-边界：仍然只有 3 个 seed，不构成显著性结论；`direct-torque` 采用 `torque_feedback_gain=1.0` 的纯比例
-力矩环加模型前馈，未做增益或阻尼项搜索，其表现是力矩式力控的基线下限，不能代表该架构调参后的上限；
-结论仅对当前显式接触条件成立。
-
-#### 6.1.2 2026-09-02 加入 adrc 的 162 条复跑
-
-完整 study 位于
-[`outputs/studies/force_tracking_controller_comparison/20260902T070427Z-4f93217f`](../outputs/studies/force_tracking_controller_comparison/20260902T070427Z-4f93217f/aggregate.csv)。
-矩阵在 6.1.1 基础上加入 `adrc` 变体：6 个控制器 × 3 类任务 × 3 个 preset × 3 个 seed，共 162 次运行，
-全部成功，全矩阵力矩与位置饱和为 0；四个 PID 系变体与 `direct-torque` 的数值与 6.1.1 完全一致
-（同配置同 seed 复现）。跨 preset 平均的 RMSE 相对 `pid-only` 变化：
-
-| 控制器 | Step | Ramp | Mixed |
-| --- | ---: | ---: | ---: |
-| `pid-torque-ff` | -11.8% | -21.9% | -22.6% |
-| `pid-stiffness-ff` | -3.2% | -0.1% | -0.5% |
-| `full` | **-14.2%** | **-22.0%** | **-23.1%** |
-| `direct-torque` | +37.7% | +204.5% | +121.0% |
-| `adrc` | +80.4% | +525.6% | +323.5% |
-
-`adrc`（一阶 LADRC 外环替换 PID 位置修正，带宽 (40, 120) rad/s、`b0=2700 N/m`）在三类任务中均为
-六个变体最差，且连续跟踪任务退化最重。Step 瞬态（跨 preset 平均）给出机制线索：上升时间 0.098 s
-（六个变体中第二慢）、超调 19.9%（介于 PID 系 0.7% 至 7.5% 与 `direct-torque` 的 64.4% 之间），
-且三个 preset 下均未在 2 s 平台内进入 ±5% 稳定带；Ramp 终端稳态误差为 -0.0142 N，比其余变体
-（±0.0003 至 -0.0017 N）大一个量级，指示外环积分通道收敛缓慢。零饱和说明差距同样是结构性的：
-在 500 Hz 控制周期、位置弹簧主导的对象上，一阶 LADRC 假设难以利用机构雅可比前馈已经显式建模的
-结构信息，其扰动观测补偿反而引入额外相位滞后。至此第二批算法对比矩阵全部落地：位置式 MIT 加
-机构力矩前馈（`full`）在全部任务 × preset 组合中保持最优。
-
-边界：只有 3 个 seed；`adrc` 的带宽仅在 step 任务上按“无饱和中 RMSE 最小”从五档候选选出，
-`b0` 取名义刚度未做在线辨识，也未联合 ramp/mixed 调参——单任务调参对连续跟踪任务失配是退化的
-主要嫌疑之一；该结论限于当前实现与调参预算，不能推广为“自抗扰不适合此类力控任务”。
-
-#### 6.1.3 2026-09-03 二阶直接力矩 MB-ADRC 正式 study
-
-`adrc-torque` 已在 162 条正式矩阵中完成三 seed 运行。它在 Ramp、Mixed 连续目标上的 RMSE 低于
-`full`，但 Step RMSE 与超调仍较高，因此当前结论是“连续目标具备优势，阶跃动态仍需调参”，不能
-描述为整体优于 `full`。后续使用专用调参 study 扫描轻度测量滤波、`ωc` 与 `ωo/ωc`，并分别报告
-连续目标跟踪、阶跃超调、LESO 力矩变化率限幅和 `b0` 调度范围。
+当前每个比较只包含三个 seed，适合判断工程趋势而不足以作统计显著性结论。Step 的
+`peak_abs_error_n` 主要反映目标跳变瞬间，不应单独用于控制器排名；Ramp 的终端保持段使
+`final_error_n` 更适合解释为末端稳态误差。
 
 ### 6.2 历史割线估计器的原理与定位
 
-上述 108-run benchmark 使用的 `secant_ewma` 是轻量级局部割线估计器，不属于先进的概率状态估计或系统
+历史 benchmark 使用的 `secant_ewma` 是轻量级局部割线估计器，不属于先进的概率状态估计或系统
 辨识算法。它继续作为计算量小、容易解释的历史工程基线；当前 profile 默认方法已经切换为
 `window_linear`。详细力学关系也见[曲柄滑块力控模型](crank-slider-force-control.md)。
 
@@ -370,52 +269,15 @@ RMSE、MAE、最终误差与力矩/位置饱和率；同时从 trace 检查刚�
 下的力—刚度叠加图。窗口法不能仅因估计曲线更平滑而判优，只有在不增加饱和或显著动态滞后的条件下改善跟踪误差，
 才可认为其对控制有效。
 
-#### 6.3.1 2026-09-01 刚度估计器对比结果
+#### 6.3.1 当前刚度估计器对比结论
 
-完整 study 位于
-[`outputs/studies/force_tracking_stiffness_estimator_comparison/20260901T153708Z-7a17f423`](../outputs/studies/force_tracking_stiffness_estimator_comparison/20260901T153708Z-7a17f423/aggregate.csv)。
-本次矩阵包含 3 个估计器、3 类目标力任务、3 个正式接触 preset 和 3 个噪声 seed，共 81 次运行；控制器固定为
-`pid-stiffness-ff`，即保留刚度位置前馈、关闭机构力矩前馈，因此以下差异只反映估计器对位置前馈的影响。
-所有运行均成功完成，且力矩与位置饱和比例在全部 27 个组合中均为 0，当前差异没有被执行器限幅或估计器引入的
-饱和主导。
+在固定 `pid-stiffness-ff` 的矩阵中，三种估计器均能稳定完成 Step、Ramp 和 Mixed 任务，且未引入明显饱和。
+`secant_ewma` 继续作为轻量、可解释的工程基线；`window_linear` 与 `window_quadratic` 的跟踪误差差异很小，
+目前没有显示出稳定、可推广的控制收益。因此不能只因窗口法的刚度曲线更平滑就判定其更优。
 
-跨 `medium`、`hard`、`stiff` 三种 preset 对 RMSE 取平均后，以 `secant_ewma` 为基准的数值与相对变化为：
-
-| 估计器 | Step | Ramp | Mixed |
-| --- | ---: | ---: | ---: |
-| `secant_ewma`（基准） | 0.440 N | 0.085 N | 0.111 N |
-| `window_linear` | 0.442 N（+0.4%） | 0.086 N（+1.0%） | 0.111 N（+0.1%） |
-| `window_quadratic` | 0.441 N（+0.3%） | 0.085 N（+0.1%） | 0.110 N（-0.1%） |
-
-两种窗口法在 Step 与 Ramp 中均未低于基准：`window_linear` 分别高 0.4% 与 1.0%（Ramp 差距主要来自
-`medium`，`stiff` 下与基准持平），`window_quadratic` 分别高 0.3% 与 0.1%；Mixed 中三者相差只有 ±0.1%，
-差异很小，不应排序，`window_quadratic` 名义上的 -0.1% 也不应视为改善。按 6.3 protocol 的判据，窗口法只有
-在不增加饱和或显著动态滞后的条件下改善跟踪误差，才可认为对控制有效；本次没有任何估计器相对基准改善跟踪
-误差，因此在当前 `pid-stiffness-ff` 条件下，两种窗口法均未显示出对控制的有效收益，更不能仅凭估计曲线更
-平滑而判优。当前只有 3 个 seed，上述差异的绝对值不超过 0.002 N，不应表述为统计显著性结论。
-
-Ramp 卸载末端的 `final_error_n` 不因估计器而异：同一 preset 下三个估计器的差别不超过 0.003 N，`medium`、
-`hard`、`stiff` 下分别约为 -0.19、-0.20、-0.18 N。与 6.1 的边界一致，该基准的 ramp 卸载到 1 N 后没有
-终端保持段，此值更接近动态滞后，不能视为严格稳态误差（`ramp.yaml` 已于 2026-09-02 附加终端保持段）。
-
-Ramp 任务的平均估计刚度（N/m）随 preset 的变化为：
-
-| 估计器 | `medium` | `hard` | `stiff` |
-| --- | ---: | ---: | ---: |
-| `secant_ewma` | 2930 | 3117 | 3226 |
-| `window_linear` | 1348 | 1268 | 2757 |
-| `window_quadratic` | 1630 | 1429 | 4935 |
-
-`secant_ewma` 随 preset 单调上升，数值与 6.1 在 `full` 控制器下报出的历史结果（约 2929、3130、3241 N/m）
-几乎一致；两种窗口法的平均估计刚度则与基准相差明显且非单调：`window_linear` 整体更低（1268 至 2757 N/m），
-`window_quadratic` 在 `medium`、`hard` 下更低，但在 `stiff` 下升至 4935 N/m，约为基准的 1.5 倍。估计刚度
-的这些差异并未转化为跟踪差异（RMSE 相对变化不超过 1.0%），说明当前配置下位置前馈对估计刚度偏差并不敏感，
-平均估计刚度的绝对值差异本身不能作为估计器优劣的证据。估计刚度仍是夹爪—Pillar—物体—接触求解器共同形成的
-局部等效刚度，不能解释为材料弹性模量；上述数值只描述当前显式接触条件与 `pid-stiffness-ff` 配置下的趋势，
-不能推广到真实材料属性或其他控制器组合。
-
-最后一个指标边界：Step 的 `peak_abs_error_n` 对三个估计器均约为 5.0 N，由目标力从 1 N 跳到 6 N 的初始
-误差主导，与估计器选择基本无关，不适合用于估计器排名。
+三种方法给出的平均等效刚度可能相差较大，且不一定随接触 preset 单调变化；这种差异未转化为明确的跟踪改善。
+它反映的是夹爪、Pillar、物体和接触求解器共同形成的局部等效刚度，不应解释为材料弹性模量或估计器精度的
+直接证据。当前每个组合只有三个 seed，结论仅限于当前 `pid-stiffness-ff` 配置与显式接触模型。
 
 ## 7. 配置组织建议
 
@@ -467,8 +329,22 @@ uv run python scripts/experiments/force_tracking_controller_comparison.py \
 默认配置展开 6 个控制器变体（四个 PID 系加 `direct-torque` 与二阶 `adrc-torque`）× 3 个 task ×
 3 个正式接触 preset × 3 个 seed，共 162 个条件。一阶位置式 `adrc` 只保留为历史复现入口
 （历史配置依次为 4 变体 108 条、5 变体 135 条、6 变体 162 条）。每个条件保留独立
-run，study 父目录生成 `summary.csv`、`aggregate.csv`、`summary.json`、对比图和
-`study_manifest.json`。脚本顺序调用 runner，不通过 CLI 子进程启动单次实验。
+run，study 父目录生成 `summary.csv`、`summary.parquet`、适用时的 `aggregate.csv` 与
+`aggregate.parquet`、对比图和 `study_manifest.json`。diagnosis study 只生成 summary。人工输入配置仍为
+YAML；每个 force-track run 的 `effective_parameters.json` 记录完整解析 profile、task 及实际运行时覆盖。
+默认时序产物是 Zstd 压缩的 `trace.parquet`：普通控制器常规区段为 100 Hz，直接力矩 ADRC 为 250 Hz，
+关键状态变化与 waypoint 邻域保留完整控制频率；指标计算和绘图仍使用完整频率数据。旧 CSV API 和历史 CSV
+产物仍可读取。脚本顺序调用 runner，不通过 CLI 子进程启动单次实验。
+
+不同研究使用不同图表，而不是复用一套通用柱状图：
+
+- PID 消融：按材料汇总 RMSE/MAE/力矩饱和，并用同材料、同 seed、四变体齐全的数据绘制 2×2 主效应与交互作用；
+- 控制器对比：按任务/材料比较误差和饱和，展示相对 Full 的消融增量，并叠加同 seed 轨迹；
+- ADRC 参数寻优：展示候选排名、连续任务约束与饱和可行性，以及三个调参维度和总体 RMSE 的关系；
+- 刚度估计器对比：展示各估计器指标、相对 secant 的增量，以及同条件的跟踪力和估计刚度轨迹；
+- 因果诊断：数值扫描使用真实参数横轴，分类实验使用条件标签，同时叠加通过运行的目标/滤波力轨迹。
+
+上述图表统一输出 600 DPI PNG 和矢量 PDF，并登记到各自的 `study_manifest.json`。
 
 刚度估计器对比同样先 dry-run；它固定 `pid-stiffness-ff`，默认展开 81 个条件：
 

@@ -11,6 +11,7 @@ from ..experiments.force_tracking import (
     ControllerVariant,
     ForceTrackingResult,
     ForceTrackingTask,
+    configure_force_controller,
     run_force_tracking,
 )
 from ..control import ForceSemantics
@@ -36,13 +37,26 @@ def execute_force_tracking(
     stiffness_estimator_method: StiffnessEstimatorMethod | None = None,
     sensor_noise_seed: int | None = None,
     torque_adrc_override: TorqueAdrcControl | None = None,
+    trace_sample_period_s: float | None = None,
+    trace_event_window_s: float = 0.2,
     viewer: bool = False,
     render_fps: float = 30.0,
     realtime_factor: float = 1.0,
 ) -> tuple[RunDirectory, ForceTrackingResult]:
     """运行一次完整力跟踪，并返回其目录与结构化结果。"""
     task = tracking_task or ForceTrackingTask.load(task_path)
-    configured = load_profile(profile)
+    configured = configure_force_controller(
+        load_profile(profile),
+        variant=controller_variant,
+        stiffness_estimator_method=stiffness_estimator_method,
+        sensor_noise_seed=sensor_noise_seed,
+        torque_adrc_override=torque_adrc_override,
+    )
+    resolved_trace_sample_period_s = trace_sample_period_s
+    if resolved_trace_sample_period_s is None:
+        resolved_trace_sample_period_s = (
+            0.004 if controller_variant in {"adrc-torque", "adrc-torque-td"} else 0.01
+        )
     run = RunDirectory.create(
         output_root,
         profile_name=configured.name,
@@ -63,6 +77,11 @@ def execute_force_tracking(
             "controller_variant": controller_variant,
             "stiffness_estimator_method": stiffness_estimator_method,
             "sensor_noise_seed": sensor_noise_seed,
+            "trace_format": "parquet",
+            "trace_compression": "zstd",
+            "trace_schema_version": 1,
+            "trace_sample_period_s": resolved_trace_sample_period_s,
+            "trace_event_window_s": trace_event_window_s,
             "torque_adrc_override": (
                 None
                 if torque_adrc_override is None
@@ -77,13 +96,55 @@ def execute_force_tracking(
         task_snapshot = run.artifact_path("task.yaml")
         task_snapshot.write_bytes(task_path.read_bytes())
         run.register_artifact(task_snapshot)
-        csv_path = run.artifact_path("trace.csv")
+        effective_parameters_path = run.artifact_path("effective_parameters.json")
+        effective_parameters_path.write_text(
+            json.dumps(
+                {
+                    "schema_version": 1,
+                    "profile": configured.model_dump(mode="json"),
+                    "task": task.model_dump(mode="json"),
+                    "runtime": {
+                        "profile_path": str(profile.resolve()),
+                        "task_path": str(task_path.resolve()),
+                        "object_material": object_material,
+                        "object_contact_model": object_contact_model,
+                        "multiccd_enabled": multiccd_enabled,
+                        "force_semantics": force_semantics,
+                        "controller_variant": controller_variant,
+                        "stiffness_estimator_method": stiffness_estimator_method,
+                        "sensor_noise_seed": sensor_noise_seed,
+                        "viewer": viewer,
+                        "render_fps": render_fps,
+                        "realtime_factor": realtime_factor,
+                        "trace_format": "parquet",
+                        "trace_compression": "zstd",
+                        "trace_schema_version": 1,
+                        "trace_sample_period_s": resolved_trace_sample_period_s,
+                        "trace_event_window_s": trace_event_window_s,
+                        "torque_adrc_override": (
+                            None
+                            if torque_adrc_override is None
+                            else torque_adrc_override.model_dump(mode="json")
+                        ),
+                    },
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        run.register_artifact(effective_parameters_path)
+        parquet_path = run.artifact_path("trace.parquet")
         plot_path = run.artifact_path("plot.png")
+        plot_pdf_path = plot_path.with_suffix(".pdf")
         result = run_force_tracking(
             profile,
             task=task,
-            output_csv=csv_path,
+            output_parquet=parquet_path,
             output_plot=plot_path,
+            trace_sample_period_s=resolved_trace_sample_period_s,
+            trace_event_window_s=trace_event_window_s,
             viewer=viewer,
             render_fps=render_fps,
             realtime_factor=realtime_factor,
@@ -96,8 +157,9 @@ def execute_force_tracking(
             sensor_noise_seed=sensor_noise_seed,
             torque_adrc_override=torque_adrc_override,
         )
-        run.register_artifact(csv_path)
+        run.register_artifact(parquet_path)
         run.register_artifact(plot_path)
+        run.register_artifact(plot_pdf_path)
         metrics_path = run.artifact_path("metrics.json")
         metrics_path.write_text(
             json.dumps(asdict(result), indent=2, sort_keys=True) + "\n", encoding="utf-8"

@@ -9,10 +9,11 @@ from pathlib import Path
 
 import pytest
 
+from parallel_gripper_tactile.studies.force_tracking_ablation import SeedSweep
 from parallel_gripper_tactile.studies.force_tracking_comparison import (
     ForceTrackingComparisonConfig,
 )
-from parallel_gripper_tactile.studies.force_tracking_ablation import SeedSweep
+from parallel_gripper_tactile.studies.tabular import write_rows_csv_and_parquet
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -190,6 +191,54 @@ def test_tracking_overlay_uses_common_seed(tmp_path: Path) -> None:
     assert outputs[0].suffix == ".png"
     assert outputs[1].suffix == ".pdf"
     assert all(path.is_file() and path.stat().st_size > 0 for path in outputs)
+
+
+def test_tracking_rows_prefer_parquet_over_legacy_csv(tmp_path: Path) -> None:
+    """轨迹读取在新旧文件同时存在时优先使用 Parquet。"""
+    protocol = _protocol_module()
+    run_directory = tmp_path / "runs" / "example"
+    run_directory.mkdir(parents=True)
+    write_rows_csv_and_parquet(
+        run_directory / "trace.csv",
+        [
+            {
+                "phase": "track_reference",
+                "tracking_time_s": 3.0,
+                "target_normal_force_n": 7.0,
+                "filtered_normal_force_n": 6.5,
+            }
+        ],
+    )
+    with (run_directory / "trace.csv").open("w", newline="", encoding="utf-8") as stream:
+        writer = csv.DictWriter(
+            stream,
+            fieldnames=(
+                "phase",
+                "tracking_time_s",
+                "target_normal_force_n",
+                "filtered_normal_force_n",
+            ),
+        )
+        writer.writeheader()
+        writer.writerow(
+            {
+                "phase": "track_reference",
+                "tracking_time_s": 0.0,
+                "target_normal_force_n": 1.0,
+                "filtered_normal_force_n": 1.0,
+            }
+        )
+
+    rows = protocol._read_tracking_rows(run_directory)  # type: ignore[attr-defined]
+
+    assert rows == [
+        {
+            "phase": "track_reference",
+            "tracking_time_s": 3.0,
+            "target_normal_force_n": 7.0,
+            "filtered_normal_force_n": 6.5,
+        }
+    ]
 
 
 def test_tracking_overlay_skips_failed_conditions_without_trace(tmp_path: Path) -> None:

@@ -29,6 +29,8 @@ def test_root_and_subcommand_help_are_available() -> None:
         "--run-suffix",
         "--controller-variant",
         "--sensor-noise-seed",
+        "--trace-period",
+        "--event-window",
         "--disable-multiccd",
     ):
         assert option in force_track_help.output

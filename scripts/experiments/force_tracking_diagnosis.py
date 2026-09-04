@@ -1,12 +1,12 @@
-"""Run focused force-tracking diagnostics without routing through the CLI."""
+"""直接调用 runner 执行聚焦的力跟踪诊断研究。"""
 
 from __future__ import annotations
 
 import argparse
-import csv
 from dataclasses import asdict
 from datetime import UTC, datetime
 import json
+import math
 from pathlib import Path
 from typing import Annotated, Literal
 from uuid import uuid4
@@ -21,6 +21,11 @@ from parallel_gripper_tactile.experiments.force_tracking import (
 )
 from parallel_gripper_tactile.runners import execute_force_tracking
 from parallel_gripper_tactile.scenes.custom import ObjectContactModel, ObjectMaterial
+from parallel_gripper_tactile.studies.tabular import (
+    read_trace_rows,
+    write_resolved_config,
+    write_rows_csv_and_parquet,
+)
 
 
 Phase = Literal[
@@ -47,14 +52,41 @@ ALL_PHASES: tuple[Phase, ...] = (
     "integral-gain",
     "filter-cutoff",
 )
+PUBLICATION_DPI = 600
+_NUMERIC_SCAN_FIELDS: dict[Phase, tuple[str, str]] = {
+    "force-scale": ("force_scale", "Target force scale"),
+    "position-limit": ("max_position_adjustment_rad", "Max. position adjustment (rad)"),
+    "integral-gain": ("pid_ki", "Integral gain Ki"),
+    "filter-cutoff": ("filter_cutoff_hz", "Filter cutoff (Hz)"),
+}
+_DIAGNOSTIC_METRICS = (
+    ("rmse_n", "RMSE (N)"),
+    ("peak_abs_error_n", "Peak abs. error (N)"),
+    ("torque_saturation_ratio", "Torque saturation ratio"),
+    ("position_saturation_ratio", "Position saturation ratio"),
+    ("contact_collapse_events", "Contact-collapse events"),
+)
+_EMPTY_CONTACT_DIAGNOSTICS: dict[str, object] = {
+    "min_active_taxel_contacts": None,
+    "max_active_taxel_contacts": None,
+    "contact_collapse_events": None,
+    "mean_left_force_n": None,
+    "mean_right_force_n": None,
+    "mean_average_side_force_n": None,
+    "mean_total_force_n": None,
+    "pid_position_adjustment_peak_to_peak_rad": None,
+    "stiffness_position_adjustment_peak_to_peak_rad": None,
+    "force_feedforward_torque_peak_to_peak_nm": None,
+    "motor_torque_peak_to_peak_nm": None,
+}
 
 
 class DiagnosisConfigError(ValueError):
-    """Raised when the diagnostic study configuration is invalid."""
+    """诊断 study 配置无效时抛出。"""
 
 
 class CollisionGeometryCondition(BaseModel):
-    """One collision-geometry model and its multicontact setting."""
+    """一项碰撞几何模型及其多接触设置。"""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -64,7 +96,7 @@ class CollisionGeometryCondition(BaseModel):
 
 
 class DiagnosisConfig(BaseModel):
-    """Small, explicit configuration for one force-tracking diagnosis protocol."""
+    """一个力跟踪诊断 protocol 的精简显式配置。"""
 
     model_config = ConfigDict(extra="forbid", frozen=True)
 
@@ -101,11 +133,11 @@ class DiagnosisConfig(BaseModel):
     )
     @classmethod
     def require_nonempty(cls, value: tuple[object, ...]) -> tuple[object, ...]:
-        """Reject empty or duplicated diagnostic dimensions."""
+        """拒绝空的或重复的诊断维度。"""
         if not value:
-            raise ValueError("must contain at least one value")
+            raise ValueError("至少需要包含一个值。")
         if len(set(value)) != len(value):
-            raise ValueError("must not contain duplicate values")
+            raise ValueError("不能包含重复值。")
         return value
 
     @field_validator("collision_geometry_models")
@@ -113,23 +145,23 @@ class DiagnosisConfig(BaseModel):
     def require_unique_collision_labels(
         cls, value: tuple[CollisionGeometryCondition, ...]
     ) -> tuple[CollisionGeometryCondition, ...]:
-        """Reject an empty geometry study or duplicate condition labels."""
+        """拒绝空的几何研究或重复的条件标签。"""
         if not value:
-            raise ValueError("must contain at least one collision geometry")
+            raise ValueError("至少需要包含一个碰撞几何。")
         labels = [condition.label for condition in value]
         if len(set(labels)) != len(labels):
-            raise ValueError("collision geometry labels must be unique")
+            raise ValueError("碰撞几何标签必须唯一。")
         return value
 
 
 def load_config(path: Path) -> DiagnosisConfig:
-    """Load YAML and resolve all relative paths from the YAML directory."""
+    """加载 YAML，并相对 YAML 目录解析所有路径。"""
     config_path = path.resolve()
     try:
         raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
         config = DiagnosisConfig.model_validate(raw)
     except (OSError, ValidationError, yaml.YAMLError) as error:
-        raise DiagnosisConfigError(f"invalid diagnosis config: {config_path}") from error
+        raise DiagnosisConfigError(f"诊断配置无效：{config_path}") from error
     base = config_path.parent
     return config.model_copy(
         update={
@@ -153,7 +185,7 @@ def load_config(path: Path) -> DiagnosisConfig:
 
 
 def _study_directory(config: DiagnosisConfig, phase: Phase) -> Path:
-    """Create an exclusive directory for one diagnostic phase."""
+    """为一个诊断 phase 创建独占目录。"""
     identifier = f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}-{uuid4().hex[:8]}"
     directory = config.output_root / config.name / phase / identifier
     directory.mkdir(parents=True, exist_ok=False)
@@ -161,23 +193,21 @@ def _study_directory(config: DiagnosisConfig, phase: Phase) -> Path:
 
 
 def _scaled_task(source: Path, scale: float, task_dir: Path) -> Path:
-    """Materialize a scaled task so every run snapshots its actual force reference."""
+    """生成缩放后的 task，使每个 run 快照其实际力参考。"""
     raw = yaml.safe_load(source.read_text(encoding="utf-8"))
     if not isinstance(raw, dict):
-        raise DiagnosisConfigError(f"force tracking task must be a mapping: {source}")
+        raise DiagnosisConfigError(f"力跟踪 task 必须是映射：{source}")
     approach = raw.get("approach")
     reference = raw.get("reference")
     if not isinstance(approach, dict) or not isinstance(reference, dict):
-        raise DiagnosisConfigError(
-            f"force tracking task lacks approach/reference mappings: {source}"
-        )
+        raise DiagnosisConfigError(f"力跟踪 task 缺少 approach/reference 映射：{source}")
     approach["feedforward_force_n"] = float(approach["feedforward_force_n"]) * scale
     waypoints = reference.get("waypoints")
     if not isinstance(waypoints, list):
-        raise DiagnosisConfigError(f"force tracking task has no waypoint list: {source}")
+        raise DiagnosisConfigError(f"力跟踪 task 没有 waypoint 列表：{source}")
     for waypoint in waypoints:
         if not isinstance(waypoint, dict) or "force_n" not in waypoint:
-            raise DiagnosisConfigError(f"invalid force tracking waypoint in {source}")
+            raise DiagnosisConfigError(f"力跟踪 task 含无效 waypoint：{source}")
         waypoint["force_n"] = float(waypoint["force_n"]) * scale
     task_dir.mkdir(parents=True, exist_ok=True)
     output = task_dir / f"force-scale-{scale:.3f}.yaml"
@@ -186,13 +216,13 @@ def _scaled_task(source: Path, scale: float, task_dir: Path) -> Path:
 
 
 def _semantics_scaled_profile(source: Path, profile_dir: Path) -> Path:
-    """Materialize the parameter conversion needed for an equivalent average-side task."""
+    """生成等效平均单侧 task 所需的参数换算 profile。"""
     raw = yaml.safe_load(source.read_text(encoding="utf-8"))
     try:
         force = raw["control"]["force"]
         stiffness = force["stiffness"]
     except (KeyError, TypeError) as error:
-        raise DiagnosisConfigError(f"profile lacks force/stiffness settings: {source}") from error
+        raise DiagnosisConfigError(f"profile 缺少 force/stiffness 设置：{source}") from error
     for key in ("kp", "ki", "kd"):
         force[key] = float(force[key]) * 2.0
     for key in ("initial_n_per_m", "min_n_per_m", "max_n_per_m", "min_delta_force_n"):
@@ -200,7 +230,7 @@ def _semantics_scaled_profile(source: Path, profile_dir: Path) -> Path:
     try:
         model_path = Path(raw["model"]["path"])
     except (KeyError, TypeError) as error:
-        raise DiagnosisConfigError(f"profile lacks model path: {source}") from error
+        raise DiagnosisConfigError(f"profile 缺少 model 路径：{source}") from error
     raw["model"]["path"] = str(
         model_path if model_path.is_absolute() else (source.parent / model_path).resolve()
     )
@@ -213,13 +243,13 @@ def _semantics_scaled_profile(source: Path, profile_dir: Path) -> Path:
 def _tuning_profile(
     source: Path, profile_dir: Path, label: str, override: tuple[str, float]
 ) -> Path:
-    """Materialize one profile with exactly one force-loop parameter override."""
+    """生成只覆盖一个力环参数的 profile。"""
     raw = yaml.safe_load(source.read_text(encoding="utf-8"))
     try:
         force = raw["control"]["force"]
         model_path = Path(raw["model"]["path"])
     except (KeyError, TypeError) as error:
-        raise DiagnosisConfigError(f"profile lacks force/model settings: {source}") from error
+        raise DiagnosisConfigError(f"profile 缺少 force/model 设置：{source}") from error
     key, value = override
     force[key] = value
     raw["model"]["path"] = str(
@@ -232,12 +262,12 @@ def _tuning_profile(
 
 
 def _model_profile(source: Path, profile_dir: Path, label: str, model_path: Path) -> Path:
-    """Materialize a profile that changes only the referenced collision model."""
+    """生成只修改引用碰撞模型的 profile。"""
     raw = yaml.safe_load(source.read_text(encoding="utf-8"))
     try:
         raw["model"]["path"] = str(model_path.resolve())
     except (KeyError, TypeError) as error:
-        raise DiagnosisConfigError(f"profile lacks model settings: {source}") from error
+        raise DiagnosisConfigError(f"profile 缺少 model 设置：{source}") from error
     profile_dir.mkdir(parents=True, exist_ok=True)
     output = profile_dir / f"{label}.yaml"
     output.write_text(yaml.safe_dump(raw, sort_keys=False), encoding="utf-8")
@@ -245,15 +275,13 @@ def _model_profile(source: Path, profile_dir: Path, label: str, model_path: Path
 
 
 def _force_parameters(profile_path: Path) -> dict[str, float]:
-    """Read the force-control parameters recorded beside a diagnostic run."""
+    """读取诊断 run 记录所需的力控参数。"""
     raw = yaml.safe_load(profile_path.read_text(encoding="utf-8"))
     try:
         force = raw["control"]["force"]
         stiffness = force["stiffness"]
     except (KeyError, TypeError) as error:
-        raise DiagnosisConfigError(
-            f"profile lacks force/stiffness settings: {profile_path}"
-        ) from error
+        raise DiagnosisConfigError(f"profile 缺少 force/stiffness 设置：{profile_path}") from error
     return {
         "pid_kp": float(force["kp"]),
         "pid_ki": float(force["ki"]),
@@ -268,12 +296,12 @@ def _force_parameters(profile_path: Path) -> dict[str, float]:
 
 
 def _task_targets(task_path: Path, force_semantics: ForceSemantics) -> dict[str, float]:
-    """Return final target force in both the selected and physical force conventions."""
+    """返回所选力语义和物理力语义下的最终目标力。"""
     raw = yaml.safe_load(task_path.read_text(encoding="utf-8"))
     try:
         target = float(raw["reference"]["waypoints"][-1]["force_n"])
     except (KeyError, IndexError, TypeError) as error:
-        raise DiagnosisConfigError(f"task lacks reference waypoints: {task_path}") from error
+        raise DiagnosisConfigError(f"task 缺少参考 waypoint：{task_path}") from error
     side = target if force_semantics == "average_side" else 0.5 * target
     return {
         "target_force_n": target,
@@ -282,17 +310,27 @@ def _task_targets(task_path: Path, force_semantics: ForceSemantics) -> dict[str,
     }
 
 
-def _contact_diagnostics(trace_path: Path) -> dict[str, object]:
-    """Summarize large taxel-contact collapses and raw single-side-force swings."""
-    with trace_path.open(newline="", encoding="utf-8") as stream:
-        rows = [row for row in csv.DictReader(stream) if row["phase"] == "track_reference"]
+def _contact_diagnostics(run_directory: Path) -> dict[str, object]:
+    """汇总 taxel 接触骤降和单侧原始力波动。"""
+    try:
+        rows = [
+            row for row in read_trace_rows(run_directory) if row.get("phase") == "track_reference"
+        ]
+    except (FileNotFoundError, OSError):
+        return dict(_EMPTY_CONTACT_DIAGNOSTICS)
     if not rows:
-        return {"max_active_taxel_contacts": 0, "contact_collapse_events": 0}
-    contacts = [int(row["active_taxel_contacts"]) for row in rows]
-    forces = [
-        0.5 * (float(row["left_taxel_normal_force_n"]) + float(row["right_taxel_normal_force_n"]))
-        for row in rows
-    ]
+        return dict(_EMPTY_CONTACT_DIAGNOSTICS)
+    try:
+        contacts = [int(row["active_taxel_contacts"]) for row in rows]
+        forces = [
+            0.5
+            * (float(row["left_taxel_normal_force_n"]) + float(row["right_taxel_normal_force_n"]))
+            for row in rows
+        ]
+        left_forces = [float(row["left_taxel_normal_force_n"]) for row in rows]
+        right_forces = [float(row["right_taxel_normal_force_n"]) for row in rows]
+    except (KeyError, TypeError, ValueError):
+        return dict(_EMPTY_CONTACT_DIAGNOSTICS)
     maximum = max(contacts)
     collapse_threshold = 0.5 * maximum
     events = sum(
@@ -304,23 +342,193 @@ def _contact_diagnostics(trace_path: Path) -> dict[str, object]:
         values = [float(row[column]) for row in rows]
         return max(values) - min(values)
 
-    left_forces = [float(row["left_taxel_normal_force_n"]) for row in rows]
-    right_forces = [float(row["right_taxel_normal_force_n"]) for row in rows]
-    return {
-        "min_active_taxel_contacts": min(contacts),
-        "max_active_taxel_contacts": maximum,
-        "contact_collapse_events": events,
-        "mean_left_force_n": sum(left_forces) / len(left_forces),
-        "mean_right_force_n": sum(right_forces) / len(right_forces),
-        "mean_average_side_force_n": sum(forces) / len(forces),
-        "mean_total_force_n": 2.0 * sum(forces) / len(forces),
-        "pid_position_adjustment_peak_to_peak_rad": peak_to_peak("pid_position_adjustment_rad"),
-        "stiffness_position_adjustment_peak_to_peak_rad": peak_to_peak(
-            "stiffness_position_adjustment_rad"
-        ),
-        "force_feedforward_torque_peak_to_peak_nm": peak_to_peak("force_feedforward_torque_n_m"),
-        "motor_torque_peak_to_peak_nm": peak_to_peak("motor_torque_n_m"),
-    }
+    try:
+        return {
+            "min_active_taxel_contacts": min(contacts),
+            "max_active_taxel_contacts": maximum,
+            "contact_collapse_events": events,
+            "mean_left_force_n": sum(left_forces) / len(left_forces),
+            "mean_right_force_n": sum(right_forces) / len(right_forces),
+            "mean_average_side_force_n": sum(forces) / len(forces),
+            "mean_total_force_n": 2.0 * sum(forces) / len(forces),
+            "pid_position_adjustment_peak_to_peak_rad": peak_to_peak("pid_position_adjustment_rad"),
+            "stiffness_position_adjustment_peak_to_peak_rad": peak_to_peak(
+                "stiffness_position_adjustment_rad"
+            ),
+            "force_feedforward_torque_peak_to_peak_nm": peak_to_peak(
+                "force_feedforward_torque_n_m"
+            ),
+            "motor_torque_peak_to_peak_nm": peak_to_peak("motor_torque_n_m"),
+        }
+    except (KeyError, TypeError, ValueError):
+        return dict(_EMPTY_CONTACT_DIAGNOSTICS)
+
+
+def _science_pyplot():
+    """加载项目统一的论文级无 LaTeX SciencePlots 样式。"""
+    try:
+        import matplotlib.pyplot as plt
+        import scienceplots  # noqa: F401 -- 导入后注册样式。
+    except ModuleNotFoundError as error:
+        raise ModuleNotFoundError("请先使用 `uv sync` 安装项目依赖。") from error
+    plt.style.use(["science", "ieee", "no-latex"])
+    plt.rcParams.update({"pdf.fonttype": 42, "ps.fonttype": 42, "savefig.dpi": PUBLICATION_DPI})
+    return plt
+
+
+def _save_publication_figure(figure, png_path: Path, **savefig_kwargs: object) -> Path:
+    """同时保存 600 DPI PNG 与嵌入 TrueType 字体的矢量 PDF。"""
+    pdf_path = png_path.with_suffix(".pdf")
+    figure.savefig(png_path, dpi=PUBLICATION_DPI, **savefig_kwargs)
+    figure.savefig(pdf_path, **savefig_kwargs)
+    return pdf_path
+
+
+def _finite_metric(row: dict[str, object], field: str) -> float | None:
+    """返回一项有限数值；缺失、无穷和非数值均视为不可绘制。"""
+    try:
+        value = float(row[field])
+    except (KeyError, TypeError, ValueError):
+        return None
+    return value if math.isfinite(value) else None
+
+
+def plot_diagnostic_metrics(rows: list[dict[str, object]], output: Path, *, phase: Phase) -> Path:
+    """绘制单个诊断 phase 的误差、饱和和接触崩塌指标。
+
+    数值扫描严格使用配置中的真实数值作为横轴；其余 phase 使用条件标签，避免将
+    不可排序的分类变量伪装成连续量。
+    """
+    if not rows:
+        raise ValueError("不能为没有运行结果的 phase 绘图。")
+    plt = _science_pyplot()
+    numeric_scan = _NUMERIC_SCAN_FIELDS.get(phase)
+    figure, axes = plt.subplots(2, 3, figsize=(10.4, 5.8), layout="constrained")
+    for axis, (field, metric_label) in zip(axes.flat, _DIAGNOSTIC_METRICS):
+        values = [_finite_metric(row, field) for row in rows]
+        if numeric_scan is not None:
+            x_field, x_label = numeric_scan
+            pairs = [
+                (x_value, value)
+                for row, value in zip(rows, values)
+                if (x_value := _finite_metric(row, x_field)) is not None and value is not None
+            ]
+            pairs.sort(key=lambda pair: pair[0])
+            if pairs:
+                x_values, y_values = zip(*pairs)
+                axis.plot(x_values, y_values, marker="o", linewidth=1.1)
+            axis.set_xlabel(x_label)
+        else:
+            categories = [str(row.get("label", "unknown condition")) for row in rows]
+            x_values = list(range(len(categories)))
+            plotted = [math.nan if value is None else value for value in values]
+            axis.bar(x_values, plotted, color="#0072B2")
+            axis.set_xticks(x_values, categories, rotation=25, ha="right")
+        axis.set_ylabel(metric_label)
+        axis.grid(True, axis="y", linewidth=0.3, alpha=0.5)
+    axes.flat[-1].set_visible(False)
+    figure.suptitle(f"{phase}: causal force-tracking diagnostics")
+    pdf_path = _save_publication_figure(figure, output)
+    plt.close(figure)
+    return pdf_path
+
+
+def _read_tracking_rows(run_directory: Path) -> list[dict[str, object]]:
+    """读取并校验一个 run 可用于叠加的跟踪阶段轨迹。"""
+    try:
+        rows = read_trace_rows(run_directory)
+    except (FileNotFoundError, OSError):
+        return []
+    usable: list[dict[str, object]] = []
+    for row in rows:
+        if row.get("phase") != "track_reference":
+            continue
+        try:
+            time_s = float(row["tracking_time_s"])
+            target = float(row["target_normal_force_n"])
+            filtered = float(row["filtered_normal_force_n"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if all(math.isfinite(value) for value in (time_s, target, filtered)):
+            usable.append(
+                {
+                    "tracking_time_s": time_s,
+                    "target_normal_force_n": target,
+                    "filtered_normal_force_n": filtered,
+                }
+            )
+    return usable
+
+
+def _row_passed(row: dict[str, object]) -> bool:
+    """判断运行是否通过，并兼容尚未写入 ``passed`` 的历史汇总。"""
+    passed = row.get("passed")
+    if isinstance(passed, str):
+        return passed.lower() == "true"
+    if passed is not None:
+        return bool(passed)
+    stable = row.get("simulation_stable")
+    if isinstance(stable, str):
+        stable = stable.lower() == "true"
+    rmse = _finite_metric(row, "rmse_n")
+    return bool(stable) and rmse is not None
+
+
+def plot_tracking_overlay(
+    rows: list[dict[str, object]], study_dir: Path, output: Path, *, phase: Phase
+) -> list[Path]:
+    """叠加所有有效运行的目标力和滤波力，并跳过无跟踪段的运行。"""
+    traces: list[tuple[str, list[dict[str, object]]]] = []
+    for row in rows:
+        if not _row_passed(row):
+            continue
+        trace = _read_tracking_rows(study_dir / str(row.get("run_directory", "")))
+        if trace:
+            traces.append((str(row.get("label", "unknown condition")), trace))
+    if not traces:
+        return []
+
+    plt = _science_pyplot()
+    figure, axis = plt.subplots(figsize=(7.2, 4.0), layout="constrained")
+    for index, (label, trace) in enumerate(traces):
+        time_s = [float(item["tracking_time_s"]) for item in trace]
+        if index == 0:
+            axis.plot(
+                time_s,
+                [float(item["target_normal_force_n"]) for item in trace],
+                color="black",
+                linestyle="--",
+                linewidth=1.0,
+                label="Target",
+            )
+        axis.plot(
+            time_s,
+            [float(item["filtered_normal_force_n"]) for item in trace],
+            linewidth=1.1,
+            label=label,
+        )
+    axis.set_xlabel("Tracking time (s)")
+    axis.set_ylabel("Normal force (N)")
+    axis.set_title(f"{phase}: target and valid filtered-force trajectories")
+    axis.grid(True, linewidth=0.3, alpha=0.5)
+    axis.legend(frameon=False, ncol=2, fontsize="small")
+    pdf_path = _save_publication_figure(figure, output)
+    plt.close(figure)
+    return [output, pdf_path]
+
+
+def render_phase_figures(
+    rows: list[dict[str, object]], study_dir: Path, *, phase: Phase
+) -> list[Path]:
+    """生成一个 phase 的诊断指标图和有效运行轨迹叠加图。"""
+    figures_dir = study_dir / "figures"
+    figures_dir.mkdir(exist_ok=True)
+    metrics_path = figures_dir / "diagnostic_metrics.png"
+    metrics_pdf = plot_diagnostic_metrics(rows, metrics_path, phase=phase)
+    trace_paths = plot_tracking_overlay(
+        rows, study_dir, figures_dir / "tracking_overlay.png", phase=phase
+    )
+    return [metrics_path, metrics_pdf, *trace_paths]
 
 
 def _conditions(
@@ -340,7 +548,7 @@ def _conditions(
     ],
     ...,
 ]:
-    """Return the deliberately one-factor-at-a-time conditions for one phase."""
+    """返回一个 phase 中刻意构造的单因素条件。"""
     if phase == "reproducibility":
         return tuple(
             (
@@ -505,9 +713,10 @@ def _conditions(
 
 
 def run_phase(config: DiagnosisConfig, phase: Phase, *, config_source: Path) -> Path:
-    """Run one diagnosis phase and return its study directory."""
+    """执行一个诊断 phase，并返回其 study 目录。"""
     study_dir = _study_directory(config, phase)
     (study_dir / "study.yaml").write_bytes(config_source.read_bytes())
+    resolved_config = write_resolved_config(study_dir / "study.resolved.json", config)
     rows: list[dict[str, object]] = []
     for (
         label,
@@ -568,27 +777,54 @@ def run_phase(config: DiagnosisConfig, phase: Phase, *, config_source: Path) -> 
                 "swept_value": None if tuning_override is None else tuning_override[1],
                 "sensor_noise_seed": config.sensor_noise_seed,
                 "run_directory": str(run.path.relative_to(study_dir)),
+                "passed": result.passed,
                 **targets,
                 **_force_parameters(profile_path),
                 **asdict(result),
-                **_contact_diagnostics(run.path / "trace.csv"),
+                **_contact_diagnostics(run.path),
             }
         )
-    with (study_dir / "summary.csv").open("w", newline="", encoding="utf-8") as stream:
-        writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
-        writer.writeheader()
-        writer.writerows(rows)
-    (study_dir / "summary.json").write_text(
+    summary_csv, summary_parquet = write_rows_csv_and_parquet(study_dir / "summary.csv", rows)
+    summary_json = study_dir / "summary.json"
+    summary_json.write_text(
         json.dumps({"phase": phase, "runs": rows}, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    figure_artifacts = render_phase_figures(rows, study_dir, phase=phase)
+    (study_dir / "study_manifest.json").write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "name": config.name,
+                "phase": phase,
+                "config": "study.yaml",
+                "resolved_config": str(resolved_config.relative_to(study_dir)),
+                "runs": [row["run_directory"] for row in rows],
+                "failed_runs": [row["run_directory"] for row in rows if not bool(row["passed"])],
+                "artifacts": [
+                    str(path.relative_to(study_dir))
+                    for path in (
+                        summary_csv,
+                        summary_parquet,
+                        summary_json,
+                        resolved_config,
+                        *figure_artifacts,
+                    )
+                ],
+            },
+            indent=2,
+            sort_keys=True,
+        )
+        + "\n",
         encoding="utf-8",
     )
     return study_dir
 
 
 def main() -> None:
-    """Parse a diagnosis configuration and execute one selected phase."""
+    """解析诊断配置并执行选定 phase。"""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", type=Path, required=True, help="Diagnosis study YAML path")
+    parser.add_argument("--config", type=Path, required=True, help="诊断 study YAML 路径")
     parser.add_argument("--phase", choices=(*ALL_PHASES, "all"), required=True)
     arguments = parser.parse_args()
     config_path = arguments.config.resolve()

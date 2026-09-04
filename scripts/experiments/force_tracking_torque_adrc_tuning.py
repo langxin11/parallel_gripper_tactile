@@ -22,19 +22,15 @@ from parallel_gripper_tactile.studies.force_tracking_torque_adrc_tuning import (
     TorqueAdrcCandidate,
     load_torque_adrc_tuning_config,
 )
+from parallel_gripper_tactile.studies.tabular import (
+    write_resolved_config,
+    write_rows_csv,
+    write_rows_csv_and_parquet,
+)
 
 
 METRICS = ("rmse_n", "overshoot_ratio", "settling_time_s", "torque_saturation_ratio")
-
-
-def _write_csv(path: Path, rows: list[dict[str, object]]) -> None:
-    """写入同构 CSV 行。"""
-    if not rows:
-        raise ValueError("cannot write empty CSV rows")
-    with path.open("w", newline="", encoding="utf-8") as stream:
-        writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
-        writer.writeheader()
-        writer.writerows(rows)
+PUBLICATION_DPI = 600
 
 
 def _create_study_directory(config: ForceTrackingTorqueAdrcTuningConfig, stage: str) -> Path:
@@ -127,6 +123,171 @@ def _mean_metric(
     return fmean(values) if values else None
 
 
+def _science_pyplot():
+    """加载项目统一的论文级无 LaTeX SciencePlots 样式。"""
+    try:
+        import matplotlib.pyplot as plt
+        import scienceplots  # noqa: F401 -- 导入后注册样式。
+    except ModuleNotFoundError as error:
+        raise ModuleNotFoundError("请先使用 `uv sync` 安装项目依赖。") from error
+    plt.style.use(["science", "ieee", "no-latex"])
+    plt.rcParams.update({"pdf.fonttype": 42, "ps.fonttype": 42, "savefig.dpi": PUBLICATION_DPI})
+    return plt
+
+
+def _save_publication_figure(figure, png_path: Path, **savefig_kwargs: object) -> Path:
+    """同时保存 600 DPI PNG 与嵌入 TrueType 字体的矢量 PDF。"""
+    pdf_path = png_path.with_suffix(".pdf")
+    figure.savefig(png_path, dpi=PUBLICATION_DPI, **savefig_kwargs)
+    figure.savefig(pdf_path, **savefig_kwargs)
+    return pdf_path
+
+
+def _finite_or_nan(value: object) -> float:
+    """将缺失或非有限指标映射为 NaN，便于图表保留缺口。"""
+    if value is None:
+        return math.nan
+    number = float(value)
+    return number if math.isfinite(number) else math.nan
+
+
+def plot_candidate_ranking_and_feasibility(
+    ranking: list[dict[str, object]],
+    output: Path,
+    *,
+    max_torque_saturation_ratio: float,
+    max_ramp_rmse_ratio_to_baseline: float,
+    max_mixed_rmse_ratio_to_baseline: float,
+) -> Path:
+    """绘制候选排序以及连续任务和饱和约束的可行性。"""
+    if not ranking:
+        raise ValueError("cannot plot empty ranking")
+    plt = _science_pyplot()
+    labels = [f"#{int(row['rank'])} {row['candidate_id']}" for row in ranking]
+    feasible = [str(row.get("feasible")) == "true" for row in ranking]
+    colors = ["#009E73" if item else "#D55E00" for item in feasible]
+    figure, axes = plt.subplots(1, 3, figsize=(13.2, 3.8), layout="constrained")
+    overshoot = [_finite_or_nan(row.get("step_overshoot_ratio_mean")) for row in ranking]
+    axes[0].barh(labels, overshoot, color=colors)
+    axes[0].invert_yaxis()
+    axes[0].set_xlabel("Step overshoot ratio")
+    axes[0].set_title("Candidate ranking")
+    axes[0].grid(True, axis="x", linewidth=0.3, alpha=0.5)
+
+    ramp = [_finite_or_nan(row.get("ramp_rmse_ratio_to_baseline")) for row in ranking]
+    mixed = [_finite_or_nan(row.get("mixed_rmse_ratio_to_baseline")) for row in ranking]
+    axes[1].scatter(ramp, mixed, c=colors, s=32)
+    axes[1].axvline(max_ramp_rmse_ratio_to_baseline, color="black", linestyle="--", linewidth=0.8)
+    axes[1].axhline(max_mixed_rmse_ratio_to_baseline, color="black", linestyle="--", linewidth=0.8)
+    for index, (x_value, y_value) in enumerate(zip(ramp, mixed, strict=True), start=1):
+        if math.isfinite(x_value) and math.isfinite(y_value):
+            axes[1].annotate(
+                str(index), (x_value, y_value), xytext=(3, 3), textcoords="offset points"
+            )
+    axes[1].set_xlabel("Ramp RMSE / baseline")
+    axes[1].set_ylabel("Mixed RMSE / baseline")
+    axes[1].set_title("Continuous-task constraints")
+    axes[1].grid(True, linewidth=0.3, alpha=0.5)
+
+    saturation = [_finite_or_nan(row.get("max_torque_saturation_ratio")) for row in ranking]
+    axes[2].barh(labels, saturation, color=colors)
+    axes[2].invert_yaxis()
+    axes[2].axvline(max_torque_saturation_ratio, color="black", linestyle="--", linewidth=0.8)
+    axes[2].set_xlabel("Maximum torque saturation ratio")
+    axes[2].set_title("Saturation constraint")
+    axes[2].grid(True, axis="x", linewidth=0.3, alpha=0.5)
+    pdf_path = _save_publication_figure(figure, output, bbox_inches="tight")
+    plt.close(figure)
+    return pdf_path
+
+
+def _candidate_performance(aggregates: list[dict[str, object]]) -> list[dict[str, float]]:
+    """将各任务和材料的聚合指标压缩为候选级参数性能点。"""
+    grouped: dict[str, list[dict[str, object]]] = {}
+    for row in aggregates:
+        grouped.setdefault(str(row["candidate_id"]), []).append(row)
+    performances: list[dict[str, float]] = []
+    for group in grouped.values():
+        first = group[0]
+        rmse = [
+            _finite_or_nan(row.get("rmse_n_mean"))
+            for row in group
+            if math.isfinite(_finite_or_nan(row.get("rmse_n_mean")))
+        ]
+        performances.append(
+            {
+                "measurement_filter_cutoff_hz": float(first["measurement_filter_cutoff_hz"]),
+                "controller_bandwidth_rad_s": float(first["controller_bandwidth_rad_s"]),
+                "observer_bandwidth_ratio": float(first["observer_bandwidth_ratio"]),
+                "rmse_n": fmean(rmse) if rmse else math.nan,
+            }
+        )
+    return performances
+
+
+def plot_parameter_performance(aggregates: list[dict[str, object]], output: Path) -> Path:
+    """绘制滤波截止频率、控制带宽和观测器比例对总体 RMSE 的影响。"""
+    if not aggregates:
+        raise ValueError("cannot plot empty aggregates")
+    plt = _science_pyplot()
+    performances = _candidate_performance(aggregates)
+    parameters = (
+        ("measurement_filter_cutoff_hz", "Filter cutoff (Hz)"),
+        ("controller_bandwidth_rad_s", "Controller bandwidth (rad/s)"),
+        ("observer_bandwidth_ratio", "Observer/controller bandwidth ratio"),
+    )
+    figure, axes = plt.subplots(1, 3, figsize=(11.2, 3.6), layout="constrained")
+    for axis, (parameter, label) in zip(axes, parameters, strict=True):
+        grouped: dict[float, list[float]] = {}
+        for item in performances:
+            value = item["rmse_n"]
+            if math.isfinite(value):
+                grouped.setdefault(item[parameter], []).append(value)
+        x_values = sorted(grouped)
+        means = [fmean(grouped[value]) for value in x_values]
+        errors = [stdev(grouped[value]) if len(grouped[value]) > 1 else 0.0 for value in x_values]
+        axis.scatter(
+            [item[parameter] for item in performances],
+            [item["rmse_n"] for item in performances],
+            color="#0072B2",
+            alpha=0.25,
+            s=24,
+        )
+        axis.errorbar(x_values, means, yerr=errors, color="#0072B2", marker="o", capsize=2)
+        axis.set_xlabel(label)
+        axis.set_ylabel("Mean RMSE (N)")
+        axis.grid(True, linewidth=0.3, alpha=0.5)
+    figure.suptitle("ADRC parameter-performance relationships")
+    pdf_path = _save_publication_figure(figure, output, bbox_inches="tight")
+    plt.close(figure)
+    return pdf_path
+
+
+def render_study_figures(
+    aggregates: list[dict[str, object]],
+    ranking: list[dict[str, object]],
+    study_dir: Path,
+    *,
+    max_torque_saturation_ratio: float,
+    max_ramp_rmse_ratio_to_baseline: float,
+    max_mixed_rmse_ratio_to_baseline: float,
+) -> list[Path]:
+    """生成适用于 coarse 和 confirm 阶段的论文级调参图表。"""
+    figures_dir = study_dir / "figures"
+    figures_dir.mkdir(exist_ok=True)
+    ranking_plot = figures_dir / "candidate_ranking_and_feasibility.png"
+    parameter_plot = figures_dir / "parameter_performance.png"
+    ranking_pdf = plot_candidate_ranking_and_feasibility(
+        ranking,
+        ranking_plot,
+        max_torque_saturation_ratio=max_torque_saturation_ratio,
+        max_ramp_rmse_ratio_to_baseline=max_ramp_rmse_ratio_to_baseline,
+        max_mixed_rmse_ratio_to_baseline=max_mixed_rmse_ratio_to_baseline,
+    )
+    parameter_pdf = plot_parameter_performance(aggregates, parameter_plot)
+    return [ranking_plot, ranking_pdf, parameter_plot, parameter_pdf]
+
+
 def rank_candidates(
     aggregates: list[dict[str, object]],
     candidates: Iterable[TorqueAdrcCandidate],
@@ -154,6 +315,8 @@ def rank_candidates(
         step_overshoot = _mean_metric(aggregates, candidate.identifier, "step", "overshoot_ratio")
         step_rmse = _mean_metric(aggregates, candidate.identifier, "step", "rmse_n")
         max_saturation = max(saturation_values, default=math.inf)
+        ramp_ratio = None if ramp_rmse is None else ramp_rmse / baseline_ramp
+        mixed_ratio = None if mixed_rmse is None else mixed_rmse / baseline_mixed
         feasible = (
             len(candidate_rows) > 0
             and all(int(row["passed_runs"]) == int(row["runs"]) for row in candidate_rows)
@@ -162,8 +325,8 @@ def rank_candidates(
             and step_overshoot is not None
             and step_rmse is not None
             and max_saturation <= max_torque_saturation_ratio
-            and ramp_rmse <= baseline_ramp * max_ramp_rmse_ratio_to_baseline
-            and mixed_rmse <= baseline_mixed * max_mixed_rmse_ratio_to_baseline
+            and ramp_ratio <= max_ramp_rmse_ratio_to_baseline
+            and mixed_ratio <= max_mixed_rmse_ratio_to_baseline
         )
         ranking.append(
             {
@@ -177,6 +340,8 @@ def rank_candidates(
                 "step_rmse_n_mean": step_rmse,
                 "ramp_rmse_n_mean": ramp_rmse,
                 "mixed_rmse_n_mean": mixed_rmse,
+                "ramp_rmse_ratio_to_baseline": ramp_ratio,
+                "mixed_rmse_ratio_to_baseline": mixed_ratio,
                 "max_torque_saturation_ratio": max_saturation,
             }
         )
@@ -229,6 +394,7 @@ def run_study(
     stage_config = config.coarse if stage == "coarse" else config.confirm
     study_dir = _create_study_directory(config, stage)
     (study_dir / "study.yaml").write_bytes(config_source.read_bytes())
+    resolved_config = write_resolved_config(study_dir / "study.resolved.json", config)
     rows: list[dict[str, object]] = []
     for candidate in candidates:
         override = TorqueAdrcControl(
@@ -278,12 +444,23 @@ def run_study(
         max_ramp_rmse_ratio_to_baseline=config.constraints.max_ramp_rmse_ratio_to_baseline,
         max_mixed_rmse_ratio_to_baseline=config.constraints.max_mixed_rmse_ratio_to_baseline,
     )
-    _write_csv(study_dir / "summary.csv", rows)
-    _write_csv(study_dir / "aggregate.csv", aggregates)
-    _write_csv(study_dir / "candidate_ranking.csv", ranking)
-    (study_dir / "summary.json").write_text(
+    summary_csv, summary_parquet = write_rows_csv_and_parquet(study_dir / "summary.csv", rows)
+    aggregate_csv, aggregate_parquet = write_rows_csv_and_parquet(
+        study_dir / "aggregate.csv", aggregates
+    )
+    ranking_csv = write_rows_csv(study_dir / "candidate_ranking.csv", ranking)
+    summary_json = study_dir / "summary.json"
+    summary_json.write_text(
         json.dumps({"runs": rows, "aggregates": aggregates, "ranking": ranking}, indent=2) + "\n",
         encoding="utf-8",
+    )
+    figure_artifacts = render_study_figures(
+        aggregates,
+        ranking,
+        study_dir,
+        max_torque_saturation_ratio=config.constraints.max_torque_saturation_ratio,
+        max_ramp_rmse_ratio_to_baseline=config.constraints.max_ramp_rmse_ratio_to_baseline,
+        max_mixed_rmse_ratio_to_baseline=config.constraints.max_mixed_rmse_ratio_to_baseline,
     )
     (study_dir / "study_manifest.json").write_text(
         json.dumps(
@@ -292,13 +469,21 @@ def run_study(
                 "name": config.name,
                 "stage": stage,
                 "config": "study.yaml",
+                "resolved_config": str(resolved_config.relative_to(study_dir)),
                 "coarse_study_dir": None if coarse_study_dir is None else str(coarse_study_dir),
                 "runs": [row["run_directory"] for row in rows],
                 "artifacts": [
-                    "summary.csv",
-                    "aggregate.csv",
-                    "candidate_ranking.csv",
-                    "summary.json",
+                    str(path.relative_to(study_dir))
+                    for path in (
+                        summary_csv,
+                        summary_parquet,
+                        aggregate_csv,
+                        aggregate_parquet,
+                        ranking_csv,
+                        summary_json,
+                        resolved_config,
+                        *figure_artifacts,
+                    )
                 ],
             },
             indent=2,
