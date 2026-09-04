@@ -76,6 +76,14 @@ def _validate_object_contact_model(contact_model: str) -> ObjectContactModel:
     return cast(ObjectContactModel, contact_model)
 
 
+def _validate_friction_coefficient(friction_coefficient: float) -> float:
+    """验证并返回显式接触对使用的切向滑动摩擦系数。"""
+    value = float(friction_coefficient)
+    if not math.isfinite(value) or value <= 0:
+        raise ValueError("friction_coefficient must be finite and positive")
+    return value
+
+
 def _quaternion_rotate(
     quaternion: tuple[float, float, float, float], vector: np.ndarray
 ) -> np.ndarray:
@@ -167,6 +175,7 @@ def _add_tactile_object_pairs(
     scene,
     profile: GripperProfile,
     object_material: ObjectMaterial,
+    friction_coefficient: float,
 ) -> None:
     """为左右指尖 taxel 与测试块添加显式接触参数。
 
@@ -174,6 +183,8 @@ def _add_tactile_object_pairs(
     ``priority``/``solmix`` 混合，因此物体材料档位只影响触觉—物体接触。
     """
     material = OBJECT_CONTACT_PRESETS[_validate_object_material(object_material)]
+    sliding_friction = _validate_friction_coefficient(friction_coefficient)
+    friction = (sliding_friction, sliding_friction, *material.friction[2:])
     object_geom = f"{CUBE_PREFIX}target_cube_geom"
     for side in ("left", "right"):
         for index, taxel_name in enumerate(profile.tactile.names(side)):
@@ -184,7 +195,7 @@ def _add_tactile_object_pairs(
                 condim=material.condim,
                 solref=list(material.solref),
                 solimp=list(material.solimp),
-                friction=list(material.friction),
+                friction=list(friction),
             )
 
 
@@ -196,6 +207,7 @@ def build_custom_grasp_spec(
     cube_mass: float = DEFAULT_CUBE_MASS,
     object_material: ObjectMaterial = "hard",
     object_contact_model: ObjectContactModel = "explicit",
+    friction_coefficient: float = 0.8,
     multiccd_enabled: bool = True,
 ):
     """附加固定自研基座、自由方块与临时支撑。
@@ -205,6 +217,7 @@ def build_custom_grasp_spec(
     """
     import mujoco
 
+    friction_coefficient = _validate_friction_coefficient(friction_coefficient)
     center_base = tactile_center_in_base(profile)
     mount_position = np.asarray(profile.mount_pos, dtype=np.float64)
     cube_position = mount_position + _quaternion_rotate(profile.mount_quat, center_base)
@@ -247,7 +260,7 @@ def build_custom_grasp_spec(
         frame=cube_mount,
     )
     if _validate_object_contact_model(object_contact_model) == "explicit":
-        _add_tactile_object_pairs(scene, profile, object_material)
+        _add_tactile_object_pairs(scene, profile, object_material, friction_coefficient)
     # 自研执行器是纯力矩源。位置预设应放在 qpos/控制器状态里，
     # 而零力矩是唯一安全的通用 keyframe 命令。
     scene.add_key(name="custom_open", ctrl=[0.0])
@@ -263,6 +276,7 @@ def build_custom_grasp_model(
     cube_mass: float = DEFAULT_CUBE_MASS,
     object_material: ObjectMaterial = "hard",
     object_contact_model: ObjectContactModel = "explicit",
+    friction_coefficient: float = 0.8,
     multiccd_enabled: bool = True,
 ):
     """编译水平安装的自研夹爪抓取场景。"""
@@ -273,5 +287,6 @@ def build_custom_grasp_model(
         cube_mass=cube_mass,
         object_material=object_material,
         object_contact_model=object_contact_model,
+        friction_coefficient=friction_coefficient,
         multiccd_enabled=multiccd_enabled,
     ).compile()

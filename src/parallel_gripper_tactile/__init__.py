@@ -15,6 +15,11 @@ from .control import (
     SecondOrderTorqueLADRC,
     TorqueAdrcStep,
 )
+from .force_scheduling import (
+    OracleTargetForceScheduler,
+    TargetForceCommand,
+    TargetForceSchedulerConfig,
+)
 from .profiles import (
     AdrcControl,
     ContactStiffnessControl,
@@ -49,9 +54,12 @@ __all__ = [
     "NormalForceControlCommand",
     "NormalForceControl",
     "NormalForceController",
+    "OracleTargetForceScheduler",
     "RealtimePacer",
     "SimulationTimer",
     "TactileLayout",
+    "TargetForceCommand",
+    "TargetForceSchedulerConfig",
     "TorqueAdrcControl",
     "TorqueAdrcStep",
     "SecondOrderTorqueLADRC",

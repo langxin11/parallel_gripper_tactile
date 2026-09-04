@@ -12,6 +12,8 @@ uv run pgt validate configs/custom_parallel_gripper.yaml
 uv run pgt run demo --profile configs/robotiq_2f85.yaml
 uv run pgt run grasp --profile configs/custom_parallel_gripper.yaml
 uv run pgt run force-track --profile configs/custom_parallel_gripper.yaml --task configs/force_tracking/default_waypoints.yaml
+uv run pgt run force-schedule --profile configs/custom_parallel_gripper.yaml --task configs/force_scheduling/gravity_hold.yaml
+uv run pgt run force-schedule --profile configs/custom_parallel_gripper.yaml --task configs/force_scheduling/dynamic_filling.yaml
 # 自研夹爪可选 soft / medium / hard / stiff 显式触觉接触 preset（默认 hard）
 uv run pgt run grasp --profile configs/custom_parallel_gripper.yaml --object-material soft
 uv run pgt run force-track --profile configs/custom_parallel_gripper.yaml --task configs/force_tracking/default_waypoints.yaml --object-material medium
@@ -30,6 +32,7 @@ pgt assets generate-touch-grid
 pgt assets prepare-onshape INPUT OUTPUT
 pgt run demo --profile PROFILE
 pgt run grasp --profile PROFILE [--video] [--object-material soft|medium|hard|stiff]
+pgt run force-schedule --profile PROFILE --task TASK.yaml
 pgt run force-track --profile PROFILE --task TASK.yaml [--viewer] [--disable-multiccd]
                     [--object-material soft|medium|hard|stiff]
                     [--trace-period SECONDS] [--event-window SECONDS]
@@ -49,6 +52,11 @@ pgt runs clean (--older-than-days N | --all | --cache) [--apply]
 `--run-suffix`。它们会保留自动生成的 UTC 时间戳和短 ID，例如
 `trial-20260830T104726Z-6dc7385b`；原有 `--run-name` 仍用于指定完整、不可改写的目录名，
 不能与前缀或后缀同时使用。
+
+`pgt run force-schedule` 根据切向载荷和已知摩擦系数 `μ` 调度平均单侧法向目标力。标准 task
+`gravity_hold.yaml` 验证仅重力保持，`dynamic_filling.yaml` 用沿重力方向的 0→2 N 附加载荷模拟注水。
+当前实现使用场景真值 `μ`，是 oracle 基线而非摩擦系数估计器；详见
+[Oracle 抓取目标力调度](docs/force-scheduling.md)。
 
 力控消融的四个跟踪阶段变体为：
 
@@ -118,6 +126,7 @@ outputs/<profile>/<experiment>/<UTC timestamp>-<id>/
 ├── profile.yaml
 ├── effective_parameters.json  # force-track
 ├── trace.parquet              # force-track
+├── trace.csv                  # force-schedule
 ├── metrics.json
 ├── plot.png
 ├── plot.pdf
@@ -134,6 +143,11 @@ profile、task 以及本次实际生效的运行时覆盖，作为 force-track r
 加载—卸载滞后和 waypoint 误差。CLI 可用 `--trace-period` 覆盖常规采样周期；该值必须是
 任务控制周期的整数倍，设为控制周期即可保留全频常规数据。
 `pgt runs clean` 默认只预览将删除的目标；需要删除时加 `--apply`。
+
+`force-schedule` 的运行目录还包含 `task.yaml`；其 `effective_parameters.json` 明确记录 oracle
+调度器，`trace.csv` 保存载荷、目标力、摩擦裕量和滑移时序。标准重力保持与动态注水场景当前分别达到
+约 `0.009 N`、`0.030 N` 的力跟踪 RMSE，最大切向位移均约 `0.009 mm`；动态注水最终目标约为
+`2.335 N/侧`。
 
 ## 🏗️ 架构
 

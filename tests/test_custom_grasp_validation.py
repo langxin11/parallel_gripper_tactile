@@ -75,6 +75,25 @@ def test_custom_scene_adds_18_explicit_tactile_object_pairs(
     assert np.all(model.pair_dim == 3)
 
 
+def test_custom_scene_uses_independent_sliding_friction_coefficient() -> None:
+    """自定义摩擦系数仅覆盖两个切向滑动方向。"""
+    profile = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    model = scene.build_custom_grasp_model(profile, friction_coefficient=0.35)
+
+    assert np.allclose(model.pair_friction, (0.35, 0.35, 0.02, 0.001, 0.001))
+
+
+@pytest.mark.parametrize("friction_coefficient", [0.0, -0.1, np.nan, np.inf, -np.inf])
+def test_custom_scene_rejects_invalid_friction_coefficient(
+    friction_coefficient: float,
+) -> None:
+    """摩擦系数必须为有限正数。"""
+    profile = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+
+    with pytest.raises(ValueError, match="friction_coefficient must be finite and positive"):
+        scene.build_custom_grasp_model(profile, friction_coefficient=friction_coefficient)
+
+
 def test_custom_scene_rejects_unknown_object_material() -> None:
     """材料档位必须来自受支持的显式接触 preset。"""
     profile = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")

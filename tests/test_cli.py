@@ -19,6 +19,12 @@ def test_root_and_subcommand_help_are_available() -> None:
     for command in ("validate", "assets", "run", "compare", "view", "runs"):
         assert command in result.output
     assert RUNNER.invoke(app, ["run", "grasp", "--help"]).exit_code == 0
+    force_schedule_help = RUNNER.invoke(
+        app, ["run", "force-schedule", "--help"], terminal_width=160
+    )
+    assert force_schedule_help.exit_code == 0
+    for option in ("--profile", "--task", "--output-root", "--run-prefix", "--run-suffix"):
+        assert option in force_schedule_help.output
     force_track_help = RUNNER.invoke(app, ["run", "force-track", "--help"], terminal_width=160)
     assert force_track_help.exit_code == 0
     for option in (

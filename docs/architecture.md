@@ -50,6 +50,7 @@ manifest。
 | `profiles.py` | 用冻结的 Pydantic 模型校验 YAML，并以 YAML 所在目录解析相对路径 | 启动 MuJoCo 或写运行结果 |
 | `scenes/` | 装配 MJCF、物体材料、碰撞几何和求解选项 | 控制算法、指标统计 |
 | `tactile.py`、`contact_taxels.py` | 把不同后端统一为局部 `(3, rows, cols)` 力数组 | 决定目标力或控制状态 |
+| `force_scheduling.py` | 由切向载荷和摩擦系数生成受限的平均单侧目标力 | 读取 MuJoCo 状态或直接写执行器 |
 | `control.py` | 接触状态、力语义、MIT 命令与法向力外环 | 创建输出目录或解析 CLI |
 | `experiments/` | 定义阶段机、仿真循环、trace 字段和指标 | 组织跨条件批量研究 |
 | `runners/` | 管理一次运行的输入快照、experiment 调用、产物登记和失败保留 | 展示 Rich 表格或展开 study 矩阵 |

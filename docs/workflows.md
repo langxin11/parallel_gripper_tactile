@@ -17,11 +17,24 @@ uv run pgt run grasp --profile configs/custom_parallel_gripper.yaml --video
 uv run pgt run force-track \
   --profile configs/custom_parallel_gripper.yaml \
   --task configs/force_tracking/default_waypoints.yaml
+uv run pgt run force-schedule \
+  --profile configs/custom_parallel_gripper.yaml \
+  --task configs/force_scheduling/gravity_hold.yaml
+uv run pgt run force-schedule \
+  --profile configs/custom_parallel_gripper.yaml \
+  --task configs/force_scheduling/dynamic_filling.yaml
 uv run pgt compare contact --profile configs/custom_parallel_gripper.yaml
 </code></pre>
 
 `--disable-multiccd` 是保留原碰撞模型、仅限制 convex geom pair 接触数的诊断开关；默认 profile 已使用
 稳定的共面球体碰撞近似，常规实验无需添加该开关。
+
+`force-schedule` 复用法向力控制器，根据切向载荷和 task 中已知的摩擦系数生成平均单侧目标力。
+`gravity_hold.yaml` 只验证撤去支撑后的重力保持；`dynamic_filling.yaml` 以沿重力方向的 0→2 N
+附加力模拟注水。当前实现是读取真值 `μ` 的 oracle 基线，不包含在线摩擦系数估计。两个 task 均显式
+设置 `noslip_iterations=5` 以抑制摩擦锥内的长时数值爬移；目标力固定为不足的 `0.5 N/侧` 时仍会
+滑落，因此该求解设置不会掩盖摩擦容量不足。公式、task 字段、输出列和当前验收结果见
+[Oracle 抓取目标力调度](force-scheduling.md)。
 
 ## 多条件研究
 
@@ -88,6 +101,7 @@ uv run python scripts/experiments/force_tracking_diagnosis.py \
 消融和控制器对比研究还生成 CSV 与 Parquet 两种聚合统计，控制器对比图统一登记到 `study_manifest.json`。
 
 动态目标力跟踪任务的配置、两阶段流程和指标解读见[动态目标力跟踪](force-tracking.md)。
+[Oracle 抓取目标力调度](force-scheduling.md)说明已知摩擦系数下的目标力调度基线。
 控制算法对比、消融矩阵和项目分工见[控制算法对比与消融](control-comparison-ablation.md)。
 碰撞几何对照的结论和使用边界见[触觉读数约定](tactile-conventions.md#collision-geometry-conclusions)。
 

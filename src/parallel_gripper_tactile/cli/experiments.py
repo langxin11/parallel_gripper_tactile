@@ -16,12 +16,13 @@ from ..experiments.contact_compare import record_contact_ab
 from ..experiments.force_tracking import (
     ForceTrackingTask,
 )
+from ..experiments.force_scheduling import ForceSchedulingTask
 from ..experiments.grasp import run_acceptance
 from ..experiments.grasp_video import record_custom_grasp_video
 from ..profiles import load_profile
 from ..protocols import DisturbanceProtocol
 from ..run_artifacts import RunDirectory
-from ..runners import execute_force_tracking
+from ..runners import execute_force_scheduling, execute_force_tracking
 from ..scenes.custom import build_custom_grasp_model
 from ..scenes.robotiq import load_grasp_model
 from ..tactile import create_tactile_reader
@@ -164,6 +165,47 @@ def run_grasp(
     table.add_row("Hold displacement", f"{result.hold_displacement_m * 1000:.3f} mm")
     table.add_row("Disturbance displacement", f"{result.disturbance_displacement_m * 1000:.3f} mm")
     table.add_row("Force RMSE", f"{result.force_tracking_rmse_n:.3f} N")
+    state(context).console.print(table)
+    state(context).console.print(f"Run: [cyan]{run.path}[/cyan]")
+    if not result.passed:
+        raise typer.Exit(1)
+
+
+@run_app.command("force-schedule")
+def run_force_schedule(
+    context: typer.Context,
+    profile: Annotated[Path, typer.Option("--profile", exists=True, dir_okay=False)],
+    task: Annotated[Path, typer.Option("--task", exists=True, dir_okay=False)],
+    output_root: Annotated[Path, typer.Option("--output-root", file_okay=False)] = Path("outputs"),
+    run_name: Annotated[str | None, typer.Option()] = None,
+    run_prefix: Annotated[str | None, typer.Option("--run-prefix")] = None,
+    run_suffix: Annotated[str | None, typer.Option("--run-suffix")] = None,
+) -> None:
+    """运行基于已知摩擦系数的抓取目标力调度实验。"""
+    try:
+        scheduling_task = ForceSchedulingTask.load(task)
+        run, result = execute_force_scheduling(
+            profile=profile,
+            task_path=task,
+            scheduling_task=scheduling_task,
+            output_root=output_root,
+            run_name=run_name,
+            run_prefix=run_prefix,
+            run_suffix=run_suffix,
+        )
+    except Exception as error:
+        fail(context, error, title="Force scheduling experiment failed")
+    table = Table(title="Force scheduling")
+    table.add_column("Result")
+    table.add_column("Value")
+    table.add_row("Passed", "PASS" if result.passed else "FAIL")
+    table.add_row("Force RMSE", f"{result.force_tracking_rmse_n:.3f} N")
+    table.add_row(
+        "Max tangential displacement",
+        f"{result.max_tangential_displacement_m * 1000:.3f} mm",
+    )
+    table.add_row("Mean target force", f"{result.mean_target_force_n:.3f} N")
+    table.add_row("Final target force", f"{result.final_target_force_n:.3f} N")
     state(context).console.print(table)
     state(context).console.print(f"Run: [cyan]{run.path}[/cyan]")
     if not result.passed:
