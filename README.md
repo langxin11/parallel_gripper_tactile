@@ -14,6 +14,7 @@ uv run pgt run grasp --profile configs/custom_parallel_gripper.yaml
 uv run pgt run force-track --profile configs/custom_parallel_gripper.yaml --task configs/force_tracking/default_waypoints.yaml
 uv run pgt run force-schedule --profile configs/custom_parallel_gripper.yaml --task configs/force_scheduling/gravity_hold.yaml
 uv run pgt run force-schedule --profile configs/custom_parallel_gripper.yaml --task configs/force_scheduling/dynamic_filling.yaml
+uv run pgt run friction-estimate --profile configs/custom_parallel_gripper.yaml --task configs/friction_estimation/nominal_friction.yaml
 # 自研夹爪可选 soft / medium / hard / stiff 显式触觉接触 preset（默认 hard）
 uv run pgt run grasp --profile configs/custom_parallel_gripper.yaml --object-material soft
 uv run pgt run force-track --profile configs/custom_parallel_gripper.yaml --task configs/force_tracking/default_waypoints.yaml --object-material medium
@@ -33,6 +34,7 @@ pgt assets prepare-onshape INPUT OUTPUT
 pgt run demo --profile PROFILE
 pgt run grasp --profile PROFILE [--video] [--object-material soft|medium|hard|stiff]
 pgt run force-schedule --profile PROFILE --task TASK.yaml
+pgt run friction-estimate --profile PROFILE --task TASK.yaml
 pgt run force-track --profile PROFILE --task TASK.yaml [--viewer] [--disable-multiccd]
                     [--object-material soft|medium|hard|stiff]
                     [--trace-period SECONDS] [--event-window SECONDS]
@@ -57,6 +59,10 @@ pgt runs clean (--older-than-days N | --all | --cache) [--apply]
 `gravity_hold.yaml` 验证仅重力保持，`dynamic_filling.yaml` 用沿重力方向的 0→2 N 附加载荷模拟注水。
 当前实现使用场景真值 `μ`，是 oracle 基线而非摩擦系数估计器；详见
 [Oracle 抓取目标力调度](docs/force-scheduling.md)。
+
+`pgt run friction-estimate` 在世界 `+Y` 方向执行慢速切向探测，仅用已知探测载荷和双侧三轴触觉
+合力检测力域初始滑移，生成安全折减后的摩擦系数下界，再用该下界运行目标力调度。真实 `μ` 和物体
+运动只用于离线评分；详见[微滑移探测与保守摩擦估计](docs/friction-estimation.md)。
 
 力控消融的四个跟踪阶段变体为：
 
@@ -126,7 +132,7 @@ outputs/<profile>/<experiment>/<UTC timestamp>-<id>/
 ├── profile.yaml
 ├── effective_parameters.json  # force-track
 ├── trace.parquet              # force-track
-├── trace.csv                  # force-schedule
+├── trace.csv                  # force-schedule / friction-estimate
 ├── metrics.json
 ├── plot.png
 ├── plot.pdf
@@ -148,6 +154,9 @@ profile、task 以及本次实际生效的运行时覆盖，作为 force-track r
 调度器，`trace.csv` 保存载荷、目标力、摩擦裕量和滑移时序。标准重力保持与动态注水场景当前分别达到
 约 `0.009 N`、`0.030 N` 的力跟踪 RMSE，最大切向位移均约 `0.009 mm`；动态注水最终目标约为
 `2.335 N/侧`。
+
+`friction-estimate` 的运行目录同样保存 task、有效参数、CSV 轨迹、指标和图。有效参数会明确声明估计器
+不消费 oracle 信号；标准低、中、高摩擦和两倍噪声场景的保守估计约为真值的 89%–92%。
 
 ## 🏗️ 架构
 

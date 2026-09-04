@@ -25,6 +25,12 @@ def test_root_and_subcommand_help_are_available() -> None:
     assert force_schedule_help.exit_code == 0
     for option in ("--profile", "--task", "--output-root", "--run-prefix", "--run-suffix"):
         assert option in force_schedule_help.output
+    friction_estimate_help = RUNNER.invoke(
+        app, ["run", "friction-estimate", "--help"], terminal_width=160
+    )
+    assert friction_estimate_help.exit_code == 0
+    for option in ("--profile", "--task", "--output-root", "--run-prefix", "--run-suffix"):
+        assert option in friction_estimate_help.output
     force_track_help = RUNNER.invoke(app, ["run", "force-track", "--help"], terminal_width=160)
     assert force_track_help.exit_code == 0
     for option in (

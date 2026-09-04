@@ -7,7 +7,8 @@
 3. [曲柄滑块力控模型](crank-slider-force-control.md)：了解 `f_n`、`k_pair`、雅可比和限幅；
 4. [动态目标力跟踪](force-tracking.md)：运行两阶段基准并理解接触状态；
 5. [Oracle 抓取目标力调度](force-scheduling.md)：根据已知摩擦系数和切向载荷生成目标力；
-6. [控制算法对比与消融](control-comparison-ablation.md)：在一致任务下比较结果。
+6. [微滑移探测与保守摩擦估计](friction-estimation.md)：盲估计摩擦下界并驱动目标力调度；
+7. [控制算法对比与消融](control-comparison-ablation.md)：在一致任务下比较结果。
 
 工程状态与电机/执行器基线见[自研夹爪配置基线与状态](custom-gripper-next-phase.md)。
 
@@ -18,8 +19,10 @@ uv run pgt validate configs/custom_parallel_gripper.yaml
 uv run pgt run demo --profile configs/robotiq_2f85.yaml
 uv run pgt run force-track --profile configs/custom_parallel_gripper.yaml --task configs/force_tracking/default_waypoints.yaml
 uv run pgt run force-schedule --profile configs/custom_parallel_gripper.yaml --task configs/force_scheduling/gravity_hold.yaml
+uv run pgt run friction-estimate --profile configs/custom_parallel_gripper.yaml --task configs/friction_estimation/nominal_friction.yaml
 </code></pre>
 
 参见[常用工作流](workflows.md)、[动态目标力跟踪](force-tracking.md)、
 [Oracle 抓取目标力调度](force-scheduling.md)、
+[微滑移探测与保守摩擦估计](friction-estimation.md)、
 [控制算法对比与消融](control-comparison-ablation.md)与[项目架构](architecture.md)。

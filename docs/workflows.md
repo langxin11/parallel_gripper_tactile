@@ -23,6 +23,9 @@ uv run pgt run force-schedule \
 uv run pgt run force-schedule \
   --profile configs/custom_parallel_gripper.yaml \
   --task configs/force_scheduling/dynamic_filling.yaml
+uv run pgt run friction-estimate \
+  --profile configs/custom_parallel_gripper.yaml \
+  --task configs/friction_estimation/nominal_friction.yaml
 uv run pgt compare contact --profile configs/custom_parallel_gripper.yaml
 </code></pre>
 
@@ -35,6 +38,11 @@ uv run pgt compare contact --profile configs/custom_parallel_gripper.yaml
 设置 `noslip_iterations=5` 以抑制摩擦锥内的长时数值爬移；目标力固定为不足的 `0.5 N/侧` 时仍会
 滑落，因此该求解设置不会掩盖摩擦容量不足。公式、task 字段、输出列和当前验收结果见
 [Oracle 抓取目标力调度](force-scheduling.md)。
+
+`friction-estimate` 在固定预抓取力下沿世界 `+Y` 缓慢加载，用逐 taxel 三轴触觉合力的摩擦比饱和
+与载荷—支撑失配检测力域初始滑移。估计器不读取真实 `μ`、物体位移或速度；确认后冻结保守
+`μ` 下界并驱动同一个目标力调度器。低、中、高摩擦和两倍噪声 task、回退语义及当前结果见
+[微滑移探测与保守摩擦估计](friction-estimation.md)。
 
 ## 多条件研究
 

@@ -1,0 +1,70 @@
+schema_version: 1
+name: nominal_friction_probe
+
+cube_mass_kg: 0.05
+friction_coefficient: 0.8
+object_material: hard
+sensor_noise_scale: 1.0
+
+approach:
+  duration_s: 1.0
+  timeout_s: 3.0
+  settle_after_contact_s: 0.3
+  feedforward_force_n: 1.0
+
+probe:
+  normal_force_n: 1.0
+  settle_after_release_s: 0.3
+  force_rate_n_s: 0.5
+  max_force_n: 3.0
+  hold_at_max_s: 0.2
+  recovery_s: 0.5
+  recovery_normal_force_n: 2.0
+
+estimator:
+  window_size: 60
+  min_samples: 20
+  estimate_quantile: 0.85
+  safety_discount: 0.9
+  fallback_friction_coefficient: 0.2
+  min_friction_coefficient: 0.05
+  max_friction_coefficient: 2.0
+  min_probe_load_n: 0.6
+  min_total_normal_force_n: 0.2
+  support_residual_threshold_n: 0.04
+  support_utilization_threshold: 0.97
+  mismatch_confirm_s: 0.012
+  ratio_trend_enabled: true
+  trend_window_size: 60
+  arming_slope_threshold_per_s: 0.09
+  saturation_slope_threshold_per_s: 0.055
+  max_side_ratio_difference: 0.1
+
+scheduler:
+  safety_factor: 1.5
+  min_force_n: 0.5
+  max_force_n: 8.0
+  max_force_rate_n_s: 2.0
+  friction_floor: 0.05
+
+downward_load:
+  interpolation: linear
+  waypoints:
+    - {t_s: 0.0, force_n: 0.0}
+    - {t_s: 1.0, force_n: 0.0}
+    - {t_s: 5.0, force_n: 2.0}
+    - {t_s: 6.0, force_n: 2.0}
+
+metrics:
+  require_detection: true
+  conservative_tolerance: 0.02
+  minimum_estimate_ratio: 0.55
+  probe_slip_threshold_m: 0.002
+  hold_slip_threshold_m: 0.002
+  force_rmse_threshold_n: 0.5
+  ignore_hold_initial_s: 0.2
+
+solver:
+  noslip_iterations: 5
+
+control_period_s: 0.002

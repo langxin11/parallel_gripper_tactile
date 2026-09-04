@@ -17,12 +17,17 @@ from ..experiments.force_tracking import (
     ForceTrackingTask,
 )
 from ..experiments.force_scheduling import ForceSchedulingTask
+from ..experiments.friction_estimation import FrictionEstimationTask
 from ..experiments.grasp import run_acceptance
 from ..experiments.grasp_video import record_custom_grasp_video
 from ..profiles import load_profile
 from ..protocols import DisturbanceProtocol
 from ..run_artifacts import RunDirectory
-from ..runners import execute_force_scheduling, execute_force_tracking
+from ..runners import (
+    execute_force_scheduling,
+    execute_force_tracking,
+    execute_friction_estimation,
+)
 from ..scenes.custom import build_custom_grasp_model
 from ..scenes.robotiq import load_grasp_model
 from ..tactile import create_tactile_reader
@@ -206,6 +211,51 @@ def run_force_schedule(
     )
     table.add_row("Mean target force", f"{result.mean_target_force_n:.3f} N")
     table.add_row("Final target force", f"{result.final_target_force_n:.3f} N")
+    state(context).console.print(table)
+    state(context).console.print(f"Run: [cyan]{run.path}[/cyan]")
+    if not result.passed:
+        raise typer.Exit(1)
+
+
+@run_app.command("friction-estimate")
+def run_friction_estimate(
+    context: typer.Context,
+    profile: Annotated[Path, typer.Option("--profile", exists=True, dir_okay=False)],
+    task: Annotated[Path, typer.Option("--task", exists=True, dir_okay=False)],
+    output_root: Annotated[Path, typer.Option("--output-root", file_okay=False)] = Path("outputs"),
+    run_name: Annotated[str | None, typer.Option()] = None,
+    run_prefix: Annotated[str | None, typer.Option("--run-prefix")] = None,
+    run_suffix: Annotated[str | None, typer.Option("--run-suffix")] = None,
+) -> None:
+    """运行微滑移探测、保守摩擦估计与估计值力调度实验。"""
+    try:
+        estimation_task = FrictionEstimationTask.load(task)
+        run, result = execute_friction_estimation(
+            profile=profile,
+            task_path=task,
+            estimation_task=estimation_task,
+            output_root=output_root,
+            run_name=run_name,
+            run_prefix=run_prefix,
+            run_suffix=run_suffix,
+        )
+    except Exception as error:
+        fail(context, error, title="Friction estimation experiment failed")
+    table = Table(title="Friction estimation")
+    table.add_column("Result")
+    table.add_column("Value")
+    table.add_row("Passed", "PASS" if result.passed else "FAIL")
+    table.add_row("Slip detected", "yes" if result.slip_detected else "fallback")
+    table.add_row("Estimated friction", f"{result.estimated_friction_coefficient:.3f}")
+    table.add_row("Estimate / true", f"{result.estimate_ratio:.1%}")
+    table.add_row(
+        "Max probe displacement",
+        f"{result.max_probe_displacement_m * 1000:.3f} mm",
+    )
+    table.add_row(
+        "Max hold displacement",
+        f"{result.max_hold_displacement_m * 1000:.3f} mm",
+    )
     state(context).console.print(table)
     state(context).console.print(f"Run: [cyan]{run.path}[/cyan]")
     if not result.passed:

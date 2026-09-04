@@ -20,6 +20,12 @@ from .force_scheduling import (
     TargetForceCommand,
     TargetForceSchedulerConfig,
 )
+from .friction_estimation import (
+    ConservativeFrictionEstimator,
+    FrictionEstimate,
+    FrictionEstimatorConfig,
+    FrictionProbeObservation,
+)
 from .profiles import (
     AdrcControl,
     ContactStiffnessControl,
@@ -38,6 +44,7 @@ __all__ = [
     "AdrcControl",
     "ContactTaxelFrame",
     "ContactTaxelReader",
+    "ConservativeFrictionEstimator",
     "ContactStiffnessControl",
     "ContactStiffnessEstimator",
     "CrankSliderGeometry",
@@ -47,6 +54,9 @@ __all__ = [
     "ForceControlReference",
     "ForceSemantics",
     "ForceTrackingController",
+    "FrictionEstimate",
+    "FrictionEstimatorConfig",
+    "FrictionProbeObservation",
     "GripperProfile",
     "MITControl",
     "MITControlCommand",
