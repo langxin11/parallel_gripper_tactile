@@ -89,7 +89,7 @@ uv run python scripts/experiments/force_tracking_diagnosis.py \
 
 动态目标力跟踪任务的配置、两阶段流程和指标解读见[动态目标力跟踪](force-tracking.md)。
 控制算法对比、消融矩阵和项目分工见[控制算法对比与消融](control-comparison-ablation.md)。
-碰撞几何对照的结论和使用边界见[触觉读数约定](tactile-conventions.md#2026-08-31-ab)。
+碰撞几何对照的结论和使用边界见[触觉读数约定](tactile-conventions.md#collision-geometry-conclusions)。
 
 用 `pgt runs list` 查看既有产物。用 `pgt runs clean --all` 预览要删除的目标；确认目标后
 再加 `--apply`。

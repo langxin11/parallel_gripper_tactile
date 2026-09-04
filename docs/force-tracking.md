@@ -273,4 +273,4 @@ uv run python scripts/experiments/force_tracking_diagnosis.py \
 该阶段分别控制 Pillar 高度共面性、mesh/sphere 拓扑和 `multiccd`。当前证据表明，问题来自原始非共面
 mesh 与 `multiccd` 的组合导致接触流形在 18 与 72 个活跃接触之间切换；并不能归因于 PID、平均单侧
 力语义、非共面性、mesh 拓扑或“72 个接触”中的任一单独因素。默认碰撞近似和完整结果见
-[触觉读数约定](tactile-conventions.md#2026-08-31-ab)。
+[触觉读数约定](tactile-conventions.md#collision-geometry-conclusions)。

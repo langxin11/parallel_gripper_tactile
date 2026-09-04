@@ -71,7 +71,7 @@ MuJoCo 物理步长。
 
 Pillar 碰撞几何属于 asset/profile，`scenes.custom` 负责把它装配进实验，并可为诊断切换
 `multiccd`。碰撞近似的当前默认、五条件因果对照与适用范围见
-[触觉读数约定](tactile-conventions.md#2026-08-31-ab)。
+[触觉读数约定](tactile-conventions.md#collision-geometry-conclusions)。
 
 ## 运行产物流
 

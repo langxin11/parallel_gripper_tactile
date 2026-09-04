@@ -87,6 +87,9 @@
 
 ### 修复
 
+- 文档站点：`tactile-conventions` 的「高载荷接触的定性结论」小节标题经上次改写后丢失原锚点，
+  导致 `architecture`、`workflows`、`force-tracking` 三处跨文档链接失效；现通过 `attr_list`
+  为该小节挂显式锚点 `#collision-geometry-conclusions` 并更新三处链接，标题后续再改名也不会断链
 - `run_custom_grasp_validation`：首步即失稳时不再因空数据抛 `IndexError`，
   而是以仿真失败状态返回
 - `report_taxels`：docstring 明确只读取模型初始状态，避免误导
