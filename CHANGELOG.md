@@ -7,6 +7,8 @@
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-09-04
+
 ### 新增
 
 - force-track run 新增 `effective_parameters.json`：记录解析后的完整 profile、task 与实际运行时覆盖，

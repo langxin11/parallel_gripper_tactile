@@ -7,7 +7,7 @@ where = ["src"]
 
 [project]
 name = "parallel-gripper-tactile"
-version = "0.2.0"
+version = "0.3.0"
 description = "MuJoCo 平行夹爪指尖触觉仿真、资产与实验工具"
 readme = "README.md"
 license = { file = "LICENSE" }
