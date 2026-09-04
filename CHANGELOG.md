@@ -9,6 +9,28 @@
 
 ### 新增
 
+- 新增 `adrc-torque-td` 工程对照变体：在论文式二阶直接力矩 ADRC 前加入临界阻尼线性 TD，
+  同步整形反馈参考和机构模型前馈，并在 trace 中记录实际使用的参考力、变化率与加速度；原
+  `adrc-torque` 保持无 TD，不改变触觉测量进入 LESO 的轻滤波链路，也不扩大默认正式矩阵
+- `adrc-torque` 默认观测器带宽由 180 调整为 240 rad/s，与三种接触 preset、三个 seed 的
+  调参确认结果一致；专用调参配置同步把 `ωo/ωc=4` 设为新基线
+- 二阶直接力矩 `adrc-torque` 新增两阶段调参 study：
+  `force_tracking_torque_adrc_tuning.py` 以独立 `TorqueAdrcControl` 覆盖扫描轻度测量滤波、
+  控制器带宽和观测器带宽比例；粗扫以连续任务 RMSE 与力矩饱和作为约束，优先降低 Step 超调，
+  确认阶段在三种接触 preset、三个噪声 seed 上复验，并记录每个候选的精确参数和排序结果
+- 默认控制器对比矩阵移除一阶位置式 `adrc`：该实现仍保留用于历史复现，但不再作为正式 benchmark
+  变体；默认条件数由 189 调整为 162
+- `adrc-torque` 控制器变体（`--controller-variant adrc-torque`）：接近阶段保留 MIT
+  阻抗，跟踪阶段旁路 MIT `kp/kd`，由二阶离散 current LESO 与名义 PD 直接输出
+  电机力矩；机构雅可比前馈承担名义静态夹持力，LESO 只观察实际总力矩扣除模型
+  前馈后的残差，并使用量化、变化率和幅值限制后的实际力矩更新；目标力一、二阶
+  导数进入控制律；LESO 使用独立 40 Hz 一阶轻滤波测量，不复用 PID 与指标的
+  20 Hz 公共滤波，trace 新增该测量、LESO 状态、`b0`、原始/受限/残差力矩及限幅诊断；
+  默认控制器对比矩阵由 162 扩至 189 条
+- profile 新增可选配置段 `control.force.torque_adrc`（`TorqueAdrcControl`）：按在线
+  接触刚度、闭合雅可比、名义等效惯量和输入增益尺度调度 `b0`，支持输入增益上下界、
+  控制/观测器带宽、测量轻滤波截止频率与力矩变化率限制；该路径要求启用机构几何和
+  接触刚度估计，并与一阶 `adrc`、`torque_feedback_gain > 0` 互斥
 - `adrc` 控制器变体（`--controller-variant adrc`）：跟踪阶段以一阶线性自抗扰
   （LADRC）外环替换 PID 位置修正——扩张状态观测器估计滤波力与总扰动，控制律输出
   闭合速度并逐周期积分成位置修正（裁剪到 `max_position_adjustment`）；MIT kp/kd

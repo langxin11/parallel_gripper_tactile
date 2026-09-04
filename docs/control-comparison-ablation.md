@@ -66,7 +66,10 @@ MIT 前馈力矩、测量力、滤波力和诊断量。
 `controller × task × material × seed` 的显式 comparison schema、`--dry-run` 条件审阅、结构化聚合和
 study 级对比图。2026-09-02 起 `direct-torque` 与 `adrc` 变体均已实现（入口分别为
 `--controller-variant direct-torque` 与 `--controller-variant adrc`，profile 字段
-`control.force.torque_feedback_gain` 与 `control.force.adrc`），默认矩阵扩为 6 个变体共 162 条。
+`control.force.torque_feedback_gain` 与 `control.force.adrc`）。2026-09-03 新增二阶直接力矩
+`adrc-torque`（profile 字段 `control.force.torque_adrc`）。一阶位置式 `adrc` 保留为历史复现入口，
+但因外包在 MIT 阻抗位置环外造成模型阶次不匹配，不再进入默认正式矩阵；当前默认矩阵为 6 个变体
+共 162 条。
 
 正式批量研究的接触 preset 已整体上移一档：使用 `medium=(-650,-8)`、`hard=(-1200,-10)` 和
 `stiff=(-2500,-15)`。其中日常语义依次更接近 compliant、firm 与 stiff；这些参数是单个显式
@@ -119,6 +122,7 @@ controller command -> 达妙电机 CAN/串口命令
 | Adaptive stiffness | PID 加在线刚度估计 | 不同物体刚度下的泛化能力 |
 | Direct torque force | `t_ff = τ_force_feedback + τ_model_feedforward` | 不经过位置刚度的力矩式力控 |
 | ADRC | `adrc` 变体：一阶 LADRC 外环替换 PID 位置修正 | 扰动、模型误差和延迟下的鲁棒性 |
+| Torque MB-ADRC | `adrc-torque`：二阶 current LESO＋机构前馈，跟踪阶段直接输出力矩 | 检验模型前馈与残差观测、连续目标跟踪及限幅鲁棒性 |
 
 所有组别应使用相同目标力曲线、相同物体、相同接触参数和相同噪声种子。只改变待评估的控制模块。
 
@@ -283,6 +287,13 @@ MIT 位置内环的位置弹簧为接触力回路提供了直接力矩式不具�
 边界：只有 3 个 seed；`adrc` 的带宽仅在 step 任务上按“无饱和中 RMSE 最小”从五档候选选出，
 `b0` 取名义刚度未做在线辨识，也未联合 ramp/mixed 调参——单任务调参对连续跟踪任务失配是退化的
 主要嫌疑之一；该结论限于当前实现与调参预算，不能推广为“自抗扰不适合此类力控任务”。
+
+#### 6.1.3 2026-09-03 二阶直接力矩 MB-ADRC 正式 study
+
+`adrc-torque` 已在 162 条正式矩阵中完成三 seed 运行。它在 Ramp、Mixed 连续目标上的 RMSE 低于
+`full`，但 Step RMSE 与超调仍较高，因此当前结论是“连续目标具备优势，阶跃动态仍需调参”，不能
+描述为整体优于 `full`。后续使用专用调参 study 扫描轻度测量滤波、`ωc` 与 `ωo/ωc`，并分别报告
+连续目标跟踪、阶跃超调、LESO 力矩变化率限幅和 `b0` 调度范围。
 
 ### 6.2 历史割线估计器的原理与定位
 
@@ -453,8 +464,9 @@ uv run python scripts/experiments/force_tracking_controller_comparison.py \
   --config configs/studies/force_tracking_controller_comparison.yaml
 </code></pre>
 
-默认配置展开 6 个控制器变体（四个 PID 系加 `direct-torque` 与 `adrc`）× 3 个 task × 3 个正式接触 preset × 3 个 seed，
-共 162 个条件（2026-09-02 前的旧配置为 4 变体 108 条、5 变体 135 条）。每个条件保留独立
+默认配置展开 6 个控制器变体（四个 PID 系加 `direct-torque` 与二阶 `adrc-torque`）× 3 个 task ×
+3 个正式接触 preset × 3 个 seed，共 162 个条件。一阶位置式 `adrc` 只保留为历史复现入口
+（历史配置依次为 4 变体 108 条、5 变体 135 条、6 变体 162 条）。每个条件保留独立
 run，study 父目录生成 `summary.csv`、`aggregate.csv`、`summary.json`、对比图和
 `study_manifest.json`。脚本顺序调用 runner，不通过 CLI 子进程启动单次实验。
 

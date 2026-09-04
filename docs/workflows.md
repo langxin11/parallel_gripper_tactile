@@ -42,10 +42,29 @@ uv run python scripts/experiments/force_tracking_controller_comparison.py \
   --config configs/studies/force_tracking_controller_comparison.yaml
 </code></pre>
 
-默认矩阵为 4 个 PID 系变体 × 3 个任务 × 3 个正式接触 preset × 3 个 seed，共 108 个条件；三个
-preset 为 `medium=(-650,-8)`、`hard=(-1200,-10)` 与 `stiff=(-2500,-15)`。原
+默认矩阵为 6 个控制器变体 × 3 个任务 × 3 个正式接触 preset × 3 个 seed，共 162 个条件；其中包含
+四个 PID 系变体、`direct-torque` 与二阶直接力矩 `adrc-torque`。一阶位置式 `adrc` 因控制导向模型
+阶次不匹配而保留为历史复现入口，不再参加默认正式对比。三个 preset 为
+`medium=(-650,-8)`、`hard=(-1200,-10)` 与 `stiff=(-2500,-15)`。原
 `soft=(-250,-5)` 不进入默认矩阵。study 完成后除
 `summary.csv`、`aggregate.csv` 外，还会在 `figures/` 生成指标、饱和比例、消融增量和同 seed 轨迹图。
+
+二阶直接力矩 ADRC 的测量轻滤波和控制/观测器带宽采用两阶段调参：粗扫先固定 `medium` 与一个 seed，
+确认阶段再在三种 preset 与三个 seed 上复验。确认阶段读取粗扫目录中的可行候选排名：
+
+<pre><code class="language-bash">
+uv run python scripts/experiments/force_tracking_torque_adrc_tuning.py \
+  --config configs/studies/force_tracking_torque_adrc_tuning.yaml \
+  --stage coarse \
+  --dry-run
+uv run python scripts/experiments/force_tracking_torque_adrc_tuning.py \
+  --config configs/studies/force_tracking_torque_adrc_tuning.yaml \
+  --stage coarse
+uv run python scripts/experiments/force_tracking_torque_adrc_tuning.py \
+  --config configs/studies/force_tracking_torque_adrc_tuning.yaml \
+  --stage confirm \
+  --coarse-study-dir outputs/studies/force_tracking_torque_adrc_tuning/coarse/&lt;粗扫目录&gt;
+</code></pre>
 
 按阶段执行因果诊断；碰撞几何阶段包含原 mesh、两种球体、共面 mesh 和关闭 `multiccd` 五个条件：
 

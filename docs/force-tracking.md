@@ -84,6 +84,54 @@ uv run pgt run force-track \
 刚度估计器照常运行以保持 trace 中刚度曲线可比。`adrc` 与 `torque_feedback_gain > 0`
 互斥，同时启用会在控制器构造时抛出 `ValueError`。
 
+`--controller-variant adrc-torque` 启用二阶直接力矩 MB-ADRC。接近阶段继续使用 profile 中的
+MIT `kp/kd` 建立稳定接触；进入跟踪后仅逐周期旁路 MIT `kp/kd`，由三状态 current LESO 估计
+法向力、力变化率与残差总扰动，控制律自身以 `ω_c²` 和 `2ω_c` 提供名义 PD 动态并直接输出电机力矩。
+目标曲线的一、二阶导数分别作为速度和加速度前馈进入控制律。
+
+该路径使用以下控制导向模型：
+
+\[
+\ddot F=f_{res}+b_0\tau_{res},\qquad
+b_0=\operatorname{clip}\!\left(
+s_b\frac{\hat K J_c(q)}{I_{eq}}, b_{min}, b_{max}
+\right)
+\]
+
+机构前馈 `τ_model=F_ref·J_c(q)` 负责名义静态夹持力，LESO 的输入使用执行器实际总力矩减去同周期
+`τ_model` 后的残差，因此不会把同一前馈再次当成总扰动补偿。力矩先经过变化率限制，再经过 MIT
+量化和幅值限制；下一周期 LESO 使用最终实际力矩。切换时扰动状态按接近阶段最后一个实际力矩初始化，
+在线调度 `b0` 时同步缩放扰动状态，使补偿力矩连续。
+
+LESO 不直接使用完全原始的触觉力，也不复用 PID、刚度估计与评价指标使用的 20 Hz 公共低通。
+它使用独立的 40 Hz 一阶低通做轻度预处理：该通道只负责抑制高频尖峰，力与力变化率的主要估计
+仍由 LESO 完成。默认截止频率在 step、ramp、mixed 三类目标和 medium、hard、stiff 三种材料的
+小范围扫描中，从 `{40, 60, 80, 100, 120}` Hz 选择；40 Hz 的综合误差与超调更稳，且扫描组合均未
+出现力矩饱和。实机仍应依据传感器采样率、噪声谱和闭环时延重新标定。
+
+profile 可选段 `control.force.torque_adrc` 提供 `equivalent_inertia_kg_m2`、`input_gain_scale`、
+`controller_bandwidth_rad_s`、`observer_bandwidth_rad_s`、
+`measurement_filter_cutoff_hz`、输入增益上下界和 `max_torque_rate_n_m_s`。默认值是当前 MuJoCo
+模型的仿真起点，不是实机标定结果；迁移到硬件前必须
+通过自由空间 `τ→q̈`、准静态 `c→F` 和接触状态 `τ→F` 三组辨识重新确认惯量、增益尺度与带宽。
+`torque_adrc` 要求启用机构几何与接触刚度估计，并与一阶 `adrc`、`torque_feedback_gain > 0` 互斥。
+当前仿真默认值 `fc=40 Hz、ωc=60 rad/s、ωo=240 rad/s` 来自三种材料、三个 seed 的确认 study；
+相比原 `ωo=180 rad/s` 基线，连续任务误差更低且 Step 超调有所下降。
+
+`--controller-variant adrc-torque-td` 是独立的工程增强对照：它在 `adrc-torque` 前增加带宽为
+180 rad/s 的临界阻尼线性 TD，将参考力整形成连续的力、力变化率和力加速度；机构模型前馈同步使用
+整形后的参考，避免原始阶跃绕过 TD。论文式 `adrc-torque` 仍不启用 TD，二者除此之外使用完全相同
+的 LESO、模型前馈、刚度调度和限幅参数。TD 只处理参考信号，不改变“触觉力轻滤波后进入 ESO”的
+测量链路，也不进入默认正式对比矩阵。Linear 与 smoothstep 已有解析导数，TD 对这两类轨迹直接
+同步并旁路，只整形 `hold` 等零导数参考中的离散跳变，避免给连续任务重复增加相位滞后。
+该带宽只是在 `medium`、seed 0 小范围扫描中选出的仿真起点，尚未进入默认正式矩阵或形成跨材料结论。
+
+一阶位置式 `adrc` 保留用于历史复现，但不再进入默认控制器对比矩阵：它把一阶 LADRC 外包在保留
+MIT 阻抗的位置环之外，控制导向模型与实际闭环阶次不匹配。二阶直接力矩 `adrc-torque` 的专用调参
+study 扫描 `measurement_filter_cutoff_hz`、`ωc` 和 `ωo/ωc`，并拒绝滤波截止频率低于
+`ωo/(2π)` 的候选。粗扫后的候选必须在 Ramp、Mixed 的 RMSE 不超过当前基线 110%、力矩饱和不超过
+1% 的前提下，按 Step 超调、Step RMSE、Mixed RMSE 排序；随后在三种材料、三个 seed 上确认。
+
 若需要测试撤掉支撑后的真实夹持能力，可以把 `release_support_on_tracking` 设为 `true`。
 若只想先评估力控曲线本身，保持默认支撑更利于排除掉落和姿态变化的干扰。
 
@@ -146,9 +194,19 @@ waypoint 的 `t_s` 应严格递增，`force_n` 应为非负值。任务总跟踪
 | `target_normal_force_n` | 当前目标平均单侧法向力。 |
 | `measured_normal_force_n` | 触觉测得的平均单侧法向力。 |
 | `filtered_normal_force_n` | 低通滤波后的平均单侧法向力。 |
+| `torque_adrc_measurement_n` | 仅供直接力矩 ADRC 使用的轻度预处理触觉力；默认 40 Hz。 |
 | `tracking_error_n` | 目标力减测量力。 |
 | `force_feedforward_torque_n_m` | 根据目标力和机构雅可比计算的力矩前馈。 |
 | `mit_feedforward_torque_n_m` | 最终送入 MIT 命令的前馈力矩。 |
+| `target_force_rate_n_s`、`target_force_acceleration_n_s2` | 由 waypoint 插值得到的目标力一、二阶导数。 |
+| `torque_adrc_estimated_force_n` | 二阶直接力矩 LESO 估计的法向力。 |
+| `torque_adrc_estimated_force_rate_n_s` | LESO 估计的法向力变化率。 |
+| `torque_adrc_estimated_disturbance_n_s2` | LESO 估计的残差总扰动。 |
+| `torque_adrc_reference_force_n` 及其 rate/acceleration 列 | 直接力矩 ADRC 实际使用的参考状态；TD 变体下为整形结果。 |
+| `torque_adrc_raw_torque_n_m`、`torque_adrc_limited_torque_n_m` | 变化率/幅值限制前后的直接力矩命令。 |
+| `torque_adrc_residual_torque_n_m` | 扣除机构模型前馈后的 LADRC 残差控制力矩。 |
+| `torque_adrc_input_gain_n_per_n_m_s2` | 按在线刚度、雅可比和名义惯量调度后的 `b0`。 |
+| `torque_adrc_rate_limited`、`torque_adrc_amplitude_limited` | 本周期是否触发 ADRC 力矩变化率或幅值限制。 |
 | `estimated_contact_stiffness_n_per_m` | 在线估计的整体等效刚度 `k_pair`。 |
 | `closure_jacobian_m_per_rad` | 当前关节角下的闭合行程雅可比 \(J_c(q)\)。 |
 | `aperture_m` | 由开度公式计算的当前夹爪开口。 |

@@ -165,6 +165,28 @@ K_d^F\frac{de_f}{dt},
 但它接触前没有位置弹簧提供闭合趋势，因此仍需要单独的接近阶段；接触后也必须处理噪声、积分饱和、
 脱离接触和 `T_MAX` 限幅。实现时应至少保留接触状态机、低通滤波、积分 anti-windup 和力矩斜率限制。
 
+对于二阶直接力矩 ADRC，采用电机输出轴上的控制导向动力学：
+
+\[
+I_{eq}(q)\ddot q+B_{eq}(q)\dot q+\tau_f(\dot q)+J_c(q)f_n=\tau+d_\tau,
+\]
+
+\[
+f_n\simeq k_{pair}(c-c_{contact})+d_{pair}\dot c+d_f.
+\]
+
+将惯量、摩擦、接触阻尼、雅可比变化与刚度误差并入残差总扰动后，在目标频段内近似为：
+
+\[
+\ddot f_n=f_{res}+b_0\tau_{res},\qquad
+b_0\simeq s_b\frac{\hat k_{pair}J_c(q)}{I_{eq}}.
+\]
+
+这里 `s_b` 是由小信号 `τ→f_n` 辨识校准的输入增益尺度，不应通过伪造惯量来调节；
+`I_eq` 仍保留明确的输出轴等效惯量物理意义。机构前馈
+`τ_model=f_ref·J_c(q)` 单独承担名义静态力矩，LESO 只使用
+`τ_res=τ_applied-τ_model` 作为已知输入并估计剩余 `f_res`。
+
 实际实现中应：
 
 1. 对 \(\hat k_{\mathrm{pair}}\) 进行低通滤波，并设置正的上下限；
@@ -176,7 +198,7 @@ K_d^F\frac{de_f}{dt},
 当前实现位于 `src/parallel_gripper_tactile/control.py`：
 
 - `CrankSliderKinematics` 计算 \(\omega(q)\)、\(c(q)\) 和 \(J_c(q)\)；
-- `ContactStiffnessEstimator` 用 secant 样本 \(\Delta f_n/\Delta c\) 加 EWMA 滤波估计 \(\hat k_{\mathrm{pair}}\)；
+- `ContactStiffnessEstimator` 用滑动窗口拟合或历史 secant-EWMA 方法估计 \(\hat k_{\mathrm{pair}}\)；
 - `NormalForceController` 将 \(\Delta q_{\mathrm{ff}}\)、PI 修正和 \(\tau_{\mathrm{ff}}\) 合并后交给 MIT 力矩内环。
 
 直接力矩式力控已实现为 `direct-torque` 控制器变体，profile 入口是
@@ -185,6 +207,15 @@ K_d^F\frac{de_f}{dt},
 做位置伺服闭合），力误差与模型前馈按上式合成 `t_ff`，仍经达妙量化与 `T_MAX` 限幅；
 刚度估计器照常运行以保持 trace 中刚度曲线可比。该变体与当前位置式控制器共享同一个
 `force-track` benchmark，见 [控制器对比研究](control-comparison-ablation.md)。
+
+二阶直接力矩 MB-ADRC 已实现为 `adrc-torque` 变体，profile 入口是
+`control.force.torque_adrc`。其三状态 current LESO 估计力、力变化率和残差总扰动；名义 PD
+位于 ADRC 控制律内部，因此跟踪阶段可以旁路 MIT `kp/kd`。接近到跟踪的切换使用上一周期实际力矩
+初始化扰动状态，在线调度 `b0` 时同步缩放扰动状态；力矩变化率和幅值限制后的实际输入会反馈给
+下一周期 LESO。触觉力先经过独立的 40 Hz 一阶轻度预处理再进入 LESO，不复用 PID、刚度估计与
+指标使用的 20 Hz 公共低通；力和力变化率的主要估计仍由 LESO 完成。当前实现仍是 MB-ADRC，
+不包含参数收敛律；PL-ADRC 应在完成实机
+`τ→q̈`、`c→f_n`、`τ→f_n` 辨识后另行增加带投影约束的参数学习通道。
 
 ## 5. 刚度辨识与 MuJoCo 模型解释
 
