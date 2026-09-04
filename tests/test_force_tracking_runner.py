@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from parallel_gripper_tactile.experiments.force_tracking import ForceTrackingResult
+from parallel_gripper_tactile.profiles import TorqueAdrcControl
 from parallel_gripper_tactile.runners import force_tracking
 
 
@@ -51,6 +52,7 @@ def test_execute_force_tracking_writes_complete_run_artifacts(tmp_path: Path, mo
         controller_variant="pid-only",
         stiffness_estimator_method="window_quadratic",
         sensor_noise_seed=7,
+        torque_adrc_override=TorqueAdrcControl(measurement_filter_cutoff_hz=60.0),
     )
 
     assert returned == result
@@ -61,6 +63,7 @@ def test_execute_force_tracking_writes_complete_run_artifacts(tmp_path: Path, mo
     assert manifest["parameters"]["multiccd_enabled"] is True
     assert manifest["parameters"]["force_semantics"] == "average_side"
     assert manifest["parameters"]["sensor_noise_seed"] == 7
+    assert manifest["parameters"]["torque_adrc_override"]["measurement_filter_cutoff_hz"] == 60.0
     assert {"profile.yaml", "task.yaml", "trace.csv", "plot.png", "metrics.json"} <= set(
         manifest["artifacts"]
     )

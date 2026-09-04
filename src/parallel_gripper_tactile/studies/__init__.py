@@ -9,13 +9,19 @@ from .force_tracking_stiffness_estimator_comparison import (
     ForceTrackingStiffnessEstimatorComparisonConfig,
     load_stiffness_estimator_comparison_config,
 )
+from .force_tracking_torque_adrc_tuning import (
+    ForceTrackingTorqueAdrcTuningConfig,
+    load_torque_adrc_tuning_config,
+)
 
 __all__ = [
     "ForceTrackingAblationConfig",
     "ForceTrackingComparisonConfig",
     "ForceTrackingStiffnessEstimatorComparisonConfig",
+    "ForceTrackingTorqueAdrcTuningConfig",
     "SeedSweep",
     "load_comparison_config",
     "load_stiffness_estimator_comparison_config",
+    "load_torque_adrc_tuning_config",
     "load_study_config",
 ]

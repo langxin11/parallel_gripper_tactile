@@ -14,7 +14,7 @@ from ..experiments.force_tracking import (
     run_force_tracking,
 )
 from ..control import ForceSemantics
-from ..profiles import StiffnessEstimatorMethod, load_profile
+from ..profiles import StiffnessEstimatorMethod, TorqueAdrcControl, load_profile
 from ..run_artifacts import RunDirectory
 from ..scenes.custom import ObjectContactModel, ObjectMaterial
 
@@ -35,6 +35,7 @@ def execute_force_tracking(
     controller_variant: ControllerVariant = "full",
     stiffness_estimator_method: StiffnessEstimatorMethod | None = None,
     sensor_noise_seed: int | None = None,
+    torque_adrc_override: TorqueAdrcControl | None = None,
     viewer: bool = False,
     render_fps: float = 30.0,
     realtime_factor: float = 1.0,
@@ -62,6 +63,11 @@ def execute_force_tracking(
             "controller_variant": controller_variant,
             "stiffness_estimator_method": stiffness_estimator_method,
             "sensor_noise_seed": sensor_noise_seed,
+            "torque_adrc_override": (
+                None
+                if torque_adrc_override is None
+                else torque_adrc_override.model_dump(mode="json")
+            ),
         },
         run_name=run_name,
         run_prefix=run_prefix,
@@ -88,6 +94,7 @@ def execute_force_tracking(
             controller_variant=controller_variant,
             stiffness_estimator_method=stiffness_estimator_method,
             sensor_noise_seed=sensor_noise_seed,
+            torque_adrc_override=torque_adrc_override,
         )
         run.register_artifact(csv_path)
         run.register_artifact(plot_path)
