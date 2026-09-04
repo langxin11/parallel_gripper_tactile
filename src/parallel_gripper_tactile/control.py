@@ -16,6 +16,7 @@ from .profiles import (
     GripperProfile,
     MITControl,
     NormalForceControl,
+    TorqueAdrcControl,
 )
 
 
@@ -218,6 +219,223 @@ class MITControlCommand:
 
 
 @dataclass(frozen=True, slots=True)
+class TorqueAdrcStep:
+    """二阶直接力矩 LADRC 的一次控制输出与内部诊断量。"""
+
+    requested_torque_n_m: float
+    raw_torque_n_m: float
+    model_feedforward_torque_n_m: float
+    residual_torque_n_m: float
+    input_gain_n_per_n_m_s2: float
+    estimated_force_n: float
+    estimated_force_rate_n_s: float
+    estimated_disturbance_n_s2: float
+    reference_force_n: float
+    reference_force_rate_n_s: float
+    reference_force_acceleration_n_s2: float
+    rate_limited: bool
+    amplitude_limited: bool
+
+
+class SecondOrderTorqueLADRC:
+    """使用 current observer 和实际受限输入的二阶直接力矩 LADRC。"""
+
+    def __init__(self, config: TorqueAdrcControl) -> None:
+        """保存参数并初始化观测器。"""
+        self._config = config
+        self.reset()
+
+    def reset(
+        self,
+        *,
+        measured_force_n: float = 0.0,
+        applied_torque_n_m: float = 0.0,
+        model_feedforward_torque_n_m: float = 0.0,
+        input_gain_n_per_n_m_s2: float | None = None,
+    ) -> None:
+        """按当前力与实际力矩初始化，保证稳态切换时控制量连续。
+
+        Args:
+            measured_force_n: 切换时的滤波法向力，单位 N。
+            applied_torque_n_m: 切换前实际施加的电机力矩，单位 N·m。
+            model_feedforward_torque_n_m: 切换时机构模型给出的名义力矩，单位 N·m。
+            input_gain_n_per_n_m_s2: 当前名义输入增益；省略时等待第一次控制步设置。
+        """
+        self._z1 = float(measured_force_n)
+        self._z2 = 0.0
+        self._input_gain = (
+            None if input_gain_n_per_n_m_s2 is None else float(input_gain_n_per_n_m_s2)
+        )
+        self._applied_torque = float(applied_torque_n_m)
+        self._model_feedforward_torque = float(model_feedforward_torque_n_m)
+        residual_torque = self._applied_torque - self._model_feedforward_torque
+        self._z3 = 0.0 if self._input_gain is None else -self._input_gain * residual_torque
+        self._td_force = float(measured_force_n)
+        self._td_force_rate = 0.0
+        self._td_active = False
+        self._td_last_target: float | None = None
+
+    def update_reference(
+        self,
+        *,
+        target_force_n: float,
+        target_force_rate_n_s: float,
+        target_force_acceleration_n_s2: float,
+        dt: float,
+    ) -> tuple[float, float, float]:
+        """更新可选的临界阻尼线性 TD，并返回控制律使用的参考状态。"""
+        bandwidth = self._config.tracking_differentiator_bandwidth_rad_s
+        if bandwidth is None:
+            return (
+                float(target_force_n),
+                float(target_force_rate_n_s),
+                float(target_force_acceleration_n_s2),
+            )
+        if dt <= 0:
+            raise ValueError("dt must be positive")
+        raw_target = float(target_force_n)
+        raw_rate = float(target_force_rate_n_s)
+        raw_acceleration = float(target_force_acceleration_n_s2)
+        has_analytic_motion = not math.isclose(raw_rate, 0.0, abs_tol=1e-12) or not math.isclose(
+            raw_acceleration, 0.0, abs_tol=1e-12
+        )
+        if has_analytic_motion:
+            # Linear 与 smoothstep 已由轨迹发生器提供解析导数；再次经过 TD 只会
+            # 增加相位滞后，因此同步内部状态并原样使用解析参考。
+            self._td_force = raw_target
+            self._td_force_rate = raw_rate
+            self._td_active = False
+            self._td_last_target = raw_target
+            return raw_target, raw_rate, raw_acceleration
+        target_changed = self._td_last_target is None or not math.isclose(
+            raw_target, self._td_last_target, abs_tol=1e-12
+        )
+        if target_changed and not math.isclose(raw_target, self._td_force, abs_tol=1e-12):
+            self._td_active = True
+        self._td_last_target = raw_target
+        if not self._td_active:
+            self._td_force = raw_target
+            self._td_force_rate = 0.0
+            return raw_target, 0.0, 0.0
+        omega = float(bandwidth)
+        error = self._td_force - raw_target
+        coupling = self._td_force_rate + omega * error
+        decay = math.exp(-omega * dt)
+        self._td_force = raw_target + (error + coupling * dt) * decay
+        self._td_force_rate = (self._td_force_rate - omega * coupling * dt) * decay
+        acceleration = omega**2 * (raw_target - self._td_force) - 2.0 * omega * (
+            self._td_force_rate
+        )
+        if math.isclose(self._td_force, raw_target, abs_tol=1e-6) and math.isclose(
+            self._td_force_rate, 0.0, abs_tol=1e-5
+        ):
+            self._td_force = raw_target
+            self._td_force_rate = 0.0
+            self._td_active = False
+            acceleration = 0.0
+        return self._td_force, self._td_force_rate, acceleration
+
+    def set_applied_torque(
+        self,
+        applied_torque_n_m: float,
+        *,
+        model_feedforward_torque_n_m: float,
+    ) -> None:
+        """记录实际总力矩及同周期名义模型前馈。"""
+        self._applied_torque = float(applied_torque_n_m)
+        self._model_feedforward_torque = float(model_feedforward_torque_n_m)
+
+    def step(
+        self,
+        *,
+        measured_force_n: float,
+        target_force_n: float,
+        target_force_rate_n_s: float,
+        target_force_acceleration_n_s2: float,
+        model_feedforward_torque_n_m: float,
+        input_gain_n_per_n_m_s2: float,
+        dt: float,
+        min_torque_n_m: float,
+        max_torque_n_m: float,
+    ) -> TorqueAdrcStep:
+        """更新离散 LESO，并生成经过力矩变化率和幅值限制的命令。"""
+        if dt <= 0:
+            raise ValueError("dt must be positive")
+        if input_gain_n_per_n_m_s2 <= 0:
+            raise ValueError("input_gain_n_per_n_m_s2 must be positive")
+        if min_torque_n_m >= max_torque_n_m:
+            raise ValueError("min_torque_n_m must be smaller than max_torque_n_m")
+
+        input_gain = float(input_gain_n_per_n_m_s2)
+        if self._input_gain is None:
+            self._input_gain = input_gain
+            residual_applied_torque = self._applied_torque - self._model_feedforward_torque
+            self._z3 = -input_gain * residual_applied_torque
+        elif not math.isclose(input_gain, self._input_gain, rel_tol=1e-12, abs_tol=0.0):
+            # 调度 b0 时同步缩放扰动状态，使 -z3/b0 对应的补偿力矩连续。
+            self._z3 *= input_gain / self._input_gain
+            self._input_gain = input_gain
+
+        # 精确离散积分链加 current observer：最新测量 y(k) 在本周期直接校正
+        # 预测状态，上一周期输入使用实际总力矩扣除同周期名义模型前馈后的
+        # 残差力矩；由此让 ESO 只补偿模型没有解释的部分。
+        residual_applied_torque = self._applied_torque - self._model_feedforward_torque
+        dt_sq = dt * dt
+        predicted_z1 = (
+            self._z1
+            + dt * self._z2
+            + 0.5 * dt_sq * (self._z3 + input_gain * residual_applied_torque)
+        )
+        predicted_z2 = self._z2 + dt * (self._z3 + input_gain * residual_applied_torque)
+        predicted_z3 = self._z3
+        observer_pole = math.exp(-float(self._config.observer_bandwidth_rad_s) * dt)
+        one_minus_pole = 1.0 - observer_pole
+        l1 = 1.0 - observer_pole**3
+        l2 = 3.0 * one_minus_pole**2 * (1.0 + observer_pole) / (2.0 * dt)
+        l3 = one_minus_pole**3 / dt_sq
+        innovation = float(measured_force_n) - predicted_z1
+        self._z1 = predicted_z1 + l1 * innovation
+        self._z2 = predicted_z2 + l2 * innovation
+        self._z3 = predicted_z3 + l3 * innovation
+
+        bandwidth = float(self._config.controller_bandwidth_rad_s)
+        virtual_force_acceleration = (
+            float(target_force_acceleration_n_s2)
+            + 2.0 * bandwidth * (float(target_force_rate_n_s) - self._z2)
+            + bandwidth**2 * (float(target_force_n) - self._z1)
+        )
+        residual_torque = (virtual_force_acceleration - self._z3) / input_gain
+        model_feedforward_torque = float(model_feedforward_torque_n_m)
+        raw_torque = model_feedforward_torque + residual_torque
+        max_delta = float(self._config.max_torque_rate_n_m_s) * dt
+        rate_limited_torque = float(
+            np.clip(
+                raw_torque,
+                self._applied_torque - max_delta,
+                self._applied_torque + max_delta,
+            )
+        )
+        requested_torque = float(np.clip(rate_limited_torque, min_torque_n_m, max_torque_n_m))
+        return TorqueAdrcStep(
+            requested_torque_n_m=requested_torque,
+            raw_torque_n_m=float(raw_torque),
+            model_feedforward_torque_n_m=model_feedforward_torque,
+            residual_torque_n_m=float(residual_torque),
+            input_gain_n_per_n_m_s2=input_gain,
+            estimated_force_n=self._z1,
+            estimated_force_rate_n_s=self._z2,
+            estimated_disturbance_n_s2=self._z3,
+            reference_force_n=float(target_force_n),
+            reference_force_rate_n_s=float(target_force_rate_n_s),
+            reference_force_acceleration_n_s2=float(target_force_acceleration_n_s2),
+            rate_limited=not math.isclose(rate_limited_torque, raw_torque, abs_tol=1e-12),
+            amplitude_limited=not math.isclose(
+                requested_torque, rate_limited_torque, abs_tol=1e-12
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class ForceControlObservation:
     """力控器在一个控制周期内可用的仿真或硬件观测。"""
 
@@ -236,6 +454,8 @@ class ForceControlReference:
 
     target_force_n: float
     approach_feedforward_force_n: float = 0.0
+    target_force_rate_n_s: float = 0.0
+    target_force_acceleration_n_s2: float = 0.0
 
 
 ForceSemantics = Literal["average_side", "total"]
@@ -288,6 +508,11 @@ class MITTorqueController:
     def actuator_id(self) -> int:
         """返回此实例所控制的编译后执行器索引。"""
         return self._actuator_id
+
+    @property
+    def torque_limit_n_m(self) -> float:
+        """返回 MIT 命令允许的对称输出轴力矩上限。"""
+        return float(self._config.t_max)
 
     def position(self, data) -> float:
         """返回当前受控关节位置。"""
@@ -386,6 +611,19 @@ class NormalForceControlCommand:
     estimated_contact_stiffness_n_per_m: float | None = None
     closure_jacobian_m_per_rad: float | None = None
     aperture_m: float | None = None
+    torque_adrc_measurement_n: float | None = None
+    torque_adrc_estimated_force_n: float | None = None
+    torque_adrc_estimated_force_rate_n_s: float | None = None
+    torque_adrc_estimated_disturbance_n_s2: float | None = None
+    torque_adrc_reference_force_n: float | None = None
+    torque_adrc_reference_force_rate_n_s: float | None = None
+    torque_adrc_reference_force_acceleration_n_s2: float | None = None
+    torque_adrc_raw_torque_n_m: float | None = None
+    torque_adrc_limited_torque_n_m: float | None = None
+    torque_adrc_residual_torque_n_m: float | None = None
+    torque_adrc_input_gain_n_per_n_m_s2: float | None = None
+    torque_adrc_rate_limited: bool = False
+    torque_adrc_amplitude_limited: bool = False
 
 
 class ForceTrackingController(Protocol):
@@ -423,6 +661,7 @@ class _ForceTrackingStep:
     estimated_contact_stiffness_n_per_m: float | None
     closure_jacobian_m_per_rad: float | None
     aperture_m: float | None
+    torque_adrc: TorqueAdrcStep | None = None
 
 
 class NormalForceController:
@@ -435,27 +674,39 @@ class NormalForceController:
         *,
         force_semantics: ForceSemantics = "average_side",
     ) -> None:
-        """创建 simple-pid 外环与接触状态机。
+        """创建可切换的法向力外环与接触状态机。
 
         Args:
             inner: MIT 力矩内环控制器。
             config: 外环法向力跟踪配置；``config.adrc`` 非 ``None`` 时跟踪阶段
-                以一阶 LADRC 外环替换 PID 位置修正。
+                以一阶 LADRC 外环替换 PID 位置修正；``config.torque_adrc`` 非
+                ``None`` 时改用二阶直接力矩 LADRC。
             force_semantics: 目标力的语义（平均单侧力或总力）。
 
         Raises:
-            ValueError: ``config.adrc`` 与 ``config.torque_feedback_gain > 0``
-                同时启用时抛出；两条路径互斥，本文假设不同时配置。``config.adrc``
-                非 ``None`` 但未配置曲柄滑块几何时抛出（速度到位置修正的换算
-                依赖闭合雅可比）。
+            ValueError: 多条可选力控路径同时启用，或 ADRC 缺少所需机构几何、
+                在线刚度估计时抛出。
         """
-        if config.adrc is not None and config.torque_feedback_gain > 0:
+        enabled_outer_loops = sum(
+            (
+                config.torque_feedback_gain > 0,
+                config.adrc is not None,
+                config.torque_adrc is not None,
+            )
+        )
+        if enabled_outer_loops > 1:
             raise ValueError(
-                "adrc and torque_feedback_gain are mutually exclusive; "
+                "adrc, torque_adrc and torque_feedback_gain are mutually exclusive; "
                 "enable at most one force-tracking outer loop"
             )
         if config.adrc is not None and config.geometry is None:
             raise ValueError("adrc requires crank-slider geometry for closure-jacobian conversion")
+        if config.torque_adrc is not None and config.geometry is None:
+            raise ValueError("torque_adrc requires crank-slider geometry for input-gain scheduling")
+        if config.torque_adrc is not None and (
+            config.stiffness is None or not config.stiffness.enabled
+        ):
+            raise ValueError("torque_adrc requires enabled contact stiffness estimation")
         self._inner = inner
         self._config = config
         self._force_semantics = force_semantics
@@ -470,6 +721,9 @@ class NormalForceController:
             and config.stiffness.enabled
             and self._kinematics is not None
             else None
+        )
+        self._torque_adrc = (
+            SecondOrderTorqueLADRC(config.torque_adrc) if config.torque_adrc is not None else None
         )
         adjustment = config.max_position_adjustment
         self._pid = PID(
@@ -531,10 +785,36 @@ class NormalForceController:
         self._adrc_u = 0.0
         self._adrc_adjustment = 0.0
 
+    def _torque_adrc_input_gain(
+        self,
+        *,
+        position_rad: float,
+        stiffness_n_per_m: float,
+    ) -> float:
+        """由在线刚度、闭合雅可比和名义惯量计算受限的 ``b0``。"""
+        if self._kinematics is None or self._config.torque_adrc is None:
+            raise RuntimeError("torque_adrc input gain requested without torque_adrc configuration")
+        adrc = self._config.torque_adrc
+        jacobian = self._kinematics.closure_jacobian(position_rad)
+        raw_gain = (
+            max(0.0, float(stiffness_n_per_m))
+            * jacobian
+            * float(adrc.input_gain_scale)
+            / float(adrc.equivalent_inertia_kg_m2)
+        )
+        return float(
+            np.clip(
+                raw_gain,
+                adrc.min_input_gain_n_per_n_m_s2,
+                adrc.max_input_gain_n_per_n_m_s2,
+            )
+        )
+
     def reset(self) -> None:
         """返回接近模式，并清除滤波器、计数器和 PID 历史。"""
         self._state = "approach"
         self._filtered_force: float | None = None
+        self._torque_adrc_measurement: float | None = None
         self._contact_position = 0.0
         self._contact_steps = 0
         self._release_steps = 0
@@ -543,6 +823,8 @@ class NormalForceController:
         self._pid.set_auto_mode(False)
         self._pid.reset()
         self._reset_adrc()
+        if self._torque_adrc is not None:
+            self._torque_adrc.reset()
 
     def step(
         self,
@@ -562,6 +844,8 @@ class NormalForceController:
             approach_velocity=observation.approach_velocity,
             target_force_n=reference.target_force_n,
             approach_feedforward_force_n=reference.approach_feedforward_force_n,
+            target_force_rate_n_s=reference.target_force_rate_n_s,
+            target_force_acceleration_n_s2=reference.target_force_acceleration_n_s2,
         )
 
     def _force_feedforward_torque(
@@ -592,7 +876,10 @@ class NormalForceController:
         data,
         *,
         measured_force_n: float,
+        torque_adrc_measurement_n: float | None,
         target_force_n: float,
+        target_force_rate_n_s: float,
+        target_force_acceleration_n_s2: float,
         dt: float,
     ) -> _ForceTrackingStep:
         """生成力跟踪阶段的组合位置修正和力矩前馈。
@@ -611,6 +898,13 @@ class NormalForceController:
         kp/kd 不做 override，位置弹簧阻尼保留——这是与直接力矩路径的本质
         区别；模型力矩前馈照常经 ``torque_feedforward_gain`` 路径进入 MIT
         前馈力矩，刚度估计器照常更新。
+
+        当 ``config.torque_adrc`` 非 ``None`` 时，二阶 current LESO 直接以实际
+        受限电机力矩为输入，按在线刚度、机构雅可比和名义惯量调度 ``b0``。
+        测量端使用独立的轻度一阶低通，不复用 PID、刚度估计和指标使用的
+        公共低通，使 LESO 承担主要状态估计而不过度放大原始触觉噪声。
+        控制律自身提供名义 PD 动态并输出力矩，因此仅在跟踪周期旁路 MIT
+        ``kp/kd``；接近阶段的阻抗控制保持不变。
 
         Returns:
             ``_ForceTrackingStep``；三条路径的 ``force_feedforward_torque`` 均填
@@ -649,6 +943,64 @@ class NormalForceController:
             force_feedforward_torque, closure_jacobian, aperture = self._force_feedforward_torque(
                 position_rad=current_position,
                 target_force_n=target_force_n,
+            )
+
+        if config.torque_adrc is not None:
+            if self._torque_adrc is None or stiffness_estimate is None:
+                raise RuntimeError("torque_adrc requires an active stiffness estimator")
+            if torque_adrc_measurement_n is None:
+                raise RuntimeError("torque_adrc requires its lightly filtered force measurement")
+            reference_force, reference_rate, reference_acceleration = (
+                self._torque_adrc.update_reference(
+                    target_force_n=target_force_n,
+                    target_force_rate_n_s=target_force_rate_n_s,
+                    target_force_acceleration_n_s2=target_force_acceleration_n_s2,
+                    dt=dt,
+                )
+            )
+            # TD 启用时模型前馈也必须使用整形后的参考，否则原始阶跃会绕过 TD
+            # 直接进入力矩命令，破坏参考过渡过程。
+            force_feedforward_torque, closure_jacobian, aperture = self._force_feedforward_torque(
+                position_rad=current_position,
+                target_force_n=reference_force,
+            )
+            input_gain = self._torque_adrc_input_gain(
+                position_rad=current_position,
+                stiffness_n_per_m=stiffness_estimate,
+            )
+            torque_limit = self._inner.torque_limit_n_m
+            torque_adrc = self._torque_adrc.step(
+                measured_force_n=torque_adrc_measurement_n,
+                target_force_n=reference_force,
+                target_force_rate_n_s=reference_rate,
+                target_force_acceleration_n_s2=reference_acceleration,
+                model_feedforward_torque_n_m=force_feedforward_torque,
+                input_gain_n_per_n_m_s2=input_gain,
+                dt=dt,
+                min_torque_n_m=-torque_limit,
+                max_torque_n_m=torque_limit,
+            )
+            mit = self._inner.apply(
+                data,
+                target_position=self._contact_position,
+                feedforward_torque=torque_adrc.requested_torque_n_m,
+                stiffness_override=0.0,
+                damping_override=0.0,
+            )
+            self._torque_adrc.set_applied_torque(
+                mit.torque,
+                model_feedforward_torque_n_m=force_feedforward_torque,
+            )
+            return _ForceTrackingStep(
+                mit=mit,
+                position_adjustment=0.0,
+                pid_position_adjustment=0.0,
+                stiffness_position_adjustment=0.0,
+                force_feedforward_torque=force_feedforward_torque,
+                estimated_contact_stiffness_n_per_m=stiffness_estimate,
+                closure_jacobian_m_per_rad=closure_jacobian,
+                aperture_m=aperture,
+                torque_adrc=torque_adrc,
             )
 
         if config.torque_feedback_gain > 0:
@@ -781,6 +1133,8 @@ class NormalForceController:
         approach_velocity: float = 0.0,
         target_force_n: float | None = None,
         approach_feedforward_force_n: float = 0.0,
+        target_force_rate_n_s: float = 0.0,
+        target_force_acceleration_n_s2: float = 0.0,
     ) -> NormalForceControlCommand:
         """推进接触检测/力跟踪，并写入一个电机力矩。
 
@@ -800,11 +1154,24 @@ class NormalForceController:
         stiffness_estimate = None
         closure_jacobian = None
         aperture = None
+        torque_adrc_step = None
         if self._filtered_force is None:
             self._filtered_force = measured_force
         else:
             alpha = 1.0 - np.exp(-2.0 * np.pi * config.filter_cutoff_hz * dt)
             self._filtered_force += float(alpha) * (measured_force - self._filtered_force)
+        if config.torque_adrc is not None:
+            # ADRC 只做独立的轻度预处理；公共滤波器继续服务于 PID、刚度估计
+            # 和评价指标，不能把它的额外相位滞后带入 LESO。
+            if self._torque_adrc_measurement is None:
+                self._torque_adrc_measurement = measured_force
+            else:
+                adrc_alpha = 1.0 - np.exp(
+                    -2.0 * np.pi * config.torque_adrc.measurement_filter_cutoff_hz * dt
+                )
+                self._torque_adrc_measurement += float(adrc_alpha) * (
+                    measured_force - self._torque_adrc_measurement
+                )
         active_target_force = (
             float(config.target_n) if target_force_n is None else max(0.0, float(target_force_n))
         )
@@ -838,12 +1205,30 @@ class NormalForceController:
                 # LADRC 外环与刚度估计器同一处复位：z1 对齐当前滤波力，
                 # z2 与积分位置修正清零。
                 self._reset_adrc(self._filtered_force)
+                if self._torque_adrc is not None:
+                    if self._stiffness_estimator is None:
+                        raise RuntimeError("torque_adrc requires an active stiffness estimator")
+                    input_gain = self._torque_adrc_input_gain(
+                        position_rad=mit.position,
+                        stiffness_n_per_m=self._stiffness_estimator.estimate_n_per_m,
+                    )
+                    # 以接近阶段最后一个实际力矩初始化 z3；当 r=y 时，首次直接
+                    # 力矩命令会延续该力矩，实现阻抗到 ADRC 的无扰切换。
+                    self._torque_adrc.reset(
+                        measured_force_n=self._torque_adrc_measurement,
+                        applied_torque_n_m=mit.torque,
+                        model_feedforward_torque_n_m=force_feedforward_torque,
+                        input_gain_n_per_n_m_s2=input_gain,
+                    )
                 self._pid.reset()
                 self._pid.set_auto_mode(True, last_output=0.0)
                 tracking = self._tracking_command(
                     data,
                     measured_force_n=self._filtered_force,
+                    torque_adrc_measurement_n=self._torque_adrc_measurement,
                     target_force_n=active_target_force,
+                    target_force_rate_n_s=target_force_rate_n_s,
+                    target_force_acceleration_n_s2=target_force_acceleration_n_s2,
                     dt=dt,
                 )
                 mit = tracking.mit
@@ -854,6 +1239,7 @@ class NormalForceController:
                 stiffness_estimate = tracking.estimated_contact_stiffness_n_per_m
                 closure_jacobian = tracking.closure_jacobian_m_per_rad
                 aperture = tracking.aperture_m
+                torque_adrc_step = tracking.torque_adrc
         else:
             both_released = max(left_normal_force_n, right_normal_force_n)
             self._release_steps = (
@@ -871,7 +1257,10 @@ class NormalForceController:
                 tracking = self._tracking_command(
                     data,
                     measured_force_n=self._filtered_force,
+                    torque_adrc_measurement_n=self._torque_adrc_measurement,
                     target_force_n=active_target_force,
+                    target_force_rate_n_s=target_force_rate_n_s,
+                    target_force_acceleration_n_s2=target_force_acceleration_n_s2,
                     dt=dt,
                 )
                 mit = tracking.mit
@@ -882,6 +1271,7 @@ class NormalForceController:
                 stiffness_estimate = tracking.estimated_contact_stiffness_n_per_m
                 closure_jacobian = tracking.closure_jacobian_m_per_rad
                 aperture = tracking.aperture_m
+                torque_adrc_step = tracking.torque_adrc
 
         reported_filtered_force = (
             measured_force if self._filtered_force is None else self._filtered_force
@@ -900,4 +1290,43 @@ class NormalForceController:
             estimated_contact_stiffness_n_per_m=stiffness_estimate,
             closure_jacobian_m_per_rad=closure_jacobian,
             aperture_m=aperture,
+            torque_adrc_measurement_n=self._torque_adrc_measurement,
+            torque_adrc_estimated_force_n=(
+                None if torque_adrc_step is None else torque_adrc_step.estimated_force_n
+            ),
+            torque_adrc_estimated_force_rate_n_s=(
+                None if torque_adrc_step is None else torque_adrc_step.estimated_force_rate_n_s
+            ),
+            torque_adrc_estimated_disturbance_n_s2=(
+                None if torque_adrc_step is None else torque_adrc_step.estimated_disturbance_n_s2
+            ),
+            torque_adrc_reference_force_n=(
+                None if torque_adrc_step is None else torque_adrc_step.reference_force_n
+            ),
+            torque_adrc_reference_force_rate_n_s=(
+                None if torque_adrc_step is None else torque_adrc_step.reference_force_rate_n_s
+            ),
+            torque_adrc_reference_force_acceleration_n_s2=(
+                None
+                if torque_adrc_step is None
+                else torque_adrc_step.reference_force_acceleration_n_s2
+            ),
+            torque_adrc_raw_torque_n_m=(
+                None if torque_adrc_step is None else torque_adrc_step.raw_torque_n_m
+            ),
+            torque_adrc_limited_torque_n_m=(
+                None if torque_adrc_step is None else torque_adrc_step.requested_torque_n_m
+            ),
+            torque_adrc_residual_torque_n_m=(
+                None if torque_adrc_step is None else torque_adrc_step.residual_torque_n_m
+            ),
+            torque_adrc_input_gain_n_per_n_m_s2=(
+                None if torque_adrc_step is None else torque_adrc_step.input_gain_n_per_n_m_s2
+            ),
+            torque_adrc_rate_limited=(
+                False if torque_adrc_step is None else torque_adrc_step.rate_limited
+            ),
+            torque_adrc_amplitude_limited=(
+                False if torque_adrc_step is None else torque_adrc_step.amplitude_limited
+            ),
         )

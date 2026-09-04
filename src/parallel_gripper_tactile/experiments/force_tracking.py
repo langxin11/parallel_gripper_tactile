@@ -27,6 +27,7 @@ from ..profiles import (
     GripperProfile,
     MITTorqueControl,
     StiffnessEstimatorMethod,
+    TorqueAdrcControl,
     load_profile,
 )
 from ..scenes.custom import (
@@ -53,7 +54,14 @@ from .grasp import (
 
 
 ControllerVariant = Literal[
-    "pid-only", "pid-torque-ff", "pid-stiffness-ff", "full", "direct-torque", "adrc"
+    "pid-only",
+    "pid-torque-ff",
+    "pid-stiffness-ff",
+    "full",
+    "direct-torque",
+    "adrc",
+    "adrc-torque",
+    "adrc-torque-td",
 ]
 CONTROLLER_VARIANTS: tuple[ControllerVariant, ...] = (
     "pid-only",
@@ -62,6 +70,8 @@ CONTROLLER_VARIANTS: tuple[ControllerVariant, ...] = (
     "full",
     "direct-torque",
     "adrc",
+    "adrc-torque",
+    "adrc-torque-td",
 )
 
 
@@ -71,13 +81,27 @@ def configure_force_controller(
     variant: ControllerVariant = "full",
     stiffness_estimator_method: StiffnessEstimatorMethod | None = None,
     sensor_noise_seed: int | None = None,
+    torque_adrc_override: TorqueAdrcControl | None = None,
 ) -> GripperProfile:
-    """返回用于公平消融的力控 profile 副本，不修改磁盘源配置。"""
+    """返回用于公平消融的力控 profile 副本，不修改磁盘源配置。
+
+    Args:
+        profile: 作为不变基线的 profile。
+        variant: 需要启用的控制器变体。
+        stiffness_estimator_method: 可选的刚度估计方法覆盖。
+        sensor_noise_seed: 可选的传感器噪声随机种子覆盖。
+        torque_adrc_override: 仅 ``adrc-torque`` 变体使用的二阶 LADRC 参数覆盖。
+
+    Raises:
+        ValueError: 变体、种子或覆盖参数与当前控制器不兼容时抛出。
+    """
     if variant not in CONTROLLER_VARIANTS:
         choices = ", ".join(CONTROLLER_VARIANTS)
         raise ValueError(f"controller_variant must be one of: {choices}")
     if sensor_noise_seed is not None and sensor_noise_seed < 0:
         raise ValueError("sensor_noise_seed must be non-negative")
+    if torque_adrc_override is not None and variant not in {"adrc-torque", "adrc-torque-td"}:
+        raise ValueError("torque_adrc_override requires a torque ADRC controller variant")
     if (
         stiffness_estimator_method is not None
         and stiffness_estimator_method not in STIFFNESS_ESTIMATOR_METHODS
@@ -106,6 +130,16 @@ def configure_force_controller(
         # LADRC 外环取代刚度位置前馈的角色：保留刚度估计（trace 中刚度曲线
         # 可比），位置前馈置 0，力矩前馈增益不动（对标 full 变体）。
         stiffness = stiffness.model_copy(update={"enabled": True, "position_feedforward_gain": 0.0})
+    elif variant in {"adrc-torque", "adrc-torque-td"} and stiffness is not None:
+        # 二阶直接力矩 LADRC 使用刚度估计调度 b0；机构力矩前馈作为名义模型
+        # 输入，LESO 仅观察实际总力矩扣除该前馈后的残差通道。
+        stiffness = stiffness.model_copy(
+            update={
+                "enabled": True,
+                "position_feedforward_gain": 0.0,
+                "torque_feedforward_gain": 1.0,
+            }
+        )
 
     if stiffness_estimator_method is not None:
         if stiffness is None:
@@ -118,9 +152,21 @@ def configure_force_controller(
     if variant == "direct-torque":
         # 力误差直接进入 MIT 前馈力矩的增益；1.0 表示误差力矩全额注入。
         force_updates["torque_feedback_gain"] = 1.0
+        force_updates["adrc"] = None
+        force_updates["torque_adrc"] = None
     if variant == "adrc":
         # 变体默认值集中在此处代码与 AdrcControl 默认值中，profile 无需显式配置。
         force_updates["adrc"] = AdrcControl()
+        force_updates["torque_adrc"] = None
+        force_updates["torque_feedback_gain"] = 0.0
+    if variant in {"adrc-torque", "adrc-torque-td"}:
+        # 跟踪阶段旁路 MIT 阻抗，接近阶段仍使用 profile 中的 kp/kd。
+        default_torque_adrc = TorqueAdrcControl(
+            tracking_differentiator_bandwidth_rad_s=(180.0 if variant == "adrc-torque-td" else None)
+        )
+        force_updates["torque_adrc"] = torque_adrc_override or default_torque_adrc
+        force_updates["adrc"] = None
+        force_updates["torque_feedback_gain"] = 0.0
     if sensor_noise_seed is not None:
         force_updates["sensor_noise_seed"] = sensor_noise_seed
     configured_force = force.model_copy(update=force_updates)
@@ -170,19 +216,28 @@ class ForceReference(_TaskModel):
 
     def target_at(self, tracking_time_s: float) -> float:
         """返回指定跟踪时间的目标力。"""
+        return self.sample_at(tracking_time_s)[0]
+
+    def sample_at(self, tracking_time_s: float) -> tuple[float, float, float]:
+        """返回指定时刻的目标力及其一、二阶时间导数。"""
         time_s = max(0.0, float(tracking_time_s))
         if time_s <= self.waypoints[0].t_s:
-            return float(self.waypoints[0].force_n)
+            return (float(self.waypoints[0].force_n), 0.0, 0.0)
         for start, end in zip(self.waypoints, self.waypoints[1:]):
             if time_s <= end.t_s:
                 if self.interpolation == "hold":
-                    return float(start.force_n)
+                    return (float(start.force_n), 0.0, 0.0)
                 span = end.t_s - start.t_s
                 u = (time_s - start.t_s) / span
+                delta = float(end.force_n - start.force_n)
+                rate = delta / span
+                acceleration = 0.0
                 if self.interpolation == "smoothstep":
+                    rate *= 6.0 * u * (1.0 - u)
+                    acceleration = delta * (6.0 - 12.0 * u) / span**2
                     u = u * u * (3.0 - 2.0 * u)
-                return float(start.force_n + u * (end.force_n - start.force_n))
-        return float(self.waypoints[-1].force_n)
+                return (float(start.force_n + u * delta), rate, acceleration)
+        return (float(self.waypoints[-1].force_n), 0.0, 0.0)
 
 
 class ForceTrackingApproach(_TaskModel):
@@ -431,6 +486,7 @@ def run_force_tracking(
     controller_variant: ControllerVariant = "full",
     stiffness_estimator_method: StiffnessEstimatorMethod | None = None,
     sensor_noise_seed: int | None = None,
+    torque_adrc_override: TorqueAdrcControl | None = None,
     output_csv: Path | None = None,
     output_plot: Path | None = None,
     viewer: bool = False,
@@ -443,6 +499,7 @@ def run_force_tracking(
         variant=controller_variant,
         stiffness_estimator_method=stiffness_estimator_method,
         sensor_noise_seed=sensor_noise_seed,
+        torque_adrc_override=torque_adrc_override,
     )
     if profile.normal_force is None or profile.mit is None:
         raise ValueError("force tracking requires MIT torque control with control.force")
@@ -516,11 +573,15 @@ def run_force_tracking(
             time_s = float(data.time)
             if tracking_start_time_s is None:
                 tracking_time_s = 0.0
-                target_force_n = task.reference.target_at(0.0)
+                target_force_n, target_force_rate_n_s, target_force_acceleration_n_s2 = (
+                    task.reference.sample_at(0.0)
+                )
                 phase = "approach_contact" if contact_time_s is None else "contact_settle"
             else:
                 tracking_time_s = time_s - tracking_start_time_s
-                target_force_n = task.reference.target_at(tracking_time_s)
+                target_force_n, target_force_rate_n_s, target_force_acceleration_n_s2 = (
+                    task.reference.sample_at(tracking_time_s)
+                )
                 phase = "track_reference"
                 if tracking_time_s > task.reference.duration_s:
                     break
@@ -558,6 +619,8 @@ def run_force_tracking(
                     reference=ForceControlReference(
                         target_force_n=target_force_n,
                         approach_feedforward_force_n=task.approach.feedforward_force_n,
+                        target_force_rate_n_s=target_force_rate_n_s,
+                        target_force_acceleration_n_s2=target_force_acceleration_n_s2,
                     ),
                 )
                 if contact_time_s is None and force_command.state == "force_tracking":
@@ -607,8 +670,15 @@ def run_force_tracking(
                     "tracking_time_s": tracking_time_s,
                     "control_state": force_command.state,
                     "target_normal_force_n": force_command.target_force_n,
+                    "target_force_rate_n_s": target_force_rate_n_s,
+                    "target_force_acceleration_n_s2": target_force_acceleration_n_s2,
                     "measured_normal_force_n": force_command.measured_force_n,
                     "filtered_normal_force_n": force_command.filtered_force_n,
+                    "torque_adrc_measurement_n": (
+                        force_command.torque_adrc_measurement_n
+                        if force_command.torque_adrc_measurement_n is not None
+                        else math.nan
+                    ),
                     "tracking_error_n": force_command.force_error_n,
                     "control": motor_command.target_position,
                     "drive_position_rad": motor_command.position,
@@ -621,6 +691,60 @@ def run_force_tracking(
                     ),
                     "force_feedforward_torque_n_m": force_command.force_feedforward_torque,
                     "mit_feedforward_torque_n_m": motor_command.feedforward_torque,
+                    "torque_adrc_estimated_force_n": (
+                        force_command.torque_adrc_estimated_force_n
+                        if force_command.torque_adrc_estimated_force_n is not None
+                        else math.nan
+                    ),
+                    "torque_adrc_estimated_force_rate_n_s": (
+                        force_command.torque_adrc_estimated_force_rate_n_s
+                        if force_command.torque_adrc_estimated_force_rate_n_s is not None
+                        else math.nan
+                    ),
+                    "torque_adrc_estimated_disturbance_n_s2": (
+                        force_command.torque_adrc_estimated_disturbance_n_s2
+                        if force_command.torque_adrc_estimated_disturbance_n_s2 is not None
+                        else math.nan
+                    ),
+                    "torque_adrc_reference_force_n": (
+                        force_command.torque_adrc_reference_force_n
+                        if force_command.torque_adrc_reference_force_n is not None
+                        else math.nan
+                    ),
+                    "torque_adrc_reference_force_rate_n_s": (
+                        force_command.torque_adrc_reference_force_rate_n_s
+                        if force_command.torque_adrc_reference_force_rate_n_s is not None
+                        else math.nan
+                    ),
+                    "torque_adrc_reference_force_acceleration_n_s2": (
+                        force_command.torque_adrc_reference_force_acceleration_n_s2
+                        if force_command.torque_adrc_reference_force_acceleration_n_s2 is not None
+                        else math.nan
+                    ),
+                    "torque_adrc_raw_torque_n_m": (
+                        force_command.torque_adrc_raw_torque_n_m
+                        if force_command.torque_adrc_raw_torque_n_m is not None
+                        else math.nan
+                    ),
+                    "torque_adrc_limited_torque_n_m": (
+                        force_command.torque_adrc_limited_torque_n_m
+                        if force_command.torque_adrc_limited_torque_n_m is not None
+                        else math.nan
+                    ),
+                    "torque_adrc_residual_torque_n_m": (
+                        force_command.torque_adrc_residual_torque_n_m
+                        if force_command.torque_adrc_residual_torque_n_m is not None
+                        else math.nan
+                    ),
+                    "torque_adrc_input_gain_n_per_n_m_s2": (
+                        force_command.torque_adrc_input_gain_n_per_n_m_s2
+                        if force_command.torque_adrc_input_gain_n_per_n_m_s2 is not None
+                        else math.nan
+                    ),
+                    "torque_adrc_rate_limited": str(force_command.torque_adrc_rate_limited).lower(),
+                    "torque_adrc_amplitude_limited": str(
+                        force_command.torque_adrc_amplitude_limited
+                    ).lower(),
                     "estimated_contact_stiffness_n_per_m": (
                         force_command.estimated_contact_stiffness_n_per_m
                         if force_command.estimated_contact_stiffness_n_per_m is not None

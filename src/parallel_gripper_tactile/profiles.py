@@ -141,6 +141,39 @@ class AdrcControl(_FrozenModel):
     max_closing_velocity_m_s: Annotated[FiniteFloat, Field(gt=0)] = 0.02
 
 
+class TorqueAdrcControl(_FrozenModel):
+    """二阶直接力矩 LADRC 的控制导向模型与工程约束。
+
+    被控假设为 ``d²F/dt² = f + b0·τ``。名义输入增益按
+    ``b0 = scale·K_hat·J(q)/I_eq`` 在线调度，其中 ``K_hat`` 为整体等效
+    接触刚度，``J(q)`` 为总闭合行程雅可比，``I_eq`` 为折算到电机输出轴的
+    等效惯量，``scale`` 用小信号辨识校准未建模的输入增益。跟踪阶段由
+    LADRC 直接输出电机力矩，MIT ``kp/kd`` 仅在该阶段旁路；接近阶段仍使用
+    原有阻抗参数。LESO 使用独立的一阶轻度预处理测量，不复用 PID 和指标的
+    较低带宽滤波结果。可选线性 TD 仅安排参考过渡过程；默认 ``None`` 保持
+    Yu 等文献所用的无显式 TD 结构。
+    """
+
+    equivalent_inertia_kg_m2: Annotated[FiniteFloat, Field(gt=0)] = 0.0021617741125
+    input_gain_scale: Annotated[FiniteFloat, Field(gt=0, le=10)] = 2.0
+    controller_bandwidth_rad_s: Annotated[FiniteFloat, Field(gt=0)] = 60.0
+    observer_bandwidth_rad_s: Annotated[FiniteFloat, Field(gt=0)] = 240.0
+    measurement_filter_cutoff_hz: Annotated[FiniteFloat, Field(gt=0)] = 40.0
+    tracking_differentiator_bandwidth_rad_s: Annotated[FiniteFloat, Field(gt=0)] | None = None
+    min_input_gain_n_per_n_m_s2: Annotated[FiniteFloat, Field(gt=0)] = 5_000.0
+    max_input_gain_n_per_n_m_s2: Annotated[FiniteFloat, Field(gt=0)] = 200_000.0
+    max_torque_rate_n_m_s: Annotated[FiniteFloat, Field(gt=0)] = 50.0
+
+    @model_validator(mode="after")
+    def validate_input_gain_limits(self) -> "TorqueAdrcControl":
+        """要求名义输入增益裁剪范围严格递增。"""
+        if self.min_input_gain_n_per_n_m_s2 >= self.max_input_gain_n_per_n_m_s2:
+            raise ValueError(
+                "min_input_gain_n_per_n_m_s2 must be smaller than max_input_gain_n_per_n_m_s2"
+            )
+        return self
+
+
 class NormalForceControl(_FrozenModel):
     """外环法向力跟踪参数。"""
 
@@ -169,6 +202,9 @@ class NormalForceControl(_FrozenModel):
     # 一阶 LADRC 外环参数：非 None 时跟踪阶段以 LADRC 替换 PID 位置修正外环，
     # 输出的闭合速度逐周期积分进位置修正；默认 None 表示不启用。
     adrc: AdrcControl | None = None
+    # 二阶直接力矩 LADRC 参数：非 None 时跟踪阶段旁路 MIT kp/kd，由 LESO
+    # 依据在线刚度、机构雅可比和名义惯量调度输入增益并直接输出力矩。
+    torque_adrc: TorqueAdrcControl | None = None
 
     @model_validator(mode="after")
     def validate_force_control(self) -> "NormalForceControl":
@@ -391,6 +427,7 @@ __all__ = [
     "TactileLayout",
     "TaxelTactileLayout",
     "TouchGridTactileLayout",
+    "TorqueAdrcControl",
     "ValidationError",
     "load_profile",
 ]

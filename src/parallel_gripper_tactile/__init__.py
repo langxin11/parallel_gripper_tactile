@@ -12,6 +12,8 @@ from .control import (
     MITTorqueController,
     NormalForceControlCommand,
     NormalForceController,
+    SecondOrderTorqueLADRC,
+    TorqueAdrcStep,
 )
 from .profiles import (
     AdrcControl,
@@ -21,6 +23,7 @@ from .profiles import (
     MITControl,
     NormalForceControl,
     TactileLayout,
+    TorqueAdrcControl,
     load_profile,
 )
 from .protocols import DisturbanceProtocol
@@ -49,6 +52,9 @@ __all__ = [
     "RealtimePacer",
     "SimulationTimer",
     "TactileLayout",
+    "TorqueAdrcControl",
+    "TorqueAdrcStep",
+    "SecondOrderTorqueLADRC",
     "load_profile",
 ]
 __version__ = "0.2.0"

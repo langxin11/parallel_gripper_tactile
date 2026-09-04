@@ -199,6 +199,8 @@ def run_force_track(
             "full",
             "direct-torque",
             "adrc",
+            "adrc-torque",
+            "adrc-torque-td",
         ],
         typer.Option("--controller-variant"),
     ] = "full",

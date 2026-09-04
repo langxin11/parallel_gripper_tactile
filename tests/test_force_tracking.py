@@ -13,7 +13,7 @@ from parallel_gripper_tactile.experiments.force_tracking import (
     configure_force_controller,
     run_force_tracking,
 )
-from parallel_gripper_tactile.profiles import AdrcControl, load_profile
+from parallel_gripper_tactile.profiles import AdrcControl, TorqueAdrcControl, load_profile
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -48,6 +48,8 @@ def test_force_tracking_task_loads_default_waypoint_config() -> None:
         ("full", True, 0.25, 1.0, 0.0),
         ("direct-torque", True, 0.0, 1.0, 1.0),
         ("adrc", True, 0.0, 1.0, 0.0),
+        ("adrc-torque", True, 0.0, 1.0, 0.0),
+        ("adrc-torque-td", True, 0.0, 1.0, 0.0),
     ],
 )
 def test_controller_variants_apply_reproducible_ablation_settings(
@@ -115,6 +117,82 @@ def test_adrc_variant_enables_ladrc_outer_loop_with_default_parameters() -> None
     assert configured.mit.kd == source.mit.kd
     # 源 profile 不携带 adrc 配置，默认行为保持不变。
     assert source.normal_force.adrc is None
+
+
+def test_adrc_torque_variant_enables_model_scheduled_direct_torque_loop() -> None:
+    """adrc-torque 注入二阶 LADRC 参数，并保留显式名义模型前馈。"""
+    source = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    configured = configure_force_controller(source, variant="adrc-torque")
+
+    assert configured.normal_force is not None
+    assert configured.normal_force.torque_adrc == TorqueAdrcControl()
+    assert configured.normal_force.torque_adrc.measurement_filter_cutoff_hz == 40.0
+    assert configured.normal_force.adrc is None
+    assert configured.normal_force.torque_feedback_gain == 0.0
+    assert configured.normal_force.stiffness is not None
+    assert configured.normal_force.stiffness.enabled is True
+    assert configured.normal_force.stiffness.position_feedforward_gain == 0.0
+    assert configured.normal_force.stiffness.torque_feedforward_gain == 1.0
+    # 接近阶段仍复用相同 MIT 阻抗参数，旁路只发生在跟踪控制周期。
+    assert configured.mit == source.mit
+
+
+def test_adrc_torque_variant_accepts_explicit_tuning_override() -> None:
+    """调参 study 可注入二阶直接力矩 ADRC 参数，而不修改源 profile。"""
+    source = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    override = TorqueAdrcControl(
+        measurement_filter_cutoff_hz=60.0,
+        controller_bandwidth_rad_s=40.0,
+        observer_bandwidth_rad_s=120.0,
+    )
+
+    configured = configure_force_controller(
+        source,
+        variant="adrc-torque",
+        torque_adrc_override=override,
+    )
+
+    assert configured.normal_force is not None
+    assert configured.normal_force.torque_adrc == override
+    with pytest.raises(ValueError, match="requires a torque ADRC"):
+        configure_force_controller(source, variant="full", torque_adrc_override=override)
+
+
+def test_adrc_torque_td_variant_only_adds_reference_shaping() -> None:
+    """TD 工程变体与论文式直接力矩 ADRC 仅参考整形配置不同。"""
+    source = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    plain = configure_force_controller(source, variant="adrc-torque")
+    shaped = configure_force_controller(source, variant="adrc-torque-td")
+
+    assert plain.normal_force is not None
+    assert shaped.normal_force is not None
+    assert plain.normal_force.torque_adrc is not None
+    assert shaped.normal_force.torque_adrc is not None
+    assert plain.normal_force.torque_adrc.tracking_differentiator_bandwidth_rad_s is None
+    assert shaped.normal_force.torque_adrc.tracking_differentiator_bandwidth_rad_s == 180.0
+    assert (
+        shaped.normal_force.torque_adrc.model_copy(
+            update={"tracking_differentiator_bandwidth_rad_s": None}
+        )
+        == plain.normal_force.torque_adrc
+    )
+
+
+def test_force_reference_samples_derivatives_for_linear_and_smoothstep() -> None:
+    """目标曲线同时提供二阶力矩 ADRC 所需的一、二阶参考导数。"""
+    waypoints = (ForceWaypoint(t_s=0.0, force_n=2.0), ForceWaypoint(t_s=2.0, force_n=6.0))
+
+    assert ForceReference(interpolation="linear", waypoints=waypoints).sample_at(1.0) == (
+        4.0,
+        2.0,
+        0.0,
+    )
+    force, rate, acceleration = ForceReference(
+        interpolation="smoothstep", waypoints=waypoints
+    ).sample_at(0.5)
+    assert force == pytest.approx(2.625)
+    assert rate == pytest.approx(2.25)
+    assert acceleration == pytest.approx(3.0)
 
 
 def test_controller_variant_rejects_unknown_name_and_negative_seed() -> None:
@@ -222,3 +300,47 @@ def test_force_tracking_direct_torque_run_tracks_reference(tmp_path: Path) -> No
         math.isfinite(float(row["estimated_contact_stiffness_n_per_m"])) for row in tracking_rows
     )
     assert any(float(row["force_feedforward_torque_n_m"]) != 0.0 for row in tracking_rows)
+
+
+@pytest.mark.parametrize("controller_variant", ["adrc-torque", "adrc-torque-td"])
+def test_force_tracking_adrc_torque_run_writes_observer_diagnostics(
+    tmp_path: Path, controller_variant: str
+) -> None:
+    """直接力矩 ADRC 两种参考路径均稳定完成并写出完整诊断量。"""
+    task = ForceTrackingTask(
+        schema_version=1,
+        name="short_adrc_torque",
+        reference=ForceReference(
+            interpolation="smoothstep",
+            waypoints=(
+                ForceWaypoint(t_s=0.0, force_n=1.0),
+                ForceWaypoint(t_s=0.4, force_n=3.0),
+                ForceWaypoint(t_s=0.8, force_n=2.0),
+            ),
+        ),
+    )
+    output_csv = tmp_path / f"{controller_variant}.csv"
+
+    result = run_force_tracking(
+        ROOT / "configs/custom_parallel_gripper.yaml",
+        task=task,
+        controller_variant=controller_variant,  # type: ignore[arg-type]
+        output_csv=output_csv,
+    )
+
+    assert result.passed
+    assert math.isfinite(result.rmse_n)
+    with output_csv.open(newline="", encoding="utf-8") as stream:
+        rows = list(csv.DictReader(stream))
+    tracking_rows = [row for row in rows if row["phase"] == "track_reference"]
+    assert tracking_rows
+    assert all(float(row["force_position_adjustment_rad"]) == 0.0 for row in tracking_rows)
+    assert all(float(row["pid_position_adjustment_rad"]) == 0.0 for row in tracking_rows)
+    assert all(float(row["stiffness_position_adjustment_rad"]) == 0.0 for row in tracking_rows)
+    assert all(float(row["force_feedforward_torque_n_m"]) > 0.0 for row in tracking_rows)
+    assert all(math.isfinite(float(row["torque_adrc_measurement_n"])) for row in tracking_rows)
+    assert all(math.isfinite(float(row["torque_adrc_reference_force_n"])) for row in tracking_rows)
+    assert all(math.isfinite(float(row["torque_adrc_estimated_force_n"])) for row in tracking_rows)
+    assert all(
+        math.isfinite(float(row["torque_adrc_input_gain_n_per_n_m_s2"])) for row in tracking_rows
+    )

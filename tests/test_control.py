@@ -16,6 +16,8 @@ from parallel_gripper_tactile import (
     GripperProfile,
     MITTorqueController,
     NormalForceController,
+    SecondOrderTorqueLADRC,
+    TorqueAdrcControl,
     load_profile,
 )
 from parallel_gripper_tactile.control import (
@@ -27,6 +29,146 @@ from parallel_gripper_tactile.control import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_second_order_torque_ladrc_bumpless_initialization_and_gain_scheduling() -> None:
+    """二阶 LADRC 在稳态切换和 b0 调度前后保持力矩命令连续。"""
+    config = TorqueAdrcControl(max_torque_rate_n_m_s=100.0)
+    controller = SecondOrderTorqueLADRC(config)
+    controller.reset(
+        measured_force_n=2.0,
+        applied_torque_n_m=0.3,
+        input_gain_n_per_n_m_s2=1000.0,
+    )
+
+    first = controller.step(
+        measured_force_n=2.0,
+        target_force_n=2.0,
+        target_force_rate_n_s=0.0,
+        target_force_acceleration_n_s2=0.0,
+        model_feedforward_torque_n_m=0.0,
+        input_gain_n_per_n_m_s2=1000.0,
+        dt=0.002,
+        min_torque_n_m=-4.0,
+        max_torque_n_m=4.0,
+    )
+    controller.set_applied_torque(
+        first.requested_torque_n_m,
+        model_feedforward_torque_n_m=0.0,
+    )
+    second = controller.step(
+        measured_force_n=2.0,
+        target_force_n=2.0,
+        target_force_rate_n_s=0.0,
+        target_force_acceleration_n_s2=0.0,
+        model_feedforward_torque_n_m=0.0,
+        input_gain_n_per_n_m_s2=2000.0,
+        dt=0.002,
+        min_torque_n_m=-4.0,
+        max_torque_n_m=4.0,
+    )
+
+    assert first.raw_torque_n_m == pytest.approx(0.3)
+    assert first.requested_torque_n_m == pytest.approx(0.3)
+    assert first.estimated_force_n == pytest.approx(2.0)
+    assert first.estimated_force_rate_n_s == pytest.approx(0.0)
+    assert first.estimated_disturbance_n_s2 == pytest.approx(-300.0)
+    assert second.raw_torque_n_m == pytest.approx(0.3)
+    assert second.estimated_disturbance_n_s2 == pytest.approx(-600.0)
+
+
+def test_second_order_torque_ladrc_limits_torque_rate_before_amplitude() -> None:
+    """二阶 LADRC 先限制力矩变化率，再执行执行器幅值限制。"""
+    controller = SecondOrderTorqueLADRC(TorqueAdrcControl(max_torque_rate_n_m_s=1.0))
+    controller.reset(
+        measured_force_n=0.0,
+        applied_torque_n_m=0.0,
+        input_gain_n_per_n_m_s2=1000.0,
+    )
+
+    command = controller.step(
+        measured_force_n=0.0,
+        target_force_n=100.0,
+        target_force_rate_n_s=0.0,
+        target_force_acceleration_n_s2=0.0,
+        model_feedforward_torque_n_m=0.0,
+        input_gain_n_per_n_m_s2=1000.0,
+        dt=0.1,
+        min_torque_n_m=-0.05,
+        max_torque_n_m=0.05,
+    )
+
+    assert command.raw_torque_n_m > 0.1
+    assert command.requested_torque_n_m == pytest.approx(0.05)
+    assert command.rate_limited is True
+    assert command.amplitude_limited is True
+
+
+def test_second_order_torque_ladrc_optional_td_shapes_step_reference() -> None:
+    """线性 TD 将阶跃整形成连续参考，并提供有限速度和加速度。"""
+    controller = SecondOrderTorqueLADRC(
+        TorqueAdrcControl(tracking_differentiator_bandwidth_rad_s=40.0)
+    )
+    controller.reset(measured_force_n=1.0)
+
+    force, rate, acceleration = controller.update_reference(
+        target_force_n=6.0,
+        target_force_rate_n_s=0.0,
+        target_force_acceleration_n_s2=0.0,
+        dt=0.002,
+    )
+
+    assert 1.0 < force < 6.0
+    assert rate > 0.0
+    assert math.isfinite(acceleration)
+
+    assert controller.update_reference(
+        target_force_n=3.0,
+        target_force_rate_n_s=2.0,
+        target_force_acceleration_n_s2=-1.0,
+        dt=0.002,
+    ) == (3.0, 2.0, -1.0)
+
+
+def test_second_order_torque_ladrc_without_td_preserves_analytic_reference() -> None:
+    """论文式无 TD 路径原样使用 waypoint 解析参考及其导数。"""
+    controller = SecondOrderTorqueLADRC(TorqueAdrcControl())
+
+    assert controller.update_reference(
+        target_force_n=3.0,
+        target_force_rate_n_s=2.0,
+        target_force_acceleration_n_s2=-1.0,
+        dt=0.002,
+    ) == (3.0, 2.0, -1.0)
+
+
+def test_second_order_torque_ladrc_observes_actual_limited_residual_input() -> None:
+    """LESO 使用执行器实际力矩减去模型前馈后的残差，而非饱和前命令。"""
+    controller = SecondOrderTorqueLADRC(TorqueAdrcControl(max_torque_rate_n_m_s=100.0))
+    controller.reset(
+        measured_force_n=0.0,
+        applied_torque_n_m=0.0,
+        model_feedforward_torque_n_m=0.0,
+        input_gain_n_per_n_m_s2=1000.0,
+    )
+    controller.set_applied_torque(0.05, model_feedforward_torque_n_m=0.02)
+
+    command = controller.step(
+        # 残差输入 0.03 N·m 在 0.1 s 内对应积分链预测 F=0.15 N、Fdot=3 N/s。
+        measured_force_n=0.15,
+        target_force_n=0.15,
+        target_force_rate_n_s=3.0,
+        target_force_acceleration_n_s2=0.0,
+        model_feedforward_torque_n_m=0.02,
+        input_gain_n_per_n_m_s2=1000.0,
+        dt=0.1,
+        min_torque_n_m=-4.0,
+        max_torque_n_m=4.0,
+    )
+
+    assert command.estimated_force_n == pytest.approx(0.15)
+    assert command.estimated_force_rate_n_s == pytest.approx(3.0)
+    assert command.estimated_disturbance_n_s2 == pytest.approx(0.0)
 
 
 def test_mit_controller_clamps_position_velocity_and_torque() -> None:
@@ -451,12 +593,90 @@ def _profile_with_adrc(profile: GripperProfile, adrc: AdrcControl | None) -> Gri
     )
 
 
+def _profile_with_torque_adrc(
+    profile: GripperProfile,
+    torque_adrc: TorqueAdrcControl | None,
+) -> GripperProfile:
+    """返回仅覆盖 force.torque_adrc 的不可变 profile 副本。"""
+    assert profile.normal_force is not None
+    force = profile.normal_force.model_copy(update={"torque_adrc": torque_adrc})
+    return profile.model_copy(
+        update={"control": profile.control.model_copy(update={"force": force})}
+    )
+
+
 _ADRC_TEST_CONFIG = AdrcControl(
     b0_n_per_m=780.0,
     controller_bandwidth_rad_s=10.0,
     observer_bandwidth_rad_s=30.0,
     max_closing_velocity_m_s=0.02,
 )
+
+
+def test_normal_force_controller_torque_adrc_bypasses_mit_impedance() -> None:
+    """二阶直接力矩 ADRC 在跟踪阶段旁路 MIT kp/kd 并输出完整诊断量。"""
+    source = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    torque_adrc_profile = _profile_with_torque_adrc(source, TorqueAdrcControl())
+    model = mujoco.MjModel.from_xml_path(str(source.model_path))
+    data = mujoco.MjData(model)
+    controller = NormalForceController.from_profile(model, torque_adrc_profile)
+
+    for _ in range(5):
+        command = controller.apply(
+            data,
+            approach_position=0.5,
+            total_normal_force_n=0.4,
+            left_normal_force_n=0.2,
+            right_normal_force_n=0.2,
+            dt=0.002,
+        )
+
+    assert command.state == "force_tracking"
+    assert command.position_adjustment == 0.0
+    assert command.pid_position_adjustment == 0.0
+    assert command.stiffness_position_adjustment == 0.0
+    assert command.force_feedforward_torque > 0.0
+    # MIT 位置弹簧与速度阻尼均被旁路，最终力矩只等于 LADRC 前馈通道。
+    assert command.mit.torque == pytest.approx(command.mit.feedforward_torque)
+    assert command.torque_adrc_measurement_n is not None
+    assert command.torque_adrc_estimated_force_n is not None
+    assert command.torque_adrc_estimated_force_rate_n_s is not None
+    assert command.torque_adrc_estimated_disturbance_n_s2 is not None
+    assert command.torque_adrc_raw_torque_n_m is not None
+    assert command.torque_adrc_limited_torque_n_m is not None
+    assert command.torque_adrc_input_gain_n_per_n_m_s2 is not None
+    assert command.torque_adrc_input_gain_n_per_n_m_s2 > 0.0
+    assert data.ctrl[controller.actuator_id] == pytest.approx(command.mit.torque)
+
+
+def test_torque_adrc_measurement_uses_independent_light_filter() -> None:
+    """ADRC 测量通道应抑制原始尖峰，但比公共 20 Hz 通道保留更多带宽。"""
+    source = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    torque_adrc_profile = _profile_with_torque_adrc(source, TorqueAdrcControl())
+    model = mujoco.MjModel.from_xml_path(str(source.model_path))
+    data = mujoco.MjData(model)
+    controller = NormalForceController.from_profile(model, torque_adrc_profile)
+
+    controller.apply(
+        data,
+        approach_position=0.5,
+        total_normal_force_n=0.0,
+        left_normal_force_n=0.0,
+        right_normal_force_n=0.0,
+        dt=0.002,
+    )
+    command = controller.apply(
+        data,
+        approach_position=0.5,
+        total_normal_force_n=4.0,
+        left_normal_force_n=2.0,
+        right_normal_force_n=2.0,
+        dt=0.002,
+    )
+
+    assert command.torque_adrc_measurement_n is not None
+    assert command.filtered_force_n < command.torque_adrc_measurement_n
+    assert command.torque_adrc_measurement_n < command.measured_force_n
 
 
 def test_normal_force_controller_adrc_branch_integrates_velocity_into_adjustment() -> None:
@@ -639,3 +859,29 @@ def test_adrc_and_direct_torque_are_mutually_exclusive() -> None:
 
     with pytest.raises(ValueError, match="mutually exclusive"):
         NormalForceController.from_profile(model, conflicting)
+
+
+def test_torque_adrc_rejects_other_outer_loops_and_missing_stiffness() -> None:
+    """二阶直接力矩 ADRC 要求独占外环，并依赖启用的刚度估计。"""
+    source = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    assert source.normal_force is not None
+    assert source.normal_force.stiffness is not None
+    model = mujoco.MjModel.from_xml_path(str(source.model_path))
+    conflicting_force = source.normal_force.model_copy(
+        update={"adrc": _ADRC_TEST_CONFIG, "torque_adrc": TorqueAdrcControl()}
+    )
+    conflicting = source.model_copy(
+        update={"control": source.control.model_copy(update={"force": conflicting_force})}
+    )
+    disabled_stiffness = source.normal_force.stiffness.model_copy(update={"enabled": False})
+    missing_model_force = source.normal_force.model_copy(
+        update={"stiffness": disabled_stiffness, "torque_adrc": TorqueAdrcControl()}
+    )
+    missing_model = source.model_copy(
+        update={"control": source.control.model_copy(update={"force": missing_model_force})}
+    )
+
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        NormalForceController.from_profile(model, conflicting)
+    with pytest.raises(ValueError, match="requires enabled contact stiffness"):
+        NormalForceController.from_profile(model, missing_model)
