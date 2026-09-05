@@ -39,11 +39,16 @@ typst compile --root . reports/wired_demo.typ
 ## 如何换数据源
 
 报告头部的 `#let …-run = "/outputs/…"` 常量声明各数据源 run 的产物目录，改成新
-run 的路径后重新编译即可。若产物不存在，先重跑对应实验：
+run 的路径后重新编译即可。插图不直接引用 `outputs/`：把所需 run 的 `plot.pdf`
+复制到 `reports/figures/` 作为入库快照（换数据时重新复制替换），保证论文的图像
+资产固定、不随 `pgt runs clean` 丢失。若产物不存在，先重跑对应实验：
 
 ```bash
 uv run pgt run friction-estimate --profile configs/custom_parallel_gripper.yaml --task configs/friction_estimation/nominal_friction.yaml
 uv run pgt run force-schedule --profile configs/custom_parallel_gripper.yaml --task configs/force_scheduling/dynamic_filling.yaml
+
+cp outputs/custom_parallel_gripper/friction-estimate/<run>/plot.pdf reports/figures/friction_estimate.pdf
+cp outputs/custom_parallel_gripper/force-schedule/<run>/plot.pdf reports/figures/force_schedule.pdf
 ```
 
 ## 模板能力速览

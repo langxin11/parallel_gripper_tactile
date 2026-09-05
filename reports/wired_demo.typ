@@ -78,14 +78,15 @@
   include-rest: false,
 )
 
-// 直接嵌入运行产物图：产物图设计宽度 7.16 in 与版面文本宽度基本一致，
-// 以跨栏浮动嵌入后不做缩放，图内字号所见即所得。
+// 插图约定：所需的产物图复制到 reports/figures/ 作为入库快照（重跑实验后重新
+// 复制并替换），论文编译不依赖 outputs/ 中的图像文件。产物图设计宽度 7.16 in
+// 与版面文本宽度基本一致，以跨栏浮动嵌入后不做缩放，图内字号所见即所得。
 #place(
   top + center,
   scope: "parent",
   float: true,
   figure(
-    image(friction-run + "/plot.pdf", width: 100%),
+    image("/reports/figures/friction_estimate.pdf", width: 100%),
     caption: [
       摩擦估计运行全程产物图，自上而下：切向载荷指令与触觉剪切响应；载荷—剪切支撑残差（虚线为判定阈值）；保守摩擦系数估计（虚线为仿真真值，仅用于评分）；探测与保持位移及其限位。
     ],
@@ -99,7 +100,7 @@
   scope: "parent",
   float: true,
   figure(
-    image(schedule-run + "/plot.pdf", width: 100%),
+    image("/reports/figures/force_schedule.pdf", width: 100%),
     caption: [
       目标力调度运行全程产物图，自上而下：切向载荷（指令与附加下压力）；平均单侧目标力与实测法向力；摩擦裕量；切向滑移。
     ],

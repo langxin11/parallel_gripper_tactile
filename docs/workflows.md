@@ -133,8 +133,9 @@ typst compile --root . reports/wired_demo.typ
 缺字体渲染成方框但编译不报错；首次编译需联网下载 `@preview/mitex` 包，之后走本地缓存。
 
 工作稿的数据源是 `friction-estimate` 与 `force-schedule` 两次运行的产物目录，路径写在
-文件头部常量里。更换数据源时改头部的 `#let …-run = "/outputs/…"` 常量；产物不存在则先
-重跑对应实验（命令见上文）。
+文件头部常量里。更换数据源时改头部的 `#let …-run = "/outputs/…"` 常量，并把新 run 的
+`plot.pdf` 复制到 `reports/figures/` 替换入库快照（插图不直接引用 `outputs/`，图像资产
+固定、不随 `pgt runs clean` 丢失）；产物不存在则先重跑对应实验（命令见上文）。
 
 报告内的 LaTeX 公式经 `mitex` 兼容，Typst 字符串中反斜杠须双写（如 `"\\rho"`），否则
 `\r`、`\t` 会被当转义符吃掉。`tests/test_report_typst.py` 用 `tests/fixtures/` 迷你数据
