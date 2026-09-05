@@ -1,5 +1,5 @@
 // 报告模板编译冒烟测试的 fixture：以最小数据完整走一遍 template.typ 的公开能力。
-// 真实报告见 reports/friction_aware_scheduling.typ；本文件不依赖 outputs/ 产物，
+// 真实使用见 reports/wired_demo.typ；本文件不依赖 outputs/ 产物，
 // 因此在没有运行过实验的环境（如 CI）也能编译。
 #import "../../reports/template.typ": *
 

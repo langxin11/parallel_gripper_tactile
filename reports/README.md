@@ -1,6 +1,6 @@
-# 📊 实验报告（Typst）
+# 📊 实验报告与论文工作稿（Typst）
 
-本目录存放用 Typst 编写的实验报告。报告是时点性交付物：头部记录所引用 run 的 ID 与
+本目录存放用 Typst 编写的实验报告与论文工作稿。两者都是时点性交付物：头部记录所引用 run 的 ID 与
 git 提交，正文数值全部程序化读取自 `outputs/` 产物，看到的每个数字都能溯源到具体 run。
 `docs/` 只保留可复现的定性结论，两者互补——报告给出某次实验的定量快照，docs 沉淀跨版本
 仍然成立的结论；报告不回写 docs/。
@@ -18,11 +18,11 @@ git 提交，正文数值全部程序化读取自 `outputs/` 产物，看到的�
 在仓库根执行：
 
 ```bash
-typst compile --root . reports/friction_aware_scheduling.typ
+typst compile --root . reports/wired_demo.typ
 ```
 
 `--root .` 授权 Typst 读取仓库内文件（表格与图直接来自 `outputs/`）。
-输出 `reports/friction_aware_scheduling.pdf`；产物 PDF 不入库，
+输出 `reports/wired_demo.pdf`；产物 PDF 不入库，
 `reports/*.pdf` 已加入 `.gitignore`。
 
 ## LaTeX 公式的双反斜杠约定
