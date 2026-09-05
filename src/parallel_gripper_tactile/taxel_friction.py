@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 import math
 
@@ -41,6 +42,10 @@ class TaxelFrictionObservation:
     right_contact_mask: np.ndarray
     left_ratio: np.ndarray
     right_ratio: np.ndarray
+    left_normal_force_n: np.ndarray
+    right_normal_force_n: np.ndarray
+    left_shear_force_n: np.ndarray
+    right_shear_force_n: np.ndarray
     active_count: int
     weighted_ratio: float
     ratio_p90: float
@@ -147,6 +152,10 @@ class TaxelFrictionObserver:
             right_contact_mask=self._active[1].copy(),
             left_ratio=ratios[0].copy(),
             right_ratio=ratios[1].copy(),
+            left_normal_force_n=normal[0].copy(),
+            right_normal_force_n=normal[1].copy(),
+            left_shear_force_n=shear[0].copy(),
+            right_shear_force_n=shear[1].copy(),
             active_count=active_count,
             weighted_ratio=weighted_ratio,
             ratio_p90=ratio_p90,
@@ -155,4 +164,194 @@ class TaxelFrictionObserver:
         )
 
 
-__all__ = ["TaxelFrictionConfig", "TaxelFrictionObservation", "TaxelFrictionObserver"]
+@dataclass(frozen=True, slots=True)
+class ForceOnlySlipConfig:
+    """纯力局部起滑检测参数。"""
+
+    window_size: int = 200
+    min_ratio: float = 0.1
+    arming_ratio_increase: float = 0.05
+    saturation_ratio_increase: float = 0.005
+    redistribution_share_drop: float = 0.05
+    min_side_shear_increase_n: float = 0.03
+    confirm_s: float = 0.05
+    estimate_quantile: float = 0.8
+    safety_discount: float = 0.8
+
+    def __post_init__(self) -> None:
+        """校验窗口、判据阈值和保守估计参数。"""
+        if not isinstance(self.window_size, int) or isinstance(self.window_size, bool):
+            raise ValueError("window_size must be an integer")
+        if self.window_size < 4 or self.window_size % 2:
+            raise ValueError("window_size must be an even integer of at least four")
+        values = (
+            self.min_ratio,
+            self.arming_ratio_increase,
+            self.saturation_ratio_increase,
+            self.redistribution_share_drop,
+            self.min_side_shear_increase_n,
+            self.confirm_s,
+            self.estimate_quantile,
+            self.safety_discount,
+        )
+        if not all(math.isfinite(value) for value in values):
+            raise ValueError("force-only slip parameters must be finite")
+        if self.min_ratio < 0 or self.arming_ratio_increase <= 0:
+            raise ValueError("ratio thresholds must be non-negative with positive arming")
+        if self.saturation_ratio_increase < 0:
+            raise ValueError("saturation_ratio_increase must be non-negative")
+        if self.redistribution_share_drop <= 0 or self.min_side_shear_increase_n < 0:
+            raise ValueError("redistribution thresholds must be positive or zero as specified")
+        if self.confirm_s <= 0:
+            raise ValueError("confirm_s must be positive")
+        if not 0 < self.estimate_quantile <= 1 or not 0 < self.safety_discount <= 1:
+            raise ValueError("estimate quantile and safety discount must be in (0, 1]")
+
+
+@dataclass(frozen=True, slots=True)
+class ForceOnlySlipObservation:
+    """一次纯力局部起滑检测结果。"""
+
+    left_armed_mask: np.ndarray
+    right_armed_mask: np.ndarray
+    left_candidate_mask: np.ndarray
+    right_candidate_mask: np.ndarray
+    left_detected_mask: np.ndarray
+    right_detected_mask: np.ndarray
+    event_count: int
+    detected_count: int
+    left_friction_estimate: float | None
+    right_friction_estimate: float | None
+
+
+class ForceOnlyTaxelSlipDetector:
+    """用局部力比趋势和剪切重分配检测局部起滑。"""
+
+    def __init__(self, config: ForceOnlySlipConfig | None = None) -> None:
+        """创建尚未绑定网格形状的检测器。"""
+        self._config = config or ForceOnlySlipConfig()
+        self._ratio_history: deque[np.ndarray] = deque(maxlen=self._config.window_size)
+        self._shear_history: deque[np.ndarray] = deque(maxlen=self._config.window_size)
+        self._active_history: deque[np.ndarray] = deque(maxlen=self._config.window_size)
+        self._armed: np.ndarray | None = None
+        self._candidate_duration_s: np.ndarray | None = None
+        self._detected: np.ndarray | None = None
+        self._candidate_estimate: np.ndarray | None = None
+        self._estimate: np.ndarray | None = None
+
+    def reset(self) -> None:
+        """清除窗口、候选事件和已锁存估计。"""
+        self._ratio_history.clear()
+        self._shear_history.clear()
+        self._active_history.clear()
+        for array in (
+            self._armed,
+            self._candidate_duration_s,
+            self._detected,
+        ):
+            if array is not None:
+                array.fill(False if array.dtype == bool else 0.0)
+        if self._candidate_estimate is not None:
+            self._candidate_estimate.fill(np.nan)
+        if self._estimate is not None:
+            self._estimate.fill(np.nan)
+
+    def update(
+        self,
+        observation: TaxelFrictionObservation,
+        *,
+        dt: float,
+    ) -> ForceOnlySlipObservation:
+        """用一个周期的逐点力观测更新局部起滑状态。"""
+        if not math.isfinite(dt) or dt <= 0:
+            raise ValueError("dt must be positive and finite")
+        ratio = np.stack((observation.left_ratio, observation.right_ratio))
+        shear = np.stack((observation.left_shear_force_n, observation.right_shear_force_n))
+        active = np.stack((observation.left_contact_mask, observation.right_contact_mask))
+        if self._armed is None:
+            self._armed = np.zeros(ratio.shape, dtype=bool)
+            self._candidate_duration_s = np.zeros(ratio.shape)
+            self._detected = np.zeros(ratio.shape, dtype=bool)
+            self._candidate_estimate = np.full(ratio.shape, np.nan)
+            self._estimate = np.full(ratio.shape, np.nan)
+        elif ratio.shape != self._armed.shape:
+            raise ValueError("taxel grid shape must remain constant")
+        assert self._candidate_duration_s is not None
+        assert self._detected is not None
+        assert self._candidate_estimate is not None
+        assert self._estimate is not None
+
+        self._ratio_history.append(ratio.copy())
+        self._shear_history.append(shear.copy())
+        self._active_history.append(active.copy())
+        candidate = np.zeros(ratio.shape, dtype=bool)
+        event = np.zeros(ratio.shape, dtype=bool)
+        if len(self._ratio_history) == self._config.window_size:
+            ratio_window = np.stack(self._ratio_history)
+            shear_window = np.stack(self._shear_history)
+            active_window = np.stack(self._active_history)
+            half = self._config.window_size // 2
+            valid_window = active_window & np.isfinite(ratio_window)
+            window_valid = valid_window.all(axis=0)
+            safe_ratio = np.where(valid_window, ratio_window, 0.0)
+            early_ratio = safe_ratio[:half].mean(axis=0)
+            recent_ratio = safe_ratio[half:].mean(axis=0)
+            ratio_increase = recent_ratio - early_ratio
+            self._armed |= (
+                window_valid
+                & (recent_ratio >= self._config.min_ratio)
+                & (ratio_increase >= self._config.arming_ratio_increase)
+            )
+
+            side_total = shear_window.sum(axis=(2, 3))
+            side_increase = side_total[half:].mean(axis=0) - side_total[:half].mean(axis=0)
+            shares = shear_window / np.maximum(side_total[:, :, None, None], 1e-12)
+            share_drop = shares[:half].mean(axis=0) - shares[half:].mean(axis=0)
+            loading = side_increase[:, None, None] >= self._config.min_side_shear_increase_n
+            saturated = ratio_increase <= self._config.saturation_ratio_increase
+            redistributed = share_drop >= self._config.redistribution_share_drop
+            candidate = (
+                self._armed & ~self._detected & window_valid & loading & (saturated | redistributed)
+            )
+            starting = candidate & (self._candidate_duration_s == 0.0)
+            for side, row, col in np.argwhere(starting):
+                samples = ratio_window[:half, side, row, col]
+                self._candidate_estimate[side, row, col] = self._config.safety_discount * float(
+                    np.quantile(samples, self._config.estimate_quantile)
+                )
+            self._candidate_duration_s = np.where(
+                candidate,
+                self._candidate_duration_s + dt,
+                0.0,
+            )
+            confirmed = candidate & (self._candidate_duration_s + 1e-12 >= self._config.confirm_s)
+            event = confirmed & ~self._detected
+            self._detected |= confirmed
+            self._estimate[event] = self._candidate_estimate[event]
+
+        side_estimates: list[float | None] = []
+        for side in range(2):
+            values = self._estimate[side][np.isfinite(self._estimate[side])]
+            side_estimates.append(float(np.min(values)) if values.size else None)
+        return ForceOnlySlipObservation(
+            left_armed_mask=self._armed[0].copy(),
+            right_armed_mask=self._armed[1].copy(),
+            left_candidate_mask=candidate[0].copy(),
+            right_candidate_mask=candidate[1].copy(),
+            left_detected_mask=self._detected[0].copy(),
+            right_detected_mask=self._detected[1].copy(),
+            event_count=int(np.count_nonzero(event)),
+            detected_count=int(np.count_nonzero(self._detected)),
+            left_friction_estimate=side_estimates[0],
+            right_friction_estimate=side_estimates[1],
+        )
+
+
+__all__ = [
+    "ForceOnlySlipConfig",
+    "ForceOnlySlipObservation",
+    "ForceOnlyTaxelSlipDetector",
+    "TaxelFrictionConfig",
+    "TaxelFrictionObservation",
+    "TaxelFrictionObserver",
+]

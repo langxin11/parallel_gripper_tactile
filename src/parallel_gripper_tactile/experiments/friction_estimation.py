@@ -22,6 +22,9 @@ from ..friction_estimation import (
     FrictionProbeObservation,
 )
 from ..taxel_friction import (
+    ForceOnlySlipConfig,
+    ForceOnlySlipObservation,
+    ForceOnlyTaxelSlipDetector,
     TaxelFrictionConfig,
     TaxelFrictionObservation,
     TaxelFrictionObserver,
@@ -154,6 +157,31 @@ class TaxelFrictionTaskConfig(_TaskModel):
         return TaxelFrictionConfig(**self.model_dump())
 
 
+class TaxelSlipDetectorTaskConfig(_TaskModel):
+    """纯力局部起滑检测与候选摩擦下界参数。"""
+
+    window_size: Annotated[int, Field(ge=4)] = 200
+    min_ratio: Annotated[FiniteFloat, Field(ge=0)] = 0.1
+    arming_ratio_increase: Annotated[FiniteFloat, Field(gt=0)] = 0.05
+    saturation_ratio_increase: Annotated[FiniteFloat, Field(ge=0)] = 0.005
+    redistribution_share_drop: Annotated[FiniteFloat, Field(gt=0)] = 0.05
+    min_side_shear_increase_n: Annotated[FiniteFloat, Field(ge=0)] = 0.03
+    confirm_s: Annotated[FiniteFloat, Field(gt=0)] = 0.05
+    estimate_quantile: Annotated[FiniteFloat, Field(gt=0, le=1)] = 0.8
+    safety_discount: Annotated[FiniteFloat, Field(gt=0, le=1)] = 0.8
+
+    @model_validator(mode="after")
+    def validate_window(self) -> "TaxelSlipDetectorTaskConfig":
+        """要求趋势窗口可均分为前后两段。"""
+        if self.window_size % 2:
+            raise ValueError("window_size must be even")
+        return self
+
+    def to_runtime_config(self) -> ForceOnlySlipConfig:
+        """转换为与仿真无关的纯力局部起滑配置。"""
+        return ForceOnlySlipConfig(**self.model_dump())
+
+
 class FrictionEstimationMetricsConfig(_TaskModel):
     """探测、估计和后续保持阶段的验收门限。"""
 
@@ -179,6 +207,7 @@ class FrictionEstimationTask(_TaskModel):
     probe: TangentialProbeTaskConfig = TangentialProbeTaskConfig()
     estimator: FrictionEstimatorTaskConfig = FrictionEstimatorTaskConfig()
     taxel_observer: TaxelFrictionTaskConfig = TaxelFrictionTaskConfig()
+    taxel_slip_detector: TaxelSlipDetectorTaskConfig = TaxelSlipDetectorTaskConfig()
     scheduler: OracleSchedulerTaskConfig = OracleSchedulerTaskConfig()
     downward_load: DownwardLoadReference
     metrics: FrictionEstimationMetricsConfig = FrictionEstimationMetricsConfig()
@@ -238,6 +267,10 @@ class FrictionEstimationResult:
     peak_local_friction_ratio: float
     local_weighted_ratio_at_detection: float | None
     local_ratio_p90_at_detection: float | None
+    local_slip_detection_time_s: float | None
+    local_slip_detected_taxel_count: int
+    local_left_friction_estimate: float | None
+    local_right_friction_estimate: float | None
     simulation_stable: bool
     detection_passed: bool
     conservatism_passed: bool
@@ -293,6 +326,45 @@ def _taxel_trace_fields(observation: TaxelFrictionObservation) -> dict[str, floa
         for row, col in np.ndindex(mask.shape):
             fields[f"{side}_taxel_contact_{row}_{col}"] = bool(mask[row, col])
             fields[f"{side}_taxel_ratio_{row}_{col}"] = float(ratios[row, col])
+    return fields
+
+
+def _taxel_slip_trace_fields(
+    observation: ForceOnlySlipObservation,
+) -> dict[str, float | int | bool]:
+    """把纯力局部起滑状态展开为 CSV 标量列。"""
+    fields: dict[str, float | int | bool] = {
+        "local_slip_event_count": observation.event_count,
+        "local_slip_detected_count": observation.detected_count,
+        "local_left_friction_estimate": (
+            math.nan
+            if observation.left_friction_estimate is None
+            else observation.left_friction_estimate
+        ),
+        "local_right_friction_estimate": (
+            math.nan
+            if observation.right_friction_estimate is None
+            else observation.right_friction_estimate
+        ),
+    }
+    for side, armed, candidate, detected in (
+        (
+            "left",
+            observation.left_armed_mask,
+            observation.left_candidate_mask,
+            observation.left_detected_mask,
+        ),
+        (
+            "right",
+            observation.right_armed_mask,
+            observation.right_candidate_mask,
+            observation.right_detected_mask,
+        ),
+    ):
+        for row, col in np.ndindex(armed.shape):
+            fields[f"{side}_taxel_slip_armed_{row}_{col}"] = bool(armed[row, col])
+            fields[f"{side}_taxel_slip_candidate_{row}_{col}"] = bool(candidate[row, col])
+            fields[f"{side}_taxel_slip_detected_{row}_{col}"] = bool(detected[row, col])
     return fields
 
 
@@ -433,6 +505,16 @@ def _plot_taxel_friction(
     axes[1, 0].set_ylabel("Local diagnostic")
     axes[1, 0].set_xlabel("Simulation time (s)")
     axes[1, 0].legend()
+    event_times = [float(row["time_s"]) for row in rows if int(row["local_slip_event_count"]) > 0]
+    if event_times:
+        for axis in (axes[0, 0], axes[1, 0]):
+            axis.axvline(
+                event_times[0],
+                color="tab:orange",
+                linestyle=":",
+                label="First local slip" if axis is axes[0, 0] else None,
+            )
+        axes[0, 0].legend()
 
     left_peak = peak_grid(left_keys)
     right_peak = peak_grid(right_keys)
@@ -493,6 +575,7 @@ def run_friction_estimation(
     controller = NormalForceController.from_profile(model, profile, name_prefix=GRIPPER_PREFIX)
     estimator = ConservativeFrictionEstimator(task.estimator.to_runtime_config())
     taxel_observer = TaxelFrictionObserver(task.taxel_observer.to_runtime_config())
+    taxel_slip_detector = ForceOnlyTaxelSlipDetector(task.taxel_slip_detector.to_runtime_config())
     scheduler = OracleTargetForceScheduler(task.scheduler.to_runtime_config())
     noise_rng = np.random.default_rng(int(profile.normal_force.sensor_noise_seed))
     support_id = model.geom(SUPPORT_GEOM_NAME).id
@@ -519,6 +602,8 @@ def run_friction_estimation(
     latest_measurement = None
     latest_estimator_state: FrictionEstimate | None = None
     latest_taxel_observation: TaxelFrictionObservation | None = None
+    latest_taxel_slip: ForceOnlySlipObservation | None = None
+    local_slip_detection_time_s: float | None = None
     simulation_stable = True
     rows: list[dict[str, float | str | bool]] = []
     maximum_duration_s = (
@@ -540,6 +625,7 @@ def run_friction_estimation(
             phase_elapsed_s = 0.0
             estimator.reset()
             taxel_observer.reset()
+            taxel_slip_detector.reset()
         elif phase == "probe" and phase_elapsed_s >= float(task.probe.maximum_duration_s):
             estimate = estimator.finalize()
             latest_estimator_state = estimate
@@ -600,6 +686,17 @@ def run_friction_estimation(
                 latest_measurement.right,
                 dt=control_dt,
             )
+            if phase == "probe" or latest_taxel_slip is None:
+                latest_taxel_slip = taxel_slip_detector.update(
+                    latest_taxel_observation,
+                    dt=control_dt,
+                )
+            if (
+                phase == "probe"
+                and latest_taxel_slip.event_count > 0
+                and local_slip_detection_time_s is None
+            ):
+                local_slip_detection_time_s = phase_elapsed_s
             measured_capacity = latest_measurement.normal_capacity
             left_normal, left_shear, right_normal, right_shear = _measurement_components(
                 latest_measurement
@@ -668,7 +765,12 @@ def run_friction_estimation(
                 phase = "contact_settle"
                 phase_start_time_s = contact_time_s
 
-        if force_command is None or latest_measurement is None or latest_taxel_observation is None:
+        if (
+            force_command is None
+            or latest_measurement is None
+            or latest_taxel_observation is None
+            or latest_taxel_slip is None
+        ):
             raise RuntimeError("control timer did not produce an initial command")
         mujoco.mj_step(model, data)
         if (
@@ -773,6 +875,7 @@ def run_friction_estimation(
                 "cube_vz": float(data.qvel[cube_dof + 2]),
                 "motor_torque_n_m": force_command.mit.torque,
                 **_taxel_trace_fields(latest_taxel_observation),
+                **_taxel_slip_trace_fields(latest_taxel_slip),
             }
         )
         if pending_recovery:
@@ -858,6 +961,16 @@ def run_friction_estimation(
         ),
         local_ratio_p90_at_detection=(
             None if detection_row is None else float(detection_row["active_taxel_ratio_p90"])
+        ),
+        local_slip_detection_time_s=local_slip_detection_time_s,
+        local_slip_detected_taxel_count=(
+            0 if latest_taxel_slip is None else latest_taxel_slip.detected_count
+        ),
+        local_left_friction_estimate=(
+            None if latest_taxel_slip is None else latest_taxel_slip.left_friction_estimate
+        ),
+        local_right_friction_estimate=(
+            None if latest_taxel_slip is None else latest_taxel_slip.right_friction_estimate
         ),
         simulation_stable=simulation_stable and bool(hold_rows),
         detection_passed=detection_passed,

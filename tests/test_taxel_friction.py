@@ -5,7 +5,12 @@ import math
 import numpy as np
 import pytest
 
-from parallel_gripper_tactile.taxel_friction import TaxelFrictionConfig, TaxelFrictionObserver
+from parallel_gripper_tactile.taxel_friction import (
+    ForceOnlySlipConfig,
+    ForceOnlyTaxelSlipDetector,
+    TaxelFrictionConfig,
+    TaxelFrictionObserver,
+)
 
 
 def _forces(normals: list[list[float]], shears: list[list[float]]) -> np.ndarray:
@@ -82,3 +87,62 @@ def test_observer_rejects_shape_changes() -> None:
 
     with pytest.raises(ValueError, match="remain constant"):
         observer.update(two, two, dt=0.01)
+
+
+def test_force_only_detector_latches_ratio_saturation_during_continued_loading() -> None:
+    """局部比值先上升后饱和且同侧剪切继续增加时锁存保守估计。"""
+    observer = TaxelFrictionObserver(
+        TaxelFrictionConfig(contact_enter_force_n=0.05, transition_confirm_s=0.01)
+    )
+    detector = ForceOnlyTaxelSlipDetector(
+        ForceOnlySlipConfig(
+            window_size=4,
+            arming_ratio_increase=0.1,
+            saturation_ratio_increase=0.01,
+            min_side_shear_increase_n=0.01,
+            confirm_s=0.02,
+            estimate_quantile=1.0,
+            safety_discount=0.9,
+        )
+    )
+
+    result = None
+    event_count = 0
+    for first, second in (
+        (0.2, 0.2),
+        (0.3, 0.3),
+        (0.4, 0.4),
+        (0.5, 0.5),
+        (0.5, 0.6),
+        (0.5, 0.7),
+        (0.5, 0.8),
+        (0.5, 0.9),
+    ):
+        forces = _forces([[1.0, 1.0]], [[first, second]])
+        local = observer.update(forces, forces, dt=0.01)
+        result = detector.update(local, dt=0.01)
+        event_count += result.event_count
+
+    assert result is not None
+    assert event_count == 2
+    assert result.detected_count == 2
+    assert result.left_detected_mask.tolist() == [[True, False]]
+    assert result.right_detected_mask.tolist() == [[True, False]]
+    assert result.left_friction_estimate == pytest.approx(0.45)
+    assert result.right_friction_estimate == pytest.approx(0.45)
+
+
+def test_force_only_detector_does_not_arm_a_constant_ratio() -> None:
+    """没有先经历摩擦比上升的稳定接触不会产生局部起滑事件。"""
+    observer = TaxelFrictionObserver(
+        TaxelFrictionConfig(contact_enter_force_n=0.05, transition_confirm_s=0.01)
+    )
+    detector = ForceOnlyTaxelSlipDetector(ForceOnlySlipConfig(window_size=4))
+    result = None
+    for _ in range(10):
+        forces = _forces([[1.0, 1.0]], [[0.4, 0.4]])
+        result = detector.update(observer.update(forces, forces, dt=0.01), dt=0.01)
+
+    assert result is not None
+    assert result.detected_count == 0
+    assert not result.left_armed_mask.any()

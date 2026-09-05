@@ -81,6 +81,20 @@ def test_standard_scenarios_estimate_conservatively_and_hold(task_path: Path) ->
     assert result.peak_active_taxel_count > 0
     assert result.local_weighted_ratio_at_detection is not None
     assert result.local_ratio_p90_at_detection is not None
+    assert result.local_slip_detection_time_s is not None
+    assert result.local_slip_detection_time_s <= result.probe_detection_time_s
+    assert result.local_slip_detected_taxel_count > 0
+    local_estimates = [
+        estimate
+        for estimate in (
+            result.local_left_friction_estimate,
+            result.local_right_friction_estimate,
+        )
+        if estimate is not None
+    ]
+    assert local_estimates
+    assert min(local_estimates) <= task.friction_coefficient + task.metrics.conservative_tolerance
+    assert min(local_estimates) / task.friction_coefficient >= 0.55
 
 
 def test_uninformative_probe_uses_explicit_fallback() -> None:
@@ -150,9 +164,14 @@ def test_execute_friction_estimation_writes_blind_estimator_artifacts(tmp_path: 
     assert effective["runtime"]["taxel_observer_kind"] == (
         "contact_hysteresis_local_friction_ratio"
     )
+    assert effective["runtime"]["taxel_slip_detector_kind"] == (
+        "force_ratio_saturation_and_redistribution"
+    )
     with (run.path / "trace.csv").open(newline="", encoding="utf-8") as stream:
         rows = list(csv.DictReader(stream))
     assert {row["phase"] for row in rows} >= {"probe", "recovery", "schedule_load"}
     assert "left_taxel_ratio_0_0" in rows[0]
     assert "right_taxel_contact_2_2" in rows[0]
     assert max(int(row["active_taxel_count"]) for row in rows) > 0
+    assert "left_taxel_slip_detected_0_0" in rows[0]
+    assert max(int(row["local_slip_detected_count"]) for row in rows) > 0
