@@ -16,7 +16,11 @@ import warnings
 import numpy as np
 
 from parallel_gripper_tactile.experiments.force_tracking import ForceTrackingTask
-from parallel_gripper_tactile.plotstyle import science_pyplot
+from parallel_gripper_tactile.plotstyle import (
+    paper_figsize,
+    save_publication_figure,
+    science_pyplot,
+)
 from parallel_gripper_tactile.profiles import load_profile
 from parallel_gripper_tactile.runners import execute_force_tracking
 from parallel_gripper_tactile.studies.force_tracking_comparison import (
@@ -52,7 +56,6 @@ PLOTTED_METRICS = (
     ("mae_n", "MAE (N)"),
     ("peak_abs_error_n", "Peak absolute error (N)"),
 )
-PUBLICATION_DPI = 600
 
 
 def _json_compatible(value: object) -> object:
@@ -113,14 +116,6 @@ def aggregate_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
     return aggregates
 
 
-def _save_publication_figure(figure, png_path: Path, **savefig_kwargs: object) -> Path:
-    """同时保存 600 DPI PNG 与嵌入 TrueType 字体的矢量 PDF。"""
-    pdf_path = png_path.with_suffix(".pdf")
-    figure.savefig(png_path, dpi=PUBLICATION_DPI, **savefig_kwargs)
-    figure.savefig(pdf_path, **savefig_kwargs)
-    return pdf_path
-
-
 def _finite_error(value: object) -> float:
     """将缺失或非有限标准差转换为零误差条。"""
     if value is None:
@@ -144,7 +139,11 @@ def plot_metric_summary(
     materials = tuple(dict.fromkeys(str(row["object_material"]) for row in aggregates))
     colors = ("#0072B2", "#E69F00", "#009E73", "#D55E00")
     figure, axes = plt.subplots(
-        len(tasks), len(PLOTTED_METRICS), figsize=(10.5, 3.1 * len(tasks)), squeeze=False
+        len(tasks),
+        len(PLOTTED_METRICS),
+        figsize=paper_figsize(3.1 * len(tasks)),
+        squeeze=False,
+        layout="constrained",
     )
     lookup = {
         (str(row["controller_variant"]), str(row["task_name"]), str(row["object_material"])): row
@@ -172,6 +171,9 @@ def plot_metric_summary(
                     capsize=2,
                     label=material,
                     color=colors[material_index % len(colors)],
+                    hatch=("", "//", "xx", "..")[material_index % 4],
+                    edgecolor="black",
+                    linewidth=0.4,
                 )
             axis.set_xticks(x, controllers, rotation=20, ha="right")
             axis.set_ylabel(label)
@@ -179,8 +181,14 @@ def plot_metric_summary(
             if metric_index == 0:
                 axis.set_title(task_name)
             if task_index == 0 and metric_index == len(PLOTTED_METRICS) - 1:
-                axis.legend(frameon=False, title="Material")
-    pdf_path = _save_publication_figure(figure, output, bbox_inches="tight")
+                figure.legend(
+                    *axis.get_legend_handles_labels(),
+                    loc="outside upper center",
+                    ncol=len(materials),
+                    frameon=False,
+                    title="Material",
+                )
+    pdf_path = save_publication_figure(figure, output)
     plt.close(figure)
     return pdf_path
 
@@ -203,7 +211,7 @@ def plot_saturation_summary(
         (str(row["controller_variant"]), str(row["task_name"]), str(row["object_material"])): row
         for row in aggregates
     }
-    figure, axes = plt.subplots(1, 2, figsize=(9.2, 3.7), layout="constrained")
+    figure, axes = plt.subplots(1, 2, figsize=paper_figsize(3.7), layout="constrained")
     for axis, metric, title in (
         (axes[0], "torque_saturation_ratio", "Torque saturation"),
         (axes[1], "position_saturation_ratio", "Position saturation"),
@@ -223,7 +231,7 @@ def plot_saturation_summary(
         axis.set_ylabel("Ratio")
         axis.tick_params(axis="x", rotation=20)
         axis.grid(True, axis="y", linewidth=0.3, alpha=0.5)
-    pdf_path = _save_publication_figure(figure, output)
+    pdf_path = save_publication_figure(figure, output)
     plt.close(figure)
     return pdf_path
 
@@ -245,7 +253,9 @@ def plot_ablation_delta(
         (str(row["controller_variant"]), str(row["task_name"]), str(row["object_material"])): row
         for row in aggregates
     }
-    figure, axes = plt.subplots(1, len(tasks), figsize=(4.2 * len(tasks), 3.8), squeeze=False)
+    figure, axes = plt.subplots(
+        1, len(tasks), figsize=paper_figsize(3.8), squeeze=False, layout="constrained"
+    )
     x = np.arange(len(controllers), dtype=np.float64)
     width = 0.8 / max(1, len(materials))
     colors = ("#0072B2", "#E69F00", "#009E73")
@@ -273,6 +283,9 @@ def plot_ablation_delta(
                 deltas,
                 width=width,
                 color=colors[material_index % len(colors)],
+                hatch=("", "//", "xx", "..")[material_index % 4],
+                edgecolor="black",
+                linewidth=0.4,
                 label=material,
             )
         axis.axhline(0.0, color="black", linewidth=0.8)
@@ -281,8 +294,14 @@ def plot_ablation_delta(
         axis.set_ylabel("RMSE change relative to full (N)")
         axis.grid(True, axis="y", linewidth=0.3, alpha=0.5)
         if task_index == len(tasks) - 1:
-            axis.legend(frameon=False, title="Material")
-    pdf_path = _save_publication_figure(figure, output, bbox_inches="tight")
+            figure.legend(
+                *axis.get_legend_handles_labels(),
+                loc="outside upper center",
+                ncol=len(materials),
+                frameon=False,
+                title="Material",
+            )
+    pdf_path = save_publication_figure(figure, output)
     plt.close(figure)
     return pdf_path
 
@@ -330,7 +349,7 @@ def plot_tracking_overlays(
         if not common_seeds:
             continue
         seed = min(common_seeds)
-        figure, axis = plt.subplots(figsize=(7.16, 3.8), layout="constrained")
+        figure, axis = plt.subplots(figsize=paper_figsize(3.8), layout="constrained")
         target_drawn = False
         for controller in controllers:
             selected = next(
@@ -363,7 +382,7 @@ def plot_tracking_overlays(
         axis.legend(frameon=False, ncol=2)
         safe_task = task_name.replace(" ", "_").replace("/", "_")
         output = figures_dir / f"tracking_{safe_task}_{material}.png"
-        pdf_path = _save_publication_figure(figure, output)
+        pdf_path = save_publication_figure(figure, output)
         plt.close(figure)
         outputs.extend((output, pdf_path))
     return outputs

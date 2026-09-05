@@ -145,6 +145,7 @@ def run_grasp(
         )
         run.register_artifact(csv_path)
         run.register_artifact(plot_path)
+        run.register_artifact(plot_path.with_suffix(".pdf"))
         metrics_path = run.artifact_path("metrics.json")
         metrics_path.write_text(
             json.dumps(asdict(result), indent=2, sort_keys=True) + "\n", encoding="utf-8"
@@ -428,7 +429,7 @@ def compare_contact(
             height=540,
             keep_frames=False,
         )
-        for artifact in (csv_path, plot_path, video_path):
+        for artifact in (csv_path, plot_path, plot_path.with_suffix(".pdf"), video_path):
             run.register_artifact(artifact)
         run.finalize()
     except Exception as error:

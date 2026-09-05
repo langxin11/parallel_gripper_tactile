@@ -157,3 +157,10 @@ Step、Ramp、Mixed/Smoothstep 任务分别突出瞬态、滞后和 waypoint 误
 3. scene 不读取控制目标，controller 不选择碰撞 asset；
 4. experiment 返回结构化结果，入口层决定如何展示；
 5. 任何新增结果文件必须先写入独占 run 目录，再登记到 manifest。
+
+## 科研绘图公共层
+
+`plotstyle.py` 只负责样式、物理尺寸与文件导出，不处理实验数据和统计。
+`science_pyplot()` 注册 SciencePlots 并应用统一中英文字体；`paper_figsize()` 提供单栏和跨栏宽度；
+`save_publication_figure()` 保存同名 PDF 与 PNG，保留画布尺寸并由调用方关闭图像。
+实验入口负责面板组织、标签与图例，runner 或 CLI 负责产物登记。视频叠加面板不属于论文图。

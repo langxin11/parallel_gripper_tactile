@@ -140,3 +140,13 @@ typst compile --root . reports/friction_aware_scheduling.typ
 `\r`、`\t` 会被当转义符吃掉。`tests/test_report_typst.py` 用 `tests/fixtures/` 迷你数据
 编译 fixture 报告做冒烟测试，本机装有 Typst CLI 时才执行、CI 无 CLI 环境自动跳过。
 模板组件说明详见 [`reports/README.md`](../reports/README.md)。
+
+## 论文图导出
+
+科研图默认使用 `science`、`ieee`、`no-latex` 组合，不需要外部 LaTeX。
+字体使用 TeX Gyre Termes 和 Noto Serif CJK SC，运行环境应安装这两种字体，中文需检查缺字警告。
+新增绘图入口复用 `plotstyle` 公共模块，以 `paper_figsize(height, columns=1)` 创建 3.5 英寸单栏图，
+默认 `columns=2` 创建 7.16 英寸跨栏图；高度由面板数量确定。创建时启用约束布局，
+通过 `save_publication_figure(figure, path)` 输出同名 PDF 和 600 DPI PNG。其他显式请求格式也会保留。
+导出不使用紧边界裁切，以免改变最终栏宽。多面板长图仍需根据目标期刊页高拆分或安排到补充材料。
+历史产物不会自动覆盖；需重新执行绘图才能应用新样式。交付前按最终尺寸检查中文、负号、图例与裁切。

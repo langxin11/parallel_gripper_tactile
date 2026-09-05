@@ -21,7 +21,7 @@ from ..friction_estimation import (
     FrictionEstimatorConfig,
     FrictionProbeObservation,
 )
-from ..plotstyle import science_pyplot
+from ..plotstyle import paper_figsize, save_publication_figure, science_pyplot
 from ..profiles import load_profile
 from ..scenes.custom import (
     CUBE_PREFIX,
@@ -256,7 +256,9 @@ def _plot_friction_estimation(
     phases = [str(row["phase"]) for row in rows]
     probe_rows = np.asarray([phase in {"probe_settle", "probe", "recovery"} for phase in phases])
     hold_rows = np.asarray([phase == "schedule_load" for phase in phases])
-    figure, axes = plt.subplots(4, 1, figsize=(7.2, 8.0), sharex=True, constrained_layout=True)
+    figure, axes = plt.subplots(
+        4, 1, figsize=paper_figsize(8.0), sharex=True, constrained_layout=True
+    )
 
     axes[0].plot(times, [float(row["tangential_demand_n"]) for row in rows], label="Demand")
     axes[0].plot(times, [float(row["measured_shear_support_n"]) for row in rows], label="Tactile")
@@ -299,8 +301,7 @@ def _plot_friction_estimation(
     axes[3].set_xlabel("Simulation time (s)")
     axes[3].legend()
     path.parent.mkdir(parents=True, exist_ok=True)
-    figure.savefig(path, dpi=600, bbox_inches="tight")
-    figure.savefig(path.with_suffix(".pdf"), bbox_inches="tight")
+    save_publication_figure(figure, path)
     plt.close(figure)
 
 

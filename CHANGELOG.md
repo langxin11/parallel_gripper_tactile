@@ -7,6 +7,11 @@
 
 ## [Unreleased]
 
+### 变更
+
+- 科研绘图统一应用 SciencePlots 无 LaTeX 论文样式与中英文字体，使用固定论文栏宽，
+  统一导出矢量 PDF 和 600 DPI PNG；抓取与接触对比运行新增 PDF 产物登记，原有显式输出格式继续保留。
+
 ### 新增
 
 - 新增 `pgt run friction-estimate` 力域初始滑移探测与保守摩擦估计：以世界 `+Y` 慢速切向探测，

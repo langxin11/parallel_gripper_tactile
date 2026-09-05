@@ -28,7 +28,7 @@ from ..scenes.custom import (
 )
 from ..contact_taxels import ContactTaxelReader
 from ..control import NormalForceController
-from ..plotstyle import science_pyplot
+from ..plotstyle import paper_figsize, save_publication_figure, science_pyplot
 from ..profiles import load_profile
 from ..protocols import DisturbanceProtocol
 from ..timing import SimulationTimer
@@ -199,15 +199,6 @@ def plot_trace(path: Path, rows: list[dict[str, float | str]]) -> None:
     if not rows:
         raise ValueError("cannot plot an empty grasp trace")
     plt = science_pyplot()
-    plt.rcParams.update(
-        {
-            "font.size": 10,
-            "axes.labelsize": 10,
-            "xtick.labelsize": 9,
-            "ytick.labelsize": 9,
-            "legend.fontsize": 8,
-        }
-    )
     times = [float(row["time_s"]) for row in rows]
     control = [float(row["control"]) for row in rows]
     drive_position = [float(row["drive_position_rad"]) for row in rows]
@@ -245,7 +236,9 @@ def plot_trace(path: Path, rows: list[dict[str, float | str]]) -> None:
     ]
 
     colors = {"black": "#000000", "blue": "#0072B2", "orange": "#D55E00", "green": "#009E73"}
-    figure, axes = plt.subplots(7, 1, figsize=(7.16, 12.4), sharex=True, layout="constrained")
+    figure, axes = plt.subplots(
+        7, 1, figsize=paper_figsize(12.4), sharex=True, layout="constrained"
+    )
     (
         control_axis,
         force_axis,
@@ -395,7 +388,7 @@ def plot_trace(path: Path, rows: list[dict[str, float | str]]) -> None:
             transform=control_axis.get_xaxis_transform(),
         )
     path.parent.mkdir(parents=True, exist_ok=True)
-    figure.savefig(path, dpi=600)
+    save_publication_figure(figure, path)
     plt.close(figure)
 
 

@@ -21,7 +21,7 @@ from ..control import (
     ForceTrackingController,
     NormalForceController,
 )
-from ..plotstyle import science_pyplot
+from ..plotstyle import paper_figsize, save_publication_figure, science_pyplot
 from ..profiles import (
     STIFFNESS_ESTIMATOR_METHODS,
     AdrcControl,
@@ -351,7 +351,7 @@ def _plot_force_tracking(
     stiffness = [math.nan if value <= 0 else value for value in stiffness]
     colors = {"black": "#000000", "blue": "#0072B2", "orange": "#D55E00", "green": "#009E73"}
     layout = _force_tracking_plot_layout(task) if task is not None else "waypoint_error"
-    figure = plt.figure(figsize=(7.16, 8.0), layout="constrained")
+    figure = plt.figure(figsize=paper_figsize(8.0), layout="constrained")
     grid = figure.add_gridspec(3, 2, height_ratios=(1.25, 1.0, 0.9))
     force_axis = figure.add_subplot(grid[0, :])
     error_axis = figure.add_subplot(grid[1, 0], sharex=force_axis)
@@ -502,8 +502,7 @@ def _plot_force_tracking(
     for axis in (force_axis, error_axis, task_axis, torque_axis, stiffness_axis):
         axis.grid(True, linewidth=0.3, alpha=0.5)
     path.parent.mkdir(parents=True, exist_ok=True)
-    figure.savefig(path, dpi=600, bbox_inches="tight")
-    figure.savefig(path.with_suffix(".pdf"), format="pdf", bbox_inches="tight")
+    save_publication_figure(figure, path)
     plt.close(figure)
 
 

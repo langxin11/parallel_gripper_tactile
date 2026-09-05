@@ -19,7 +19,11 @@ from parallel_gripper_tactile.experiments.force_tracking import (
     CONTROLLER_VARIANTS,
     ControllerVariant,
 )
-from parallel_gripper_tactile.plotstyle import science_pyplot
+from parallel_gripper_tactile.plotstyle import (
+    paper_figsize,
+    save_publication_figure,
+    science_pyplot,
+)
 from parallel_gripper_tactile.runners import execute_force_tracking
 from parallel_gripper_tactile.scenes.custom import ObjectContactModel, ObjectMaterial
 from parallel_gripper_tactile.studies.tabular import (
@@ -53,7 +57,6 @@ ALL_PHASES: tuple[Phase, ...] = (
     "integral-gain",
     "filter-cutoff",
 )
-PUBLICATION_DPI = 600
 _NUMERIC_SCAN_FIELDS: dict[Phase, tuple[str, str]] = {
     "force-scale": ("force_scale", "Target force scale"),
     "position-limit": ("max_position_adjustment_rad", "Max. position adjustment (rad)"),
@@ -365,14 +368,6 @@ def _contact_diagnostics(run_directory: Path) -> dict[str, object]:
         return dict(_EMPTY_CONTACT_DIAGNOSTICS)
 
 
-def _save_publication_figure(figure, png_path: Path, **savefig_kwargs: object) -> Path:
-    """同时保存 600 DPI PNG 与嵌入 TrueType 字体的矢量 PDF。"""
-    pdf_path = png_path.with_suffix(".pdf")
-    figure.savefig(png_path, dpi=PUBLICATION_DPI, **savefig_kwargs)
-    figure.savefig(pdf_path, **savefig_kwargs)
-    return pdf_path
-
-
 def _finite_metric(row: dict[str, object], field: str) -> float | None:
     """返回一项有限数值；缺失、无穷和非数值均视为不可绘制。"""
     try:
@@ -392,7 +387,7 @@ def plot_diagnostic_metrics(rows: list[dict[str, object]], output: Path, *, phas
         raise ValueError("不能为没有运行结果的 phase 绘图。")
     plt = science_pyplot()
     numeric_scan = _NUMERIC_SCAN_FIELDS.get(phase)
-    figure, axes = plt.subplots(2, 3, figsize=(10.4, 5.8), layout="constrained")
+    figure, axes = plt.subplots(2, 3, figsize=paper_figsize(5.8), layout="constrained")
     for axis, (field, metric_label) in zip(axes.flat, _DIAGNOSTIC_METRICS):
         values = [_finite_metric(row, field) for row in rows]
         if numeric_scan is not None:
@@ -417,7 +412,7 @@ def plot_diagnostic_metrics(rows: list[dict[str, object]], output: Path, *, phas
         axis.grid(True, axis="y", linewidth=0.3, alpha=0.5)
     axes.flat[-1].set_visible(False)
     figure.suptitle(f"{phase}: causal force-tracking diagnostics")
-    pdf_path = _save_publication_figure(figure, output)
+    pdf_path = save_publication_figure(figure, output)
     plt.close(figure)
     return pdf_path
 
@@ -478,7 +473,7 @@ def plot_tracking_overlay(
         return []
 
     plt = science_pyplot()
-    figure, axis = plt.subplots(figsize=(7.2, 4.0), layout="constrained")
+    figure, axis = plt.subplots(figsize=paper_figsize(4.0), layout="constrained")
     for index, (label, trace) in enumerate(traces):
         time_s = [float(item["tracking_time_s"]) for item in trace]
         if index == 0:
@@ -501,7 +496,7 @@ def plot_tracking_overlay(
     axis.set_title(f"{phase}: target and valid filtered-force trajectories")
     axis.grid(True, linewidth=0.3, alpha=0.5)
     axis.legend(frameon=False, ncol=2, fontsize="small")
-    pdf_path = _save_publication_figure(figure, output)
+    pdf_path = save_publication_figure(figure, output)
     plt.close(figure)
     return [output, pdf_path]
 

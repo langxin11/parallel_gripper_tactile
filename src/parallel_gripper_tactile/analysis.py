@@ -5,7 +5,7 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
-from .plotstyle import science_pyplot
+from .plotstyle import paper_figsize, save_publication_figure, science_pyplot
 
 
 REQUIRED_COLUMNS = {
@@ -42,7 +42,7 @@ def plot_forces(values: dict[str, list[float]], output: Path, show: bool = False
     plt = science_pyplot()
     time_s = values["time_s"]
     figure, (control_axis, left_axis, right_axis) = plt.subplots(
-        3, 1, figsize=(7.16, 6.5), sharex=True, layout="constrained"
+        3, 1, figsize=paper_figsize(6.5), sharex=True, layout="constrained"
     )
     control_axis.plot(time_s, values["control"], color="black", label="control")
     control_axis.set_ylabel("Control")
@@ -60,7 +60,7 @@ def plot_forces(values: dict[str, list[float]], output: Path, show: bool = False
 
     right_axis.set_xlabel("Simulation time (s)")
     output.parent.mkdir(parents=True, exist_ok=True)
-    figure.savefig(output, dpi=600)
+    save_publication_figure(figure, output)
     print(f"已保存 {output}")
     if show:
         plt.show()

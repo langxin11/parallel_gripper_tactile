@@ -15,7 +15,11 @@ from typing import Iterable
 from uuid import uuid4
 
 from parallel_gripper_tactile.experiments.force_tracking import ForceTrackingTask
-from parallel_gripper_tactile.plotstyle import science_pyplot
+from parallel_gripper_tactile.plotstyle import (
+    paper_figsize,
+    save_publication_figure,
+    science_pyplot,
+)
 from parallel_gripper_tactile.profiles import TorqueAdrcControl, load_profile
 from parallel_gripper_tactile.runners import execute_force_tracking
 from parallel_gripper_tactile.studies.force_tracking_torque_adrc_tuning import (
@@ -31,7 +35,6 @@ from parallel_gripper_tactile.studies.tabular import (
 
 
 METRICS = ("rmse_n", "overshoot_ratio", "settling_time_s", "torque_saturation_ratio")
-PUBLICATION_DPI = 600
 
 
 def _create_study_directory(config: ForceTrackingTorqueAdrcTuningConfig, stage: str) -> Path:
@@ -124,14 +127,6 @@ def _mean_metric(
     return fmean(values) if values else None
 
 
-def _save_publication_figure(figure, png_path: Path, **savefig_kwargs: object) -> Path:
-    """同时保存 600 DPI PNG 与嵌入 TrueType 字体的矢量 PDF。"""
-    pdf_path = png_path.with_suffix(".pdf")
-    figure.savefig(png_path, dpi=PUBLICATION_DPI, **savefig_kwargs)
-    figure.savefig(pdf_path, **savefig_kwargs)
-    return pdf_path
-
-
 def _finite_or_nan(value: object) -> float:
     """将缺失或非有限指标映射为 NaN，便于图表保留缺口。"""
     if value is None:
@@ -155,9 +150,17 @@ def plot_candidate_ranking_and_feasibility(
     labels = [f"#{int(row['rank'])} {row['candidate_id']}" for row in ranking]
     feasible = [str(row.get("feasible")) == "true" for row in ranking]
     colors = ["#009E73" if item else "#D55E00" for item in feasible]
-    figure, axes = plt.subplots(1, 3, figsize=(13.2, 3.8), layout="constrained")
+    hatches = ["" if item else "//" for item in feasible]
+    ranking_height = max(2.0, 0.18 * len(ranking))
+    figure, panels = plt.subplot_mosaic(
+        [["ranking", "saturation"], ["constraints", "constraints"]],
+        figsize=paper_figsize(ranking_height + 2.6),
+        height_ratios=(ranking_height, 2.6),
+        layout="constrained",
+    )
+    axes = (panels["ranking"], panels["constraints"], panels["saturation"])
     overshoot = [_finite_or_nan(row.get("step_overshoot_ratio_mean")) for row in ranking]
-    axes[0].barh(labels, overshoot, color=colors)
+    axes[0].barh(labels, overshoot, color=colors, hatch=hatches, edgecolor="black", linewidth=0.4)
     axes[0].invert_yaxis()
     axes[0].set_xlabel("Step overshoot ratio")
     axes[0].set_title("Candidate ranking")
@@ -165,11 +168,21 @@ def plot_candidate_ranking_and_feasibility(
 
     ramp = [_finite_or_nan(row.get("ramp_rmse_ratio_to_baseline")) for row in ranking]
     mixed = [_finite_or_nan(row.get("mixed_rmse_ratio_to_baseline")) for row in ranking]
-    axes[1].scatter(ramp, mixed, c=colors, s=32)
+    for is_feasible, marker, color in ((True, "o", "#009E73"), (False, "x", "#D55E00")):
+        indices = [index for index, value in enumerate(feasible) if value == is_feasible]
+        axes[1].scatter(
+            [ramp[index] for index in indices],
+            [mixed[index] for index in indices],
+            color=color,
+            marker=marker,
+            s=32,
+            label="Feasible" if is_feasible else "Infeasible",
+        )
+    axes[1].legend(frameon=False, fontsize="small")
     axes[1].axvline(max_ramp_rmse_ratio_to_baseline, color="black", linestyle="--", linewidth=0.8)
     axes[1].axhline(max_mixed_rmse_ratio_to_baseline, color="black", linestyle="--", linewidth=0.8)
     for index, (x_value, y_value) in enumerate(zip(ramp, mixed, strict=True), start=1):
-        if math.isfinite(x_value) and math.isfinite(y_value):
+        if feasible[index - 1] and math.isfinite(x_value) and math.isfinite(y_value):
             axes[1].annotate(
                 str(index), (x_value, y_value), xytext=(3, 3), textcoords="offset points"
             )
@@ -179,13 +192,14 @@ def plot_candidate_ranking_and_feasibility(
     axes[1].grid(True, linewidth=0.3, alpha=0.5)
 
     saturation = [_finite_or_nan(row.get("max_torque_saturation_ratio")) for row in ranking]
-    axes[2].barh(labels, saturation, color=colors)
+    axes[2].barh(labels, saturation, color=colors, hatch=hatches, edgecolor="black", linewidth=0.4)
     axes[2].invert_yaxis()
+    axes[2].tick_params(axis="y", labelleft=False)
     axes[2].axvline(max_torque_saturation_ratio, color="black", linestyle="--", linewidth=0.8)
-    axes[2].set_xlabel("Maximum torque saturation ratio")
+    axes[2].set_xlabel("Maximum torque\nsaturation ratio")
     axes[2].set_title("Saturation constraint")
     axes[2].grid(True, axis="x", linewidth=0.3, alpha=0.5)
-    pdf_path = _save_publication_figure(figure, output, bbox_inches="tight")
+    pdf_path = save_publication_figure(figure, output)
     plt.close(figure)
     return pdf_path
 
@@ -222,10 +236,10 @@ def plot_parameter_performance(aggregates: list[dict[str, object]], output: Path
     performances = _candidate_performance(aggregates)
     parameters = (
         ("measurement_filter_cutoff_hz", "Filter cutoff (Hz)"),
-        ("controller_bandwidth_rad_s", "Controller bandwidth (rad/s)"),
-        ("observer_bandwidth_ratio", "Observer/controller bandwidth ratio"),
+        ("controller_bandwidth_rad_s", "Controller bandwidth\n(rad/s)"),
+        ("observer_bandwidth_ratio", "Observer/controller\nbandwidth ratio"),
     )
-    figure, axes = plt.subplots(1, 3, figsize=(11.2, 3.6), layout="constrained")
+    figure, axes = plt.subplots(1, 3, figsize=paper_figsize(3.6), layout="constrained")
     for axis, (parameter, label) in zip(axes, parameters, strict=True):
         grouped: dict[float, list[float]] = {}
         for item in performances:
@@ -247,7 +261,7 @@ def plot_parameter_performance(aggregates: list[dict[str, object]], output: Path
         axis.set_ylabel("Mean RMSE (N)")
         axis.grid(True, linewidth=0.3, alpha=0.5)
     figure.suptitle("ADRC parameter-performance relationships")
-    pdf_path = _save_publication_figure(figure, output, bbox_inches="tight")
+    pdf_path = save_publication_figure(figure, output)
     plt.close(figure)
     return pdf_path
 

@@ -17,7 +17,11 @@ import numpy as np
 import yaml
 
 from parallel_gripper_tactile.experiments.force_tracking import ForceTrackingTask
-from parallel_gripper_tactile.plotstyle import science_pyplot
+from parallel_gripper_tactile.plotstyle import (
+    paper_figsize,
+    save_publication_figure,
+    science_pyplot,
+)
 from parallel_gripper_tactile.runners import execute_force_tracking
 from parallel_gripper_tactile.studies.force_tracking_ablation import (
     ForceTrackingAblationConfig,
@@ -51,7 +55,6 @@ _PLOTTED_METRICS = (
     ("mae_n", "MAE (N)"),
     ("torque_saturation_ratio", "Torque saturation ratio"),
 )
-_PUBLICATION_DPI = 600
 
 
 def _transient_stats(group: list[dict[str, object]], metric: str) -> tuple[float, float]:
@@ -106,14 +109,6 @@ def json_compatible(value: object) -> object:
     return value
 
 
-def _save_publication_figure(figure, png_path: Path, **savefig_kwargs: object) -> Path:
-    """同时保存 600 DPI PNG 与嵌入 TrueType 字体的矢量 PDF。"""
-    pdf_path = png_path.with_suffix(".pdf")
-    figure.savefig(png_path, dpi=_PUBLICATION_DPI, **savefig_kwargs)
-    figure.savefig(pdf_path, **savefig_kwargs)
-    return pdf_path
-
-
 def _finite_error(value: object) -> float:
     """将缺失或非有限标准差转换为零误差条。"""
     if value is None:
@@ -137,8 +132,9 @@ def plot_material_summary(
     figure, axes = plt.subplots(
         len(materials),
         len(_PLOTTED_METRICS),
-        figsize=(10.5, max(3.0, 2.7 * len(materials))),
+        figsize=paper_figsize(max(3.0, 2.7 * len(materials))),
         squeeze=False,
+        layout="constrained",
     )
     x = np.arange(len(controllers), dtype=np.float64)
     for material_index, material in enumerate(materials):
@@ -166,7 +162,7 @@ def plot_material_summary(
                     va="top",
                     fontweight="bold",
                 )
-    pdf_path = _save_publication_figure(figure, output, bbox_inches="tight")
+    pdf_path = save_publication_figure(figure, output)
     plt.close(figure)
     return pdf_path
 
@@ -235,7 +231,7 @@ def plot_pid_factorial_effects(rows: list[dict[str, object]], output: Path) -> P
     """绘制 torque FF 与 stiffness FF 的配对主效应和 2×2 交互作用。"""
     effects = paired_pid_factorial_effects(rows)
     plt = science_pyplot()
-    figure, axes = plt.subplots(1, 2, figsize=(8.8, 3.6), layout="constrained")
+    figure, axes = plt.subplots(1, 2, figsize=paper_figsize(3.6), layout="constrained")
     interaction = axes[0]
     x = np.asarray((0.0, 1.0))
     for label, off_key, on_key, color in (
@@ -265,12 +261,21 @@ def plot_pid_factorial_effects(rows: list[dict[str, object]], output: Path) -> P
         *(_mean_and_standard_error(effects[key]) for key in ("torque_effect", "stiffness_effect")),
         strict=True,
     )
-    main_effect.bar(labels, means, yerr=errors, capsize=2, color=("#009E73", "#CC79A7"))
+    main_effect.bar(
+        labels,
+        means,
+        yerr=errors,
+        capsize=2,
+        color=("#009E73", "#CC79A7"),
+        hatch=("//", "xx"),
+        edgecolor="black",
+        linewidth=0.4,
+    )
     main_effect.axhline(0.0, color="black", linewidth=0.8)
     main_effect.set_ylabel("Paired ΔRMSE, FF on − off (N)")
     main_effect.set_title("Main effects")
     main_effect.grid(True, axis="y", linewidth=0.3, alpha=0.5)
-    pdf_path = _save_publication_figure(figure, output, bbox_inches="tight")
+    pdf_path = save_publication_figure(figure, output)
     plt.close(figure)
     return pdf_path
 

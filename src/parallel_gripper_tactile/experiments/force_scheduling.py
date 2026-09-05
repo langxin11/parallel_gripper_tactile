@@ -15,7 +15,7 @@ import yaml
 
 from ..control import ForceControlObservation, ForceControlReference, NormalForceController
 from ..force_scheduling import OracleTargetForceScheduler, TargetForceSchedulerConfig
-from ..plotstyle import science_pyplot
+from ..plotstyle import paper_figsize, save_publication_figure, science_pyplot
 from ..profiles import load_profile
 from ..scenes.custom import (
     CUBE_PREFIX,
@@ -219,7 +219,9 @@ def _plot_force_scheduling(
     plt = science_pyplot()
     rows = scenario_rows
     times = np.asarray([float(row["scenario_time_s"]) for row in rows])
-    figure, axes = plt.subplots(4, 1, figsize=(7.2, 7.8), sharex=True, constrained_layout=True)
+    figure, axes = plt.subplots(
+        4, 1, figsize=paper_figsize(7.8), sharex=True, constrained_layout=True
+    )
     axes[0].plot(times, [float(row["tangential_demand_n"]) for row in rows], label="Demand")
     axes[0].plot(
         times,
@@ -251,8 +253,7 @@ def _plot_force_scheduling(
     axes[3].set_ylabel("Slip (mm)")
     axes[3].set_xlabel("Scenario time (s)")
     path.parent.mkdir(parents=True, exist_ok=True)
-    figure.savefig(path, dpi=600)
-    figure.savefig(path.with_suffix(".pdf"))
+    save_publication_figure(figure, path)
     plt.close(figure)
 
 

@@ -27,8 +27,8 @@ def test_apply_paper_style_matches_typst_template_fonts() -> None:
     science_pyplot()
     apply_paper_style(plt)
 
-    assert plt.rcParams["font.family"] == ["serif"]
-    assert plt.rcParams["font.serif"] == ["TeX Gyre Termes", "Noto Serif CJK SC"]
+    assert plt.rcParams["font.family"] == ["Noto Serif CJK SC", "TeX Gyre Termes"]
+    assert plt.rcParams["font.serif"] == ["Noto Serif CJK SC", "TeX Gyre Termes"]
     assert plt.rcParams["font.size"] == 8
     assert plt.rcParams["legend.fontsize"] == 7
     assert plt.rcParams["axes.linewidth"] == 0.8
@@ -38,3 +38,65 @@ def test_paper_width_constants_follow_ieee_layout() -> None:
     """栏宽常量应与 IEEE 单栏、跨栏版面一致。"""
     assert COLUMN_WIDTH_IN == 3.5
     assert TEXT_WIDTH_IN == 7.16
+
+
+def test_publication_export_preserves_width_and_requested_format(tmp_path) -> None:
+    """全局紧裁切不能改变导出栏宽，且原请求格式仍然保留。"""
+    import re
+
+    from PIL import Image
+
+    from parallel_gripper_tactile.plotstyle import paper_figsize, save_publication_figure
+
+    with plt.rc_context():
+        science_pyplot()
+        figure, axis = plt.subplots(figsize=paper_figsize(2, columns=1), layout="constrained")
+        axis.plot([0, 1], [-1, 1])
+        axis.set_xlabel("Time (s)")
+        plt.rcParams["savefig.bbox"] = "tight"
+        pdf = save_publication_figure(figure, tmp_path / "figure.svg", bbox_inches="tight")
+        assert (tmp_path / "figure.svg").is_file()
+        with Image.open(tmp_path / "figure.png") as preview:
+            assert preview.size == (2100, 1200)
+        bounds = re.search(rb"/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)", pdf.read_bytes())
+        assert bounds is not None
+        assert float(bounds[1]) == 252
+        assert float(bounds[2]) == 144
+        assert plt.rcParams["savefig.bbox"] == "tight"
+        plt.close(figure)
+
+
+def test_paper_figsize_rejects_invalid_dimensions() -> None:
+    """无效尺寸在创建图像前报告明确错误。"""
+    import pytest
+
+    from parallel_gripper_tactile.plotstyle import paper_figsize
+
+    for height in (0, -1, float("nan"), float("inf")):
+        with pytest.raises(ValueError):
+            paper_figsize(height)
+    with pytest.raises(ValueError):
+        paper_figsize(2, columns=3)
+
+
+def test_chinese_math_label_renders_without_missing_glyphs(tmp_path, caplog) -> None:
+    """中文与数学公式混排应在已安装中文字体时完整渲染。"""
+    import warnings
+
+    import pytest
+    from matplotlib import font_manager
+
+    from parallel_gripper_tactile.plotstyle import paper_figsize, save_publication_figure
+
+    if "Noto Serif CJK SC" not in {font.name for font in font_manager.fontManager.ttflist}:
+        pytest.skip("环境未安装论文中文字体。")
+    with plt.rc_context(), warnings.catch_warnings(record=True) as caught:
+        science_pyplot()
+        figure, axis = plt.subplots(figsize=paper_figsize(2, columns=1), layout="constrained")
+        axis.plot([0, 1], [-1, 1], label="触觉力")
+        axis.set(xlabel="时间（s）", ylabel="力（N）", title="中文公式：$F_z$")
+        axis.legend()
+        save_publication_figure(figure, tmp_path / "chinese.png")
+        plt.close(figure)
+    assert not any("Glyph" in str(item.message) for item in caught)
+    assert "does not have a glyph" not in caplog.text

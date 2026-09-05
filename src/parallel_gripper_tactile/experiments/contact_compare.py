@@ -13,7 +13,7 @@ import numpy as np
 
 from ..contact_taxels import ContactTaxelReader
 from ..control import MITTorqueController
-from ..plotstyle import science_pyplot
+from ..plotstyle import paper_figsize, save_publication_figure, science_pyplot
 from ..profiles import load_profile
 from ..video import encode_video, save_pixels
 from .custom_demo import build_demo_model
@@ -54,15 +54,6 @@ def _write_csv(rows: list[dict[str, float | int]], output_path: Path) -> None:
 def _plot(rows: list[dict[str, float | int]], output_path: Path) -> None:
     """按项目 SciencePlots 规范绘制 A/B 法向力、接触数与耗时。"""
     plt = science_pyplot()
-    plt.rcParams.update(
-        {
-            "font.size": 10,
-            "axes.labelsize": 10,
-            "xtick.labelsize": 9,
-            "ytick.labelsize": 9,
-            "legend.fontsize": 8,
-        }
-    )
     time_s = np.asarray([row["time_s"] for row in rows], dtype=np.float64)
     native_fz = np.asarray([row["native_fz_n"] for row in rows], dtype=np.float64)
     sdf_fz = np.asarray([row["sdf_fz_n"] for row in rows], dtype=np.float64)
@@ -72,7 +63,7 @@ def _plot(rows: list[dict[str, float | int]], output_path: Path) -> None:
     sdf_ms = np.asarray([row["sdf_evaluation_ms"] for row in rows], dtype=np.float64)
 
     colors = {"black": "#000000", "blue": "#0072B2", "orange": "#D55E00"}
-    figure, axes = plt.subplots(3, 1, sharex=True, figsize=(7.16, 7.2), layout="constrained")
+    figure, axes = plt.subplots(3, 1, sharex=True, figsize=paper_figsize(7.2), layout="constrained")
     axes[0].plot(time_s, native_fz, color=colors["blue"], label="Mesh contact", linewidth=1.3)
     axes[0].plot(
         time_s,
@@ -113,7 +104,7 @@ def _plot(rows: list[dict[str, float | int]], output_path: Path) -> None:
         axis.legend(frameon=False, loc="upper left")
         axis.tick_params(direction="in", which="both", top=True, right=True)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    figure.savefig(output_path, dpi=600)
+    save_publication_figure(figure, output_path)
     plt.close(figure)
 
 
