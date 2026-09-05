@@ -8,5 +8,9 @@ __pycache__/
 outputs/
 MUJOCO_LOG.TXT
 site/
+# Typst 报告编译产物（源文件 reports/*.typ 入库，PDF 可随时重编译）
+reports/*.pdf
+# 会话工具目录
+.zcode/
 # onshape-to-robot 中间缓存（可再生成，不入库）
 robot.pkl

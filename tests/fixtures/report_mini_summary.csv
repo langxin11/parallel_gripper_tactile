@@ -1,0 +1,4 @@
+variant,material,seed,passed,rmse_n,note
+pid,hard,0,True,0.0407,基准
+adrc,hard,1,False,,回退值缺失
+pid,soft,2,True,0.0913,
