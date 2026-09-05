@@ -10,6 +10,7 @@ from statistics import fmean
 
 import numpy as np
 
+from ..plotstyle import science_pyplot
 from ..protocols import DisturbanceProtocol
 from ..scenes.robotiq import gripper_name_in_model, load_grasp_model, prefixed_gripper_name
 
@@ -481,13 +482,7 @@ def write_comparison_csv(
 
 def plot_comparison(path: Path, box: ForceTrace, grid: ForceTrace) -> None:
     """使用 SciencePlots 绘制常规法向比较或分阶段扰动比较。"""
-    try:
-        import matplotlib.pyplot as plt
-        import scienceplots  # noqa: F401 -- 导入后注册 science 样式。
-    except ModuleNotFoundError as error:
-        raise ModuleNotFoundError("请先使用 `uv sync` 安装项目依赖。") from error
-
-    plt.style.use(["science", "ieee", "no-latex"])
+    plt = science_pyplot()
     if box.phase:
         _plot_disturbance_comparison(plt, path, box, grid)
         return

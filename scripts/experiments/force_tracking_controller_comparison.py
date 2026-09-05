@@ -16,6 +16,7 @@ import warnings
 import numpy as np
 
 from parallel_gripper_tactile.experiments.force_tracking import ForceTrackingTask
+from parallel_gripper_tactile.plotstyle import science_pyplot
 from parallel_gripper_tactile.profiles import load_profile
 from parallel_gripper_tactile.runners import execute_force_tracking
 from parallel_gripper_tactile.studies.force_tracking_comparison import (
@@ -112,18 +113,6 @@ def aggregate_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
     return aggregates
 
 
-def _science_pyplot():
-    """加载项目统一的论文级无 LaTeX SciencePlots 样式。"""
-    try:
-        import matplotlib.pyplot as plt
-        import scienceplots  # noqa: F401 -- 导入后注册样式。
-    except ModuleNotFoundError as error:
-        raise ModuleNotFoundError("请先使用 `uv sync` 安装项目依赖。") from error
-    plt.style.use(["science", "ieee", "no-latex"])
-    plt.rcParams.update({"pdf.fonttype": 42, "ps.fonttype": 42, "savefig.dpi": PUBLICATION_DPI})
-    return plt
-
-
 def _save_publication_figure(figure, png_path: Path, **savefig_kwargs: object) -> Path:
     """同时保存 600 DPI PNG 与嵌入 TrueType 字体的矢量 PDF。"""
     pdf_path = png_path.with_suffix(".pdf")
@@ -149,7 +138,7 @@ def plot_metric_summary(
     """按任务绘制各控制器跟踪误差的均值与样本标准差。"""
     if not aggregates:
         raise ValueError("cannot plot empty aggregates")
-    plt = _science_pyplot()
+    plt = science_pyplot()
     controllers = tuple(controller_order)
     tasks = tuple(dict.fromkeys(str(row["task_name"]) for row in aggregates))
     materials = tuple(dict.fromkeys(str(row["object_material"]) for row in aggregates))
@@ -205,7 +194,7 @@ def plot_saturation_summary(
     """绘制各控制器的力矩和位置饱和比例。"""
     if not aggregates:
         raise ValueError("cannot plot empty aggregates")
-    plt = _science_pyplot()
+    plt = science_pyplot()
     controllers = tuple(controller_order)
     task_materials = tuple(
         dict.fromkeys((str(row["task_name"]), str(row["object_material"])) for row in aggregates)
@@ -248,7 +237,7 @@ def plot_ablation_delta(
     """绘制各消融变体相对 ``full`` 的 RMSE 变化。"""
     if not aggregates:
         raise ValueError("cannot plot empty aggregates")
-    plt = _science_pyplot()
+    plt = science_pyplot()
     controllers = tuple(controller for controller in controller_order if controller != "full")
     tasks = tuple(dict.fromkeys(str(row["task_name"]) for row in aggregates))
     materials = tuple(dict.fromkeys(str(row["object_material"]) for row in aggregates))
@@ -318,7 +307,7 @@ def plot_tracking_overlays(
     未建立可跟踪接触的运行会保留在 summary 中作为失败条件，但不参与轨迹叠加，
     因为它们没有 ``track_reference`` 样本可供公平比较。
     """
-    plt = _science_pyplot()
+    plt = science_pyplot()
     controllers = tuple(controller_order)
     groups: dict[tuple[str, str], list[dict[str, object]]] = {}
     for row in rows:

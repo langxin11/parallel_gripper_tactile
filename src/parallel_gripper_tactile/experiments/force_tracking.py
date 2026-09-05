@@ -21,6 +21,7 @@ from ..control import (
     ForceTrackingController,
     NormalForceController,
 )
+from ..plotstyle import science_pyplot
 from ..profiles import (
     STIFFNESS_ESTIMATOR_METHODS,
     AdrcControl,
@@ -339,14 +340,7 @@ def _plot_force_tracking(
     """按目标曲线类型绘制力跟踪诊断，并同时生成 PNG 与 PDF。"""
     if not rows:
         raise ValueError("cannot plot an empty force tracking trace")
-    try:
-        import matplotlib.pyplot as plt
-        import scienceplots  # noqa: F401 -- 导入后注册 SciencePlots 样式。
-    except ModuleNotFoundError as error:
-        raise ModuleNotFoundError("请先使用 `uv sync` 安装项目依赖。") from error
-
-    plt.style.use(["science", "ieee", "no-latex"])
-    plt.rcParams.update({"pdf.fonttype": 42, "ps.fonttype": 42, "savefig.dpi": 600})
+    plt = science_pyplot()
     times = [float(row["time_s"]) for row in rows]
     target = [float(row["target_normal_force_n"]) for row in rows]
     filtered = [float(row["filtered_normal_force_n"]) for row in rows]

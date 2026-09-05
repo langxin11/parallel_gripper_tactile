@@ -19,6 +19,7 @@ from parallel_gripper_tactile.experiments.force_tracking import (
     CONTROLLER_VARIANTS,
     ControllerVariant,
 )
+from parallel_gripper_tactile.plotstyle import science_pyplot
 from parallel_gripper_tactile.runners import execute_force_tracking
 from parallel_gripper_tactile.scenes.custom import ObjectContactModel, ObjectMaterial
 from parallel_gripper_tactile.studies.tabular import (
@@ -364,18 +365,6 @@ def _contact_diagnostics(run_directory: Path) -> dict[str, object]:
         return dict(_EMPTY_CONTACT_DIAGNOSTICS)
 
 
-def _science_pyplot():
-    """加载项目统一的论文级无 LaTeX SciencePlots 样式。"""
-    try:
-        import matplotlib.pyplot as plt
-        import scienceplots  # noqa: F401 -- 导入后注册样式。
-    except ModuleNotFoundError as error:
-        raise ModuleNotFoundError("请先使用 `uv sync` 安装项目依赖。") from error
-    plt.style.use(["science", "ieee", "no-latex"])
-    plt.rcParams.update({"pdf.fonttype": 42, "ps.fonttype": 42, "savefig.dpi": PUBLICATION_DPI})
-    return plt
-
-
 def _save_publication_figure(figure, png_path: Path, **savefig_kwargs: object) -> Path:
     """同时保存 600 DPI PNG 与嵌入 TrueType 字体的矢量 PDF。"""
     pdf_path = png_path.with_suffix(".pdf")
@@ -401,7 +390,7 @@ def plot_diagnostic_metrics(rows: list[dict[str, object]], output: Path, *, phas
     """
     if not rows:
         raise ValueError("不能为没有运行结果的 phase 绘图。")
-    plt = _science_pyplot()
+    plt = science_pyplot()
     numeric_scan = _NUMERIC_SCAN_FIELDS.get(phase)
     figure, axes = plt.subplots(2, 3, figsize=(10.4, 5.8), layout="constrained")
     for axis, (field, metric_label) in zip(axes.flat, _DIAGNOSTIC_METRICS):
@@ -488,7 +477,7 @@ def plot_tracking_overlay(
     if not traces:
         return []
 
-    plt = _science_pyplot()
+    plt = science_pyplot()
     figure, axis = plt.subplots(figsize=(7.2, 4.0), layout="constrained")
     for index, (label, trace) in enumerate(traces):
         time_s = [float(item["tracking_time_s"]) for item in trace]

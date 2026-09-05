@@ -17,6 +17,7 @@ import numpy as np
 import yaml
 
 from parallel_gripper_tactile.experiments.force_tracking import ForceTrackingTask
+from parallel_gripper_tactile.plotstyle import science_pyplot
 from parallel_gripper_tactile.runners import execute_force_tracking
 from parallel_gripper_tactile.studies.force_tracking_ablation import (
     ForceTrackingAblationConfig,
@@ -105,18 +106,6 @@ def json_compatible(value: object) -> object:
     return value
 
 
-def _science_pyplot():
-    """加载项目统一的论文级无 LaTeX SciencePlots 样式。"""
-    try:
-        import matplotlib.pyplot as plt
-        import scienceplots  # noqa: F401 -- 导入后注册样式。
-    except ModuleNotFoundError as error:
-        raise ModuleNotFoundError("请先使用 `uv sync` 安装项目依赖。") from error
-    plt.style.use(["science", "ieee", "no-latex"])
-    plt.rcParams.update({"pdf.fonttype": 42, "ps.fonttype": 42, "savefig.dpi": _PUBLICATION_DPI})
-    return plt
-
-
 def _save_publication_figure(figure, png_path: Path, **savefig_kwargs: object) -> Path:
     """同时保存 600 DPI PNG 与嵌入 TrueType 字体的矢量 PDF。"""
     pdf_path = png_path.with_suffix(".pdf")
@@ -139,7 +128,7 @@ def plot_material_summary(
     """按材料展示 RMSE、MAE 与力矩饱和比例的总体对比。"""
     if not aggregates:
         raise ValueError("cannot plot empty aggregates")
-    plt = _science_pyplot()
+    plt = science_pyplot()
     controllers = tuple(controller_order)
     materials = tuple(dict.fromkeys(str(row["object_material"]) for row in aggregates))
     lookup = {
@@ -245,7 +234,7 @@ def _mean_and_standard_error(values: list[float]) -> tuple[float, float]:
 def plot_pid_factorial_effects(rows: list[dict[str, object]], output: Path) -> Path:
     """绘制 torque FF 与 stiffness FF 的配对主效应和 2×2 交互作用。"""
     effects = paired_pid_factorial_effects(rows)
-    plt = _science_pyplot()
+    plt = science_pyplot()
     figure, axes = plt.subplots(1, 2, figsize=(8.8, 3.6), layout="constrained")
     interaction = axes[0]
     x = np.asarray((0.0, 1.0))

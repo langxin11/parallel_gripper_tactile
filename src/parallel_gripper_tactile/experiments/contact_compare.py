@@ -13,6 +13,7 @@ import numpy as np
 
 from ..contact_taxels import ContactTaxelReader
 from ..control import MITTorqueController
+from ..plotstyle import science_pyplot
 from ..profiles import load_profile
 from ..video import encode_video, save_pixels
 from .custom_demo import build_demo_model
@@ -52,13 +53,7 @@ def _write_csv(rows: list[dict[str, float | int]], output_path: Path) -> None:
 
 def _plot(rows: list[dict[str, float | int]], output_path: Path) -> None:
     """按项目 SciencePlots 规范绘制 A/B 法向力、接触数与耗时。"""
-    try:
-        import matplotlib.pyplot as plt
-        import scienceplots  # noqa: F401 -- 导入后注册 SciencePlots 样式。
-    except ModuleNotFoundError as error:
-        raise ModuleNotFoundError("请先使用 `uv sync` 安装项目依赖。") from error
-
-    plt.style.use(["science", "ieee", "no-latex"])
+    plt = science_pyplot()
     plt.rcParams.update(
         {
             "font.size": 10,

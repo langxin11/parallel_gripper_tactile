@@ -15,6 +15,7 @@ from typing import Iterable
 from uuid import uuid4
 
 from parallel_gripper_tactile.experiments.force_tracking import ForceTrackingTask
+from parallel_gripper_tactile.plotstyle import science_pyplot
 from parallel_gripper_tactile.profiles import TorqueAdrcControl, load_profile
 from parallel_gripper_tactile.runners import execute_force_tracking
 from parallel_gripper_tactile.studies.force_tracking_torque_adrc_tuning import (
@@ -123,18 +124,6 @@ def _mean_metric(
     return fmean(values) if values else None
 
 
-def _science_pyplot():
-    """加载项目统一的论文级无 LaTeX SciencePlots 样式。"""
-    try:
-        import matplotlib.pyplot as plt
-        import scienceplots  # noqa: F401 -- 导入后注册样式。
-    except ModuleNotFoundError as error:
-        raise ModuleNotFoundError("请先使用 `uv sync` 安装项目依赖。") from error
-    plt.style.use(["science", "ieee", "no-latex"])
-    plt.rcParams.update({"pdf.fonttype": 42, "ps.fonttype": 42, "savefig.dpi": PUBLICATION_DPI})
-    return plt
-
-
 def _save_publication_figure(figure, png_path: Path, **savefig_kwargs: object) -> Path:
     """同时保存 600 DPI PNG 与嵌入 TrueType 字体的矢量 PDF。"""
     pdf_path = png_path.with_suffix(".pdf")
@@ -162,7 +151,7 @@ def plot_candidate_ranking_and_feasibility(
     """绘制候选排序以及连续任务和饱和约束的可行性。"""
     if not ranking:
         raise ValueError("cannot plot empty ranking")
-    plt = _science_pyplot()
+    plt = science_pyplot()
     labels = [f"#{int(row['rank'])} {row['candidate_id']}" for row in ranking]
     feasible = [str(row.get("feasible")) == "true" for row in ranking]
     colors = ["#009E73" if item else "#D55E00" for item in feasible]
@@ -229,7 +218,7 @@ def plot_parameter_performance(aggregates: list[dict[str, object]], output: Path
     """绘制滤波截止频率、控制带宽和观测器比例对总体 RMSE 的影响。"""
     if not aggregates:
         raise ValueError("cannot plot empty aggregates")
-    plt = _science_pyplot()
+    plt = science_pyplot()
     performances = _candidate_performance(aggregates)
     parameters = (
         ("measurement_filter_cutoff_hz", "Filter cutoff (Hz)"),

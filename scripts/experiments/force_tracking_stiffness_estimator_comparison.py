@@ -16,6 +16,7 @@ import warnings
 import numpy as np
 
 from parallel_gripper_tactile.experiments.force_tracking import ForceTrackingTask
+from parallel_gripper_tactile.plotstyle import science_pyplot
 from parallel_gripper_tactile.profiles import load_profile
 from parallel_gripper_tactile.runners import execute_force_tracking
 from parallel_gripper_tactile.studies.force_tracking_stiffness_estimator_comparison import (
@@ -113,18 +114,6 @@ def aggregate_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
     return aggregates
 
 
-def _science_pyplot():
-    """加载项目统一的论文级无 LaTeX SciencePlots 样式。"""
-    try:
-        import matplotlib.pyplot as plt
-        import scienceplots  # noqa: F401 -- 导入后注册样式。
-    except ModuleNotFoundError as error:
-        raise ModuleNotFoundError("请先使用 `uv sync` 安装项目依赖。") from error
-    plt.style.use(["science", "ieee", "no-latex"])
-    plt.rcParams.update({"pdf.fonttype": 42, "ps.fonttype": 42, "savefig.dpi": PUBLICATION_DPI})
-    return plt
-
-
 def _save_publication_figure(figure, png_path: Path, **savefig_kwargs: object) -> Path:
     """同时保存 600 DPI PNG 与嵌入 TrueType 字体的矢量 PDF。"""
     pdf_path = png_path.with_suffix(".pdf")
@@ -147,7 +136,7 @@ def plot_metric_summary(
     """按任务绘制各刚度估计器的跟踪指标均值与样本标准差。"""
     if not aggregates:
         raise ValueError("cannot plot empty aggregates")
-    plt = _science_pyplot()
+    plt = science_pyplot()
     estimators = tuple(estimator_order)
     tasks = tuple(dict.fromkeys(str(row["task_name"]) for row in aggregates))
     materials = tuple(dict.fromkeys(str(row["object_material"]) for row in aggregates))
@@ -204,7 +193,7 @@ def plot_delta_vs_secant(
     """绘制窗口方法相对 ``secant_ewma`` 的 RMSE 变化。"""
     if not aggregates:
         raise ValueError("cannot plot empty aggregates")
-    plt = _science_pyplot()
+    plt = science_pyplot()
     estimators = tuple(
         estimator for estimator in estimator_order if estimator != BASELINE_ESTIMATOR
     )
@@ -276,7 +265,7 @@ def plot_tracking_and_stiffness_overlays(
     estimator_order: Iterable[str],
 ) -> list[Path]:
     """为共同有效 seed 叠加目标力、实际力和刚度估计轨迹。"""
-    plt = _science_pyplot()
+    plt = science_pyplot()
     estimators = tuple(estimator_order)
     groups: dict[tuple[str, str], list[dict[str, object]]] = {}
     for row in rows:

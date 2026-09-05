@@ -21,6 +21,7 @@ from ..friction_estimation import (
     FrictionEstimatorConfig,
     FrictionProbeObservation,
 )
+from ..plotstyle import science_pyplot
 from ..profiles import load_profile
 from ..scenes.custom import (
     CUBE_PREFIX,
@@ -250,13 +251,7 @@ def _plot_friction_estimation(
     """绘制探测残差、摩擦估计、目标力和滑移诊断图。"""
     if not rows:
         raise ValueError("cannot plot an empty friction estimation trace")
-    try:
-        import matplotlib.pyplot as plt
-        import scienceplots  # noqa: F401 -- 导入后注册 SciencePlots 样式。
-    except ModuleNotFoundError as error:
-        raise ModuleNotFoundError("请先使用 `uv sync` 安装项目依赖。") from error
-
-    plt.style.use(["science", "ieee", "no-latex"])
+    plt = science_pyplot()
     times = np.asarray([float(row["time_s"]) for row in rows])
     phases = [str(row["phase"]) for row in rows]
     probe_rows = np.asarray([phase in {"probe_settle", "probe", "recovery"} for phase in phases])

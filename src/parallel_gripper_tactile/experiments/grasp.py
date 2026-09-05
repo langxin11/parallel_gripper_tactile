@@ -28,6 +28,7 @@ from ..scenes.custom import (
 )
 from ..contact_taxels import ContactTaxelReader
 from ..control import NormalForceController
+from ..plotstyle import science_pyplot
 from ..profiles import load_profile
 from ..protocols import DisturbanceProtocol
 from ..timing import SimulationTimer
@@ -197,13 +198,7 @@ def plot_trace(path: Path, rows: list[dict[str, float | str]]) -> None:
     """绘制发表风格的控制量、触觉力与物体运动轨迹图。"""
     if not rows:
         raise ValueError("cannot plot an empty grasp trace")
-    try:
-        import matplotlib.pyplot as plt
-        import scienceplots  # noqa: F401 -- 导入后注册 SciencePlots 样式。
-    except ModuleNotFoundError as error:
-        raise ModuleNotFoundError("请先使用 `uv sync` 安装项目依赖。") from error
-
-    plt.style.use(["science", "ieee", "no-latex"])
+    plt = science_pyplot()
     plt.rcParams.update(
         {
             "font.size": 10,

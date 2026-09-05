@@ -15,6 +15,7 @@ import yaml
 
 from ..control import ForceControlObservation, ForceControlReference, NormalForceController
 from ..force_scheduling import OracleTargetForceScheduler, TargetForceSchedulerConfig
+from ..plotstyle import science_pyplot
 from ..profiles import load_profile
 from ..scenes.custom import (
     CUBE_PREFIX,
@@ -215,13 +216,7 @@ def _plot_force_scheduling(
     scenario_rows = [row for row in rows if row["phase"] == "schedule_load"]
     if not scenario_rows:
         raise ValueError("cannot plot an empty force scheduling trace")
-    try:
-        import matplotlib.pyplot as plt
-        import scienceplots  # noqa: F401 -- 导入后注册 SciencePlots 样式。
-    except ModuleNotFoundError as error:
-        raise ModuleNotFoundError("请先使用 `uv sync` 安装项目依赖。") from error
-
-    plt.style.use(["science", "ieee", "no-latex"])
+    plt = science_pyplot()
     rows = scenario_rows
     times = np.asarray([float(row["scenario_time_s"]) for row in rows])
     figure, axes = plt.subplots(4, 1, figsize=(7.2, 7.8), sharex=True, constrained_layout=True)

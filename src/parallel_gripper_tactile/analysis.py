@@ -5,6 +5,8 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
+from .plotstyle import science_pyplot
+
 
 REQUIRED_COLUMNS = {
     "time_s",
@@ -37,14 +39,7 @@ def read_force_csv(path: Path) -> dict[str, list[float]]:
 
 def plot_forces(values: dict[str, list[float]], output: Path, show: bool = False) -> None:
     """按 SciencePlots 风格绘制控制量、左右三维力曲线。"""
-    try:
-        import matplotlib.pyplot as plt
-        import scienceplots  # noqa: F401 -- 导入后才会注册 science 样式。
-    except ModuleNotFoundError as error:
-        raise ModuleNotFoundError("请先使用 `uv sync` 安装项目依赖。") from error
-
-    # ieee: IEEE 风格 Times 衬线+网格；no-latex: 不依赖 TeX 发行版。
-    plt.style.use(["science", "ieee", "no-latex"])
+    plt = science_pyplot()
     time_s = values["time_s"]
     figure, (control_axis, left_axis, right_axis) = plt.subplots(
         3, 1, figsize=(7.16, 6.5), sharex=True, layout="constrained"
