@@ -115,3 +115,28 @@ uv run python scripts/experiments/force_tracking_diagnosis.py \
 
 用 `pgt runs list` 查看既有产物。用 `pgt runs clean --all` 预览要删除的目标；确认目标后
 再加 `--apply`。
+
+## 实验报告（Typst）
+
+`reports/` 目录用 Typst 编写实验报告。报告是时点性交付物：头部记录所引用 run 的 ID 与
+git 提交，数值全部程序化读取自 `outputs/` 产物，与 docs/ 只保留可复现定性结论的约定互补；
+报告不回写 docs/。
+
+在仓库根编译首份《摩擦感知目标力调度实验报告》：
+
+<pre><code class="language-bash">
+typst compile --root . reports/friction_aware_scheduling.typ
+</code></pre>
+
+产物为 `reports/friction_aware_scheduling.pdf`，不入库（`reports/*.pdf` 已加入 `.gitignore`）。
+前置要求：Typst CLI ≥ 0.14（0.15.0 已验证）；Noto Serif/Sans CJK SC 简体中文字体，
+缺字体渲染成方框但编译不报错；首次编译需联网下载 `@preview/mitex` 包，之后走本地缓存。
+
+首份报告的数据源是 `friction-estimate` 与 `force-schedule` 两次运行的产物目录，路径写在
+报告头部常量里。更换数据源时改头部的 `#let …-run = "/outputs/…"` 常量；产物不存在则先
+重跑对应实验（命令见上文）。
+
+报告内的 LaTeX 公式经 `mitex` 兼容，Typst 字符串中反斜杠须双写（如 `"\\rho"`），否则
+`\r`、`\t` 会被当转义符吃掉。`tests/test_report_typst.py` 用 `tests/fixtures/` 迷你数据
+编译 fixture 报告做冒烟测试，本机装有 Typst CLI 时才执行、CI 无 CLI 环境自动跳过。
+模板组件说明详见 [`reports/README.md`](../reports/README.md)。

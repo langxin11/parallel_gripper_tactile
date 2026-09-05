@@ -22,6 +22,11 @@
 - 目标力调度 task 显式配置 `noslip_iterations=5`，抑制摩擦锥内长时数值爬移；目标力不足的反例仍会
   滑落，避免把求解器后处理误解为额外摩擦或防滑控制
 - 新增 `docs/force-scheduling.md`，说明 oracle 边界、平均单侧力公式、标准场景、输出字段与当前验证结果
+- 新增 `reports/` Typst 实验报告模板与首份《摩擦感知目标力调度》报告：表格直读 `outputs/` 产物、
+  嵌入矢量 PDF 图、公式经 mitex 兼容 LaTeX 语法；在仓库根用
+  `typst compile --root . reports/friction_aware_scheduling.typ` 编译，产物 PDF 不入库
+- 新增 `tests/test_report_typst.py` 编译冒烟测试：用 `tests/fixtures/` 迷你数据编译 fixture 报告，
+  本机装有 Typst CLI 时自动执行、CI 无 CLI 环境自动跳过
 
 ## [0.3.0] - 2026-09-04
 
