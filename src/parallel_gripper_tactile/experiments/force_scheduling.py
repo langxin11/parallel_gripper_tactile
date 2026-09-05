@@ -15,7 +15,13 @@ import yaml
 
 from ..control import ForceControlObservation, ForceControlReference, NormalForceController
 from ..force_scheduling import OracleTargetForceScheduler, TargetForceSchedulerConfig
-from ..plotstyle import paper_figsize, save_publication_figure, science_pyplot
+from ..plotstyle import (
+    FULL_WIDTH_FONT_SCALE,
+    paper_figsize,
+    save_publication_figure,
+    science_pyplot,
+)
+
 from ..profiles import load_profile
 from ..scenes.custom import (
     CUBE_PREFIX,
@@ -216,7 +222,7 @@ def _plot_force_scheduling(
     scenario_rows = [row for row in rows if row["phase"] == "schedule_load"]
     if not scenario_rows:
         raise ValueError("cannot plot an empty force scheduling trace")
-    plt = science_pyplot()
+    plt = science_pyplot(font_scale=FULL_WIDTH_FONT_SCALE)
     rows = scenario_rows
     times = np.asarray([float(row["scenario_time_s"]) for row in rows])
     figure, axes = plt.subplots(

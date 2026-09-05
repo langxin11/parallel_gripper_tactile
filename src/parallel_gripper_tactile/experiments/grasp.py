@@ -28,7 +28,13 @@ from ..scenes.custom import (
 )
 from ..contact_taxels import ContactTaxelReader
 from ..control import NormalForceController
-from ..plotstyle import paper_figsize, save_publication_figure, science_pyplot
+from ..plotstyle import (
+    FULL_WIDTH_FONT_SCALE,
+    paper_figsize,
+    save_publication_figure,
+    science_pyplot,
+)
+
 from ..profiles import load_profile
 from ..protocols import DisturbanceProtocol
 from ..timing import SimulationTimer
@@ -198,7 +204,7 @@ def plot_trace(path: Path, rows: list[dict[str, float | str]]) -> None:
     """绘制发表风格的控制量、触觉力与物体运动轨迹图。"""
     if not rows:
         raise ValueError("cannot plot an empty grasp trace")
-    plt = science_pyplot()
+    plt = science_pyplot(font_scale=FULL_WIDTH_FONT_SCALE)
     times = [float(row["time_s"]) for row in rows]
     control = [float(row["control"]) for row in rows]
     drive_position = [float(row["drive_position_rad"]) for row in rows]

@@ -17,6 +17,7 @@ import numpy as np
 
 from parallel_gripper_tactile.experiments.force_tracking import ForceTrackingTask
 from parallel_gripper_tactile.plotstyle import (
+    FULL_WIDTH_FONT_SCALE,
     paper_figsize,
     save_publication_figure,
     science_pyplot,
@@ -326,7 +327,7 @@ def plot_tracking_overlays(
     未建立可跟踪接触的运行会保留在 summary 中作为失败条件，但不参与轨迹叠加，
     因为它们没有 ``track_reference`` 样本可供公平比较。
     """
-    plt = science_pyplot()
+    plt = science_pyplot(font_scale=FULL_WIDTH_FONT_SCALE)
     controllers = tuple(controller_order)
     groups: dict[tuple[str, str], list[dict[str, object]]] = {}
     for row in rows:

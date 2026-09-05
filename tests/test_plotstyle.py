@@ -6,6 +6,7 @@ import matplotlib.pyplot as plt
 
 from parallel_gripper_tactile.plotstyle import (
     COLUMN_WIDTH_IN,
+    FULL_WIDTH_FONT_SCALE,
     TEXT_WIDTH_IN,
     apply_paper_style,
     science_pyplot,
@@ -29,9 +30,37 @@ def test_apply_paper_style_matches_typst_template_fonts() -> None:
 
     assert plt.rcParams["font.family"] == ["Noto Serif CJK SC", "TeX Gyre Termes"]
     assert plt.rcParams["font.serif"] == ["Noto Serif CJK SC", "TeX Gyre Termes"]
-    assert plt.rcParams["font.size"] == 8
-    assert plt.rcParams["legend.fontsize"] == 7
-    assert plt.rcParams["axes.linewidth"] == 0.8
+    assert plt.rcParams["font.size"] == 9
+    assert plt.rcParams["axes.labelsize"] == 9
+    assert plt.rcParams["axes.titlesize"] == 10
+    assert plt.rcParams["xtick.labelsize"] == 8
+    assert plt.rcParams["legend.fontsize"] == 8
+    assert plt.rcParams["axes.linewidth"] == 0.9
+    assert plt.rcParams["lines.linewidth"] == 1.2
+    assert plt.rcParams["lines.markersize"] == 4
+
+
+def test_full_width_font_scale_enlarges_typography() -> None:
+    """跨栏整宽档应等比放大字号与线宽，保持文字相对面板的视觉密度。"""
+    import pytest
+
+    science_pyplot(font_scale=FULL_WIDTH_FONT_SCALE)
+
+    assert plt.rcParams["font.size"] == pytest.approx(9 * FULL_WIDTH_FONT_SCALE)
+    assert plt.rcParams["axes.labelsize"] == pytest.approx(9 * FULL_WIDTH_FONT_SCALE)
+    assert plt.rcParams["xtick.labelsize"] == pytest.approx(8 * FULL_WIDTH_FONT_SCALE)
+    assert plt.rcParams["legend.fontsize"] == pytest.approx(8 * FULL_WIDTH_FONT_SCALE)
+    assert plt.rcParams["axes.linewidth"] == pytest.approx(0.9 * FULL_WIDTH_FONT_SCALE)
+    assert plt.rcParams["lines.linewidth"] == pytest.approx(1.2 * FULL_WIDTH_FONT_SCALE)
+
+
+def test_apply_paper_style_rejects_invalid_font_scale() -> None:
+    """无效缩放系数应在创建图像前报告明确错误。"""
+    import pytest
+
+    for scale in (0, -1.0, float("nan"), float("inf")):
+        with pytest.raises(ValueError):
+            apply_paper_style(plt, font_scale=scale)
 
 
 def test_paper_width_constants_follow_ieee_layout() -> None:

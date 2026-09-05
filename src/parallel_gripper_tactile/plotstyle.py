@@ -32,9 +32,18 @@ TEXT_WIDTH_IN = 7.16
 # 中文字体优先，确保同一文本中的中文与 MathText 混排不丢字。
 PAPER_FONT_STACK = ("Noto Serif CJK SC", "TeX Gyre Termes")
 
+# 跨栏整宽面板的字号档：面板宽度约为单栏校准宽度的两倍时，等比放大
+# 字号与线宽，保持文字与线迹相对面板的视觉密度和单栏图一致。
+FULL_WIDTH_FONT_SCALE = 1.2
 
-def science_pyplot() -> Any:
+
+def science_pyplot(*, font_scale: float = 1.0) -> Any:
     """按项目统一样式加载并返回 matplotlib.pyplot。
+
+    Args:
+        font_scale: 论文版式的字号缩放系数；跨栏整宽面板（宽度为
+            `TEXT_WIDTH_IN` 的单列时间序列）使用 `FULL_WIDTH_FONT_SCALE`，
+            单栏面板与多列网格保持默认。
 
     Returns:
         应用了基础样式与统一 rcParams 的 matplotlib.pyplot 模块。
@@ -46,33 +55,42 @@ def science_pyplot() -> Any:
         raise ModuleNotFoundError("请先使用 `uv sync` 安装项目依赖。") from error
     plt.style.use(BASE_STYLE_SHEETS)
     plt.rcParams.update(BASE_RC_PARAMS)
-    apply_paper_style(plt)
+    apply_paper_style(plt, font_scale=font_scale)
     return plt
 
 
-def apply_paper_style(plt: Any) -> None:
-    """在基础样式之上应用论文单栏版式预设。
+def apply_paper_style(plt: Any, *, font_scale: float = 1.0) -> None:
+    """在基础样式之上应用论文版式预设。
 
-    字体与 Typst 论文模板同源，字号按 IEEE 单栏 3.5 in 宽度校准：图内
-    8 pt 与论文 8 pt 图注同大小，嵌入后不再因缩放变小。使用时以
-    `COLUMN_WIDTH_IN`（单栏）或 `TEXT_WIDTH_IN`（跨栏）作为 figsize 宽度。
+    字体与 Typst 论文模板同源。字号按 IEEE 单栏 3.5 in 宽的面板校准：
+    正文与轴标签 9 pt，刻度与图例 8 pt，嵌入后不再因缩放变小。使用时以
+    `COLUMN_WIDTH_IN`（单栏）或 `TEXT_WIDTH_IN`（跨栏）作为 figsize 宽度，
+    跨栏整宽面板传 `font_scale=FULL_WIDTH_FONT_SCALE` 等比放大字号与线宽。
 
     Args:
         plt: `science_pyplot()` 返回的 pyplot 模块。
+        font_scale: 字号与线宽的整体缩放系数，必须为有限正数。
+
+    Raises:
+        ValueError: `font_scale` 不是有限正数。
     """
+    if not math.isfinite(font_scale) or font_scale <= 0:
+        raise ValueError("font_scale 必须为有限正数。")
     plt.rcParams.update(
         {
             "font.family": list(PAPER_FONT_STACK),
             "mathtext.fontset": "dejavuserif",
             "font.serif": list(PAPER_FONT_STACK),
-            "font.size": 8,
-            "axes.labelsize": 8,
-            "xtick.labelsize": 7,
-            "ytick.labelsize": 7,
-            "legend.fontsize": 7,
-            "axes.linewidth": 0.8,
-            "lines.linewidth": 1.0,
-            "lines.markersize": 3,
+            "font.size": 9 * font_scale,
+            "axes.labelsize": 9 * font_scale,
+            "axes.titlesize": 10 * font_scale,
+            "figure.titlesize": 10 * font_scale,
+            "xtick.labelsize": 8 * font_scale,
+            "ytick.labelsize": 8 * font_scale,
+            "legend.fontsize": 8 * font_scale,
+            "axes.linewidth": 0.9 * font_scale,
+            "lines.linewidth": 1.2 * font_scale,
+            "lines.markersize": 4 * font_scale,
         }
     )
 

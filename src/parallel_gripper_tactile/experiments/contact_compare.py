@@ -13,7 +13,13 @@ import numpy as np
 
 from ..contact_taxels import ContactTaxelReader
 from ..control import MITTorqueController
-from ..plotstyle import paper_figsize, save_publication_figure, science_pyplot
+from ..plotstyle import (
+    FULL_WIDTH_FONT_SCALE,
+    paper_figsize,
+    save_publication_figure,
+    science_pyplot,
+)
+
 from ..profiles import load_profile
 from ..video import encode_video, save_pixels
 from .custom_demo import build_demo_model
@@ -53,7 +59,7 @@ def _write_csv(rows: list[dict[str, float | int]], output_path: Path) -> None:
 
 def _plot(rows: list[dict[str, float | int]], output_path: Path) -> None:
     """按项目 SciencePlots 规范绘制 A/B 法向力、接触数与耗时。"""
-    plt = science_pyplot()
+    plt = science_pyplot(font_scale=FULL_WIDTH_FONT_SCALE)
     time_s = np.asarray([row["time_s"] for row in rows], dtype=np.float64)
     native_fz = np.asarray([row["native_fz_n"] for row in rows], dtype=np.float64)
     sdf_fz = np.asarray([row["sdf_fz_n"] for row in rows], dtype=np.float64)

@@ -17,6 +17,7 @@ import numpy as np
 
 from parallel_gripper_tactile.experiments.force_tracking import ForceTrackingTask
 from parallel_gripper_tactile.plotstyle import (
+    FULL_WIDTH_FONT_SCALE,
     paper_figsize,
     save_publication_figure,
     science_pyplot,
@@ -284,7 +285,7 @@ def plot_tracking_and_stiffness_overlays(
     estimator_order: Iterable[str],
 ) -> list[Path]:
     """为共同有效 seed 叠加目标力、实际力和刚度估计轨迹。"""
-    plt = science_pyplot()
+    plt = science_pyplot(font_scale=FULL_WIDTH_FONT_SCALE)
     estimators = tuple(estimator_order)
     groups: dict[tuple[str, str], list[dict[str, object]]] = {}
     for row in rows:

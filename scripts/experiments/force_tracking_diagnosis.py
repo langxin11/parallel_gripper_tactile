@@ -20,6 +20,7 @@ from parallel_gripper_tactile.experiments.force_tracking import (
     ControllerVariant,
 )
 from parallel_gripper_tactile.plotstyle import (
+    FULL_WIDTH_FONT_SCALE,
     paper_figsize,
     save_publication_figure,
     science_pyplot,
@@ -472,7 +473,7 @@ def plot_tracking_overlay(
     if not traces:
         return []
 
-    plt = science_pyplot()
+    plt = science_pyplot(font_scale=FULL_WIDTH_FONT_SCALE)
     figure, axis = plt.subplots(figsize=paper_figsize(4.0), layout="constrained")
     for index, (label, trace) in enumerate(traces):
         time_s = [float(item["tracking_time_s"]) for item in trace]
@@ -495,7 +496,7 @@ def plot_tracking_overlay(
     axis.set_ylabel("Normal force (N)")
     axis.set_title(f"{phase}: target and valid filtered-force trajectories")
     axis.grid(True, linewidth=0.3, alpha=0.5)
-    axis.legend(frameon=False, ncol=2, fontsize="small")
+    axis.legend(frameon=False, ncol=2, fontsize=8)
     pdf_path = save_publication_figure(figure, output)
     plt.close(figure)
     return [output, pdf_path]

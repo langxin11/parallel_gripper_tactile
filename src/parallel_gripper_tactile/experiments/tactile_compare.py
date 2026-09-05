@@ -10,7 +10,13 @@ from statistics import fmean
 
 import numpy as np
 
-from ..plotstyle import paper_figsize, save_publication_figure, science_pyplot
+from ..plotstyle import (
+    FULL_WIDTH_FONT_SCALE,
+    paper_figsize,
+    save_publication_figure,
+    science_pyplot,
+)
+
 from ..protocols import DisturbanceProtocol
 from ..scenes.robotiq import gripper_name_in_model, load_grasp_model, prefixed_gripper_name
 
@@ -482,7 +488,7 @@ def write_comparison_csv(
 
 def plot_comparison(path: Path, box: ForceTrace, grid: ForceTrace) -> None:
     """使用 SciencePlots 绘制常规法向比较或分阶段扰动比较。"""
-    plt = science_pyplot()
+    plt = science_pyplot(font_scale=FULL_WIDTH_FONT_SCALE)
     if box.phase:
         _plot_disturbance_comparison(plt, path, box, grid)
         return
@@ -578,7 +584,7 @@ def _plot_disturbance_comparison(plt, path: Path, box: ForceTrace, grid: ForceTr
             box.phase[start].replace("_", "\n"),
             ha="center",
             va="top",
-            fontsize=7,
+            fontsize=8,
             color="0.35",
             transform=control_axis.get_xaxis_transform(),
         )

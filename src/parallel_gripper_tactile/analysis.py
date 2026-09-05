@@ -5,7 +5,12 @@ from __future__ import annotations
 import csv
 from pathlib import Path
 
-from .plotstyle import paper_figsize, save_publication_figure, science_pyplot
+from .plotstyle import (
+    FULL_WIDTH_FONT_SCALE,
+    paper_figsize,
+    save_publication_figure,
+    science_pyplot,
+)
 
 
 REQUIRED_COLUMNS = {
@@ -39,7 +44,7 @@ def read_force_csv(path: Path) -> dict[str, list[float]]:
 
 def plot_forces(values: dict[str, list[float]], output: Path, show: bool = False) -> None:
     """按 SciencePlots 风格绘制控制量、左右三维力曲线。"""
-    plt = science_pyplot()
+    plt = science_pyplot(font_scale=FULL_WIDTH_FONT_SCALE)
     time_s = values["time_s"]
     figure, (control_axis, left_axis, right_axis) = plt.subplots(
         3, 1, figsize=paper_figsize(6.5), sharex=True, layout="constrained"

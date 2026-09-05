@@ -396,7 +396,7 @@ def _plot_force_tracking(
                         xytext=(3, 8 if delta_force > 0 else -8),
                         textcoords="offset points",
                         va="bottom" if delta_force > 0 else "top",
-                        fontsize=7,
+                        fontsize=8,
                         color="#444444",
                     )
                     window_end = min(event_time + 0.2, times[-1])
@@ -408,7 +408,7 @@ def _plot_force_tracking(
                     xytext=(3, -8),
                     textcoords="offset points",
                     va="top",
-                    fontsize=7,
+                    fontsize=8,
                     color="#444444",
                 )
 

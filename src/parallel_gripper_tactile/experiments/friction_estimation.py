@@ -21,7 +21,13 @@ from ..friction_estimation import (
     FrictionEstimatorConfig,
     FrictionProbeObservation,
 )
-from ..plotstyle import paper_figsize, save_publication_figure, science_pyplot
+from ..plotstyle import (
+    FULL_WIDTH_FONT_SCALE,
+    paper_figsize,
+    save_publication_figure,
+    science_pyplot,
+)
+
 from ..profiles import load_profile
 from ..scenes.custom import (
     CUBE_PREFIX,
@@ -251,7 +257,7 @@ def _plot_friction_estimation(
     """绘制探测残差、摩擦估计、目标力和滑移诊断图。"""
     if not rows:
         raise ValueError("cannot plot an empty friction estimation trace")
-    plt = science_pyplot()
+    plt = science_pyplot(font_scale=FULL_WIDTH_FONT_SCALE)
     times = np.asarray([float(row["time_s"]) for row in rows])
     phases = [str(row["phase"]) for row in rows]
     probe_rows = np.asarray([phase in {"probe_settle", "probe", "recovery"} for phase in phases])

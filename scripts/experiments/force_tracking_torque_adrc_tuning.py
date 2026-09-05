@@ -178,7 +178,7 @@ def plot_candidate_ranking_and_feasibility(
             s=32,
             label="Feasible" if is_feasible else "Infeasible",
         )
-    axes[1].legend(frameon=False, fontsize="small")
+    axes[1].legend(frameon=False, fontsize=8)
     axes[1].axvline(max_ramp_rmse_ratio_to_baseline, color="black", linestyle="--", linewidth=0.8)
     axes[1].axhline(max_mixed_rmse_ratio_to_baseline, color="black", linestyle="--", linewidth=0.8)
     for index, (x_value, y_value) in enumerate(zip(ramp, mixed, strict=True), start=1):
