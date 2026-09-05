@@ -158,7 +158,7 @@
     stroke: 0.4pt + luma(170),
     table.header(header-cell([字段]), header-cell([数值]), header-cell([说明])),
     ..entries.map(((key, desc)) => row-of(key, desc)).flatten(),
-    ..rest.map(key => row-of(key, "")).flatten(),
+    ..(if include-rest { rest.map(key => row-of(key, "")) } else { () }).flatten(),
   )
 }
 
