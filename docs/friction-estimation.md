@@ -23,6 +23,23 @@
 [Khamis 等，2018](https://contactile.com/wp-content/uploads/2022/01/KhamisEtAl2017_PapillArray_ProofOfConcept_preprint.pdf)、
 [Sui 等，2021](https://ieeexplore.ieee.org/document/9565930/)）。
 
+## 逐 taxel 局部观测
+
+每个控制周期还会对左右触觉面的每个 taxel 独立计算局部摩擦利用率：
+
+\[
+\rho_{s,i}=\frac{\sqrt{F_{x,s,i}^2+F_{y,s,i}^2}}{F_{z,s,i}}.
+\]
+
+局部观测器只在法向力连续 `transition_confirm_s` 达到 `contact_enter_force_n` 后激活触点；已激活
+触点的法向力连续低于更小的 `contact_exit_force_n` 后才退出。标准 task 使用 `0.05 N`、`0.025 N`
+和 `0.01 s`，避免接触边缘的噪声造成状态抖动。分母为零时比值记为缺失值，不生成无穷大。
+
+逐点接触掩码与 `ρ_{s,i}` 全部写入 `trace.csv`，同时记录有效触点数、按法向力加权的局部合成比、
+局部 P90、最大值和极差。`taxel_plot.pdf`/`taxel_plot.png` 对比原有全 taxel 合力比与接触筛选后的合成比，
+并显示探测阶段左右触觉面的逐点峰值热图。局部瞬时最大值对弱法向力和测量噪声仍然敏感，因此当前
+只作为空间诊断量；现有保守 `μ` 估计和目标力调度继续使用经过验证的双侧总体摩擦比。
+
 ## 运行方法
 
 名义摩擦场景：
@@ -118,5 +135,5 @@ f_{min},f_{max}\right).
 ## 运行产物
 
 每次运行保存 `profile.yaml`、`task.yaml`、`effective_parameters.json`、`trace.csv`、`metrics.json`、
-`plot.png`、`plot.pdf` 和 `manifest.json`。`trace.csv` 同时记录触觉输入、残差、利用率、估计值、
+`plot.png`、`plot.pdf`、`taxel_plot.png`、`taxel_plot.pdf` 和 `manifest.json`。`trace.csv` 同时记录触觉输入、残差、利用率、估计值、
 探测载荷、目标力与物体运动；真实 `μ`、摩擦容量和物体运动字段仅用于离线评分。

@@ -38,6 +38,7 @@ def test_standard_friction_estimation_tasks_load(task_path: Path) -> None:
     assert task.schema_version == 1
     assert task.solver.noslip_iterations == 5
     assert task.estimator.ratio_trend_enabled
+    assert task.taxel_observer.contact_exit_force_n < task.taxel_observer.contact_enter_force_n
     assert task.probe.maximum_duration_s > 0
 
 
@@ -77,6 +78,9 @@ def test_standard_scenarios_estimate_conservatively_and_hold(task_path: Path) ->
     assert result.max_probe_displacement_m <= task.metrics.probe_slip_threshold_m
     assert result.max_hold_displacement_m <= task.metrics.hold_slip_threshold_m
     assert result.minimum_hold_friction_margin_n > 0
+    assert result.peak_active_taxel_count > 0
+    assert result.local_weighted_ratio_at_detection is not None
+    assert result.local_ratio_p90_at_detection is not None
 
 
 def test_uninformative_probe_uses_explicit_fallback() -> None:
@@ -134,6 +138,8 @@ def test_execute_friction_estimation_writes_blind_estimator_artifacts(tmp_path: 
         "trace.csv",
         "plot.png",
         "plot.pdf",
+        "taxel_plot.png",
+        "taxel_plot.pdf",
         "metrics.json",
         "manifest.json",
     }
@@ -141,6 +147,12 @@ def test_execute_friction_estimation_writes_blind_estimator_artifacts(tmp_path: 
     effective = json.loads((run.path / "effective_parameters.json").read_text(encoding="utf-8"))
     assert effective["runtime"]["scheduler_kind"] == "estimated_friction"
     assert effective["runtime"]["oracle_signals_used_by_estimator"] == []
+    assert effective["runtime"]["taxel_observer_kind"] == (
+        "contact_hysteresis_local_friction_ratio"
+    )
     with (run.path / "trace.csv").open(newline="", encoding="utf-8") as stream:
         rows = list(csv.DictReader(stream))
     assert {row["phase"] for row in rows} >= {"probe", "recovery", "schedule_load"}
+    assert "left_taxel_ratio_0_0" in rows[0]
+    assert "right_taxel_contact_2_2" in rows[0]
+    assert max(int(row["active_taxel_count"]) for row in rows) > 0

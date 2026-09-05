@@ -43,6 +43,8 @@ uv run pgt compare contact --profile configs/custom_parallel_gripper.yaml
 与载荷—支撑失配检测力域初始滑移。估计器不读取真实 `μ`、物体位移或速度；确认后冻结保守
 `μ` 下界并驱动同一个目标力调度器。低、中、高摩擦和两倍噪声 task、回退语义及当前结果见
 [微滑移探测与保守摩擦估计](friction-estimation.md)。
+运行同时输出经过接触滞回筛选的逐 taxel 局部摩擦利用率，以及左右触觉面的峰值分布图；这些局部量
+当前用于诊断和验证，不参与目标力计算。
 
 ## 多条件研究
 

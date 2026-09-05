@@ -41,6 +41,11 @@ estimator:
   saturation_slope_threshold_per_s: 0.04
   max_side_ratio_difference: 0.18
 
+taxel_observer:
+  contact_enter_force_n: 0.05
+  contact_exit_force_n: 0.025
+  transition_confirm_s: 0.01
+
 scheduler:
   safety_factor: 1.6
   min_force_n: 0.5
