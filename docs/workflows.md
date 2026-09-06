@@ -26,6 +26,9 @@ uv run pgt run force-schedule \
 uv run pgt run friction-estimate \
   --profile configs/custom_parallel_gripper.yaml \
   --task configs/friction_estimation/nominal_friction.yaml
+uv run pgt run discrete-force \
+  --profile configs/robotiq_2f85.yaml \
+  --task configs/discrete_force/robotiq_delta_f_tick.yaml
 uv run pgt compare contact --profile configs/custom_parallel_gripper.yaml
 </code></pre>
 
@@ -59,6 +62,21 @@ study 输出逐次与聚合 CSV/Parquet、检测时刻与局部候选摩擦比�
 纯触觉总体检测改变了探测终止时刻，历史局部 study 通过率不能沿用，必须重新运行。
 事件门槛检查正例检测和负例误报；控制候选门槛另要求局部估计/真值位于 `[0.55, 1.02]`，防止把
 “检测到局部变化”误写成“局部摩擦估计已经可以接管目标力”。
+
+`discrete-force` 使用 Robotiq 2F-85 的 `0～255` 整数 tendon 命令，在线估计稳定动作前后的
+`ΔF_tick`，并驱动自适应 HOLD 死区、再激活滞回、一步预测、动态步长和安全释放。主任务在一次抓取
+内运行 `2→4→6→8→6→4→2 N` 平台—过渡曲线；五种控制器、四种接触刚度和三个噪声等级组成
+60 条件 study：
+
+<pre><code class="language-bash">
+uv run python scripts/experiments/robotiq_discrete_force.py \
+  --config configs/studies/robotiq_discrete_force.yaml --dry-run
+uv run python scripts/experiments/robotiq_discrete_force.py \
+  --config configs/studies/robotiq_discrete_force.yaml
+</code></pre>
+
+算法、trace 字段、验收口径和当前四档可达力见
+[Robotiq 2F-85 离散力控制](discrete-force-control.md)。
 
 ## 多条件研究
 

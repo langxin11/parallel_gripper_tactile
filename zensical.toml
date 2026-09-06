@@ -10,7 +10,8 @@ nav = [
     { "4. 动态目标力跟踪" = "force-tracking.md" },
     { "5. Oracle 目标力调度" = "force-scheduling.md" },
     { "6. 微滑移探测与摩擦估计" = "friction-estimation.md" },
-    { "7. 控制算法对比与消融" = "control-comparison-ablation.md" },
+    { "7. Robotiq 离散力控制" = "discrete-force-control.md" },
+    { "8. 控制算法对比与消融" = "control-comparison-ablation.md" },
   ] },
   { "工程基线" = [
     { "自研夹爪配置基线与状态" = "custom-gripper-next-phase.md" },

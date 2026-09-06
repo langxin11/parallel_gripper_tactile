@@ -15,6 +15,7 @@ uv run pgt run force-track --profile configs/custom_parallel_gripper.yaml --task
 uv run pgt run force-schedule --profile configs/custom_parallel_gripper.yaml --task configs/force_scheduling/gravity_hold.yaml
 uv run pgt run force-schedule --profile configs/custom_parallel_gripper.yaml --task configs/force_scheduling/dynamic_filling.yaml
 uv run pgt run friction-estimate --profile configs/custom_parallel_gripper.yaml --task configs/friction_estimation/nominal_friction.yaml
+uv run pgt run discrete-force --profile configs/robotiq_2f85.yaml --task configs/discrete_force/robotiq_delta_f_tick.yaml
 # 自研夹爪可选 soft / medium / hard / stiff 显式触觉接触 preset（默认 hard）
 uv run pgt run grasp --profile configs/custom_parallel_gripper.yaml --object-material soft
 uv run pgt run force-track --profile configs/custom_parallel_gripper.yaml --task configs/force_tracking/default_waypoints.yaml --object-material medium
@@ -35,6 +36,7 @@ pgt run demo --profile PROFILE
 pgt run grasp --profile PROFILE [--video] [--object-material soft|medium|hard|stiff]
 pgt run force-schedule --profile PROFILE --task TASK.yaml
 pgt run friction-estimate --profile PROFILE --task TASK.yaml
+pgt run discrete-force --profile PROFILE --task TASK.yaml
 pgt run force-track --profile PROFILE --task TASK.yaml [--viewer] [--disable-multiccd]
                     [--object-material soft|medium|hard|stiff]
                     [--trace-period SECONDS] [--event-window SECONDS]
@@ -63,6 +65,10 @@ pgt runs clean (--older-than-days N | --all | --cache) [--apply]
 `pgt run friction-estimate` 在世界 `+Y` 方向执行慢速切向探测，仅用已知探测载荷和双侧三轴触觉
 合力检测力域初始滑移，生成安全折减后的摩擦系数下界，再用该下界运行目标力调度。真实 `μ` 和物体
 运动只用于离线评分；详见[微滑移探测与保守摩擦估计](docs/friction-estimation.md)。
+
+`pgt run discrete-force` 在 Robotiq 2F-85 的 `0～255` 整数命令空间中估计稳定动作前后的
+`ΔF_tick`，并以此调整 HOLD 死区、再激活阈值、动作预测和 1～3 tick 动态步长；统一量化 PI 与四级离散
+消融、四种接触刚度和完整 study 见[Robotiq 2F-85 离散力控制](docs/discrete-force-control.md)。
 
 力控消融的四个跟踪阶段变体为：
 
@@ -130,9 +136,9 @@ uv run python scripts/experiments/force_tracking_controller_comparison.py \
 outputs/<profile>/<experiment>/<UTC timestamp>-<id>/
 ├── manifest.json
 ├── profile.yaml
-├── effective_parameters.json  # force-track
+├── effective_parameters.json  # force-track / discrete-force / force-schedule / friction-estimate
 ├── trace.parquet              # force-track
-├── trace.csv                  # force-schedule / friction-estimate
+├── trace.csv                  # discrete-force / force-schedule / friction-estimate
 ├── metrics.json
 ├── plot.png
 ├── plot.pdf

@@ -51,6 +51,7 @@ manifest。
 | `scenes/` | 装配 MJCF、物体材料、碰撞几何和求解选项 | 控制算法、指标统计 |
 | `tactile.py`、`contact_taxels.py` | 把不同后端统一为局部 `(3, rows, cols)` 力数组 | 决定目标力或控制状态 |
 | `force_scheduling.py` | 由切向载荷和摩擦系数生成受限的平均单侧目标力 | 读取 MuJoCo 状态或直接写执行器 |
+| `discrete_force_control.py` | 在整数命令空间执行稳定判定、单 tick 增益估计、HOLD 与安全动作决策 | 推进仿真或读取 oracle 刚度 |
 | `tactile_slip.py` | 仅由触觉时序生成变化评分，持续确认后冻结摩擦候选 | 读取外部载荷、探测命令、真值 `μ` 或物体运动 |
 | `friction_estimation.py` | 保留历史估计器和估计结果结构；旧检测器不进入当前实验 | 被当前实验实例化以使用残差检测 |
 | `taxel_friction.py` | 筛选逐 taxel 接触，并用局部摩擦比趋势和剪切重分配生成纯力局部起滑候选 | 把未验证的局部候选直接用于目标力调度 |
@@ -103,8 +104,9 @@ outputs/<profile>/<experiment>/<UTC timestamp>-<id>/
 ├── manifest.json
 ├── profile.yaml
 ├── task.yaml        # 仅需要 task 的实验
-├── effective_parameters.json  # force-track：完整解析结果与实际覆盖
+├── effective_parameters.json  # 任务实验：完整解析结果与实际覆盖
 ├── trace.parquet
+├── trace.csv       # discrete-force、force-schedule 与 friction-estimate
 ├── metrics.json
 ├── plot.png
 ├── plot.pdf
