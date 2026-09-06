@@ -11,7 +11,7 @@ control:
   actuator: fingers_actuator
   # 张开/闭合命令范围，对应 MJCF 中 position actuator 的控制输入。
   open: 0.0
-  closed: 220.0
+  closed: 255.0
 
 mount:
   # 抓取场景中夹爪基座的安装位姿。

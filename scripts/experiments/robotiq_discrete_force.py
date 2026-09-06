@@ -7,6 +7,7 @@ from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import asdict
 from datetime import UTC, datetime
 import json
+import os
 from pathlib import Path
 from statistics import fmean
 from uuid import uuid4
@@ -33,6 +34,34 @@ from parallel_gripper_tactile.studies.tabular import (
 )
 
 
+_MAX_AUTO_JOBS = 12
+
+
+def _available_cpu_count() -> int:
+    """返回当前进程实际可用的 CPU 数，优先遵守亲和性限制。"""
+    try:
+        return max(1, len(os.sched_getaffinity(0)))
+    except (AttributeError, OSError):
+        return max(1, os.cpu_count() or 1)
+
+
+def _resolve_worker_count(
+    jobs: int | None,
+    condition_count: int,
+    *,
+    available_cpus: int | None = None,
+) -> int:
+    """解析并行进程数；自动模式兼顾 CPU、条件数与内存压力。"""
+    if condition_count < 1:
+        raise ValueError("condition_count must be positive")
+    if jobs is not None and jobs < 1:
+        raise ValueError("jobs must be a positive integer")
+    if jobs is not None:
+        return min(jobs, condition_count)
+    cpu_count = _available_cpu_count() if available_cpus is None else max(1, available_cpus)
+    return min(cpu_count, condition_count, _MAX_AUTO_JOBS)
+
+
 def aggregate_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
     """按控制器汇总安全性、动作、振荡、时间和误差指标。"""
     groups: dict[str, list[dict[str, object]]] = {}
@@ -52,7 +81,14 @@ def aggregate_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
                 "runs": len(group),
                 "passed_runs": sum(bool(row["passed"]) for row in group),
                 "safety_violations": sum(bool(row["safety_violated"]) for row in group),
+                "safety_violation_duration_s_mean": fmean(
+                    float(row["safety_violation_duration_s"]) for row in group
+                ),
+                "release_count_mean": fmean(float(row["release_count"]) for row in group),
                 "action_count_mean": fmean(float(row["action_count"]) for row in group),
+                "average_nonzero_action_step_mean": fmean(
+                    float(row["average_nonzero_action_step"]) for row in group
+                ),
                 "command_movement_mean": fmean(
                     float(row["total_command_movement"]) for row in group
                 ),
@@ -64,6 +100,7 @@ def aggregate_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
                     float(row["steady_force_error_n"]) for row in group
                 ),
                 "rmse_n_mean": fmean(float(row["rmse_n"]) for row in group),
+                "peak_overshoot_n_mean": fmean(float(row["peak_overshoot_n"]) for row in group),
                 "prediction_mae_n_mean": fmean(prediction) if prediction else None,
             }
         )
@@ -367,20 +404,20 @@ def run_study(
     config: RobotiqDiscreteForceStudyConfig,
     *,
     config_source: Path | None = None,
-    jobs: int = 1,
+    jobs: int | None = None,
 ) -> Path:
     """执行矩阵全部条件并写入逐次、聚合、图像和 manifest 产物。
 
     Args:
         config: 已解析的 study 配置。
         config_source: 配置文件原始路径，会原样存档到 study 目录。
-        jobs: 并行工作进程数；1 为串行，条件间相互独立，结果与串行一致。
+        jobs: 并行工作进程数；``None`` 自动选择，1 强制串行。
 
     Returns:
         本次 study 的输出目录。
     """
-    if jobs < 1:
-        raise ValueError("jobs must be a positive integer")
+    conditions = config.conditions()
+    worker_count = _resolve_worker_count(jobs, len(conditions))
     study_dir = _create_study_directory(config)
     if config_source is not None:
         (study_dir / "study.yaml").write_bytes(config_source.read_bytes())
@@ -391,7 +428,7 @@ def run_study(
         )
     write_resolved_config(study_dir / "study.resolved.json", config)
     payloads: list[dict[str, object]] = []
-    for index, (controller, material, noise, seed) in enumerate(config.conditions()):
+    for index, (controller, material, noise, seed) in enumerate(conditions):
         condition = f"{controller}-{material}-noise{noise:g}-seed{seed:03d}".replace(".", "p")
         payloads.append(
             {
@@ -409,11 +446,12 @@ def run_study(
         )
 
     results: list[tuple[int, dict[str, object], list[dict[str, object]]]] = []
-    if jobs == 1:
+    if worker_count == 1:
         for payload in payloads:
             results.append(_evaluate_condition(payload))
     else:
-        with ProcessPoolExecutor(max_workers=jobs) as executor:
+        print(f"使用 {worker_count} 个进程并行执行 {len(payloads)} 个条件", flush=True)
+        with ProcessPoolExecutor(max_workers=worker_count) as executor:
             futures = {executor.submit(_evaluate_condition, item): item for item in payloads}
             for done, future in enumerate(as_completed(futures), start=1):
                 results.append(future.result())
@@ -449,6 +487,7 @@ def run_study(
     manifest = {
         "schema_version": 1,
         "runs": len(rows),
+        "worker_count": worker_count,
         "passed_runs": sum(bool(row["passed"]) for row in rows),
         "safety_violations": sum(bool(row["safety_violated"]) for row in rows),
         "artifacts": sorted(
@@ -488,14 +527,15 @@ def main() -> None:
     parser.add_argument(
         "--jobs",
         type=int,
-        default=1,
-        help="并行工作进程数，默认 1 为串行；条件相互独立，结果与串行一致",
+        default=None,
+        help="并行工作进程数；默认自动选择且最多 12，设为 1 可强制串行",
     )
     arguments = parser.parse_args()
     config_path = arguments.config.resolve()
     config = load_robotiq_discrete_force_study_config(config_path)
     if arguments.dry_run:
         print(f"conditions={len(config.conditions())}")
+        print(f"workers={_resolve_worker_count(arguments.jobs, len(config.conditions()))}")
         for condition in config.conditions():
             print(" ".join(str(value) for value in condition))
         return

@@ -6,6 +6,8 @@ name: robotiq_delta_f_tick
 duration_s: 24.0
 # 控制周期，对应 30 Hz 决策频率。
 control_period_s: 0.03333333333333333
+# 独立记录周期，对应 100 Hz 常规 trace；控制、动作和状态事件仍按各自语义运行。
+record_period_s: 0.01
 # 动作从决策到写入 actuator 的延迟；控制器在延迟过后才开始计时。
 control_delay_s: 0.0
 # 力测量高斯噪声标准差与随机种子。
@@ -74,11 +76,11 @@ delta_f_tick:
   # 单次动作观测被接受为有效样本的最小力增量，用于滤除噪声引起的过小差值。
   minimum_value_n: 0.02
 
-# HOLD 死区 ε_hold：fixed-step 用固定死区，自适应变体取 max(c_σ·σ_F, α·ΔF_tick)。
+# HOLD 死区 ε_hold：fixed-step 用固定死区，自适应变体取 max(c_σ·σ_F, 0.5·ΔF_tick)。
 deadband:
   fixed_n: 0.15
   noise_sigma_factor: 3.0
-  tick_factor_alpha: 0.60
+  tick_factor_alpha: 0.50
 
 # 再激活阈值 ε_react：固定变体加固定裕量，自适应变体加 β·ΔF_tick。
 # HOLD 中偏差需连续超过该阈值 duration_s 才返回 ADJUST。
@@ -92,7 +94,7 @@ prediction:
   noise_factor: 2.0
   tick_margin_factor: 0.20
 
-# 动态步长增益 η：n = clip(⌊η·|e|/ΔF_tick⌋, 1, max_dynamic_step)。
+# 兼容旧任务文件保留的启发式增益；正式 dynamic-step 已改用有限候选动作枚举。
 dynamic_step:
   eta: 0.60
 

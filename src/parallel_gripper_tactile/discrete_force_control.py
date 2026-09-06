@@ -50,7 +50,7 @@ class DiscreteForceControlConfig:
     fixed_deadband_n: float = 0.15
     fixed_reactivate_margin_n: float = 0.1
     noise_sigma_factor: float = 3.0
-    tick_deadband_factor: float = 0.6
+    tick_deadband_factor: float = 0.5
     reactivate_tick_factor: float = 0.7
     reactivate_duration_s: float = 0.2
     prediction_noise_factor: float = 2.0
@@ -60,10 +60,23 @@ class DiscreteForceControlConfig:
 
     def __post_init__(self) -> None:
         """拒绝会破坏整数命令、阈值滞回或安全边界的配置。"""
+        integer_commands = (
+            self.command_min,
+            self.command_max,
+            self.approach_step,
+            self.max_dynamic_step,
+        )
+        if any(
+            isinstance(value, bool) or not isinstance(value, (int, np.integer))
+            for value in integer_commands
+        ):
+            raise ValueError("command bounds and action steps must be integers")
         if self.command_min < 0 or self.command_min >= self.command_max:
             raise ValueError("command range must be non-negative and increasing")
-        if self.approach_step < 1 or self.max_dynamic_step < 1:
+        if self.approach_step < 1:
             raise ValueError("action steps must be positive integers")
+        if not 1 <= self.max_dynamic_step <= 3:
+            raise ValueError("max_dynamic_step must lie in [1, 3]")
         if self.target_force_n <= 0 or self.max_force_n <= self.target_force_n:
             raise ValueError("max_force_n must exceed the positive target force")
         if self.contact_threshold_n <= 0 or self.contact_threshold_n >= self.target_force_n:
@@ -124,6 +137,19 @@ class DiscreteControlSnapshot:
     action_count: int
     total_command_movement: int
     reverse_count: int
+    selected_action: int = 0
+    candidate_cost_m3: float | None = None
+    candidate_cost_m2: float | None = None
+    candidate_cost_m1: float | None = None
+    candidate_cost_hold: float | None = None
+    candidate_cost_p1: float | None = None
+    candidate_cost_p2: float | None = None
+    candidate_cost_p3: float | None = None
+    model_valid: bool = False
+    model_sample_count: int = 0
+    settled_action_id: int = 0
+    settled_delta_u: int = 0
+    settled_delta_f_n: float | None = None
 
 
 class DiscreteForceController:
@@ -171,6 +197,11 @@ class DiscreteForceController:
         self.prediction_errors_n: list[float] = []
         self._dynamic_step_raw: float | None = None
         self._dynamic_step_command = 0
+        self._selected_action = 0
+        self._candidate_costs: dict[int, float] = {}
+        self._settled_action_id = 0
+        self._settled_delta_u = 0
+        self._settled_delta_f_n: float | None = None
 
     @property
     def delta_f_tick_reliable(self) -> bool:
@@ -241,40 +272,48 @@ class DiscreteForceController:
         requested = bounded_command - self.command
         self._requested_delta = requested
         self._dynamic_step_command = requested
+        self._selected_action = requested
         if requested != 0:
             self._pending_action = True
             self._pending_predicted_force_n = self._predicted_force_next_n
         return requested
 
-    def _prediction_improves(self, force_n: float, delta: int, margin_n: float) -> bool:
-        tick = self._delta_f_tick_estimate_n
-        if tick is None:
-            return True
-        predicted = force_n + delta * tick
-        current_error = abs(self._target_force_n - force_n)
-        predicted_error = abs(self._target_force_n - predicted)
-        self._predicted_force_next_n = predicted
-        self._predicted_error_next_n = predicted_error
-        return predicted_error + margin_n < current_error
-
-    def _tightening_step(self, force_n: float) -> int:
+    def _select_model_action(self, force_n: float, margin_n: float) -> int:
+        """枚举有限整数动作，并返回预测代价最小的安全候选。"""
         tick = self._delta_f_tick_estimate_n
         if not self.delta_f_tick_reliable or tick is None:
-            self._dynamic_step_raw = 1.0
-            return 1
-        error = self._target_force_n - force_n
-        requested = 1
-        if self.variant == "dynamic-step":
-            raw = self.config.dynamic_step_eta * abs(error) / max(tick, 1e-12)
-            self._dynamic_step_raw = raw
-            requested = int(np.clip(math.floor(raw), 1, self.config.max_dynamic_step))
-        else:
-            self._dynamic_step_raw = 1.0
-        safe = math.floor(
-            (self.config.max_force_n - self.config.safety_force_margin_n - force_n)
-            / max(tick, 1e-12)
+            raise RuntimeError("model action selection requires a reliable model")
+
+        radius = self.config.max_dynamic_step if self.variant == "dynamic-step" else 1
+        safety_limit = self.config.max_force_n - self.config.safety_force_margin_n
+        candidates: list[tuple[float, int]] = []
+        for action in range(-radius, radius + 1):
+            next_command = self.command + action
+            if not self.config.command_min <= next_command <= self.config.command_max:
+                continue
+            predicted_force = force_n + tick * action
+            if predicted_force > safety_limit:
+                continue
+            cost = abs(self._target_force_n - predicted_force) + margin_n * abs(action)
+            self._candidate_costs[action] = cost
+            candidates.append((cost, action))
+
+        if not candidates:
+            return 0
+        _, selected = min(
+            candidates,
+            key=lambda item: (
+                item[0],
+                abs(item[1]),
+                0 if item[1] == 0 else 1,
+                item[1],
+            ),
         )
-        return min(requested, max(0, safe))
+        self._predicted_force_next_n = force_n + tick * selected
+        self._predicted_error_next_n = abs(self._target_force_n - self._predicted_force_next_n)
+        if self.variant == "dynamic-step":
+            self._dynamic_step_raw = abs(self._target_force_n - force_n) / max(tick, 1e-12)
+        return selected
 
     def decide(self, time_s: float) -> int:
         """根据当前状态返回本周期请求的整数命令增量。"""
@@ -284,10 +323,22 @@ class DiscreteForceController:
         self._requested_delta = 0
         self._dynamic_step_raw = None
         self._dynamic_step_command = 0
+        self._selected_action = 0
+        self._candidate_costs = {}
         self._predicted_force_next_n = None
         self._predicted_error_next_n = None
+
+        # 安全状态拥有最高优先级，任何普通状态都不能掩盖超限释放。
+        if force > self.config.max_force_n:
+            self.state = DiscreteControlState.RELEASE
         if self._pending_action:
             return 0
+
+        if self.state == DiscreteControlState.RELEASE:
+            if force <= self.config.max_force_n - self.config.safety_force_margin_n:
+                self.state = DiscreteControlState.HOLD
+                return 0
+            return self._request(-1)
 
         if self.state == DiscreteControlState.APPROACH:
             if force < self.config.contact_threshold_n:
@@ -303,15 +354,6 @@ class DiscreteForceController:
             if stable and settled:
                 self._finish_settled_action(force)
             return 0
-
-        if force > self.config.max_force_n:
-            self.state = DiscreteControlState.RELEASE
-
-        if self.state == DiscreteControlState.RELEASE:
-            if force <= self.config.max_force_n - self.config.safety_force_margin_n:
-                self.state = DiscreteControlState.HOLD
-                return 0
-            return self._request(-1)
 
         error = self._target_force_n - force
         if self.state == DiscreteControlState.HOLD:
@@ -329,28 +371,20 @@ class DiscreteForceController:
             self.state = DiscreteControlState.HOLD
             return 0
 
-        if error > 0:
-            step = self._tightening_step(force)
-            if step <= 0:
+        if self.variant in {"predictive", "dynamic-step"} and self.delta_f_tick_reliable:
+            selected = self._select_model_action(force, prediction_margin)
+            if selected == 0:
                 self.state = DiscreteControlState.HOLD
                 return 0
-            if self.variant in {"predictive", "dynamic-step"} and not self._prediction_improves(
-                force, step, prediction_margin
-            ):
-                self.state = DiscreteControlState.HOLD
-                return 0
-            return self._request(step)
+            return self._request(selected)
 
-        # 松开始终保持单 tick，并使用比夹紧更保守的一步预测。
-        if self.delta_f_tick_reliable and not self._prediction_improves(
-            force, -1, prediction_margin
-        ):
-            self.state = DiscreteControlState.HOLD
-            return 0
-        return self._request(-1)
+        # 模型 warm-up 及非预测变体始终使用单 tick 调整。
+        return self._request(1 if error > 0 else -1)
 
     def action_applied(self, delta: int, time_s: float) -> None:
         """在延迟队列真正修改 actuator 命令时登记一次动作。"""
+        if isinstance(delta, bool) or not isinstance(delta, (int, np.integer)):
+            raise ValueError("applied action must be an integer")
         actual = int(delta)
         if actual == 0:
             self._pending_action = False
@@ -378,17 +412,24 @@ class DiscreteForceController:
         self._wait_reason = "release" if self.state == DiscreteControlState.RELEASE else "adjust"
         self.state = DiscreteControlState.WAIT_STABLE
 
+    def cancel_pending_action(self) -> None:
+        """取消尚未写入 actuator 的动作，不改变当前已执行命令。"""
+        self._pending_action = False
+        self._pending_predicted_force_n = None
+        self._requested_delta = 0
+        self._selected_action = 0
+        self._dynamic_step_command = 0
+
     def _finish_settled_action(self, force_n: float) -> None:
         if self._active_predicted_force_n is not None:
             self.prediction_errors_n.append(abs(force_n - self._active_predicted_force_n))
         self._active_predicted_force_n = None
-        if (
-            self._wait_reason == "adjust"
-            and self._action_for_estimate > 0
-            and self._force_before_action_n is not None
-            and self._force_before_action_n >= self.config.contact_threshold_n
-        ):
-            raw = (force_n - self._force_before_action_n) / self._action_for_estimate
+        if self._wait_reason == "adjust" and self._force_before_action_n is not None:
+            delta_force = force_n - self._force_before_action_n
+            self._settled_action_id += 1
+            self._settled_delta_u = self._action_for_estimate
+            self._settled_delta_f_n = delta_force
+            raw = delta_force / self._action_for_estimate
             if math.isfinite(raw) and raw >= self.config.delta_f_minimum_n:
                 self._delta_f_tick_raw_n = raw
                 if self._delta_f_tick_estimate_n is None:
@@ -433,6 +474,19 @@ class DiscreteForceController:
             action_count=self.action_count,
             total_command_movement=self.total_command_movement,
             reverse_count=self.reverse_count,
+            selected_action=self._selected_action,
+            candidate_cost_m3=self._candidate_costs.get(-3),
+            candidate_cost_m2=self._candidate_costs.get(-2),
+            candidate_cost_m1=self._candidate_costs.get(-1),
+            candidate_cost_hold=self._candidate_costs.get(0),
+            candidate_cost_p1=self._candidate_costs.get(1),
+            candidate_cost_p2=self._candidate_costs.get(2),
+            candidate_cost_p3=self._candidate_costs.get(3),
+            model_valid=self.delta_f_tick_reliable,
+            model_sample_count=self._delta_f_tick_samples,
+            settled_action_id=self._settled_action_id,
+            settled_delta_u=self._settled_delta_u,
+            settled_delta_f_n=self._settled_delta_f_n,
         )
 
 
