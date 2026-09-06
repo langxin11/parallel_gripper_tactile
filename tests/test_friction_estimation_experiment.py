@@ -28,6 +28,7 @@ STANDARD_TASKS = tuple(
         "noisy_friction.yaml",
     )
 )
+HARDWARE_SCALE_TASK = TASK_ROOT / "hardware_scale_nominal.yaml"
 
 
 @pytest.mark.parametrize("task_path", STANDARD_TASKS)
@@ -81,20 +82,28 @@ def test_standard_scenarios_estimate_conservatively_and_hold(task_path: Path) ->
     assert result.peak_active_taxel_count > 0
     assert result.local_weighted_ratio_at_detection is not None
     assert result.local_ratio_p90_at_detection is not None
-    assert result.local_slip_detection_time_s is not None
-    assert result.local_slip_detection_time_s <= result.probe_detection_time_s
-    assert result.local_slip_detected_taxel_count > 0
-    local_estimates = [
-        estimate
-        for estimate in (
-            result.local_left_friction_estimate,
-            result.local_right_friction_estimate,
-        )
-        if estimate is not None
-    ]
-    assert local_estimates
-    assert min(local_estimates) <= task.friction_coefficient + task.metrics.conservative_tolerance
-    assert min(local_estimates) / task.friction_coefficient >= 0.55
+    assert result.detection_features["slip_state"] == "incipient_slip_confirmed"
+    assert result.detection_features["incipient_slip_score"] >= task.tactile_slip.confirm_threshold
+    # 旧逐点旁路不再决定探测终止时刻，不能要求它先于新的总体判据触发。
+    assert result.hold_succeeded
+
+
+def test_hardware_scale_threshold_retains_taxel_observability() -> None:
+    """0.5 N 实机候选阈值配合更高预载时仍能完成局部探测与保守估计。"""
+    task = FrictionEstimationTask.load(HARDWARE_SCALE_TASK)
+
+    assert task.taxel_observer.contact_enter_force_n == pytest.approx(0.5)
+    assert task.taxel_observer.contact_exit_force_n == pytest.approx(0.25)
+    assert task.probe.normal_force_n == pytest.approx(4.0)
+
+    result = run_friction_estimation(PROFILE, task=task)
+
+    assert result.passed
+    assert result.peak_active_taxel_count > 0
+    assert result.slip_detected
+    assert result.estimated_friction_coefficient <= (
+        task.friction_coefficient + task.metrics.conservative_tolerance
+    )
 
 
 def test_uninformative_probe_uses_explicit_fallback() -> None:
@@ -115,6 +124,30 @@ def test_uninformative_probe_uses_explicit_fallback() -> None:
     assert result.estimated_friction_coefficient == pytest.approx(
         task.estimator.fallback_friction_coefficient
     )
+    assert result.local_slip_detection_time_s is None
+    assert result.local_slip_detected_taxel_count == 0
+
+
+def test_legacy_load_detection_settings_do_not_affect_online_result() -> None:
+    """旧载荷门限和残差参数即使改变，也不能影响纯触觉检测。"""
+    task = FrictionEstimationTask.load(TASK_ROOT / "nominal_friction.yaml")
+    baseline = run_friction_estimation(PROFILE, task=task)
+    changed = task.model_copy(
+        update={
+            "estimator": task.estimator.model_copy(
+                update={
+                    "min_probe_load_n": 1000.0,
+                    "support_residual_threshold_n": 1000.0,
+                    "support_utilization_threshold": 0.0,
+                    "ratio_trend_enabled": False,
+                }
+            )
+        }
+    )
+    replay = run_friction_estimation(PROFILE, task=changed)
+    assert replay.probe_detection_time_s == baseline.probe_detection_time_s
+    assert replay.estimated_friction_coefficient == baseline.estimated_friction_coefficient
+    assert replay.detection_features == baseline.detection_features
 
 
 def test_disabling_noslip_invalidates_the_identification_task() -> None:
@@ -174,4 +207,7 @@ def test_execute_friction_estimation_writes_blind_estimator_artifacts(tmp_path: 
     assert "right_taxel_contact_2_2" in rows[0]
     assert max(int(row["active_taxel_count"]) for row in rows) > 0
     assert "left_taxel_slip_detected_0_0" in rows[0]
-    assert max(int(row["local_slip_detected_count"]) for row in rows) > 0
+    assert any(row["slip_state"] == "incipient_slip_confirmed" for row in rows)
+    assert effective["runtime"]["scheduler_input"] == "measured_tactile_shear"
+    assert "mu_true_score_only" in rows[0]
+    assert "left_taxel_normal_0_0" in rows[0]

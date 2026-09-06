@@ -39,12 +39,26 @@ uv run pgt compare contact --profile configs/custom_parallel_gripper.yaml
 滑落，因此该求解设置不会掩盖摩擦容量不足。公式、task 字段、输出列和当前验收结果见
 [Oracle 抓取目标力调度](force-scheduling.md)。
 
-`friction-estimate` 在固定预抓取力下沿世界 `+Y` 缓慢加载，用逐 taxel 三轴触觉合力的摩擦比饱和
-与载荷—支撑失配检测力域初始滑移。估计器不读取真实 `μ`、物体位移或速度；确认后冻结保守
-`μ` 下界并驱动同一个目标力调度器。低、中、高摩擦和两倍噪声 task、回退语义及当前结果见
+`friction-estimate` 在固定预抓取力下沿世界 `+Y` 缓慢加载，仅从逐 taxel 三轴触觉的利用率趋势、
+空间重分布和双侧不对称性生成接触变化评分。检测器不读取外部载荷、真实 `μ`、位移或速度；
+确认后冻结摩擦候选，保持阶段根据实测切向力调度法向目标。当前结果和能力边界见
 [微滑移探测与保守摩擦估计](friction-estimation.md)。
 运行同时输出经过接触滞回筛选的逐 taxel 局部摩擦利用率，以及左右触觉面的峰值分布图；这些局部量
 当前用于诊断和验证，不参与目标力计算。
+`hardware_scale_nominal.yaml` 另以目标传感器单 taxel 的 `0.05 N` 标称分辨率为依据，采用
+`0.5 N/0.25 N` 接触滞回阈值和 `4 N/侧` 预载；原有 `0.05 N/0.025 N` 仅保留为低力仿真基线。
+
+纯力局部起滑的多种子正例与低探测载荷负例 study：
+
+<pre><code class="language-bash">
+uv run python scripts/experiments/friction_estimation_local_slip.py \
+  --config configs/studies/friction_estimation_local_slip.yaml
+</code></pre>
+
+study 输出逐次与聚合 CSV/Parquet、检测时刻与局部候选摩擦比图，以及每个条件的完整单次运行产物。
+纯触觉总体检测改变了探测终止时刻，历史局部 study 通过率不能沿用，必须重新运行。
+事件门槛检查正例检测和负例误报；控制候选门槛另要求局部估计/真值位于 `[0.55, 1.02]`，防止把
+“检测到局部变化”误写成“局部摩擦估计已经可以接管目标力”。
 
 ## 多条件研究
 

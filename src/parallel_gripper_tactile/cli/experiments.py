@@ -248,6 +248,13 @@ def run_friction_estimate(
     table.add_row("Passed", "PASS" if result.passed else "FAIL")
     table.add_row("Slip detected", "yes" if result.slip_detected else "fallback")
     table.add_row("Estimated friction", f"{result.estimated_friction_coefficient:.3f}")
+    table.add_row("Detection reason", result.detection_reason)
+    table.add_row(
+        "Detection time (probe)",
+        "none"
+        if result.probe_detection_time_s is None
+        else f"{result.probe_detection_time_s:.3f} s",
+    )
     table.add_row("Estimate / true", f"{result.estimate_ratio:.1%}")
     table.add_row(
         "Max probe displacement",

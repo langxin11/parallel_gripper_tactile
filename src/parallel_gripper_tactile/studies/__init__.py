@@ -13,15 +13,23 @@ from .force_tracking_torque_adrc_tuning import (
     ForceTrackingTorqueAdrcTuningConfig,
     load_torque_adrc_tuning_config,
 )
+from .friction_estimation_local_slip import (
+    FrictionEstimationLocalSlipStudyConfig,
+    LocalSlipScenario,
+    load_local_slip_study_config,
+)
 
 __all__ = [
     "ForceTrackingAblationConfig",
     "ForceTrackingComparisonConfig",
     "ForceTrackingStiffnessEstimatorComparisonConfig",
     "ForceTrackingTorqueAdrcTuningConfig",
+    "FrictionEstimationLocalSlipStudyConfig",
+    "LocalSlipScenario",
     "SeedSweep",
     "load_comparison_config",
     "load_stiffness_estimator_comparison_config",
     "load_torque_adrc_tuning_config",
     "load_study_config",
+    "load_local_slip_study_config",
 ]

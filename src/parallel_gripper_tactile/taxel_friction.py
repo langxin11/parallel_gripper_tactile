@@ -174,7 +174,7 @@ class ForceOnlySlipConfig:
     saturation_ratio_increase: float = 0.005
     redistribution_share_drop: float = 0.05
     min_side_shear_increase_n: float = 0.03
-    confirm_s: float = 0.05
+    confirm_s: float = 0.03
     estimate_quantile: float = 0.8
     safety_discount: float = 0.8
 

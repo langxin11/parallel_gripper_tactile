@@ -52,7 +52,7 @@ taxel_slip_detector:
   saturation_ratio_increase: 0.005
   redistribution_share_drop: 0.05
   min_side_shear_increase_n: 0.03
-  confirm_s: 0.05
+  confirm_s: 0.03
   estimate_quantile: 0.8
   safety_discount: 0.8
 

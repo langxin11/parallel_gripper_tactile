@@ -25,10 +25,22 @@ def execute_friction_estimation(
     run_name: str | None = None,
     run_prefix: str | None = None,
     run_suffix: str | None = None,
+    sensor_noise_seed: int | None = None,
 ) -> tuple[RunDirectory, FrictionEstimationResult]:
     """运行一次探测—估计—调度仿真并保存全部复现产物。"""
     task = estimation_task or FrictionEstimationTask.load(task_path)
     configured = load_profile(profile)
+    if configured.normal_force is None:
+        raise ValueError("friction estimation requires profile control.force")
+    if sensor_noise_seed is not None:
+        if sensor_noise_seed < 0:
+            raise ValueError("sensor_noise_seed must be non-negative")
+        configured_force = configured.normal_force.model_copy(
+            update={"sensor_noise_seed": sensor_noise_seed}
+        )
+        configured = configured.model_copy(
+            update={"control": configured.control.model_copy(update={"force": configured_force})}
+        )
     run = RunDirectory.create(
         output_root,
         profile_name=configured.name,
@@ -41,6 +53,7 @@ def execute_friction_estimation(
             "true_friction_coefficient": float(task.friction_coefficient),
             "cube_mass_kg": float(task.cube_mass_kg),
             "sensor_noise_scale": float(task.sensor_noise_scale),
+            "sensor_noise_seed": int(configured.normal_force.sensor_noise_seed),
             "probe": task.probe.model_dump(mode="json"),
             "estimator": task.estimator.model_dump(mode="json"),
             "taxel_observer": task.taxel_observer.model_dump(mode="json"),
@@ -65,11 +78,15 @@ def execute_friction_estimation(
                 "runtime": {
                     "profile_path": str(profile.resolve()),
                     "task_path": str(task_path.resolve()),
-                    "estimator_kind": "touch_force_incipient_slip_proxy",
+                    "estimator_kind": "tactile_only_contact_change_score",
                     "taxel_observer_kind": "contact_hysteresis_local_friction_ratio",
                     "taxel_slip_detector_kind": "force_ratio_saturation_and_redistribution",
                     "scheduler_kind": "estimated_friction",
+                    "scheduler_input": "measured_tactile_shear",
+                    "detector_inputs": ["taxel_normal", "taxel_shear", "tactile_history"],
+                    "legacy_estimator_detection_parameters": "ignored; use tactile_slip",
                     "oracle_signals_used_by_estimator": [],
+                    "sensor_noise_seed": int(configured.normal_force.sensor_noise_seed),
                 },
             },
             indent=2,
@@ -88,6 +105,7 @@ def execute_friction_estimation(
         output_csv=trace_path,
         output_plot=plot_path,
         output_taxel_plot=taxel_plot_path,
+        sensor_noise_seed=sensor_noise_seed,
     )
     for artifact in (
         trace_path,

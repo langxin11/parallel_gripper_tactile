@@ -51,7 +51,8 @@ manifest。
 | `scenes/` | 装配 MJCF、物体材料、碰撞几何和求解选项 | 控制算法、指标统计 |
 | `tactile.py`、`contact_taxels.py` | 把不同后端统一为局部 `(3, rows, cols)` 力数组 | 决定目标力或控制状态 |
 | `force_scheduling.py` | 由切向载荷和摩擦系数生成受限的平均单侧目标力 | 读取 MuJoCo 状态或直接写执行器 |
-| `friction_estimation.py` | 从已知探测载荷和双侧触觉合力检测力域起滑并生成保守 `μ` 下界 | 读取真值 `μ`、物体位移或 MuJoCo 状态 |
+| `tactile_slip.py` | 仅由触觉时序生成变化评分，持续确认后冻结摩擦候选 | 读取外部载荷、探测命令、真值 `μ` 或物体运动 |
+| `friction_estimation.py` | 保留历史估计器和估计结果结构；旧检测器不进入当前实验 | 被当前实验实例化以使用残差检测 |
 | `taxel_friction.py` | 筛选逐 taxel 接触，并用局部摩擦比趋势和剪切重分配生成纯力局部起滑候选 | 把未验证的局部候选直接用于目标力调度 |
 | `control.py` | 接触状态、力语义、MIT 命令与法向力外环 | 创建输出目录或解析 CLI |
 | `experiments/` | 定义阶段机、仿真循环、trace 字段和指标 | 组织跨条件批量研究 |

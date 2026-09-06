@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import csv
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 import math
 from pathlib import Path
 from typing import Annotated, Literal
@@ -16,11 +16,10 @@ import yaml
 from ..control import ForceControlObservation, ForceControlReference, NormalForceController
 from ..force_scheduling import OracleTargetForceScheduler
 from ..friction_estimation import (
-    ConservativeFrictionEstimator,
     FrictionEstimate,
     FrictionEstimatorConfig,
-    FrictionProbeObservation,
 )
+from ..tactile_slip import TactileFeatureComputer, TactileFrictionEstimator, TactileSlipConfig
 from ..taxel_friction import (
     ForceOnlySlipConfig,
     ForceOnlySlipObservation,
@@ -28,12 +27,6 @@ from ..taxel_friction import (
     TaxelFrictionConfig,
     TaxelFrictionObservation,
     TaxelFrictionObserver,
-)
-from ..plotstyle import (
-    FULL_WIDTH_FONT_SCALE,
-    paper_figsize,
-    save_publication_figure,
-    science_pyplot,
 )
 
 from ..profiles import load_profile
@@ -166,7 +159,7 @@ class TaxelSlipDetectorTaskConfig(_TaskModel):
     saturation_ratio_increase: Annotated[FiniteFloat, Field(ge=0)] = 0.005
     redistribution_share_drop: Annotated[FiniteFloat, Field(gt=0)] = 0.05
     min_side_shear_increase_n: Annotated[FiniteFloat, Field(ge=0)] = 0.03
-    confirm_s: Annotated[FiniteFloat, Field(gt=0)] = 0.05
+    confirm_s: Annotated[FiniteFloat, Field(gt=0)] = 0.03
     estimate_quantile: Annotated[FiniteFloat, Field(gt=0, le=1)] = 0.8
     safety_discount: Annotated[FiniteFloat, Field(gt=0, le=1)] = 0.8
 
@@ -206,6 +199,7 @@ class FrictionEstimationTask(_TaskModel):
     approach: ForceSchedulingApproach = ForceSchedulingApproach()
     probe: TangentialProbeTaskConfig = TangentialProbeTaskConfig()
     estimator: FrictionEstimatorTaskConfig = FrictionEstimatorTaskConfig()
+    tactile_slip: TactileSlipConfig = TactileSlipConfig()
     taxel_observer: TaxelFrictionTaskConfig = TaxelFrictionTaskConfig()
     taxel_slip_detector: TaxelSlipDetectorTaskConfig = TaxelSlipDetectorTaskConfig()
     scheduler: OracleSchedulerTaskConfig = OracleSchedulerTaskConfig()
@@ -278,6 +272,11 @@ class FrictionEstimationResult:
     probe_slip_passed: bool
     hold_slip_passed: bool
     force_tracking_passed: bool
+    detection_reason: str
+    detection_features: dict
+    relative_estimation_error: float
+    probe_displacement_limit_exceeded: bool
+    hold_succeeded: bool
 
     @property
     def passed(self) -> bool:
@@ -326,6 +325,12 @@ def _taxel_trace_fields(observation: TaxelFrictionObservation) -> dict[str, floa
         for row, col in np.ndindex(mask.shape):
             fields[f"{side}_taxel_contact_{row}_{col}"] = bool(mask[row, col])
             fields[f"{side}_taxel_ratio_{row}_{col}"] = float(ratios[row, col])
+            fields[f"{side}_taxel_normal_{row}_{col}"] = float(
+                getattr(observation, f"{side}_normal_force_n")[row, col]
+            )
+            fields[f"{side}_taxel_shear_{row}_{col}"] = float(
+                getattr(observation, f"{side}_shear_force_n")[row, col]
+            )
     return fields
 
 
@@ -368,185 +373,6 @@ def _taxel_slip_trace_fields(
     return fields
 
 
-def _plot_friction_estimation(
-    path: Path,
-    rows: list[dict[str, float | str | bool]],
-    *,
-    task: FrictionEstimationTask,
-) -> None:
-    """绘制探测残差、摩擦估计、目标力和滑移诊断图。"""
-    if not rows:
-        raise ValueError("cannot plot an empty friction estimation trace")
-    plt = science_pyplot(font_scale=FULL_WIDTH_FONT_SCALE)
-    times = np.asarray([float(row["time_s"]) for row in rows])
-    phases = [str(row["phase"]) for row in rows]
-    probe_rows = np.asarray([phase in {"probe_settle", "probe", "recovery"} for phase in phases])
-    hold_rows = np.asarray([phase == "schedule_load" for phase in phases])
-    figure, axes = plt.subplots(
-        4, 1, figsize=paper_figsize(8.0), sharex=True, constrained_layout=True
-    )
-
-    axes[0].plot(times, [float(row["tangential_demand_n"]) for row in rows], label="Demand")
-    axes[0].plot(times, [float(row["measured_shear_support_n"]) for row in rows], label="Tactile")
-    axes[0].set_ylabel("Tangential\nforce (N)")
-    axes[0].legend()
-
-    axes[1].plot(times, [float(row["support_residual_n"]) for row in rows])
-    axes[1].axhline(
-        float(task.estimator.support_residual_threshold_n),
-        color="tab:red",
-        linestyle="--",
-    )
-    axes[1].set_ylabel("Support\nresidual (N)")
-
-    estimate = np.asarray([float(row["estimated_friction_coefficient"]) for row in rows])
-    axes[2].plot(times, estimate, label="Conservative estimate")
-    axes[2].axhline(
-        float(task.friction_coefficient), color="0.35", linestyle="--", label="True (score only)"
-    )
-    axes[2].set_ylabel("Friction\ncoefficient")
-    axes[2].legend()
-
-    probe_displacement = 1000.0 * np.asarray([float(row["release_displacement_m"]) for row in rows])
-    hold_displacement = 1000.0 * np.asarray([float(row["hold_displacement_m"]) for row in rows])
-    axes[3].plot(times[probe_rows], probe_displacement[probe_rows], label="Probe")
-    axes[3].plot(times[hold_rows], hold_displacement[hold_rows], label="Scheduled hold")
-    axes[3].axhline(
-        1000.0 * float(task.metrics.probe_slip_threshold_m),
-        color="tab:red",
-        linestyle="--",
-        label="Probe limit",
-    )
-    axes[3].axhline(
-        1000.0 * float(task.metrics.hold_slip_threshold_m),
-        color="tab:orange",
-        linestyle=":",
-        label="Hold limit",
-    )
-    axes[3].set_ylabel("Displacement\n(mm)")
-    axes[3].set_xlabel("Simulation time (s)")
-    axes[3].legend()
-    path.parent.mkdir(parents=True, exist_ok=True)
-    save_publication_figure(figure, path)
-    plt.close(figure)
-
-
-def _plot_taxel_friction(
-    path: Path,
-    rows: list[dict[str, float | str | bool]],
-    *,
-    task: FrictionEstimationTask,
-) -> None:
-    """绘制局部摩擦利用率时间序列和双侧 taxel 峰值热图。"""
-    if not rows:
-        raise ValueError("cannot plot an empty taxel friction trace")
-    plt = science_pyplot()
-    times = np.asarray([float(row["time_s"]) for row in rows])
-    probe_mask = np.asarray([str(row["phase"]) == "probe" for row in rows])
-    left_keys = sorted(key for key in rows[0] if key.startswith("left_taxel_ratio_"))
-    right_keys = sorted(key for key in rows[0] if key.startswith("right_taxel_ratio_"))
-    if not left_keys or len(left_keys) != len(right_keys):
-        raise ValueError("taxel friction trace does not contain balanced grids")
-    coordinates = [tuple(int(value) for value in key.rsplit("_", 2)[-2:]) for key in left_keys]
-    grid_shape = (
-        max(row for row, _ in coordinates) + 1,
-        max(col for _, col in coordinates) + 1,
-    )
-    if math.prod(grid_shape) != len(left_keys):
-        raise ValueError("taxel friction trace requires a complete rectangular grid")
-
-    def peak_grid(keys: list[str]) -> np.ndarray:
-        """返回探测阶段逐点的未平滑峰值。"""
-        values = np.asarray([[float(row[key]) for key in keys] for row in rows])
-        selected = values[probe_mask]
-        finite = np.isfinite(selected)
-        peak = np.full(selected.shape[1], np.nan)
-        for index in range(selected.shape[1]):
-            if finite[:, index].any():
-                peak[index] = float(np.max(selected[finite[:, index], index]))
-        grid = np.full(grid_shape, np.nan)
-        for index, coordinate in enumerate(coordinates):
-            grid[coordinate] = peak[index]
-        return grid
-
-    figure, axes = plt.subplots(2, 2, figsize=paper_figsize(6.0), constrained_layout=True)
-    aggregate_ratio = np.asarray(
-        [
-            (float(row["measured_left_shear_n"]) + float(row["measured_right_shear_n"]))
-            / max(
-                float(row["measured_left_normal_n"]) + float(row["measured_right_normal_n"]),
-                1e-12,
-            )
-            for row in rows
-        ]
-    )
-    axes[0, 0].plot(times[probe_mask], aggregate_ratio[probe_mask], label="All-taxel resultant")
-    axes[0, 0].plot(
-        times[probe_mask],
-        np.asarray([float(row["active_taxel_weighted_ratio"]) for row in rows])[probe_mask],
-        linestyle="--",
-        label="Contact-filtered",
-    )
-    axes[0, 0].set_ylabel("Friction ratio")
-    axes[0, 0].set_xlabel("Simulation time (s)")
-    axes[0, 0].legend()
-
-    axes[1, 0].plot(
-        times[probe_mask],
-        np.asarray([float(row["active_taxel_ratio_p90"]) for row in rows])[probe_mask],
-        label="Local ratio P90",
-    )
-    axes[1, 0].plot(
-        times[probe_mask],
-        np.asarray([float(row["active_taxel_ratio_spread"]) for row in rows])[probe_mask],
-        linestyle="--",
-        label="Local ratio spread",
-    )
-    axes[1, 0].set_ylabel("Local diagnostic")
-    axes[1, 0].set_xlabel("Simulation time (s)")
-    axes[1, 0].legend()
-    event_times = [float(row["time_s"]) for row in rows if int(row["local_slip_event_count"]) > 0]
-    if event_times:
-        for axis in (axes[0, 0], axes[1, 0]):
-            axis.axvline(
-                event_times[0],
-                color="tab:orange",
-                linestyle=":",
-                label="First local slip" if axis is axes[0, 0] else None,
-            )
-        axes[0, 0].legend()
-
-    left_peak = peak_grid(left_keys)
-    right_peak = peak_grid(right_keys)
-    finite_peaks = np.concatenate(
-        (left_peak[np.isfinite(left_peak)], right_peak[np.isfinite(right_peak)])
-    )
-    color_limit = max(
-        1.0,
-        1.25 * float(task.friction_coefficient),
-        float(np.max(finite_peaks)) if finite_peaks.size else 1.0,
-    )
-    images = []
-    for axis, title, grid in (
-        (axes[0, 1], "Left taxel peak ratio", left_peak),
-        (axes[1, 1], "Right taxel peak ratio", right_peak),
-    ):
-        image = axis.imshow(grid, vmin=0.0, vmax=color_limit, cmap="viridis")
-        images.append(image)
-        axis.set_title(title)
-        axis.set_xlabel("Column")
-        axis.set_ylabel("Row")
-        axis.set_xticks(range(grid_shape[1]))
-        axis.set_yticks(range(grid_shape[0]))
-        for row, col in np.ndindex(grid.shape):
-            label = "--" if not math.isfinite(grid[row, col]) else f"{grid[row, col]:.2f}"
-            axis.text(col, row, label, ha="center", va="center", color="black", fontsize=6)
-    figure.colorbar(images[0], ax=[axes[0, 1], axes[1, 1]], label="Peak local friction ratio")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    save_publication_figure(figure, path)
-    plt.close(figure)
-
-
 def run_friction_estimation(
     profile_path: Path = DEFAULT_PROFILE,
     *,
@@ -554,11 +380,21 @@ def run_friction_estimation(
     output_csv: Path | None = None,
     output_plot: Path | None = None,
     output_taxel_plot: Path | None = None,
+    sensor_noise_seed: int | None = None,
 ) -> FrictionEstimationResult:
     """运行探测、保守估计与估计值目标力调度仿真。"""
     profile = load_profile(profile_path)
     if profile.normal_force is None:
         raise ValueError("friction estimation requires profile control.force")
+    if sensor_noise_seed is not None:
+        if sensor_noise_seed < 0:
+            raise ValueError("sensor_noise_seed must be non-negative")
+        configured_force = profile.normal_force.model_copy(
+            update={"sensor_noise_seed": sensor_noise_seed}
+        )
+        profile = profile.model_copy(
+            update={"control": profile.control.model_copy(update={"force": configured_force})}
+        )
     model = build_custom_grasp_model(
         profile,
         cube_mass=float(task.cube_mass_kg),
@@ -573,7 +409,8 @@ def run_friction_estimation(
     control_timer = SimulationTimer(float(task.control_period_s), float(data.time))
     reader = _prefixed_reader(model, profile)
     controller = NormalForceController.from_profile(model, profile, name_prefix=GRIPPER_PREFIX)
-    estimator = ConservativeFrictionEstimator(task.estimator.to_runtime_config())
+    estimator = TactileFrictionEstimator(task.estimator.to_runtime_config(), task.tactile_slip)
+    feature_computer = TactileFeatureComputer(task.tactile_slip)
     taxel_observer = TaxelFrictionObserver(task.taxel_observer.to_runtime_config())
     taxel_slip_detector = ForceOnlyTaxelSlipDetector(task.taxel_slip_detector.to_runtime_config())
     scheduler = OracleTargetForceScheduler(task.scheduler.to_runtime_config())
@@ -624,6 +461,7 @@ def run_friction_estimation(
             phase_start_time_s = time_s
             phase_elapsed_s = 0.0
             estimator.reset()
+            feature_computer.reset()
             taxel_observer.reset()
             taxel_slip_detector.reset()
         elif phase == "probe" and phase_elapsed_s >= float(task.probe.maximum_duration_s):
@@ -701,18 +539,11 @@ def run_friction_estimation(
             left_normal, left_shear, right_normal, right_shear = _measurement_components(
                 latest_measurement
             )
+            features = feature_computer.compute_tactile_features(
+                latest_taxel_observation, control_dt
+            )
             if phase == "probe":
-                latest_estimator_state = estimator.update(
-                    FrictionProbeObservation(
-                        tangential_demand_n=tangential_demand_n,
-                        probe_excitation_n=probe_force_n,
-                        left_normal_force_n=left_normal,
-                        left_shear_force_n=left_shear,
-                        right_normal_force_n=right_normal,
-                        right_shear_force_n=right_shear,
-                        dt=control_dt,
-                    )
-                )
+                latest_estimator_state = estimator.update_slip_detector(features, control_dt)
                 if latest_estimator_state.slip_detected:
                     estimate = latest_estimator_state
                     detection_time_s = phase_elapsed_s
@@ -727,7 +558,7 @@ def run_friction_estimation(
                 if estimate is None:
                     raise RuntimeError("target force scheduling requires a friction estimate")
                 schedule_command = scheduler.update(
-                    tangential_demand_n=tangential_demand_n,
+                    tangential_demand_n=left_shear + right_shear,
                     friction_coefficient=float(estimate.friction_coefficient),
                     dt=control_dt,
                 )
@@ -810,6 +641,12 @@ def run_friction_estimation(
         rows.append(
             {
                 "time_s": float(data.time),
+                **estimator.trace_fields(),
+                **asdict(features),
+                "mu_hat": estimated_mu,
+                "mu_raw": math.nan if estimator.mu_raw is None else estimator.mu_raw,
+                "mu_true_score_only": float(task.friction_coefficient),
+                "load_ground_truth": tangential_demand_n,
                 "phase": step_phase,
                 "phase_time_s": phase_elapsed_s,
                 "true_friction_coefficient": float(task.friction_coefficient),
@@ -822,7 +659,7 @@ def run_friction_estimation(
                 "slip_detected": False
                 if estimator_state is None
                 else estimator_state.slip_detected,
-                "using_fallback": False
+                "using_fallback": True
                 if estimator_state is None
                 else estimator_state.using_fallback,
                 "mismatch_duration_s": (
@@ -928,9 +765,13 @@ def run_friction_estimation(
             writer.writeheader()
             writer.writerows(rows)
     if rows and output_plot is not None:
-        _plot_friction_estimation(output_plot, rows, task=task)
+        from ..friction_plots import plot_summary
+
+        plot_summary(output_plot, rows, task=task)
     if rows and output_taxel_plot is not None:
-        _plot_taxel_friction(output_taxel_plot, rows, task=task)
+        from ..friction_plots import plot_taxel_diagnostics
+
+        plot_taxel_diagnostics(output_taxel_plot, rows, task=task)
 
     probe_local_ratios = [
         float(row["active_taxel_max_ratio"])
@@ -979,6 +820,15 @@ def run_friction_estimation(
         probe_slip_passed=probe_slip_passed,
         hold_slip_passed=hold_slip_passed,
         force_tracking_passed=force_tracking_passed,
+        detection_reason=(
+            f"触觉变化评分连续超过确认阈值 {1000 * estimator.duration:.1f} ms。"
+            if estimate.slip_detected
+            else "未确认触觉变化，使用回退摩擦值。"
+        ),
+        detection_features=estimator.trace_fields(),
+        relative_estimation_error=absolute_error / float(task.friction_coefficient),
+        probe_displacement_limit_exceeded=not probe_slip_passed,
+        hold_succeeded=hold_slip_passed and force_tracking_passed and bool(hold_rows),
     )
 
 

@@ -1,0 +1,17 @@
+name: friction_estimation_local_slip
+profile: ../custom_parallel_gripper.yaml
+scenarios:
+  - task: ../friction_estimation/low_friction.yaml
+    expect_local_slip: true
+  - task: ../friction_estimation/nominal_friction.yaml
+    expect_local_slip: true
+  - task: ../friction_estimation/high_friction.yaml
+    expect_local_slip: true
+  - task: ../friction_estimation/noisy_friction.yaml
+    expect_local_slip: true
+  - task: ../friction_estimation/no_slip_low_probe.yaml
+    expect_local_slip: false
+seeds:
+  start: 0
+  count: 3
+output_root: ../../outputs/studies
