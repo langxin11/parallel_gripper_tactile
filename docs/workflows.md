@@ -75,6 +75,10 @@ uv run python scripts/experiments/robotiq_discrete_force.py \
   --config configs/studies/robotiq_discrete_force.yaml
 </code></pre>
 
+完整矩阵默认自动并行，进程数取可用 CPU、条件数量与 12 的最小值；资源受限时可用 `--jobs 1`
+强制串行，或用 `--jobs N` 指定进程数。单次运行中的物理、控制和记录时钟分别配置；默认是
+500 Hz 物理、30 Hz 控制和 100 Hz 常规记录，并额外保留关键事件。
+
 算法、trace 字段、验收口径和当前四档可达力见
 [Robotiq 2F-85 离散力控制](discrete-force-control.md)。
 
