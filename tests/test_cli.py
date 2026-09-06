@@ -31,6 +31,19 @@ def test_root_and_subcommand_help_are_available() -> None:
     assert friction_estimate_help.exit_code == 0
     for option in ("--profile", "--task", "--output-root", "--run-prefix", "--run-suffix"):
         assert option in friction_estimate_help.output
+    discrete_force_help = RUNNER.invoke(
+        app, ["run", "discrete-force", "--help"], terminal_width=180
+    )
+    assert discrete_force_help.exit_code == 0
+    for option in (
+        "--profile",
+        "--task",
+        "--controller-variant",
+        "--object-material",
+        "--force-noise-std",
+        "--noise-seed",
+    ):
+        assert option in discrete_force_help.output
     force_track_help = RUNNER.invoke(app, ["run", "force-track", "--help"], terminal_width=160)
     assert force_track_help.exit_code == 0
     for option in (

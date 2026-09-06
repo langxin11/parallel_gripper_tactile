@@ -18,6 +18,10 @@ from .friction_estimation_local_slip import (
     LocalSlipScenario,
     load_local_slip_study_config,
 )
+from .robotiq_discrete_force import (
+    RobotiqDiscreteForceStudyConfig,
+    load_robotiq_discrete_force_study_config,
+)
 
 __all__ = [
     "ForceTrackingAblationConfig",
@@ -32,4 +36,6 @@ __all__ = [
     "load_torque_adrc_tuning_config",
     "load_study_config",
     "load_local_slip_study_config",
+    "RobotiqDiscreteForceStudyConfig",
+    "load_robotiq_discrete_force_study_config",
 ]

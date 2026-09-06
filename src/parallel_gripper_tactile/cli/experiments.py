@@ -20,6 +20,7 @@ from ..experiments.force_scheduling import ForceSchedulingTask
 from ..experiments.friction_estimation import FrictionEstimationTask
 from ..experiments.grasp import run_acceptance
 from ..experiments.grasp_video import record_custom_grasp_video
+from ..experiments.robotiq_discrete_force import RobotiqDiscreteForceTask
 from ..profiles import load_profile
 from ..protocols import DisturbanceProtocol
 from ..run_artifacts import RunDirectory
@@ -27,6 +28,7 @@ from ..runners import (
     execute_force_scheduling,
     execute_force_tracking,
     execute_friction_estimation,
+    execute_robotiq_discrete_force,
 )
 from ..scenes.custom import build_custom_grasp_model
 from ..scenes.robotiq import load_grasp_model
@@ -263,6 +265,77 @@ def run_friction_estimate(
     table.add_row(
         "Max hold displacement",
         f"{result.max_hold_displacement_m * 1000:.3f} mm",
+    )
+    state(context).console.print(table)
+    state(context).console.print(f"Run: [cyan]{run.path}[/cyan]")
+    if not result.passed:
+        raise typer.Exit(1)
+
+
+@run_app.command("discrete-force")
+def run_discrete_force(
+    context: typer.Context,
+    profile: Annotated[Path, typer.Option("--profile", exists=True, dir_okay=False)],
+    task: Annotated[Path, typer.Option("--task", exists=True, dir_okay=False)],
+    output_root: Annotated[Path, typer.Option("--output-root", file_okay=False)] = Path("outputs"),
+    run_name: Annotated[str | None, typer.Option()] = None,
+    run_prefix: Annotated[str | None, typer.Option("--run-prefix")] = None,
+    run_suffix: Annotated[str | None, typer.Option("--run-suffix")] = None,
+    controller_variant: Annotated[
+        Literal[
+            "quantized-pi",
+            "fixed-step",
+            "adaptive-deadband",
+            "predictive",
+            "dynamic-step",
+        ]
+        | None,
+        typer.Option("--controller-variant"),
+    ] = None,
+    object_material: Annotated[
+        Literal["soft", "medium", "hard", "stiff"] | None,
+        typer.Option("--object-material"),
+    ] = None,
+    force_noise_std: Annotated[float | None, typer.Option("--force-noise-std", min=0.0)] = None,
+    noise_seed: Annotated[int | None, typer.Option("--noise-seed", min=0)] = None,
+) -> None:
+    """运行基于单 tick 力增量的 Robotiq 离散力控制实验。"""
+    try:
+        discrete_task = RobotiqDiscreteForceTask.load(task)
+        run, result = execute_robotiq_discrete_force(
+            profile=profile,
+            task_path=task,
+            discrete_task=discrete_task,
+            output_root=output_root,
+            run_name=run_name,
+            run_prefix=run_prefix,
+            run_suffix=run_suffix,
+            controller_variant=controller_variant,
+            object_material=object_material,
+            force_noise_std_n=force_noise_std,
+            noise_seed=noise_seed,
+        )
+    except Exception as error:
+        fail(context, error, title="Discrete force experiment failed")
+    table = Table(title="Robotiq discrete force control")
+    table.add_column("Result")
+    table.add_column("Value")
+    table.add_row("Passed", "PASS" if result.passed else "FAIL")
+    table.add_row("Variant", result.controller_variant)
+    table.add_row("Steady MAE", f"{result.steady_force_error_n:.3f} N")
+    table.add_row("Actions", str(result.action_count))
+    table.add_row("Reversals", str(result.reverse_count))
+    table.add_row("Oscillations", str(result.oscillation_count))
+    table.add_row(
+        "Settled platforms",
+        f"{result.settled_platform_count}/{result.platform_count}",
+    )
+    table.add_row("HOLD ratio", f"{100.0 * result.hold_ratio:.1f}%")
+    table.add_row(
+        "Delta F / tick",
+        "n/a"
+        if result.delta_f_tick_estimate_n is None
+        else f"{result.delta_f_tick_estimate_n:.3f} N/tick",
     )
     state(context).console.print(table)
     state(context).console.print(f"Run: [cyan]{run.path}[/cyan]")
