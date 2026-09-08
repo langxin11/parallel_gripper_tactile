@@ -374,6 +374,7 @@ def run_force_track(
             "adrc",
             "adrc-torque",
             "adrc-torque-td",
+            "admittance",
         ],
         typer.Option("--controller-variant"),
     ] = "full",

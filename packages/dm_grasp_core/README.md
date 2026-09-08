@@ -1,0 +1,30 @@
+# dm-grasp-core 0.1.0
+
+DMgripper 的共享 Python 控制核，要求 Python >=3.12，无第三方运行依赖。
+安装本目录后，两端使用 `from dm_grasp_core import ...`；版本为 `__version__`。
+
+## 控制约定
+
+- 力反馈为左右法向力的平均值（N），不是两侧之和。
+- 导纳位移是总闭合行程（m）；角位置 rad，角速度 rad/s，力矩 N·m。
+- `SecondOrderAdmittance` 使用半隐式 Euler，`step_admittance` 原地更新其状态。
+- `MITCommandConfig` 依次包含位置上下限、速度上限、闭合方向（±1）、kp、kd、前馈比例、前馈力矩上限、合成力矩上限。
+- `build_mit_command` 使用目标构型雅可比映射速度、实测构型雅可比映射力前馈。先限制合成力矩，再限制机械角；约束无法同时满足时抛出 `ValueError`。
+- `step_admittance` 顺序为平均力误差积分、按参考闭合行程与机械范围限制状态、按实测雅可比限制速度、构建 MIT 命令。
+
+调用者保留设备参数验证、输入新鲜度和有效性判断、目标力上限、控制时间步裁剪、接触状态机、失接触策略、使能/失能、通信与协议量化。这里没有新增这些策略；出错时导纳状态可能已被更新，与迁移前节点相同。接触确认器亦保留原输入约定，不应直接接收未经检查的 NaN 传感器读数。
+
+## 安装与测试
+
+```sh
+python -m pip install ./packages/dm_grasp_core
+PYTHONPATH=packages/dm_grasp_core/src python -m pytest packages/dm_grasp_core/tests
+```
+
+测试包含数学独立期望、限幅/复位/无效输入，以及从迁移前 ROS 节点抽取执行后固定保存的 240 步轨迹：正反方向，2 ms、4 ms 和不规则时间步。回放比较命令五个字段及导纳两个状态，要求逐值相等。`tests/generate_golden.py` 仅用于从显式提供的原始 `dm_gripper_control` 模块目录重新生成基线；正常测试不导入 ROS，也不运行该生成器。
+
+## 来源与许可
+
+Apache-2.0。原 `dm_gripper_control/package.xml` 声明 Apache-2.0；本目录 `LICENSE` 原样复制自承载仓库 `parallel_gripper_tactile/LICENSE`，保留其中 Copyright 2026 langxin11。ROS 控制包没有独立 LICENSE 文件。
+
+`control.py` 的八项公共算法来自 `tactile_grasp_ros2/src/dm_gripper_control/dm_gripper_control/dm_gripper_control/control.py`，仅移除机械端点搜索类并调整模块说明与导入；`command.py` 从 `force_tracking_node.py` 的 `_build_command` 和 FORCE_TRACKING 积分段抽取，改用显式参数和 dataclass 返回值，保留数学顺序和限幅行为。原始文件 SHA256 记录在 `tests/golden_tracking.json`。没有从不再维护的实验或传感器原型仓库复制实现。

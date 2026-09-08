@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dm-grasp-core"
+version = "0.1.0"
+description = "无第三方运行依赖的 DMgripper 共享导纳控制核"
+readme = "README.md"
+requires-python = ">=3.12"
+license = {file = "LICENSE"}
+dependencies = []
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "D"]
+ignore = ["D400", "D401", "D403", "D404", "D415"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"

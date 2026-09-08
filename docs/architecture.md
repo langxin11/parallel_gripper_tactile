@@ -156,6 +156,13 @@ Step、Ramp、Mixed/Smoothstep 任务分别突出瞬态、滞后和 waypoint 误
 
 ## 依赖规则
 
+DMgripper 的二阶导纳基线另由 `packages/dm_grasp_core` 独立包提供，与 ROS 2 共用。
+`dm_admittance.py` 只负责把共享算法接入 MuJoCo；既有 PID/ADRC 暂保留历史实现。
+共享核无 ROS、MuJoCo 或 profile 依赖，安装 ROS 侧时不需要安装仿真主包。
+导纳外环按任务周期生成 MIT 请求，执行器适配每个物理步用最新 q/dq 重算内环力矩，
+模拟电机内部持续执行目标。此路径不改变旧实验的控制时序。详情见
+[DMgripper 共享控制核](dm-shared-control.md)。
+
 1. `src/parallel_gripper_tactile` 不依赖 `scripts/` 或 CLI 输出格式；
 2. study 直接调用 runner，不通过子进程拼接 `pgt` 命令；
 3. scene 不读取控制目标，controller 不选择碰撞 asset；

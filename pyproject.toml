@@ -13,6 +13,7 @@ readme = "README.md"
 license = { file = "LICENSE" }
 requires-python = ">=3.12"
 dependencies = [
+    "dm-grasp-core==0.1.0",
     "imageio>=2.37.4",
     "matplotlib>=3.8",
     "mujoco>=3.1",
@@ -39,8 +40,14 @@ dev = [
 ]
 
 [tool.pytest.ini_options]
-testpaths = ["tests"]
+testpaths = ["tests", "packages/dm_grasp_core/tests"]
 addopts = "-q"
+
+[tool.uv.workspace]
+members = ["packages/dm_grasp_core"]
+
+[tool.uv.sources]
+dm-grasp-core = { workspace = true }
 
 [tool.ruff]
 target-version = "py312"

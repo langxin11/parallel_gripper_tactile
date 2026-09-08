@@ -2,6 +2,12 @@ version = 1
 revision = 3
 requires-python = ">=3.12"
 
+[manifest]
+members = [
+    "dm-grasp-core",
+    "parallel-gripper-tactile",
+]
+
 [[package]]
 name = "absl-py"
 version = "2.5.0"
@@ -160,6 +166,11 @@ sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/c9/02/bd72be9134d25e
 wheels = [
     { url = "https://pypi.tuna.tsinghua.edu.cn/packages/02/08/9c41fb51ab5b43eb21674aff13df270e8ba6c4b29c8624e328dc7a9482af/distlib-0.4.3-py2.py3-none-any.whl", hash = "sha256:4b0ce306c966eb73bc3a7b6abad017c556dadd92c44701562cd528ac7fde4d5b", size = 470628, upload-time = "2026-06-12T08:04:50.506Z" },
 ]
+
+[[package]]
+name = "dm-grasp-core"
+version = "0.1.0"
+source = { editable = "packages/dm_grasp_core" }
 
 [[package]]
 name = "etils"
@@ -648,6 +659,7 @@ name = "parallel-gripper-tactile"
 version = "0.3.0"
 source = { editable = "." }
 dependencies = [
+    { name = "dm-grasp-core" },
     { name = "imageio" },
     { name = "matplotlib" },
     { name = "mujoco" },
@@ -672,6 +684,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
+    { name = "dm-grasp-core", editable = "packages/dm_grasp_core" },
     { name = "imageio", specifier = ">=2.37.4" },
     { name = "matplotlib", specifier = ">=3.8" },
     { name = "mujoco", specifier = ">=3.1" },

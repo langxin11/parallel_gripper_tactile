@@ -174,6 +174,39 @@ class TorqueAdrcControl(_FrozenModel):
         return self
 
 
+class DMAdmittanceControl(_FrozenModel):
+    """DM 共享导纳参数；质量 kg，阻尼 N·s/m，刚度 N/m，角度 rad。"""
+
+    mass_kg: Annotated[FiniteFloat, Field(gt=0)] = 0.02
+    damping_ns_m: Annotated[FiniteFloat, Field(ge=0)] = 0.20
+    stiffness_n_m: Annotated[FiniteFloat, Field(ge=0)] = 1.0
+    feedforward_ratio: Annotated[FiniteFloat, Field(ge=0, le=1)] = 0.2
+    contact_stable_time_s: Annotated[FiniteFloat, Field(ge=0)] = 0.10
+    contact_transition_time_s: Annotated[FiniteFloat, Field(gt=0)] = 0.15
+    approach_velocity_rad_s: Annotated[FiniteFloat, Field(gt=0)] = 0.20
+    approach_acceleration_rad_s2: Annotated[FiniteFloat, Field(gt=0)] = 0.50
+    approach_jerk_rad_s3: Annotated[FiniteFloat, Field(gt=0)] = 2.0
+    approach_feedforward_force_n: Annotated[FiniteFloat, Field(ge=0)] = 2.0
+    approach_feedforward_ratio: Annotated[FiniteFloat, Field(ge=0, le=1)] = 1.0
+    position_min_rad: FiniteFloat = 0.0
+    position_max_rad: FiniteFloat = 1.5707963267948966
+    velocity_limit_rad_s: Annotated[FiniteFloat, Field(gt=0)] = 0.30
+    closing_direction: Literal[-1, 1] = 1
+    feedforward_torque_limit_nm: Annotated[FiniteFloat, Field(gt=0)] = 4.0
+    mit_torque_limit_nm: Annotated[FiniteFloat, Field(gt=0)] = 4.0
+
+    @model_validator(mode="after")
+    def validate_admittance_limits(self) -> "DMAdmittanceControl":
+        """拒绝倒置机械范围和超出公共速度限制的接近轨迹。"""
+        if self.position_min_rad >= self.position_max_rad:
+            raise ValueError("admittance position limits must be increasing")
+        if self.approach_velocity_rad_s > self.velocity_limit_rad_s:
+            raise ValueError("approach velocity exceeds admittance velocity limit")
+        if self.feedforward_torque_limit_nm > self.mit_torque_limit_nm:
+            raise ValueError("feedforward torque limit exceeds MIT torque limit")
+        return self
+
+
 class NormalForceControl(_FrozenModel):
     """外环法向力跟踪参数。"""
 
@@ -205,10 +238,16 @@ class NormalForceControl(_FrozenModel):
     # 二阶直接力矩 LADRC 参数：非 None 时跟踪阶段旁路 MIT kp/kd，由 LESO
     # 依据在线刚度、机构雅可比和名义惯量调度输入增益并直接输出力矩。
     torque_adrc: TorqueAdrcControl | None = None
+    admittance: DMAdmittanceControl | None = None
 
     @model_validator(mode="after")
     def validate_force_control(self) -> "NormalForceControl":
         """要求释放阈值和可选刚度估计配置相互一致。"""
+        if self.admittance is not None:
+            if self.geometry is None:
+                raise ValueError("admittance requires geometry")
+            if self.adrc is not None or self.torque_adrc is not None or self.torque_feedback_gain:
+                raise ValueError("admittance cannot mix with ADRC or torque feedback")
         if self.release_threshold_n > self.contact_threshold_n:
             raise ValueError("release_threshold_n must not exceed contact_threshold_n")
         if self.stiffness is not None and self.stiffness.enabled and self.geometry is None:

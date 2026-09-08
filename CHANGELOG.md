@@ -33,6 +33,14 @@
 
 ### 新增
 
+- 新增独立 `dm-grasp-core==0.1.0`，与 ROS 2 DMgripper 共用二阶导纳、运动学、
+  平滑接近/接触过渡及 MIT 请求映射；仿真以 uv workspace 引用，ROS 安装固定 wheel。
+- `pgt run force-track` 新增显式 `--controller-variant admittance`、可选
+  `control.force.admittance` 配置及 4 ms / 0.5 N 示例。仅该变体在每个物理步重算
+  MIT 内环，外环按任务周期运行；默认比较矩阵和旧控制器行为不变。
+- 新增迁移前固定轨迹回归、可选 ROS/仿真共同回放测试；导纳运行产物记录核心版本与
+  执行器应用方式。共享请求与仿真量化结果分别说明，尚不宣称协议字节或硬件动态等价。
+
 - 新增 `pgt run discrete-force` Robotiq 2F-85 离散力控制实验：命令严格限制为 `0～255`，离散变体
   保留真正的零动作 HOLD，并实现稳定窗口、统一双向 `ΔF_tick` EWMA、自适应死区与再激活滞回、
   一步预测、最多 ±3 tick 有限候选动作、安全预测及单 tick RELEASE；运行保存按独立周期（默认 100 Hz）

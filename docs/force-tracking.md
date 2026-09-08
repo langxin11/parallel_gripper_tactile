@@ -31,6 +31,12 @@ uv run pgt run force-track \
 
 ## 1. 两阶段流程
 
+另有独立的 [DMgripper 导纳基线](dm-shared-control.md)，通过
+`--controller-variant admittance` 选择。它包含接近、接触速度过渡和跟踪，
+使用当前 ROS 2 的共享导纳核，不进入本页历史 PID/ADRC 默认比较矩阵。
+该变体的接近轨迹/前馈由 `control.force.admittance.approach_*` 配置，
+任务 `approach.timeout_s` 仍控制等待上限；旧任务的接近持续时间/前馈不会覆盖这些参数。
+
 ### 接近阶段
 
 接近阶段由 `approach` 配置段控制。该阶段夹爪按低速闭合，直到确认左右两侧都稳定接触物体。

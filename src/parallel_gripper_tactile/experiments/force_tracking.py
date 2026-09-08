@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 import csv
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 from pathlib import Path
 import time
@@ -26,6 +26,7 @@ from ..plotstyle import paper_figsize, save_publication_figure, science_pyplot
 from ..profiles import (
     STIFFNESS_ESTIMATOR_METHODS,
     AdrcControl,
+    DMAdmittanceControl,
     GripperProfile,
     MITTorqueControl,
     StiffnessEstimatorMethod,
@@ -64,6 +65,7 @@ ControllerVariant = Literal[
     "adrc",
     "adrc-torque",
     "adrc-torque-td",
+    "admittance",
 ]
 CONTROLLER_VARIANTS: tuple[ControllerVariant, ...] = (
     "pid-only",
@@ -99,8 +101,8 @@ def configure_force_controller(
     Raises:
         ValueError: 变体、种子或覆盖参数与当前控制器不兼容时抛出。
     """
-    if variant not in CONTROLLER_VARIANTS:
-        choices = ", ".join(CONTROLLER_VARIANTS)
+    if variant not in (*CONTROLLER_VARIANTS, "admittance"):
+        choices = ", ".join((*CONTROLLER_VARIANTS, "admittance"))
         raise ValueError(f"controller_variant must be one of: {choices}")
     if sensor_noise_seed is not None and sensor_noise_seed < 0:
         raise ValueError("sensor_noise_seed must be non-negative")
@@ -115,6 +117,32 @@ def configure_force_controller(
     if not isinstance(profile.control, MITTorqueControl) or profile.normal_force is None:
         raise ValueError("controller ablation requires MIT torque control with control.force")
     force = profile.normal_force
+    if variant == "admittance":
+        if stiffness_estimator_method is not None:
+            raise ValueError("admittance does not use stiffness estimation")
+        if force.geometry is None:
+            raise ValueError("admittance requires control.force.geometry")
+        if force.adrc is not None or force.torque_adrc is not None or force.torque_feedback_gain:
+            raise ValueError("admittance cannot mix with ADRC or torque feedback")
+        updates = {
+            "admittance": force.admittance or DMAdmittanceControl(),
+            "kp": 0.0,
+            "ki": 0.0,
+            "kd": 0.0,
+        }
+        if force.stiffness is not None:
+            updates["stiffness"] = force.stiffness.model_copy(update={"enabled": False})
+        if sensor_noise_seed is not None:
+            updates["sensor_noise_seed"] = sensor_noise_seed
+        return profile.model_copy(
+            update={
+                "control": profile.control.model_copy(
+                    update={"force": force.model_copy(update=updates)}
+                )
+            }
+        )
+    if force.admittance is not None:
+        raise ValueError("control.force.admittance requires --controller-variant admittance")
     stiffness = force.stiffness
     if stiffness is None and variant not in {"pid-only", "full"}:
         raise ValueError("controller ablation requires control.force.stiffness")
@@ -791,7 +819,13 @@ def run_force_tracking(
     data = mujoco.MjData(model)
     control_timer = SimulationTimer(task.control_period_s, float(data.time))
     reader = _prefixed_reader(model, profile)
-    controller: ForceTrackingController = NormalForceController.from_profile(
+    if controller_variant == "admittance":
+        from ..dm_admittance import DMAdmittanceController
+
+        controller_type = DMAdmittanceController
+    else:
+        controller_type = NormalForceController
+    controller: ForceTrackingController = controller_type.from_profile(
         model,
         profile,
         name_prefix=GRIPPER_PREFIX,
@@ -907,6 +941,9 @@ def run_force_tracking(
 
             if force_command is None:
                 raise RuntimeError("control timer did not produce an initial command")
+            if controller_variant == "admittance":
+                # 电机内环持续执行上一 MIT 请求，外环仍仅在控制时钟触发。
+                force_command = replace(force_command, mit=controller.apply_held_command(data))
             motor_command = force_command.mit
             mujoco.mj_step(model, data)
             if (

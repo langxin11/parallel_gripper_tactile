@@ -52,10 +52,22 @@ def execute_force_tracking(
         sensor_noise_seed=sensor_noise_seed,
         torque_adrc_override=torque_adrc_override,
     )
+    core_metadata = {}
+    if controller_variant == "admittance":
+        from dm_grasp_core import __version__
+
+        core_metadata = {
+            "dm_grasp_core_version": __version__,
+            "command_application": "shared_request_then_existing_sim_mit_quantization_each_physics_step",
+        }
     resolved_trace_sample_period_s = trace_sample_period_s
     if resolved_trace_sample_period_s is None:
         resolved_trace_sample_period_s = (
-            0.004 if controller_variant in {"adrc-torque", "adrc-torque-td"} else 0.01
+            task.control_period_s
+            if controller_variant == "admittance"
+            else 0.004
+            if controller_variant in {"adrc-torque", "adrc-torque-td"}
+            else 0.01
         )
     run = RunDirectory.create(
         output_root,
@@ -64,6 +76,7 @@ def execute_force_tracking(
         profile_source=profile,
         command=tuple(sys.argv),
         parameters={
+            **core_metadata,
             "task": str(task_path),
             "task_name": task.name,
             "tracking_duration_s": task.reference.duration_s,
@@ -104,6 +117,7 @@ def execute_force_tracking(
                     "profile": configured.model_dump(mode="json"),
                     "task": task.model_dump(mode="json"),
                     "runtime": {
+                        **core_metadata,
                         "profile_path": str(profile.resolve()),
                         "task_path": str(task_path.resolve()),
                         "object_material": object_material,
