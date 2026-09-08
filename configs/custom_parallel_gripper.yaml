@@ -66,9 +66,14 @@ control:
       # 滑动窗口样本数与拟合所需最小样本数；窗口方法使用全部最近样本。
       window_size: 25
       min_samples: 8
-      # 位置前馈用平均单侧力误差除以 K*Jc；力矩前馈用 f_target*Jc，两个增益用于保守缩放。
+      # 历史位置前馈用平均单侧力误差除以 K*Jc；力矩前馈用 f_target*Jc。
       position_feedforward_gain: 0.25
       torque_feedforward_gain: 1.0
+      # pid-stiffness-limit 变体会启用刚度感知位置限幅并关闭历史位置前馈：
+      # 每周期允许的预测力变化不超过 force_rate*dt，安全系数放大刚度后再换算为角度边界。
+      position_limit_enabled: false
+      position_limit_force_rate_n_s: 10.0
+      position_limit_stiffness_safety_factor: 1.0
 
 mount:
   # 抓取场景中夹爪基座的安装位姿。

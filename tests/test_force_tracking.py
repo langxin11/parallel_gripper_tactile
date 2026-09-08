@@ -148,16 +148,24 @@ def test_force_tracking_trace_downsampling_preserves_events_and_boundaries() -> 
 
 
 @pytest.mark.parametrize(
-    ("variant", "enabled", "position_gain", "torque_gain", "feedback_gain"),
+    (
+        "variant",
+        "enabled",
+        "position_gain",
+        "torque_gain",
+        "feedback_gain",
+        "position_limit_enabled",
+    ),
     [
-        ("pid-only", False, 0.25, 1.0, 0.0),
-        ("pid-torque-ff", True, 0.0, 1.0, 0.0),
-        ("pid-stiffness-ff", True, 0.25, 0.0, 0.0),
-        ("full", True, 0.25, 1.0, 0.0),
-        ("direct-torque", True, 0.0, 1.0, 1.0),
-        ("adrc", True, 0.0, 1.0, 0.0),
-        ("adrc-torque", True, 0.0, 1.0, 0.0),
-        ("adrc-torque-td", True, 0.0, 1.0, 0.0),
+        ("pid-only", False, 0.25, 1.0, 0.0, False),
+        ("pid-torque-ff", True, 0.0, 1.0, 0.0, False),
+        ("pid-stiffness-ff", True, 0.25, 0.0, 0.0, False),
+        ("pid-stiffness-limit", True, 0.0, 1.0, 0.0, True),
+        ("full", True, 0.25, 1.0, 0.0, False),
+        ("direct-torque", True, 0.0, 1.0, 1.0, False),
+        ("adrc", True, 0.0, 1.0, 0.0, False),
+        ("adrc-torque", True, 0.0, 1.0, 0.0, False),
+        ("adrc-torque-td", True, 0.0, 1.0, 0.0, False),
     ],
 )
 def test_controller_variants_apply_reproducible_ablation_settings(
@@ -166,6 +174,7 @@ def test_controller_variants_apply_reproducible_ablation_settings(
     position_gain: float,
     torque_gain: float,
     feedback_gain: float,
+    position_limit_enabled: bool,
 ) -> None:
     """各控制器档位只修改对应的刚度估计与前馈开关。"""
     source = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
@@ -180,6 +189,7 @@ def test_controller_variants_apply_reproducible_ablation_settings(
     assert configured.normal_force.stiffness.enabled is enabled
     assert configured.normal_force.stiffness.position_feedforward_gain == position_gain
     assert configured.normal_force.stiffness.torque_feedforward_gain == torque_gain
+    assert configured.normal_force.stiffness.position_limit_enabled is position_limit_enabled
     assert source.normal_force is not None
     assert source.normal_force.sensor_noise_seed == 20260814
     assert source.normal_force.torque_feedback_gain == 0.0
@@ -401,12 +411,14 @@ def test_force_tracking_run_writes_dynamic_reference_trace(
     assert schema.names == list(rows[0])
     assert schema.field("phase").type == "string"
     assert schema.field("multiccd_enabled").type == "bool"
+    assert schema.field("stiffness_position_limited").type == "bool"
     assert schema.field("active_taxel_contacts").type == "int64"
     assert schema.field("time_s").type == "double"
     parquet_rows = parquet.read().to_pylist()
     assert parquet_rows
     assert isinstance(parquet_rows[0]["multiccd_enabled"], bool)
     assert any(math.isnan(row["torque_adrc_measurement_n"]) for row in parquet_rows)
+    assert all(row["stiffness_position_limited"] is False for row in parquet_rows)
     assert len(parquet_rows) == len(rows) < len(plotted_rows)
     configured = configure_force_controller(
         load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
@@ -420,6 +432,7 @@ def test_force_tracking_run_writes_dynamic_reference_trace(
         p_max=float(configured.mit.p_max),
     )
     assert result.rmse_n == pytest.approx(expected_metrics[0])
+    assert result.stiffness_position_limit_ratio == 0.0
     assert schema.metadata[b"pgt.trace.sample_period_s"] == b"0.01"
     assert schema.metadata[b"pgt.trace.event_window_s"] == b"0.02"
 

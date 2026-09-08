@@ -26,6 +26,7 @@ from parallel_gripper_tactile.control import (
     DAMIAO_STIFFNESS_RANGE,
     _roundtrip_unsigned,
 )
+from parallel_gripper_tactile.experiments.force_tracking import configure_force_controller
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -582,6 +583,50 @@ def test_default_torque_feedback_gain_keeps_positional_tracking_path() -> None:
     # 位置式路径未被旁路：PID 修正非零，MIT 力矩仍含位置弹簧项。
     assert default_command.pid_position_adjustment > 0.0
     assert default_command.mit.torque != pytest.approx(default_command.mit.feedforward_torque)
+
+
+def test_stiffness_position_limit_bounds_pid_increment_without_position_feedforward() -> None:
+    """刚度感知变体限制 PID 周期增量，并保留机构力矩前馈。"""
+    source = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    profile = configure_force_controller(source, variant="pid-stiffness-limit")
+    model = mujoco.MjModel.from_xml_path(str(source.model_path))
+    data = mujoco.MjData(model)
+    controller = NormalForceController.from_profile(model, profile)
+
+    command = None
+    for _ in range(5):
+        command = controller.apply(
+            data,
+            approach_position=0.5,
+            total_normal_force_n=0.4,
+            left_normal_force_n=0.2,
+            right_normal_force_n=0.2,
+            dt=0.002,
+        )
+
+    assert command is not None
+    assert command.state == "force_tracking"
+    assert command.estimated_contact_stiffness_n_per_m == pytest.approx(3000.0)
+    assert command.closure_jacobian_m_per_rad is not None
+    expected_limit = 10.0 * 0.002 / (3000.0 * command.closure_jacobian_m_per_rad)
+    assert command.stiffness_position_adjustment == 0.0
+    assert command.stiffness_position_limit_rad == pytest.approx(expected_limit)
+    assert command.stiffness_position_limited is True
+    assert command.position_adjustment == pytest.approx(expected_limit)
+    assert command.force_feedforward_torque > 0.0
+
+    next_command = controller.apply(
+        data,
+        approach_position=0.5,
+        total_normal_force_n=0.4,
+        left_normal_force_n=0.2,
+        right_normal_force_n=0.2,
+        dt=0.002,
+    )
+    assert next_command.position_adjustment > command.position_adjustment
+    assert next_command.position_adjustment - command.position_adjustment == pytest.approx(
+        next_command.stiffness_position_limit_rad
+    )
 
 
 def _profile_with_adrc(profile: GripperProfile, adrc: AdrcControl | None) -> GripperProfile:

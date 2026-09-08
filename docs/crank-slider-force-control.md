@@ -117,7 +117,7 @@ J_f(q)=\frac{\partial f_n}{\partial q}
 \Delta q_{\mathrm{ff}}=\frac{e_f}{\hat k_{\mathrm{pair}}J_c(q)}.
 \]
 
-建议保留现有力反馈环，并采用受限的组合命令：
+历史 `pid-stiffness-ff` 变体把逆刚度位置修正与 PI 输出相加：
 
 \[
 \Delta q=
@@ -130,6 +130,31 @@ J_f(q)=\frac{\partial f_n}{\partial q}
 
 其中 \(\alpha\) 是保守系数，\(\Delta q_{\mathrm{PI}}\) 用来抵消建模误差和稳态偏差。
 对较硬物体，\(\hat J_f\) 较大，位置修正会自动减小以抑制过冲；对较软物体，位置修正会增大以更快达到目标力。
+由于该项和 PI 同时使用实时误差，它属于模型辅助反馈而不是严格意义上的参考前馈，估计误差还可能与 PI
+重复补偿。新的 `pid-stiffness-limit` 因此关闭该加法项，仅把在线刚度用于 PID 位置目标的周期增量约束。
+设允许的预测平均单侧力变化率为 \(\dot f_{lim}\)，刚度安全系数为 \(\gamma_k\ge1\)，则：
+
+\[
+k_{safe,k}=\gamma_k\hat k_{pair,k},\qquad
+\Delta f_{lim,k}=\min\left(|e_{f,k}|,\dot f_{lim}\Delta t\right),
+\]
+
+\[
+\Delta q_{lim,k}=\frac{\Delta f_{lim,k}}{k_{safe,k}J_c(q_k)},
+\]
+
+\[
+\Delta q_{cmd,k}=\operatorname{clip}\left(
+\Delta q_{PI,k},
+\Delta q_{cmd,k-1}-\Delta q_{lim,k},
+\Delta q_{cmd,k-1}+\Delta q_{lim,k}
+\right).
+\]
+
+该动态边界同时受全局 `max_position_adjustment` 约束，并直接设置为 PID 的输出上下界，使积分项在限幅期间
+同步裁剪。误差为零时 \(\Delta q_{lim,k}=0\)，控制器保持上一周期的平衡位置，而不是把绝对位置修正拉回零。
+该变体默认保留机构力矩前馈；`position_limit_force_rate_n_s` 与
+`position_limit_stiffness_safety_factor` 仍是待正式 study 验证的仿真起点，不是实机安全认证参数。
 
 同时使用开度雅可比计算准静态力矩前馈：
 

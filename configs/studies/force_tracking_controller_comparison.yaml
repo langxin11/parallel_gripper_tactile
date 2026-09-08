@@ -11,7 +11,8 @@ controllers:
   - full
   # direct-torque 为位置式 MIT 力控的直接力矩式对照；矩阵由 108 扩至 135 条。
   # 2026-09-01 历史 108-run 基准的复现以当时 manifest 与本文件 git 历史为准。
-  - direct-torque
+  #- direct-torque
+  - pid-stiffness-limit
   # 一阶位置式 adrc 因模型阶次不匹配，不再参加默认正式矩阵；保留 CLI 供历史复现。
   # adrc-torque 为二阶直接力矩 MB-ADRC；默认矩阵为 162 条。
   - adrc-torque

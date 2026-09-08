@@ -75,6 +75,10 @@ uv run pgt run force-track \
 结合触觉测得的平均单侧法向力 \(f_n=(F_L+F_R)/2\)、接触刚度估计、位置修正和力矩前馈生成执行器命令。
 
 默认为位置式力控：PID 位置修正与刚度位置前馈修正目标位置，模型力矩前馈进入 MIT `t_ff`。
+`--controller-variant pid-stiffness-limit` 保留 PID 和机构力矩前馈，但关闭刚度位置前馈；在线刚度只把
+`position_limit_force_rate_n_s·dt` 的允许预测力变化换算成每周期位置目标增量上限，并通过动态 PID
+输出边界抑制积分 windup。刚度安全系数由 `position_limit_stiffness_safety_factor` 配置。该变体是新增的
+独立实验入口，不替换历史 `pid-stiffness-ff`、`full` 或默认正式比较矩阵。
 若把 profile 字段 `control.force.torque_feedback_gain` 设为大于 0（`direct-torque` 控制器变体
 即取 1.0，可用 `--controller-variant direct-torque` 运行），跟踪阶段切换为直接力矩式对照：
 力误差直接进入 MIT 前馈力矩，PID 与刚度位置修正置零，MIT 位置环 kp/kd 逐周期覆盖为 0；
@@ -233,6 +237,8 @@ profile、task 等人工输入继续采用 YAML。`effective_parameters.json` �
 | `estimated_contact_stiffness_n_per_m` | 在线估计的整体等效刚度 `k_pair`。 |
 | `closure_jacobian_m_per_rad` | 当前关节角下的闭合行程雅可比 \(J_c(q)\)。 |
 | `aperture_m` | 由开度公式计算的当前夹爪开口。 |
+| `stiffness_position_limit_rad` | 刚度感知变体本周期允许的 PID 位置目标最大变化量。 |
+| `stiffness_position_limited` | 本周期 PID 输出是否触及刚度感知动态边界。 |
 
 ## 5. 指标解读
 
@@ -248,6 +254,7 @@ profile、task 等人工输入继续采用 YAML。`effective_parameters.json` �
 | `torque_saturation_ratio` | 力矩命令触达限幅的比例。 |
 | `position_saturation_ratio` | 位置命令触达限幅的比例。 |
 | `mean_estimated_stiffness_n_per_m` | 跟踪阶段平均等效接触刚度。 |
+| `stiffness_position_limit_ratio` | 评价区间内刚度感知位置边界实际触发的周期比例。 |
 | `rise_time_s` | 加载阶跃后滤波力首次达到阶跃前平台加 90% 阶跃幅值的耗时；非 `hold` 任务、无合格阶跃或窗口内未达到时为 `null`。 |
 | `overshoot_ratio` | 阶跃平台窗口内滤波力峰值超出目标平台的幅值与阶跃幅值之比（下限为 0）；无法判定时为 `null`。 |
 | `settling_time_s` | 滤波力进入并保持 ±5% 阶跃幅值稳定带的首个时刻相对阶跃起点的耗时；窗口末尾仍未稳定或无法判定时为 `null`。 |

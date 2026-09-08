@@ -147,6 +147,8 @@ def test_custom_grasp_trace_plot_is_written(tmp_path: Path) -> None:
         "normal_force_error_n",
         "force_position_adjustment_rad",
         "stiffness_position_adjustment_rad",
+        "stiffness_position_limit_rad",
+        "stiffness_position_limited",
         "force_feedforward_torque_n_m",
         "mit_feedforward_torque_n_m",
         "estimated_contact_stiffness_n_per_m",

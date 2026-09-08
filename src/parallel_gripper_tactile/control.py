@@ -611,6 +611,8 @@ class NormalForceControlCommand:
     estimated_contact_stiffness_n_per_m: float | None = None
     closure_jacobian_m_per_rad: float | None = None
     aperture_m: float | None = None
+    stiffness_position_limit_rad: float | None = None
+    stiffness_position_limited: bool = False
     torque_adrc_measurement_n: float | None = None
     torque_adrc_estimated_force_n: float | None = None
     torque_adrc_estimated_force_rate_n_s: float | None = None
@@ -661,6 +663,8 @@ class _ForceTrackingStep:
     estimated_contact_stiffness_n_per_m: float | None
     closure_jacobian_m_per_rad: float | None
     aperture_m: float | None
+    stiffness_position_limit_rad: float | None = None
+    stiffness_position_limited: bool = False
     torque_adrc: TorqueAdrcStep | None = None
 
 
@@ -741,6 +745,7 @@ class NormalForceController:
         self._adrc_z2 = 0.0
         self._adrc_u = 0.0
         self._adrc_adjustment = 0.0
+        self._position_adjustment = 0.0
         self.reset()
 
     @classmethod
@@ -818,6 +823,7 @@ class NormalForceController:
         self._contact_position = 0.0
         self._contact_steps = 0
         self._release_steps = 0
+        self._position_adjustment = 0.0
         if self._stiffness_estimator is not None:
             self._stiffness_estimator.reset()
         self._pid.set_auto_mode(False)
@@ -906,6 +912,10 @@ class NormalForceController:
         控制律自身提供名义 PD 动态并输出力矩，因此仅在跟踪周期旁路 MIT
         ``kp/kd``；接近阶段的阻抗控制保持不变。
 
+        当刚度感知位置限幅启用时，在线刚度不作为额外位置前馈叠加，
+        而是把允许的法向力变化率换算为 PID 位置目标的周期增量边界。
+        动态更新 PID 输出上下界同时限制其积分项，避免限幅期间 windup。
+
         Returns:
             ``_ForceTrackingStep``；三条路径的 ``force_feedforward_torque`` 均填
             送入 MIT 内环的前馈力矩总值（直接力矩路径下为力误差项与模型前馈之和）。
@@ -918,6 +928,8 @@ class NormalForceController:
         stiffness_estimate = None
         closure_jacobian = None
         aperture = None
+        stiffness_position_limit = None
+        stiffness_position_limited = False
 
         if self._kinematics is not None:
             aperture = self._kinematics.aperture(current_position)
@@ -1097,7 +1109,46 @@ class NormalForceController:
             )
 
         self._pid.setpoint = target_force_n
+        stiffness = config.stiffness
+        if (
+            stiffness is not None
+            and stiffness.position_limit_enabled
+            and stiffness_estimate is not None
+            and closure_jacobian is not None
+        ):
+            safe_joint_stiffness = (
+                float(stiffness.position_limit_stiffness_safety_factor)
+                * stiffness_estimate
+                * closure_jacobian
+            )
+            maximum_force_step = min(
+                abs(force_error),
+                float(stiffness.position_limit_force_rate_n_s) * dt,
+            )
+            stiffness_position_limit = maximum_force_step / max(safe_joint_stiffness, 1e-12)
+            lower = max(
+                -float(config.max_position_adjustment),
+                self._position_adjustment - stiffness_position_limit,
+            )
+            upper = min(
+                float(config.max_position_adjustment),
+                self._position_adjustment + stiffness_position_limit,
+            )
+            self._pid.output_limits = (lower, upper)
+        else:
+            self._pid.output_limits = (
+                -float(config.max_position_adjustment),
+                float(config.max_position_adjustment),
+            )
         pid_adjustment = float(self._pid(measured_force_n, dt=dt))
+        if stiffness_position_limit is not None:
+            raw_pid_adjustment = float(sum(self._pid.components))
+            stiffness_position_limited = not math.isclose(
+                pid_adjustment,
+                raw_pid_adjustment,
+                rel_tol=0.0,
+                abs_tol=1e-12,
+            )
         adjustment = float(
             np.clip(
                 stiffness_adjustment + pid_adjustment,
@@ -1105,6 +1156,7 @@ class NormalForceController:
                 config.max_position_adjustment,
             )
         )
+        self._position_adjustment = adjustment
         mit = self._inner.apply(
             data,
             target_position=self._contact_position + adjustment,
@@ -1119,6 +1171,8 @@ class NormalForceController:
             estimated_contact_stiffness_n_per_m=stiffness_estimate,
             closure_jacobian_m_per_rad=closure_jacobian,
             aperture_m=aperture,
+            stiffness_position_limit_rad=stiffness_position_limit,
+            stiffness_position_limited=stiffness_position_limited,
         )
 
     def apply(
@@ -1154,6 +1208,8 @@ class NormalForceController:
         stiffness_estimate = None
         closure_jacobian = None
         aperture = None
+        stiffness_position_limit = None
+        stiffness_position_limited = False
         torque_adrc_step = None
         if self._filtered_force is None:
             self._filtered_force = measured_force
@@ -1239,6 +1295,8 @@ class NormalForceController:
                 stiffness_estimate = tracking.estimated_contact_stiffness_n_per_m
                 closure_jacobian = tracking.closure_jacobian_m_per_rad
                 aperture = tracking.aperture_m
+                stiffness_position_limit = tracking.stiffness_position_limit_rad
+                stiffness_position_limited = tracking.stiffness_position_limited
                 torque_adrc_step = tracking.torque_adrc
         else:
             both_released = max(left_normal_force_n, right_normal_force_n)
@@ -1271,6 +1329,8 @@ class NormalForceController:
                 stiffness_estimate = tracking.estimated_contact_stiffness_n_per_m
                 closure_jacobian = tracking.closure_jacobian_m_per_rad
                 aperture = tracking.aperture_m
+                stiffness_position_limit = tracking.stiffness_position_limit_rad
+                stiffness_position_limited = tracking.stiffness_position_limited
                 torque_adrc_step = tracking.torque_adrc
 
         reported_filtered_force = (
@@ -1290,6 +1350,8 @@ class NormalForceController:
             estimated_contact_stiffness_n_per_m=stiffness_estimate,
             closure_jacobian_m_per_rad=closure_jacobian,
             aperture_m=aperture,
+            stiffness_position_limit_rad=stiffness_position_limit,
+            stiffness_position_limited=stiffness_position_limited,
             torque_adrc_measurement_n=self._torque_adrc_measurement,
             torque_adrc_estimated_force_n=(
                 None if torque_adrc_step is None else torque_adrc_step.estimated_force_n

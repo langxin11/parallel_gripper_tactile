@@ -37,6 +37,10 @@
 
 ### 新增
 
+- 新增平行夹爪力控制方法说明报告，采用中文适配的 IEEE 双栏会议版式和 Times 系西文字体，集中整理位置式 PID、刚度感知位置增量限幅、二阶导纳与二阶直接力矩 ADRC 的控制律及验证边界；报告表格统一为三线表。
+- 新增 `pid-stiffness-limit` 力跟踪变体：保留 PID 与机构力矩前馈，关闭基于同一力误差的刚度位置前馈，
+  改用在线刚度和机构雅可比把允许力变化率换算为 PID 位置目标的周期增量边界；trace 与 metrics 记录
+  边界值、触发状态和触发比例。既有 `pid-stiffness-ff`、`full` 及默认比较矩阵保持不变。
 - 新增独立 `dm-grasp-core==0.1.0`，与 ROS 2 DMgripper 共用二阶导纳、运动学、
   平滑接近/接触过渡及 MIT 请求映射；仿真以 uv workspace 引用，ROS 安装固定 wheel。
 - `pgt run force-track` 新增显式 `--controller-variant admittance`、可选

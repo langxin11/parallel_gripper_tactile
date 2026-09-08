@@ -113,6 +113,10 @@ controller command -> 达妙电机 CAN/串口命令
 | No stiffness position FF | `position_feedforward_gain: 0.0` | 评估刚度估计用于位置前馈的贡献 |
 | No stiffness estimator | `stiffness.enabled: false` | 评估在线刚度估计整体贡献 |
 
+新增的 `pid-stiffness-limit` 不进入既有默认矩阵。它与 `pid-torque-ff` 保持相同的 PID 和机构力矩前馈，
+只增加由在线刚度换算的周期位置增量边界，适合后续以配对实验检验“刚度估计作为约束”是否比历史
+`pid-stiffness-ff` 的加法位置修正更稳健。已有矩阵和结论继续表示历史实现，不回溯改写。
+
 第二批实验再做算法对比：
 
 | 组别 | 控制器 | 对比重点 |

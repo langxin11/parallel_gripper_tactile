@@ -369,6 +369,7 @@ def run_force_track(
             "pid-only",
             "pid-torque-ff",
             "pid-stiffness-ff",
+            "pid-stiffness-limit",
             "full",
             "direct-torque",
             "adrc",
@@ -432,6 +433,10 @@ def run_force_track(
     table.add_row("Overshoot", _format_optional_ratio(result.overshoot_ratio))
     table.add_row("Settling time", _format_optional_seconds(result.settling_time_s))
     table.add_row("Torque saturation", f"{100.0 * result.torque_saturation_ratio:.1f}%")
+    table.add_row(
+        "Stiffness position limit",
+        f"{100.0 * result.stiffness_position_limit_ratio:.1f}%",
+    )
     state(context).console.print(table)
     state(context).console.print(f"Run: [cyan]{run.path}[/cyan]")
     if not result.passed:

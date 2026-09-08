@@ -60,6 +60,7 @@ ControllerVariant = Literal[
     "pid-only",
     "pid-torque-ff",
     "pid-stiffness-ff",
+    "pid-stiffness-limit",
     "full",
     "direct-torque",
     "adrc",
@@ -71,6 +72,7 @@ CONTROLLER_VARIANTS: tuple[ControllerVariant, ...] = (
     "pid-only",
     "pid-torque-ff",
     "pid-stiffness-ff",
+    "pid-stiffness-limit",
     "full",
     "direct-torque",
     "adrc",
@@ -153,6 +155,17 @@ def configure_force_controller(
         stiffness = stiffness.model_copy(update={"enabled": True, "position_feedforward_gain": 0.0})
     elif variant == "pid-stiffness-ff" and stiffness is not None:
         stiffness = stiffness.model_copy(update={"enabled": True, "torque_feedforward_gain": 0.0})
+    elif variant == "pid-stiffness-limit" and stiffness is not None:
+        # 在线刚度只约束 PID 位置目标的周期增量，不再把同一力误差作为
+        # 第二条位置修正与 PID 叠加；机构力矩前馈继续保留。
+        stiffness = stiffness.model_copy(
+            update={
+                "enabled": True,
+                "position_feedforward_gain": 0.0,
+                "torque_feedforward_gain": 1.0,
+                "position_limit_enabled": True,
+            }
+        )
     elif variant == "direct-torque" and stiffness is not None:
         # 直接力矩式对照：保留刚度估计（trace 中刚度曲线可比）并关闭刚度位置前馈，
         # 力矩前馈增益不动。MIT kp/kd 不在 profile 层清零——接近阶段共享同一组
@@ -338,6 +351,7 @@ class ForceTrackingResult:
     overshoot_ratio: float | None
     settling_time_s: float | None
     simulation_stable: bool
+    stiffness_position_limit_ratio: float = 0.0
 
     @property
     def passed(self) -> bool:
@@ -579,6 +593,7 @@ def _downsample_force_tracking_rows(
                     "control_state",
                     "torque_adrc_rate_limited",
                     "torque_adrc_amplitude_limited",
+                    "stiffness_position_limited",
                 )
             ):
                 keep_indices.add(index - 1)
@@ -620,6 +635,7 @@ def _write_force_tracking_parquet(
         "multiccd_enabled",
         "torque_adrc_rate_limited",
         "torque_adrc_amplitude_limited",
+        "stiffness_position_limited",
     )
     parquet_rows = [
         {
@@ -648,7 +664,7 @@ def _evaluate_tracking(
     mit_t_max: float,
     p_min: float,
     p_max: float,
-) -> tuple[float, float, float, float, float, float, float, float]:
+) -> tuple[float, float, float, float, float, float, float, float, float]:
     """计算目标力跟踪误差和饱和比例。"""
     tracking_rows = [
         row
@@ -656,7 +672,17 @@ def _evaluate_tracking(
         if row["phase"] == "track_reference" and float(row["tracking_time_s"]) >= ignore_initial_s
     ]
     if not tracking_rows:
-        return (math.inf, math.inf, math.inf, math.inf, math.inf, math.inf, math.inf, math.inf)
+        return (
+            math.inf,
+            math.inf,
+            math.inf,
+            math.inf,
+            math.inf,
+            math.inf,
+            math.inf,
+            math.inf,
+            math.inf,
+        )
     errors = np.asarray([float(row["tracking_error_n"]) for row in tracking_rows])
     torques = np.asarray([float(row["motor_torque_n_m"]) for row in tracking_rows])
     positions = np.asarray([float(row["control"]) for row in tracking_rows])
@@ -670,6 +696,9 @@ def _evaluate_tracking(
     )
     torque_saturation = float(np.mean(np.abs(torques) >= 0.999 * mit_t_max))
     position_saturation = float(np.mean((positions <= p_min + 1e-6) | (positions >= p_max - 1e-6)))
+    stiffness_position_limit = float(
+        np.mean([row.get("stiffness_position_limited") == "true" for row in tracking_rows])
+    )
     return (
         float(np.sqrt(np.mean(errors**2))),
         float(np.mean(np.abs(errors))),
@@ -679,6 +708,7 @@ def _evaluate_tracking(
         torque_saturation,
         position_saturation,
         float(np.mean(stiffness)) if stiffness.size else math.nan,
+        stiffness_position_limit,
     )
 
 
@@ -999,6 +1029,14 @@ def run_force_tracking(
                     "stiffness_position_adjustment_rad": (
                         force_command.stiffness_position_adjustment
                     ),
+                    "stiffness_position_limit_rad": (
+                        force_command.stiffness_position_limit_rad
+                        if force_command.stiffness_position_limit_rad is not None
+                        else math.nan
+                    ),
+                    "stiffness_position_limited": str(
+                        force_command.stiffness_position_limited
+                    ).lower(),
                     "force_feedforward_torque_n_m": force_command.force_feedforward_torque,
                     "mit_feedforward_torque_n_m": motor_command.feedforward_torque,
                     "torque_adrc_estimated_force_n": (
@@ -1135,6 +1173,7 @@ def run_force_tracking(
         torque_saturation_ratio,
         position_saturation_ratio,
         mean_stiffness,
+        stiffness_position_limit_ratio,
     ) = _evaluate_tracking(
         rows,
         ignore_initial_s=task.metrics.ignore_initial_s,
@@ -1164,6 +1203,7 @@ def run_force_tracking(
         overshoot_ratio=overshoot_ratio,
         settling_time_s=settling_time_s,
         simulation_stable=simulation_stable,
+        stiffness_position_limit_ratio=stiffness_position_limit_ratio,
     )
 
 

@@ -607,6 +607,12 @@ def run_acceptance(
                 "normal_force_error_n": force_command.force_error_n,
                 "force_position_adjustment_rad": force_command.position_adjustment,
                 "stiffness_position_adjustment_rad": (force_command.stiffness_position_adjustment),
+                "stiffness_position_limit_rad": (
+                    force_command.stiffness_position_limit_rad
+                    if force_command.stiffness_position_limit_rad is not None
+                    else math.nan
+                ),
+                "stiffness_position_limited": force_command.stiffness_position_limited,
                 "force_feedforward_torque_n_m": force_command.force_feedforward_torque,
                 "mit_feedforward_torque_n_m": motor_command.feedforward_torque,
                 "estimated_contact_stiffness_n_per_m": (
