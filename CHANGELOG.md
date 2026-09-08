@@ -9,6 +9,10 @@
 
 ### 变更
 
+- 演示视频默认升级为 1920×1080 @30 fps 与 H.264 CRF 18；实时曲线面板复用
+  `plotstyle.science_pyplot()` 的 SciencePlots IEEE 样式。自定义力箭头先经
+  `mjv_initGeom()` 初始化，再由 `mjv_connector()` 设置起终点，避免复用槽位残留。
+
 - Robotiq 离散力控制升级为 v2：正常正负调节动作共用单 tick 力增益模型，自适应量化死区采用
   `0.5·ΔF_tick`，predictive 与 dynamic-step 分别显式枚举 `{-1,0,+1}` 和 `{-3,…,+3}` 候选；
   新增请求/执行/机械位置、稳定动作增量与候选代价诊断。常规轨迹按独立记录时钟加关键事件记录，

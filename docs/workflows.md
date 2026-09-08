@@ -199,8 +199,10 @@ uv run python scripts/demos/record_experiment_demos.py --demo ramp --noise-seed 
 ```
 
 产物默认写入 `outputs/demos/force_tracking_ramp.mp4` 与
-`outputs/demos/friction_estimation_with_curves.mp4`（均为 1600×900 @30 fps，
-可通过 `--width/--height/--fps/--panel-width/--output-dir` 调整，不入库）。
+`outputs/demos/friction_estimation_with_curves.mp4`（均默认为 1920×1080 @30 fps，
+使用 H.264 CRF 18 编码；可通过 `--width/--height/--fps/--panel-width/--output-dir`
+调整，不入库）。右侧实时面板调用 `plotstyle.science_pyplot()`，与论文图共用
+SciencePlots IEEE 样式及字体配置。
 每次录制还会把对应真实事件的关键帧导出到
 `outputs/demos/preview/`（Ramp：start/mid/end；摩擦：滑移前/检测瞬间/
 自适应增载后）供人工验收。录制器入口为

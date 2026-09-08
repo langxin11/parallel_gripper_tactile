@@ -52,14 +52,14 @@ def _parser() -> argparse.ArgumentParser:
         default="outputs/demos",
         help="MP4 输出目录（默认 outputs/demos）。",
     )
-    parser.add_argument("--width", type=int, default=1600, help="画面总宽（默认 1600）。")
-    parser.add_argument("--height", type=int, default=900, help="画面高（默认 900）。")
+    parser.add_argument("--width", type=int, default=1920, help="画面总宽（默认 1920）。")
+    parser.add_argument("--height", type=int, default=1080, help="画面高（默认 1080）。")
     parser.add_argument("--fps", type=int, default=30, help="视频帧率（默认 30）。")
     parser.add_argument(
         "--panel-width",
         type=int,
-        default=720,
-        help="右侧实时曲线面板宽度（默认 720，配合 1600 总宽实现 MuJoCo:Data≈55:45）。",
+        default=864,
+        help="右侧实时曲线面板宽度（默认 864，配合 1920 总宽实现 MuJoCo:Data≈55:45）。",
     )
     parser.add_argument(
         "--no-arrow",

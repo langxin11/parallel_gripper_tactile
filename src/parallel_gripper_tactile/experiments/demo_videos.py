@@ -31,6 +31,7 @@ import tempfile
 
 import numpy as np
 
+from ..plotstyle import FULL_WIDTH_FONT_SCALE, PAPER_FONT_STACK, science_pyplot
 from ..scenes.custom import CUBE_PREFIX, GRIPPER_PREFIX
 from ..video import add_arrow_to_scene, encode_video, save_pixels
 
@@ -42,11 +43,12 @@ DEFAULT_FRICTION_TASK = (
 )
 DEFAULT_DEMOS_DIR = REPOSITORY_ROOT / "outputs" / "demos"
 
-#: 右侧数据面板宽度（像素）。默认画布 1600 宽时面板占 45%（720 px），
-#: 左侧 MuJoCo 场景占 55%（880 px），即 MuJoCo : Data ≈ 55 : 45。
-PANEL_WIDTH_PX = 720
-#: 与项目论文样式同源的中文字体栈，用于 matplotlib 面板与 HUD 信息卡。
-FONT_STACK = ("Noto Serif CJK SC", "TeX Gyre Termes", "DejaVu Sans")
+#: 默认使用 1080p 高清画布，右侧数据面板占 45%。
+DEFAULT_VIDEO_WIDTH_PX = 1920
+DEFAULT_VIDEO_HEIGHT_PX = 1080
+PANEL_WIDTH_PX = 864
+#: HUD 与数据面板直接复用项目论文字体栈。
+FONT_STACK = PAPER_FONT_STACK
 
 #: 场景相机预设：不同演示可分别指定方位角、俯仰角与距离。
 #: 经人工验收，夹爪+被抓物体应占左画面约 40–50%：采用整机构视角（夹爪本体
@@ -263,19 +265,10 @@ def _ensure_headless_style() -> None:
     import matplotlib
 
     matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
     if not getattr(_ensure_headless_style, "_applied", False):
+        plt = science_pyplot(font_scale=FULL_WIDTH_FONT_SCALE)
         plt.rcParams.update(
             {
-                "font.family": list(FONT_STACK),
-                "font.serif": list(FONT_STACK),
-                "font.size": 8.5,
-                "axes.labelsize": 9.5,
-                "axes.titlesize": 10.5,
-                "xtick.labelsize": 8.0,
-                "ytick.labelsize": 8.0,
-                "legend.fontsize": 8.0,
                 "axes.unicode_minus": False,
                 "text.usetex": False,
                 "figure.facecolor": "white",
@@ -769,8 +762,20 @@ class _DemoRecorder:
         if force is not None:
             direction, magnitude = force
             origin = data.xpos[self._cube_body_id].copy()
-            origin[2] += 0.02
-            add_arrow_to_scene(scene, scene.ngeom, origin, direction * magnitude, scale=0.02)
+            # 固定箭尾；最大长度时箭尖抵达物体上方，因此幅值增加会沿受力方向生长。
+            origin[2] += 0.075
+            add_arrow_to_scene(
+                scene,
+                scene.ngeom,
+                origin,
+                direction * magnitude,
+                scale=0.035,
+                width=0.0016,
+                min_length=0.025,
+                max_length=0.055,
+                emission=0.05,
+                tip_at_origin=False,
+            )
         pixels = self._renderer.render()
 
         runs = _phase_runs(self._times, self._labels)
@@ -1019,8 +1024,8 @@ def record_force_tracking_ramp_video(
     profile_path: Path = DEFAULT_PROFILE,
     task_path: Path = DEFAULT_RAMP_TASK,
     output: Path = DEFAULT_DEMOS_DIR / "force_tracking_ramp.mp4",
-    width: int = 1600,
-    height: int = 900,
+    width: int = DEFAULT_VIDEO_WIDTH_PX,
+    height: int = DEFAULT_VIDEO_HEIGHT_PX,
     fps: int = 30,
     panel_width: int = PANEL_WIDTH_PX,
     controller_variant: str = "full",
@@ -1079,8 +1084,8 @@ def record_friction_demo_video(
     profile_path: Path = DEFAULT_PROFILE,
     task_path: Path = DEFAULT_FRICTION_TASK,
     output: Path = DEFAULT_DEMOS_DIR / "friction_estimation_with_curves.mp4",
-    width: int = 1600,
-    height: int = 900,
+    width: int = DEFAULT_VIDEO_WIDTH_PX,
+    height: int = DEFAULT_VIDEO_HEIGHT_PX,
     fps: int = 30,
     panel_width: int = PANEL_WIDTH_PX,
     sensor_noise_seed: int | None = None,
