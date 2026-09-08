@@ -180,6 +180,33 @@ typst compile --root . reports/wired_demo.typ
 编译 fixture 报告做冒烟测试，本机装有 Typst CLI 时才执行、CI 无 CLI 环境自动跳过。
 模板组件说明详见 [`reports/README.md`](../reports/README.md)。
 
+## 演示视频录制
+
+摩擦估计与 Ramp 力跟踪实验支持把 MuJoCo 场景和右侧实时曲线面板合成为
+16:9 MP4 演示，适合组会口头报告。画面为论文式仪表盘：左侧为整机构视角的
+MuJoCo 场景（摩擦演示叠加当前切向外加载荷箭头），右侧三行曲线
+（MathText 数学符号，配色语义固定：灰虚线=目标、蓝=实测、橙=外部载荷、
+绿=摩擦极限、紫=估计 μ̂、红虚线=真值/事件）带顶部窄 phase bar 与逐帧
+同步的时间游标；左上 HUD 采用「实验名 / 状态 / 关键测量 / 辅助量」四层
+结构。录制走实验循环的可选逐帧回调，只读快照、不产生实验 trace；需要
+ffmpeg，无界面环境需在导入 mujoco 前设置 `MUJOCO_GL=egl`。
+
+```bash
+# 同时录制摩擦估计与 Ramp 力跟踪两个演示
+uv run python scripts/demos/record_experiment_demos.py --demo both
+# 只录制 Ramp 力跟踪，固定触觉噪声种子保证可复现
+uv run python scripts/demos/record_experiment_demos.py --demo ramp --noise-seed 0 --fps 60
+```
+
+产物默认写入 `outputs/demos/force_tracking_ramp.mp4` 与
+`outputs/demos/friction_estimation_with_curves.mp4`（均为 1600×900 @30 fps，
+可通过 `--width/--height/--fps/--panel-width/--output-dir` 调整，不入库）。
+每次录制还会把对应真实事件的关键帧导出到
+`outputs/demos/preview/`（Ramp：start/mid/end；摩擦：滑移前/检测瞬间/
+自适应增载后）供人工验收。录制器入口为
+`parallel_gripper_tactile.experiments.demo_videos` 中的
+`record_force_tracking_ramp_video` 与 `record_friction_demo_video`。
+
 ## 论文图导出
 
 科研图默认使用 `science`、`ieee`、`no-latex` 组合，不需要外部 LaTeX。

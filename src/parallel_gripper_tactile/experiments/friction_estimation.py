@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import csv
 from dataclasses import asdict, dataclass
 import math
@@ -57,6 +58,10 @@ from .grasp import (
 
 class FrictionEstimationConfigError(ValueError):
     """摩擦估计任务配置无法加载或未通过校验。"""
+
+
+#: 逐帧快照回调：接收本步采样行、模型与数据；默认不启用，不改变仿真与产物。
+FrameCallback = Callable[[dict[str, object], mujoco.MjModel, mujoco.MjData], None]
 
 
 class _TaskModel(BaseModel):
@@ -381,8 +386,16 @@ def run_friction_estimation(
     output_plot: Path | None = None,
     output_taxel_plot: Path | None = None,
     sensor_noise_seed: int | None = None,
+    on_frame: FrameCallback | None = None,
+    render_fps: float = 30.0,
 ) -> FrictionEstimationResult:
-    """运行探测、保守估计与估计值目标力调度仿真。"""
+    """运行探测、保守估计与估计值目标力调度仿真。
+
+    当传入 ``on_frame`` 时，仿真在每 ``1/render_fps`` 秒仿真时间回调一次
+    最新采样行与模型/数据快照，供离屏录制脚本叠加实时曲线，不改变物理与产物。
+    """
+    if on_frame is not None and render_fps <= 0:
+        raise ValueError("render_fps must be positive when on_frame is enabled")
     profile = load_profile(profile_path)
     if profile.normal_force is None:
         raise ValueError("friction estimation requires profile control.force")
@@ -453,6 +466,8 @@ def run_friction_estimation(
         + 1.0
     )
     steps = math.ceil(maximum_duration_s / float(model.opt.timestep))
+    next_frame_time_s = 0.0
+    frame_period_s = 0.0 if on_frame is None else 1.0 / render_fps
     for _ in range(steps):
         time_s = float(data.time)
         phase_elapsed_s = time_s - phase_start_time_s
@@ -715,6 +730,11 @@ def run_friction_estimation(
                 **_taxel_slip_trace_fields(latest_taxel_slip),
             }
         )
+        if on_frame is not None and float(data.time) + 1e-12 >= next_frame_time_s:
+            on_frame(rows[-1], model, data)
+            next_frame_time_s += frame_period_s
+            while next_frame_time_s <= float(data.time) - 1e-12:
+                next_frame_time_s += frame_period_s
         if pending_recovery:
             phase = "recovery"
             phase_start_time_s = float(data.time)

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import csv
 from dataclasses import dataclass
 import math
@@ -74,6 +75,8 @@ CONTROLLER_VARIANTS: tuple[ControllerVariant, ...] = (
     "adrc-torque",
     "adrc-torque-td",
 )
+#: 逐帧快照回调：接收本步采样行、模型与数据；默认不启用，不改变仿真与产物。
+FrameCallback = Callable[[dict[str, object], mujoco.MjModel, mujoco.MjData], None]
 
 
 def configure_force_controller(
@@ -748,8 +751,13 @@ def run_force_tracking(
     viewer: bool = False,
     render_fps: float = 30.0,
     realtime_factor: float = 1.0,
+    on_frame: FrameCallback | None = None,
 ) -> ForceTrackingResult:
-    """运行两阶段目标法向力跟踪测试。"""
+    """运行两阶段目标法向力跟踪测试。
+
+    当传入 ``on_frame`` 时，仿真在每 ``1/render_fps`` 秒仿真时间回调一次
+    最新采样行与模型/数据快照，供离屏录制脚本叠加实时曲线，不改变物理与产物。
+    """
     profile = configure_force_controller(
         load_profile(profile_path),
         variant=controller_variant,
@@ -761,6 +769,8 @@ def run_force_tracking(
         raise ValueError("force tracking requires MIT torque control with control.force")
     if viewer and (render_fps <= 0 or realtime_factor <= 0):
         raise ValueError("render_fps and realtime_factor must be positive when viewer is enabled")
+    if on_frame is not None and render_fps <= 0:
+        raise ValueError("render_fps must be positive when on_frame is enabled")
     model = build_custom_grasp_model(
         profile,
         cube_half_thickness=cube_half_thickness,
@@ -827,6 +837,8 @@ def run_force_tracking(
         wall_start = time.monotonic()
         pacer = RealtimePacer(realtime_factor, float(data.time), wall_start)
         next_render_time = wall_start
+    next_frame_time_s = 0.0
+    frame_period_s = 0.0 if on_frame is None else 1.0 / render_fps
     try:
         for _ in range(steps):
             if viewer_handle is not None and not viewer_handle.is_running():
@@ -1037,6 +1049,11 @@ def run_force_tracking(
                     "cube_vz": float(velocity[2]),
                 }
             )
+            if on_frame is not None and float(data.time) + 1e-12 >= next_frame_time_s:
+                on_frame(rows[-1], model, data)
+                next_frame_time_s += frame_period_s
+                while next_frame_time_s <= float(data.time) - 1e-12:
+                    next_frame_time_s += frame_period_s
             if viewer_handle is not None and pacer is not None:
                 while float(data.time) > pacer.target_simulation_time(time.monotonic()):
                     time.sleep(0.001)

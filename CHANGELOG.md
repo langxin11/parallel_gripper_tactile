@@ -68,6 +68,11 @@
   排版；在仓库根用 `typst compile --root . reports/wired_demo.typ` 编译，产物 PDF 不入库
 - 新增 `tests/test_report_typst.py` 编译冒烟测试：用 `tests/fixtures/` 迷你数据编译 fixture 报告，
   本机装有 Typst CLI 时自动执行、CI 无 CLI 环境自动跳过
+- 摩擦估计与 Ramp 力跟踪实验循环新增可选逐帧 `on_frame` 渲染回调：按视频帧率
+  （`render_fps`）回调最新采样行与模型/数据快照，默认关闭，不改变仿真与产物；
+  配套新增离屏演示录制 `scripts/demos/record_experiment_demos.py`，把 MuJoCo
+  场景与实时曲线面板合成为 16:9 MP4（摩擦估计、Ramp 力跟踪两个演示，产物默认
+  `outputs/demos/`，无界面环境需在导入 mujoco 前设置 `MUJOCO_GL=egl`）
 
 ## [0.3.0] - 2026-09-04
 

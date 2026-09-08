@@ -211,3 +211,32 @@ def test_execute_friction_estimation_writes_blind_estimator_artifacts(tmp_path: 
     assert effective["runtime"]["scheduler_input"] == "measured_tactile_shear"
     assert "mu_true_score_only" in rows[0]
     assert "left_taxel_normal_0_0" in rows[0]
+
+
+def test_friction_estimation_on_frame_receives_monotonic_snapshots() -> None:
+    """摩擦估计逐帧回调按仿真时间单调推进，覆盖探测与调度加载阶段。"""
+    task = FrictionEstimationTask.load(TASK_ROOT / "nominal_friction.yaml")
+    probe = task.probe.model_copy(
+        update={"force_rate_n_s": 1.0, "max_force_n": 1.2, "settle_after_release_s": 0.2}
+    )
+    waypoints = tuple(
+        point.model_copy(update={"t_s": 2.0}) if float(point.t_s) == 5.0 else point
+        for point in task.downward_load.waypoints[:3]
+    )
+    downward = task.downward_load.model_copy(update={"waypoints": waypoints})
+    shortened = task.model_copy(update={"probe": probe, "downward_load": downward})
+    times: list[float] = []
+    phases: list[str] = []
+
+    def capture(row: dict[str, object], model: object, data: object) -> None:
+        del model, data
+        times.append(float(row["time_s"]))
+        phases.append(str(row["phase"]))
+
+    result = run_friction_estimation(PROFILE, task=shortened, render_fps=10.0, on_frame=capture)
+
+    assert result.simulation_stable
+    assert len(times) >= 8
+    assert times == sorted(times)
+    assert times[0] < times[-1]
+    assert {"probe", "schedule_load"} <= set(phases)

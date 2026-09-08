@@ -505,3 +505,39 @@ def test_force_tracking_adrc_torque_run_writes_observer_diagnostics(
     assert all(
         math.isfinite(float(row["torque_adrc_input_gain_n_per_n_m_s2"])) for row in tracking_rows
     )
+
+
+def test_force_tracking_on_frame_receives_monotonic_snapshots() -> None:
+    """逐帧回调按仿真时间单调推进，且不改变默认运行的跟踪结果。"""
+    task = ForceTrackingTask(
+        schema_version=1,
+        name="short_on_frame",
+        reference=ForceReference(
+            interpolation="linear",
+            waypoints=(
+                ForceWaypoint(t_s=0.0, force_n=2.0),
+                ForceWaypoint(t_s=0.4, force_n=6.0),
+                ForceWaypoint(t_s=0.8, force_n=4.0),
+            ),
+        ),
+    )
+    profile = ROOT / "configs/custom_parallel_gripper.yaml"
+    baseline = run_force_tracking(profile, task=task)
+    times: list[float] = []
+    phases: list[str] = []
+
+    def capture(row: dict[str, object], model: object, data: object) -> None:
+        del model, data
+        times.append(float(row["time_s"]))
+        phases.append(str(row["phase"]))
+
+    result = run_force_tracking(profile, task=task, render_fps=20.0, on_frame=capture)
+
+    assert result.passed
+    assert result.rmse_n == pytest.approx(baseline.rmse_n)
+    assert result.mae_n == pytest.approx(baseline.mae_n)
+    assert len(times) >= 5
+    assert times == sorted(times)
+    assert times[0] < times[-1]
+    assert float(times[-1]) * 20.0 >= len(times) - 2
+    assert any(phase == "track_reference" for phase in phases)

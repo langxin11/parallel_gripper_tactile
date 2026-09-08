@@ -43,7 +43,10 @@ def add_arrow_to_scene(scene, base_idx: int, origin, force, scale: float) -> int
     slot.specular = 0.1
     slot.shininess = 0.5
     slot.segid = -1
-    slot.objtype = mujoco.mjtObj.mjOBJ_UNKNOWN
+    # 用 mjOBJ_GEOM 而非 mjOBJ_UNKNOWN：后者会让 MuJoCo 在开启标签时对 dataid
+    # 解引用而产生乱码标签（如 void* / bitgen_t* / PyObject*）；几何体自身
+    # 没有名字，标签渲染自然会跳过。
+    slot.objtype = mujoco.mjtObj.mjOBJ_GEOM
     slot.dataid = -1
     slot.category = int(mujoco.mjtCatBit.mjCAT_DECOR)
 
