@@ -40,6 +40,11 @@
 
 ### 新增
 
+- 新增 `dmgripper-hardware==0.1.0` workspace 成员：基于现有达妙官方 USB2CAN 实现提供
+  无设备 I/O 的 DM4310P 协议编解码、串口分帧器、显式固件量程和 fake transport；尚不包含
+  真实串口、USB2CANFD、设备使能或运动流程。
+- 新增 `robotiq-hardware==0.1.0` workspace 成员：严格校验 `0～255` 整数位置命令，并提供
+  `pyrobotiqgripper==3.3.12` 的可选非阻塞适配器；连接和激活仍由调用方显式负责。
 - 新增独立 uv workspace 成员 `robotiq-grasp-core==0.1.0`，承载 Robotiq 整数量化离散力控制、
   单 tick 力增益、HOLD／再激活与有限动作预测；仿真旧导入路径保留兼容出口，且该核心不依赖
   ROS、MuJoCo、profile 或仿真主包。

@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "robotiq-hardware"
+version = "0.1.0"
+description = "Robotiq 2F85 的纯 Python 硬件适配边界"
+readme = "README.md"
+requires-python = ">=3.12"
+license = {file = "LICENSE"}
+dependencies = []
+
+[project.optional-dependencies]
+pyrobotiq = ["pyrobotiqgripper==3.3.12"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F", "D"]
+ignore = ["D400", "D401", "D403", "D404", "D415"]
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"

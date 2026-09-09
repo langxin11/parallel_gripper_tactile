@@ -5,8 +5,10 @@ requires-python = ">=3.12"
 [manifest]
 members = [
     "dm-grasp-core",
+    "dmgripper-hardware",
     "parallel-gripper-tactile",
     "robotiq-grasp-core",
+    "robotiq-hardware",
 ]
 
 [[package]]
@@ -172,6 +174,11 @@ wheels = [
 name = "dm-grasp-core"
 version = "0.1.0"
 source = { editable = "packages/dm_grasp_core" }
+
+[[package]]
+name = "dmgripper-hardware"
+version = "0.1.0"
+source = { editable = "packages/dmgripper_hardware" }
 
 [[package]]
 name = "etils"
@@ -992,6 +999,15 @@ wheels = [
 ]
 
 [[package]]
+name = "pymodbus"
+version = "3.15.0"
+source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
+sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/e5/b8/03dace16e0e5d1c3eb16e8b9bcce9885f5e8a38db34345ec375cd70ed2e2/pymodbus-3.15.0.tar.gz", hash = "sha256:4c5f715128bfeba59f4c9fb3542b0c32a8afd4b90081111e39c12f7af0c89aae", size = 168238, upload-time = "2026-08-13T09:33:33.049Z" }
+wheels = [
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/27/7b/fa75ca74270ad3786234c6573f3c6c524441d3eb686882e280c717ce6d04/pymodbus-3.15.0-py3-none-any.whl", hash = "sha256:74d8dee961f23845f18a8481253183504dca05c4fcd102890cd28f4d7ce09267", size = 167602, upload-time = "2026-08-13T09:33:31.474Z" },
+]
+
+[[package]]
 name = "pyopengl"
 version = "3.1.10"
 source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
@@ -1007,6 +1023,29 @@ source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
 sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/f3/91/9c6ee907786a473bf81c5f53cf703ba0957b23ab84c264080fb5a450416f/pyparsing-3.3.2.tar.gz", hash = "sha256:c777f4d763f140633dcb6d8a3eda953bf7a214dc4eff598413c070bcdc117cbc", size = 6851574, upload-time = "2026-01-21T03:57:59.36Z" }
 wheels = [
     { url = "https://pypi.tuna.tsinghua.edu.cn/packages/10/bd/c038d7cc38edc1aa5bf91ab8068b63d4308c66c4c8bb3cbba7dfbc049f9c/pyparsing-3.3.2-py3-none-any.whl", hash = "sha256:850ba148bd908d7e2411587e247a1e4f0327839c40e2e5e6d05a007ecc69911d", size = 122781, upload-time = "2026-01-21T03:57:55.912Z" },
+]
+
+[[package]]
+name = "pyrobotiqgripper"
+version = "3.3.12"
+source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
+dependencies = [
+    { name = "numpy" },
+    { name = "pymodbus" },
+    { name = "pyserial" },
+]
+sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/c8/34/bc0e3366ba3f11ff46b74bf0bc639392c26ed1f35301ca0910564fa2f443/pyrobotiqgripper-3.3.12.tar.gz", hash = "sha256:330e0f59418ebec4b05f116ebcc30f98711b09c564cd6cafb9c13f343f20842b", size = 57453, upload-time = "2026-07-29T23:06:06.932Z" }
+wheels = [
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/9e/bc/dc489197ea4393a86155aeae837a10cf2b572879f30babb99705b6eff9b0/pyrobotiqgripper-3.3.12-py3-none-any.whl", hash = "sha256:f99c1ecbd7ab6ef2a562c3079cfb5a6fb47a6e3aa4d3f56ea15837fc14e5f169", size = 63056, upload-time = "2026-07-29T23:06:05.775Z" },
+]
+
+[[package]]
+name = "pyserial"
+version = "3.5"
+source = { registry = "https://pypi.tuna.tsinghua.edu.cn/simple" }
+sdist = { url = "https://pypi.tuna.tsinghua.edu.cn/packages/1e/7d/ae3f0a63f41e4d2f6cb66a5b57197850f919f59e558159a4dd3a818f5082/pyserial-3.5.tar.gz", hash = "sha256:3c77e014170dfffbd816e6ffc205e9842efb10be9f58ec16d3e8675b4925cddb", size = 159125, upload-time = "2020-11-23T03:59:15.045Z" }
+wheels = [
+    { url = "https://pypi.tuna.tsinghua.edu.cn/packages/07/bc/587a445451b253b285629263eb51c2d8e9bcea4fc97826266d186f96f558/pyserial-3.5-py2.py3-none-any.whl", hash = "sha256:c4451db6ba391ca6ca299fb3ec7bae67a5c55dde170964c7a14ceefec02f2cf0", size = 90585, upload-time = "2020-11-23T03:59:13.41Z" },
 ]
 
 [[package]]
@@ -1137,6 +1176,20 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [{ name = "numpy", specifier = ">=2.0" }]
+
+[[package]]
+name = "robotiq-hardware"
+version = "0.1.0"
+source = { editable = "packages/robotiq_hardware" }
+
+[package.optional-dependencies]
+pyrobotiq = [
+    { name = "pyrobotiqgripper" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pyrobotiqgripper", marker = "extra == 'pyrobotiq'", specifier = "==3.3.12" }]
+provides-extras = ["pyrobotiq"]
 
 [[package]]
 name = "ruff"

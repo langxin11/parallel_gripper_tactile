@@ -171,6 +171,11 @@ Robotiq 离散力控制由独立 workspace 成员 `packages/robotiq_grasp_core` 
 兼容模块接入。该核心仅依赖 NumPy，不依赖 ROS、MuJoCo、profile、DM 核或仿真主包。
 DM 与 Robotiq 分别维护控制算法、命令类型和状态机。
 
+纯 Python 真机基础层同样按夹爪隔离。`packages/dmgripper_hardware` 当前只提供 DM4310P
+USB2CAN 协议编解码、接收分帧和传输抽象；`packages/robotiq_hardware` 只提供 `0～255`
+位置命令边界与 `pyrobotiqgripper==3.3.12` 薄适配。两包互不依赖，也不依赖仿真主包；
+当前均不自动连接、激活或操作设备。USB2CANFD 和商业触觉串口须待实物／代码到位后新增后端。
+
 1. `src/parallel_gripper_tactile` 不依赖 `scripts/` 或 CLI 输出格式；
 2. study 直接调用 runner，不通过子进程拼接 `pgt` 命令；
 3. scene 不读取控制目标，controller 不选择碰撞 asset；
