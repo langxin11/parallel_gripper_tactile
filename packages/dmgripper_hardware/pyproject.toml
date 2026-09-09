@@ -9,7 +9,7 @@ description = "DM4310P USB2CAN 纯 Python 协议与传输抽象"
 readme = "README.md"
 requires-python = ">=3.12"
 license = {file = "LICENSE"}
-dependencies = ["pyserial>=3.5,<4"]
+dependencies = ["dm-grasp-core==0.1.0", "pyserial>=3.5,<4"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

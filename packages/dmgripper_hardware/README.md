@@ -31,6 +31,10 @@ packet = protocol.make_mit_packet(0x01, MitCommand(0.0, 0.0, 0.0, 0.0, 0.0))
 assert len(packet) == 30
 ```
 
+`DmMitCommandAdapter.prepare()` 可把 `dm_grasp_core.MITCommand` 显式映射为独立协议命令并
+生成 30 字节帧。返回的 `PreparedMitCommand` 同时保留核心请求、协议对象和最终字节，便于审计；
+该过程不持有传输对象，也不会发送帧。核心与协议的同名命令类型不会混用。
+
 ## 只读状态刷新示例
 
 下例显示显式生命周期。真正使用 `PySerialTransport` 前，应先在无负载、急停可用的条件下核对

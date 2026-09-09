@@ -9,7 +9,7 @@ description = "Robotiq 2F85 的纯 Python 硬件适配边界"
 readme = "README.md"
 requires-python = ">=3.12"
 license = {file = "LICENSE"}
-dependencies = []
+dependencies = ["robotiq-grasp-core==0.1.0"]
 
 [project.optional-dependencies]
 pyrobotiq = ["pyrobotiqgripper==3.3.12"]

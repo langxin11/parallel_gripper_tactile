@@ -176,6 +176,8 @@ USB2CAN 协议编解码、接收分帧和传输抽象；`packages/robotiq_hardwa
 位置命令边界与 `pyrobotiqgripper==3.3.12` 薄适配。两包互不依赖，也不依赖仿真主包；
 当前均不自动连接、激活或操作设备。DM 包仅在显式调用时发送状态查询帧并读取反馈；Robotiq
 包分别暴露非阻塞位置命令和位置反馈。USB2CANFD 和商业触觉串口须待实物／代码到位后新增后端。
+DM 核心命令经显式适配后才进入协议量化；Robotiq 硬件单步只调用自身离散控制核心，且仅在
+位置命令成功交给后端后登记动作。两条适配链不共享命令类型或控制时序。
 
 1. `src/parallel_gripper_tactile` 不依赖 `scripts/` 或 CLI 输出格式；
 2. study 直接调用 runner，不通过子进程拼接 `pgt` 命令；

@@ -12,6 +12,8 @@
 - `dmgripper-hardware` 新增延迟打开的 PySerial 传输和仅发送状态查询帧的单次反馈刷新；
   `robotiq-hardware` 新增严格校验的 `position()` 反馈读取与不可变命令收据。两条路径均不自动
   连接、激活或启动设备。
+- 两个硬件包分别依赖自身控制核心：DM 新增从共享 MIT 请求到 USB2CAN 帧的纯离线适配，
+  Robotiq 新增离散控制器到绝对位置命令的单步编排；后端发送失败不会登记为已执行动作。
 - `dm-grasp-core` 按 `control`、`grasp` 与 `tactile` 子域整理内部实现，并保留顶层及
   `dm_grasp_core.control`、`dm_grasp_core.command` 兼容入口；算法公式、固定轨迹与版本号不变。
 

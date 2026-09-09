@@ -11,6 +11,12 @@ from .gripper import (
     RobotiqPositionBackend,
     validate_position_command,
 )
+from .control_step import (
+    RobotiqControlStepResult,
+    RobotiqDiscreteController,
+    RobotiqDiscreteControlStep,
+    run_discrete_control_step,
+)
 
 __version__ = "0.1.0"
 
@@ -24,4 +30,8 @@ __all__ = [
     "Robotiq2F85Hardware",
     "RobotiqPositionBackend",
     "validate_position_command",
+    "RobotiqControlStepResult",
+    "RobotiqDiscreteController",
+    "RobotiqDiscreteControlStep",
+    "run_discrete_control_step",
 ]

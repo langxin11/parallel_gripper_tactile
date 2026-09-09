@@ -2,8 +2,8 @@
 
 日期：2026-09-09。状态：实施中，P0 已完成；P1 已完成 `config`、`artifacts` 与
 `analysis`／`visualization` 的首轮迁移；P2 已完成 DM 核首轮子域整理与 Robotiq
-离散控制核心提取；P3 已建立 DM USB2CAN 状态刷新和 Robotiq 命令／反馈基础层，触觉采集及
-受控实机验证仍待接入。
+离散控制核心提取；P3 已建立 DM USB2CAN 状态刷新／MIT 离线适配和 Robotiq 命令／反馈／
+离散控制单步，触觉采集及受控实机验证仍待接入。
 
 本计划记录下一阶段的目标布局与验收顺序，不表示所列包、接口或硬件能力已经落地。
 当前架构仍以 [architecture.md](architecture.md) 为准；实施各阶段时同步更新该文档。

@@ -39,4 +39,8 @@ hardware.read_position()
 
 该后端尚未经过真实 Robotiq 设备验证。连接、激活、串口参数和设备生命周期全部由调用方负责；适配器不会自动 connect、activate、start 或 stop。测试只使用 fake gripper，不会发送真实设备命令。
 
+`run_discrete_control_step()` 把 `robotiq_grasp_core` 的一次 `observe`／`decide` 与绝对位置命令
+衔接起来。零增量不发送命令；非零增量只有在后端成功返回后才调用 `action_applied`。发送失败时
+取消核心中的 pending 动作并原样抛出异常。该单步不会隐式读取位置反馈，反馈采样由调用方独立调度。
+
 测试使用 fake backend，不会发送真实设备命令。

@@ -180,11 +180,15 @@ name = "dmgripper-hardware"
 version = "0.1.0"
 source = { editable = "packages/dmgripper_hardware" }
 dependencies = [
+    { name = "dm-grasp-core" },
     { name = "pyserial" },
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pyserial", specifier = ">=3.5,<4" }]
+requires-dist = [
+    { name = "dm-grasp-core", editable = "packages/dm_grasp_core" },
+    { name = "pyserial", specifier = ">=3.5,<4" },
+]
 
 [[package]]
 name = "etils"
@@ -1187,6 +1191,9 @@ requires-dist = [{ name = "numpy", specifier = ">=2.0" }]
 name = "robotiq-hardware"
 version = "0.1.0"
 source = { editable = "packages/robotiq_hardware" }
+dependencies = [
+    { name = "robotiq-grasp-core" },
+]
 
 [package.optional-dependencies]
 pyrobotiq = [
@@ -1194,7 +1201,10 @@ pyrobotiq = [
 ]
 
 [package.metadata]
-requires-dist = [{ name = "pyrobotiqgripper", marker = "extra == 'pyrobotiq'", specifier = "==3.3.12" }]
+requires-dist = [
+    { name = "pyrobotiqgripper", marker = "extra == 'pyrobotiq'", specifier = "==3.3.12" },
+    { name = "robotiq-grasp-core", editable = "packages/robotiq_grasp_core" },
+]
 provides-extras = ["pyrobotiq"]
 
 [[package]]

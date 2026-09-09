@@ -1,6 +1,13 @@
 """DM4310P USB2CAN 的纯 Python 硬件基础层。"""
 
 from .config import DEFAULT_USB2CAN_BAUD_RATE, Usb2CanDeviceConfig
+from .adapter import (
+    CoreMotorObservation,
+    DmMitCommandAdapter,
+    PreparedMitCommand,
+    core_observation_from_feedback,
+    map_core_mit_command,
+)
 from .protocol import (
     CAN_BROADCAST_ID,
     CMD_DISABLE,
@@ -37,13 +44,16 @@ __all__ = [
     "STATUS_DISABLED",
     "STATUS_ENABLED",
     "ByteTransport",
+    "CoreMotorObservation",
     "DmStateRefresher",
+    "DmMitCommandAdapter",
     "FakeTransport",
     "ForcePositionCommand",
     "MitCommand",
     "MotorFeedback",
     "MotorLimits",
     "PositionVelocityCommand",
+    "PreparedMitCommand",
     "PySerialTransport",
     "RegisterReply",
     "SerialFactory",
@@ -57,4 +67,6 @@ __all__ = [
     "VelocityCommand",
     "motor_status_is_fault",
     "motor_status_to_fault_code",
+    "core_observation_from_feedback",
+    "map_core_mit_command",
 ]
