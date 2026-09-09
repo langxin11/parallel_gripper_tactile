@@ -14,6 +14,7 @@ class FakeSerialPort:
         """创建可指定读队列和打开状态的替身。"""
         self.is_open = is_open
         self.timeout: float | None = None
+        self.write_timeout: float | None = None
         self.reads = list(reads or [])
         self.writes: list[bytes] = []
         self.read_sizes: list[int] = []
@@ -65,12 +66,13 @@ def test_open_read_write_and_close_use_only_injected_serial() -> None:
     transport = PySerialTransport(factory)
     transport.open("fake://usb2can", 921600)
 
-    assert transport.write(b"request") == 7
+    assert transport.write(b"request", timeout_s=0.2) == 7
     assert transport.read(16, timeout_s=0.2) == b"response"
     assert calls == [("fake://usb2can", 921600)]
     assert serial_port.writes == [b"request"]
     assert serial_port.read_sizes == [16]
     assert serial_port.timeout == 3.0
+    assert serial_port.write_timeout is None
 
     transport.close()
     assert transport.is_open is False
@@ -89,6 +91,24 @@ def test_read_restores_timeout_when_fake_serial_raises() -> None:
         transport.read(1, timeout_s=0.1)
 
     assert serial_port.timeout == 4.0
+
+
+def test_write_restores_timeout_when_fake_serial_raises() -> None:
+    """底层写入异常也不能把临时写超时泄漏给下一次操作。"""
+    serial_port = FakeSerialPort()
+    serial_port.write_timeout = 4.0
+    transport = PySerialTransport(lambda _port, _baud_rate: serial_port)
+    transport.open("fake://usb2can", 921600)
+
+    def failing_write(_data: bytes) -> int:
+        """模拟 PySerial 写入异常。"""
+        raise RuntimeError("模拟串口写入失败")
+
+    serial_port.write = failing_write  # type: ignore[method-assign]
+    with pytest.raises(RuntimeError, match="模拟串口写入"):
+        transport.write(b"x", timeout_s=0.1)
+
+    assert serial_port.write_timeout == 4.0
 
 
 def test_closed_and_invalid_operations_fail_without_factory_call() -> None:

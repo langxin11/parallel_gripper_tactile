@@ -9,6 +9,13 @@
 
 ### 变更
 
+- `dmgripper-motion-probe` 在三阶段成功且最终失能读回确认后，额外输出
+  `event=complete`、`disable_confirmed=true` 的 terminal JSON；该事件不推断机械回位误差。
+- `dmgripper-motion-probe` 的 MIT 阶段改为固定 `--stage-duration` 运行：`q_des` 作为阻抗平衡点，
+  未达到目标位置仅记录诊断、不再判失败；JSON 增加阶段位置范围、最大绝对速度／力矩、命令次数和
+  实际耗时，通信／状态／机械边界失败仍会失能。
+- `dmgripper-motion-probe` 的 `--mit-kp` 改按 MIT 协议允许 `(0, 500]`；`--closing-step` 接受任意
+  正有限值，二者不再由人为力矩阈值限制，最终目标仍严格拒绝机械行程外数值。
 - `papillarray-probe` 新增单包总等待时限与有界协议诊断；即使串口持续返回噪声、坏帧或半包，
   也会自动退出并报告接收字节、起止标志、候选帧、校验／结构失败和原始十六进制预览。
 - PapillArray PTS 顶层索引解析兼容真实 Controller v2.0 在索引表与首个数据块之间加入的
@@ -56,6 +63,10 @@
 
 ### 新增
 
+- `dmgripper-motion-probe` 提供默认 dry-run 的 DM4310P 受限阻抗联调：先只读验证初始状态，
+  仅在显式 `--execute` 后按“当前位置保持、闭合平衡点、恢复初始平衡点”执行；每阶段
+  检查机械位置、故障和通信超时，记录速度与力矩，所有结束路径均尽力失能，且不包含置零或
+  未经验证的停止帧。
 - 新增 `papillarray-probe` 与 `dmgripper-state-probe` 两个有限次数、JSON Lines 输出的纯 Python
   真机探针。前者只配置触觉采样率并读取 PTS 包，默认不执行清零或滑动检测命令；后者只发送
   DM 状态查询帧，不包含使能、置零或运动命令。

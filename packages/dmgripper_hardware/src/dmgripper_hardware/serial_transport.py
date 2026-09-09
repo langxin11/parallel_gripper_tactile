@@ -24,6 +24,14 @@ class _SerialPort(Protocol):
     def timeout(self, value: float | None) -> None:
         """设置读取超时。"""
 
+    @property
+    def write_timeout(self) -> float | None:
+        """写入超时。"""
+
+    @write_timeout.setter
+    def write_timeout(self, value: float | None) -> None:
+        """设置写入超时。"""
+
     def close(self) -> None:
         """关闭串口。"""
 
@@ -94,9 +102,19 @@ class PySerialTransport:
         if serial_port is not None and serial_port.is_open:
             serial_port.close()
 
-    def write(self, payload: bytes) -> int:
-        """写入一个字节序列并返回底层接受的字节数。"""
-        return self._require_open().write(bytes(payload))
+    def write(self, payload: bytes, timeout_s: float | None = None) -> int:
+        """在临时写入时限内写入一个字节序列并恢复底层设置。"""
+        if timeout_s is not None:
+            _validate_timeout(timeout_s)
+        serial_port = self._require_open()
+        if timeout_s is None:
+            return serial_port.write(bytes(payload))
+        previous_timeout = serial_port.write_timeout
+        serial_port.write_timeout = timeout_s
+        try:
+            return serial_port.write(bytes(payload))
+        finally:
+            serial_port.write_timeout = previous_timeout
 
     def read(self, max_bytes: int, timeout_s: float | None = None) -> bytes:
         """在临时超时内读取至多指定数量的字节。

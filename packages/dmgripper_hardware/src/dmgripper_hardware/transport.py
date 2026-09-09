@@ -28,8 +28,8 @@ class ByteTransport(Protocol):
     def close(self) -> None:
         """关闭传输。"""
 
-    def write(self, payload: bytes) -> int:
-        """写入字节并返回已接受的字节数。"""
+    def write(self, payload: bytes, timeout_s: float | None = None) -> int:
+        """在可选有界时限内写入字节并返回已接受的字节数。"""
 
     def read(self, max_bytes: int, timeout_s: float | None = None) -> bytes:
         """读取至多 `max_bytes` 个字节。"""
@@ -63,8 +63,9 @@ class FakeTransport:
         """关闭内存传输，但保留已记录数据供断言。"""
         self._is_open = False
 
-    def write(self, payload: bytes) -> int:
-        """记录一份写入副本，不会访问任何真实设备。"""
+    def write(self, payload: bytes, timeout_s: float | None = None) -> int:
+        """记录一份写入副本，不会访问任何真实设备或等待。"""
+        del timeout_s
         self._require_open()
         copied = bytes(payload)
         self.written_payloads.append(copied)

@@ -8,6 +8,7 @@ import pytest
 
 from dmgripper_hardware import (
     DEFAULT_USB2CAN_BAUD_RATE,
+    DmResponseReceiver,
     DmStateRefresher,
     FakeTransport,
     MotorFeedback,
@@ -92,6 +93,52 @@ def test_refresh_handles_partial_noise_and_unrelated_frames(
     assert transport.written_payloads[0] == protocol.make_feedback_request(1)
 
 
+def test_shared_receiver_handles_partial_noise_and_unrelated_frames_without_writing(
+    config: Usb2CanDeviceConfig, protocol: Usb2CanProtocol
+) -> None:
+    """命令后接收器复用相同分帧规则，但不得追加状态查询。"""
+    transport = FakeTransport()
+    receiver = DmResponseReceiver(config, protocol, transport)
+    target = protocol.encode_feedback_frame(1, MotorFeedback(0.5, 0.0, 0.0, 1))
+    unrelated = protocol.encode_feedback_frame(42, MotorFeedback(0.0, 0.0, 0.0, 0))
+    transport.open("fake://usb2can", 921600)
+    transport.inject_received(b"noise" + unrelated[:7])
+    transport.inject_received(unrelated[7:] + target[:4])
+    transport.inject_received(target[4:])
+
+    feedback = receiver.receive_feedback()
+
+    assert feedback.position_rad == pytest.approx(0.5, abs=3.4 / 65535)
+    assert transport.written_payloads == []
+
+
+def test_shared_receiver_preserves_second_frame_from_one_read(
+    config: Usb2CanDeviceConfig, protocol: Usb2CanProtocol
+) -> None:
+    """一次串口读取包含多帧时，首帧消费后后续帧不得丢失。"""
+
+    class GreedyReadTransport(FakeTransport):
+        """模拟底层一次返回超过请求长度的聚合读取。"""
+
+        def read(self, max_bytes: int, timeout_s: float | None = None) -> bytes:
+            """故意返回全部接收字节，以覆盖接收器的待消费缓存。"""
+            del max_bytes, timeout_s
+            self._require_open()
+            result = bytes(self._received)
+            self._received.clear()
+            return result
+
+    transport = GreedyReadTransport()
+    receiver = DmResponseReceiver(config, protocol, transport)
+    first = protocol.encode_feedback_frame(1, MotorFeedback(0.2, 0.0, 0.0, 1))
+    second = protocol.encode_feedback_frame(1, MotorFeedback(0.3, 0.0, 0.0, 1))
+    transport.open("fake://usb2can", 921600)
+    transport.inject_received(first + second)
+
+    assert receiver.receive_feedback().position_rad == pytest.approx(0.2, abs=3.4 / 65535)
+    assert receiver.receive_feedback().position_rad == pytest.approx(0.3, abs=3.4 / 65535)
+
+
 def test_refresh_rejects_closed_transport_without_writing(
     config: Usb2CanDeviceConfig, protocol: Usb2CanProtocol
 ) -> None:
@@ -122,9 +169,9 @@ def test_refresh_raises_timeout_for_empty_read(
 class ShortWriteTransport(FakeTransport):
     """以可控短写模拟 USB／串口拥塞。"""
 
-    def write(self, payload: bytes) -> int:
+    def write(self, payload: bytes, timeout_s: float | None = None) -> int:
         """记录后故意少报告一个已接受字节。"""
-        super().write(payload)
+        super().write(payload, timeout_s=timeout_s)
         return len(payload) - 1
 
 
