@@ -9,6 +9,9 @@
 
 ### 变更
 
+- `dmgripper-hardware` 新增当前 DM4310P 夹爪部署配置：CAN ID 为 `1/17`，协议量程为
+  `±1.7 rad`、`±8 rad/s`、`±4 N·m`，机械行程另设为 `[0, pi/2] rad` 且角度增大为闭合；
+  机械目标越界直接拒绝，不由协议量化层静默饱和。
 - 仿真步进会话迁入 `simulation/session.py`，摩擦估计、触觉滑移与逐点摩擦算法迁入
   `perception/`；原模块路径保留完整兼容导出，仿真循环与算法数值行为不变。
 - `dmgripper-hardware` 新增延迟打开的 PySerial 传输和仅发送状态查询帧的单次反馈刷新；
@@ -47,6 +50,9 @@
 
 ### 新增
 
+- 新增独立 `papillarray-hardware==0.1.0` workspace 成员：参考现有专有驱动提取 PTS v2.0
+  协议解析、字节流重同步和显式生命周期同步串口客户端；保留包计数与设备时间戳，Type 7
+  仅保存原始字节，并将设备清零／偏置清除作为显式命令而非传感器标定流程。
 - 新增 `dmgripper-hardware==0.1.0` workspace 成员：基于现有达妙官方 USB2CAN 实现提供
   无设备 I/O 的 DM4310P 协议编解码、串口分帧器、显式固件量程和 fake transport；尚不包含
   真实串口、USB2CANFD、设备使能或运动流程。

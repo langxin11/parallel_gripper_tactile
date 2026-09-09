@@ -6,7 +6,7 @@ MuJoCo 二指平行夹爪触觉仿真：使用通过 schema 校验的 YAML profi
 ## 🚀 快速开始
 
 ```bash
-uv sync
+uv sync --all-packages --locked
 uv run pgt validate configs/robotiq_2f85.yaml
 uv run pgt validate configs/custom_parallel_gripper.yaml
 uv run pgt run demo --profile configs/robotiq_2f85.yaml

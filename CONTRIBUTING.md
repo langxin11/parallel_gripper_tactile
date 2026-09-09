@@ -10,7 +10,7 @@
 在仓库根目录执行：
 
 ```bash
-uv sync --all-groups
+uv sync --all-packages --all-groups --locked
 uv run pre-commit install
 ```
 

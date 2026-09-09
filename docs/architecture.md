@@ -171,13 +171,15 @@ Robotiq 离散力控制由独立 workspace 成员 `packages/robotiq_grasp_core` 
 兼容模块接入。该核心仅依赖 NumPy，不依赖 ROS、MuJoCo、profile、DM 核或仿真主包。
 DM 与 Robotiq 分别维护控制算法、命令类型和状态机。
 
-纯 Python 真机基础层同样按夹爪隔离。`packages/dmgripper_hardware` 当前只提供 DM4310P
-USB2CAN 协议编解码、接收分帧和传输抽象；`packages/robotiq_hardware` 只提供 `0～255`
-位置命令边界与 `pyrobotiqgripper==3.3.12` 薄适配。两包互不依赖，也不依赖仿真主包；
-当前均不自动连接、激活或操作设备。DM 包仅在显式调用时发送状态查询帧并读取反馈；Robotiq
-包分别暴露非阻塞位置命令和位置反馈。USB2CANFD 和商业触觉串口须待实物／代码到位后新增后端。
+纯 Python 真机基础层同样按夹爪隔离。`packages/dmgripper_hardware` 提供 DM4310P
+USB2CAN 协议、传输、状态刷新和当前夹爪部署边界；`packages/robotiq_hardware` 提供 `0～255`
+位置命令边界与 `pyrobotiqgripper==3.3.12` 薄适配。两包互不依赖，也不依赖仿真主包。
+`packages/papillarray_hardware` 是独立的商业触觉设备包，只负责 PTS v2.0 解析、同步串口读取和
+显式设备命令；实验运行时把它与所选夹爪后端组合，不让共享采集代码变成共享控制逻辑。
+所有设备对象均要求显式打开或调用才发生 I/O，当前不会自动连接、激活或驱动执行器。
 DM 核心命令经显式适配后才进入协议量化；Robotiq 硬件单步只调用自身离散控制核心，且仅在
-位置命令成功交给后端后登记动作。两条适配链不共享命令类型或控制时序。
+位置命令成功交给后端后登记动作。两条适配链不共享命令类型或控制时序；USB2CANFD 仍待实物
+到位后按实际接口新增传输后端。
 
 1. `src/parallel_gripper_tactile` 不依赖 `scripts/` 或 CLI 输出格式；
 2. study 直接调用 runner，不通过子进程拼接 `pgt` 命令；

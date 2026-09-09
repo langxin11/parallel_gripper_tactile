@@ -11,8 +11,11 @@ DM4310P 与 USB2CAN 的纯 Python 硬件基础包。当前版本包含可离线�
   创建串口。其工厂可注入，测试只使用内存 fake，不访问 `/dev`。
 - `Usb2CanDeviceConfig` 严格校验端点、波特率、不同且非零的电机／主机 CAN ID，以及有限正的
   刷新超时。默认波特率为 `921600`。
-- `MotorLimits` 没有默认值。实际的 PMAX、VMAX、TMAX 必须由调用方按固件读回值或已验证部署
-  配置显式传入，不能仅根据 DM4310P 型号猜测。
+- `MotorLimits` 没有通用默认值。当前夹爪的 `make_dm4310p_gripper_config()` 固化用户提供的、
+  无 I/O 的部署配置：电机协议量程为位置 `[-1.7, 1.7] rad`、速度 `[-8, 8] rad/s`、
+  力矩 `[-4, 4] N·m`；机械关节行程为 `[0, pi/2] rad`，角度增大方向为闭合方向。
+- 电机协议量程和机械关节行程是两个不同边界。`validate_joint_position()` 对机械目标越界直接
+  抛出 `ValueError`，不做静默 clamp；构造配置时也会检查机械行程位于协议位置量程内。
 - `DmStateRefresher.refresh_once()` 唯一允许写入 `make_feedback_request()` 创建的状态刷新帧；
   它会按总超时读取、分帧、忽略噪声与无关帧并返回目标反馈。它不实现使能、失能、置零、控制
   报文或寄存器读写；上层必须单独实现互锁、反馈新鲜度与急停策略。
@@ -21,11 +24,15 @@ DM4310P 与 USB2CAN 的纯 Python 硬件基础包。当前版本包含可离线�
 ## 使用示例
 
 ```python
-from dmgripper_hardware import MitCommand, MotorLimits, Usb2CanProtocol
+from dmgripper_hardware import MitCommand, Usb2CanProtocol, make_dm4310p_gripper_config
 
-limits = MotorLimits(-1.7, 1.7, -8.0, 8.0, -4.0, 4.0)
-protocol = Usb2CanProtocol(limits)
-packet = protocol.make_mit_packet(0x01, MitCommand(0.0, 0.0, 0.0, 0.0, 0.0))
+deployment = make_dm4310p_gripper_config("/dev/ttyUSB0")
+target_joint_rad = deployment.validate_joint_position(0.2)
+protocol = Usb2CanProtocol(deployment.motor_limits)
+packet = protocol.make_mit_packet(
+    deployment.motor_id,
+    MitCommand(target_joint_rad, 0.0, 0.0, 0.0, 0.0),
+)
 
 # packet 仅是 30 字节；此处不发生 I/O。
 assert len(packet) == 30
@@ -59,7 +66,7 @@ with refresher:
 
 ## 协议来源
 
-实现以仓库中已验证的 ROS 2 C++ 适配器为直接来源，数值量化、字节序、30/16 字节帧布局、
+实现以仓库中已有的 ROS 2 C++ 适配器为直接来源，数值量化、字节序、30/16 字节帧布局、
 CAN ID 偏移和反馈解析与下列文件保持一致：
 
 - `tactile_grasp_ros2/src/dm_gripper_control/dmj4310_driver_cpp/include/dmj4310_driver_cpp/usb2can_protocol.hpp`，SHA-256：`e073cb8f390449406896714ad545c0974db88f37d276853aafa8fe557cec49d2`。
@@ -74,7 +81,7 @@ CAN ID 偏移和反馈解析与下列文件保持一致：
   SHA-256：`78f1d6bc14805f8d5ca5c5a3399c57efaecc055e77dacf838864a076de92a75b`。
 
 参考 ROS 2 部署配置使用 `motor_id=1`、`master_id=17` 和 `[-1.7, 1.7] rad`、`[-8, 8] rad/s`、
-`[-4, 4] N·m`，但这些只是该设备的已验证配置，不构成本包默认值或对当前实机的保证。
+`[-4, 4] N·m`。这些值已经过离线协议向量核对，但尚未在当前实机上验收。
 
 ## 未验证的实机假设
 

@@ -45,8 +45,11 @@ testpaths = [
     "tests",
     "packages/dm_grasp_core/tests",
     "packages/robotiq_grasp_core/tests",
+    "packages/dmgripper_hardware/tests",
+    "packages/robotiq_hardware/tests",
+    "packages/papillarray_hardware/tests",
 ]
-addopts = "-q"
+addopts = "-q --import-mode=importlib"
 
 [tool.uv.workspace]
 members = [
@@ -54,6 +57,7 @@ members = [
     "packages/robotiq_grasp_core",
     "packages/dmgripper_hardware",
     "packages/robotiq_hardware",
+    "packages/papillarray_hardware",
 ]
 
 [tool.uv.sources]

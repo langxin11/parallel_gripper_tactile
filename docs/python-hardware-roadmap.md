@@ -2,8 +2,9 @@
 
 日期：2026-09-09。状态：实施中，P0 已完成；P1 已完成 `config`、`artifacts`、
 `analysis`／`visualization`、`simulation` 与 `perception` 的首轮迁移；P2 已完成 DM 核首轮
-子域整理与 Robotiq 离散控制核心提取；P3 已建立 DM USB2CAN 状态刷新／MIT 离线适配和
-Robotiq 命令／反馈／离散控制单步，触觉采集及受控实机验证仍待接入。
+子域整理与 Robotiq 离散控制核心提取；P3 已建立 DM USB2CAN 状态刷新／MIT 离线适配、
+Robotiq 命令／反馈／离散控制单步，以及 PapillArray PTS v2.0 解析／同步串口边界；受控实机
+验证、异步运行时和记录仍待接入。
 
 本计划记录下一阶段的目标布局与验收顺序，不表示所列包、接口或硬件能力已经落地。
 当前架构仍以 [architecture.md](architecture.md) 为准；实施各阶段时同步更新该文档。
@@ -61,15 +62,17 @@ flowchart TB
   Experiments --> Real
   Sim --> Core
   Real --> Core
+  TactileDevice["papillarray_hardware<br/>设备采集与 PTS 协议"] --> Real
   Core --> Tactile
   Core --> Control
   Core --> Grasp
 ```
 
 图中的 `tactile algorithms` 只处理已经适配的触觉观测，例如滤波、接触判定、
-滑移特征和力语义；商业传感器的串口、协议解析、清零命令、左右设备映射和时间戳
-属于 `dmgripper_hardware/tactile`。`grasp logic` 负责接近、接触过渡、跟踪、保持和释放等
-夹持状态，不负责设备通信。
+滑移特征和力语义；商业传感器的串口、协议解析、清零命令、原始 sensor 顺序和时间戳
+属于独立的 `papillarray_hardware`。物理安装的左右映射属于各夹爪硬件适配，DM 真机运行时
+再把映射后的设备观测适配给 DM 核。
+`grasp logic` 负责接近、接触过渡、跟踪、保持和释放等夹持状态，不负责设备通信。
 
 `dmgripper_sim` 与 `dmgripper_hardware` 是同级适配器：前者把 MuJoCo 状态转换为核心观测并把
 核心命令应用到仿真执行器，后者把商业触觉和 DM4310P 反馈转换为核心观测并通过 USB2CAN
@@ -88,6 +91,10 @@ robotiq_grasp_core`。两棵结构不共享控制算法、状态机、命令类�
 
 ```text
 packages/
+├── papillarray_hardware/           # 商业触觉设备协议与串口采集，不含夹爪控制
+│   └── src/papillarray_hardware/
+│       ├── protocol.py            # PTS v2.0 解码、校验与流重同步
+│       └── client.py              # 显式生命周期的同步串口客户端
 ├── dm_grasp_core/                  # dmgripper_core，沿用已有发行包和导入名
 │   └── src/dm_grasp_core/
 │       ├── interfaces.py          # DM 观测、参考与 MIT 请求
@@ -102,14 +109,14 @@ packages/
 │       └── grasp/                 # WAIT_STABLE、ADJUST、HOLD 与 RELEASE
 ├── dmgripper_hardware/             # 无 ROS、MuJoCo 的 DM 真机程序
 │   └── src/dmgripper_hardware/
-│       ├── tactile/               # 双侧采集、协议解析与数据适配
+│       ├── tactile/               # DM 专属左右映射与观测适配
 │       ├── motor/                 # USB2CAN、DM4310P 协议与设备状态
 │       ├── runtime.py
 │       ├── recording.py
 │       └── cli.py
 └── robotiq_hardware/               # 无 ROS、MuJoCo 的 Robotiq 真机程序
     └── src/robotiq_hardware/
-        ├── tactile/               # 双侧采集、协议解析与数据适配
+        ├── tactile/               # Robotiq 专属左右映射与观测适配
         ├── gripper/               # pyrobotiqgripper 适配与设备状态
         ├── runtime.py
         ├── recording.py
@@ -150,7 +157,7 @@ DM 核与 Robotiq 核之间不相互导入。真机不能通过导入仿真主�
 运行依赖和测试目录；根锁文件统一固定开发环境。目标配置在相应目录实际创建后逐项加入，
 不为尚不存在的包提前声明成员：
 
-当前四个成员均已登记；硬件成员暂时只包含可离线验证的协议或适配边界。当前配置如下：
+当前五个成员均已登记；硬件成员暂时只包含可离线验证的协议或适配边界。当前配置如下：
 
 ```toml
 [tool.uv.workspace]
@@ -159,6 +166,7 @@ members = [
     "packages/robotiq_grasp_core",
     "packages/dmgripper_hardware",
     "packages/robotiq_hardware",
+    "packages/papillarray_hardware",
 ]
 
 [tool.uv.sources]
@@ -167,18 +175,20 @@ robotiq-grasp-core = { workspace = true }
 ```
 
 `parallel-gripper-tactile` 依赖两个控制核心，用于仿真适配；`dmgripper-hardware` 只依赖
-`dm-grasp-core` 和 DM／触觉通信依赖；`robotiq-hardware` 只依赖 `robotiq-grasp-core`、
-`pyrobotiqgripper` 和触觉通信依赖。两个硬件包互不依赖，也不依赖仿真主包。
+`dm-grasp-core` 和 DM 通信依赖；`robotiq-hardware` 只依赖 `robotiq-grasp-core` 及可选的
+`pyrobotiqgripper`。`papillarray-hardware` 独立承担商业触觉协议和串口依赖。三者互不依赖，
+也不依赖仿真主包；实验运行时通过组合对象建立数据流。
 
 开发时可从 workspace 根统一同步和测试，也必须验证成员可独立安装，防止根环境中偶然存在的
 MuJoCo、ROS 或另一夹爪依赖掩盖边界错误：
 
 ```bash
-uv sync --all-groups
+uv sync --all-packages --all-groups --locked
 uv run --package dm-grasp-core pytest packages/dm_grasp_core/tests
 uv run --package robotiq-grasp-core pytest packages/robotiq_grasp_core/tests
 uv run --package dmgripper-hardware pytest packages/dmgripper_hardware/tests
 uv run --package robotiq-hardware pytest packages/robotiq_hardware/tests
+uv run --package papillarray-hardware pytest packages/papillarray_hardware/tests
 ```
 
 具体包创建时再确认 `uv run --package` 与测试依赖组的最终命令。硬件依赖优先放在各成员中，
@@ -217,11 +227,10 @@ Robotiq 首批迁移量化 PI 与固定单步／HOLD，再接入自适应和预�
 
 ### DM4310P 与 USB2CAN
 
-当前代码通过 PySerial 使用达妙 USB2CAN 封装，已有配置为 `921600` baud、
-从机 ID `1`、主机 ID `17`；这些是来源配置，不代表已核对当前设备。
-代码使用 `DM4310` 枚举并覆盖位置／速度／力矩编码范围为 `±1.7 rad`、
-`±8 rad/s`、`±4 N·m`。连接阶段核对 DM4310P 固件对应范围、ID、模式、方向与机械行程。
-协议量程与运行限幅分别保存，不把机械零位确认归入触觉传感器功能。
+当前部署配置通过 PySerial 使用达妙 USB2CAN 封装，采用 `921600` baud、从机 ID `1`、
+主机 ID `17`；用户提供的协议编码范围为 `±1.7 rad`、`±8 rad/s`、`±4 N·m`。
+夹爪机械关节行程另设为 `[0, pi/2] rad`，角度增大为闭合方向；机械目标越界直接拒绝，
+不依靠协议量化层静默饱和。协议量程、机械行程和未来实测安全限幅分别保存。
 
 官方 `controlMIT()` 内部发送后调用 `recv()`；后者读取现有缓冲，返回不代表新反馈到达。
 以实际解析事件更新反馈新鲜度，单一通信所有者管理 SDK 状态。
@@ -255,7 +264,7 @@ DM 与 Robotiq 分别实现调度和故障策略，记录周期、测量年龄�
 | P0：冻结基线（已完成） | 合并旧分支；记录提交、导入路径、依赖和测试基线 | 工作区干净，原有全量门禁通过，列明跳过项 |
 | P1：包内整理（进行中） | 按职责迁移；旧导入路径兼容层；缩减顶层提前导入 | CLI 与导入回归，固定轨迹一致，默认配置与产物字段不变 |
 | P2：隔离控制核（进行中） | DM、Robotiq 独立包、类型、配置与测试；仿真适配器 | 两核独立安装，在无 ROS／MuJoCo 环境导入和运行；无交叉依赖 |
-| P3：纯 Python 采集（进行中） | 已建立 DM 协议／PySerial／单次状态刷新与 Robotiq 3.3.12 非阻塞命令／位置反馈；待触觉读取、日志及完整设备状态 | fake 串口已覆盖拆帧、噪声、无关帧、超时、短写与异常关闭；待设备在线后验证真实采集 |
+| P3：纯 Python 采集（进行中） | 已建立 DM 协议／PySerial／单次状态刷新、Robotiq 3.3.12 非阻塞命令／位置反馈，以及 PapillArray PTS 解析／同步串口客户端；待异步运行时、日志及完整设备状态 | fake 串口已覆盖分片、噪声、坏校验、超时、短写与异常关闭；待设备在线后验证真实采集 |
 | P4：受限动作 | 分设备的使能、反馈读取、动作和停止流程 | 实机确认方向、行程、设备状态与停止；记录量程和实际时序 |
 | P5：基础闭环 | DM 两基线；Robotiq PI 与固定单步；固定目标与 Ramp | 每台夹爪独立验收误差、峰值、丢数据和故障响应；记录参数与阈值 |
 | P6：完整算法迁移 | DM 剩余控制律；Robotiq 自适应／预测；统一分析入口 | 按夹爪同条件比较，区分仿真与实机结论，完成回放和文档同步 |
@@ -283,6 +292,7 @@ uv run pytest
 从合并后的 `main` 创建 `codex/python-hardware-architecture`，提交本计划，后续实现沿此分支推进。
 本轮不推送远端。下一次从 P1 的导入／依赖审计与文件迁移清单开始，不直接启动硬件闭环。
 
-实施前仍需核实：当前 DM4310P 固件参数、USB2CANFD 的实际型号与 SDK、
-Robotiq 库版本和串口配置、触觉左右映射，以及设备是否在线。
+实施前仍需核实：USB2CANFD 的实际型号与 SDK、Robotiq 串口配置、PapillArray 实际端口与
+触觉左右映射，以及设备是否在线。DM4310P 参数已经写成当前部署配置，但首次动作前仍须通过
+只读反馈和无负载低速步骤复核方向、零位与行程。
 这些事项不阻塞 P1、P2 和 P3 的无硬件部分。

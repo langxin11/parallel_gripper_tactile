@@ -1,6 +1,7 @@
 """DM4310P USB2CAN 的纯 Python 硬件基础层。"""
 
 from .config import DEFAULT_USB2CAN_BAUD_RATE, Usb2CanDeviceConfig
+from .deployment import Dm4310PGripperConfig, make_dm4310p_gripper_config
 from .adapter import (
     CoreMotorObservation,
     DmMitCommandAdapter,
@@ -41,6 +42,7 @@ __all__ = [
     "CMD_SET_ZERO",
     "CONTROL_MODE_REGISTER",
     "DEFAULT_USB2CAN_BAUD_RATE",
+    "Dm4310PGripperConfig",
     "STATUS_DISABLED",
     "STATUS_ENABLED",
     "ByteTransport",
@@ -69,4 +71,5 @@ __all__ = [
     "motor_status_to_fault_code",
     "core_observation_from_feedback",
     "map_core_mit_command",
+    "make_dm4310p_gripper_config",
 ]

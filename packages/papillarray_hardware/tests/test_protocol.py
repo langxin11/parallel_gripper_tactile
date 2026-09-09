@@ -1,0 +1,406 @@
+"""PTS v2.0 解析和字节流重同步的离线回归测试。"""
+
+from __future__ import annotations
+
+import struct
+
+import numpy as np
+import numpy.testing as npt
+import pytest
+
+from papillarray_hardware.protocol import (
+    END_MARKER,
+    START_MARKER,
+    PacketChecksumError,
+    ProtocolError,
+    PtsStreamReader,
+    parse_packet,
+    verify_checksum,
+)
+
+_INDEX_SIZE = 2
+
+
+class FakeReadableSerial:
+    """按给定分片返回字节，完全不访问真实串口。"""
+
+    def __init__(self, chunks: list[bytes]) -> None:
+        """保存待返回的字节分片。"""
+        self._chunks = list(chunks)
+
+    def read(self, _size: int) -> bytes:
+        """返回下一个分片，耗尽后模拟读取超时。"""
+        return self._chunks.pop(0) if self._chunks else b""
+
+
+def test_parse_packet_preserves_hub_timestamp_and_type_7_data() -> None:
+    """完整包解码 Type 1／3／4／5／6，并原样保留 Type 7。"""
+    packet_data = build_packet_data(
+        packet_counter=41,
+        timestamp_us=987_654_321,
+        sensors=[
+            {
+                "pillars": [(1.0, 2.0, 3.0, 0.1, 0.2, 0.3)],
+                "global": (4.0, 5.0, 6.0, 0.4, 0.5, 0.6),
+            },
+            {
+                "pillars": [
+                    (7.0, 8.0, 9.0, 0.7, 0.8, 0.9),
+                    (10.0, 11.0, 12.0, 1.0, 1.1, 1.2),
+                ],
+                "global": (13.0, 14.0, 15.0, 1.3, 1.4, 1.5),
+            },
+        ],
+        include_slip=True,
+        type_7_data=b"\xde\xad\xbe\xef",
+    )
+
+    packet = parse_packet(packet_data)
+
+    assert packet.packet_counter == 41
+    assert packet.timestamp_us == 987_654_321
+    assert packet.n_sensors == 2
+    npt.assert_allclose(packet.pillar_forces[1][1], (10.0, 11.0, 12.0))
+    npt.assert_allclose(packet.pillar_displacements[0][0], (0.1, 0.2, 0.3))
+    npt.assert_allclose(packet.global_torques[1], (1.3, 1.4, 1.5))
+    npt.assert_array_equal(packet.pillar_slip_states[0], np.array((3,), dtype=np.int8))
+    npt.assert_allclose(packet.pillar_friction_estimates[1], (0.82, 0.92))
+    assert packet.slip_detection_active == [True, True]
+    assert packet.reference_pillar_loaded == [True, False]
+    assert packet.sensor_friction_estimates == pytest.approx([0.68, 0.78])
+    assert packet.target_grip_forces == pytest.approx([12.5, 13.5])
+    assert packet.type_7_data == b"\xde\xad\xbe\xef"
+
+
+def test_parse_packet_rejects_bad_checksum_and_invalid_offsets() -> None:
+    """直接解析时明确报告坏校验和和越界偏移。"""
+    good = build_packet_data(
+        packet_counter=1,
+        timestamp_us=2,
+        sensors=[{"pillars": [], "global": (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)}],
+    )
+    corrupted = bytearray(good)
+    corrupted[-3] ^= 0x01
+
+    with pytest.raises(PacketChecksumError, match="校验和"):
+        parse_packet(bytes(corrupted))
+
+    invalid = bytearray(good)
+    invalid[3:5] = (65_535).to_bytes(2, "little")
+    invalid[-2:] = (sum(invalid[:-2]) & 0xFFFF).to_bytes(2, "little")
+    with pytest.raises(ProtocolError, match="偏移越界"):
+        parse_packet(bytes(invalid))
+
+
+def test_parse_packet_rejects_misaligned_nested_pillar_offset() -> None:
+    """Type 3 pillar 偏移即使仍在块内，也必须指向声明的连续条目起点。"""
+    packet_data = bytearray(
+        build_packet_data(
+            packet_counter=1,
+            timestamp_us=2,
+            sensors=[
+                {
+                    "pillars": [(1.0, 2.0, 3.0, 0.1, 0.2, 0.3)],
+                    "global": (0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+                }
+            ],
+        )
+    )
+    pillar_block_offset = int.from_bytes(packet_data[7:9], "little")
+    pillar_offset_position = pillar_block_offset + 6
+    packet_data[pillar_offset_position : pillar_offset_position + _INDEX_SIZE] = (5).to_bytes(
+        _INDEX_SIZE, "little"
+    )
+    packet_data[-2:] = (sum(packet_data[:-2]) & 0xFFFF).to_bytes(2, "little")
+
+    with pytest.raises(ProtocolError, match="Type 3 sensor 0 pillar 0 相对偏移"):
+        parse_packet(bytes(packet_data))
+
+
+def test_parse_packet_rejects_two_types_sharing_one_top_level_offset() -> None:
+    """不同 Type 不能将同一段字节重复解释为两种数据块。"""
+    packet_data = bytearray(
+        build_packet_data(
+            packet_counter=1,
+            timestamp_us=2,
+            sensors=[{"pillars": [], "global": (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)}],
+        )
+    )
+    pillar_block_offset = packet_data[7:9]
+    packet_data[11:13] = pillar_block_offset
+    packet_data[-2:] = (sum(packet_data[:-2]) & 0xFFFF).to_bytes(2, "little")
+
+    with pytest.raises(ProtocolError, match="共用块偏移"):
+        parse_packet(bytes(packet_data))
+
+
+def test_parse_packet_rejects_inconsistent_type_sensor_and_pillar_counts() -> None:
+    """Type 3 是一个观测包的基准，其他已存在块必须与它逐项对齐。"""
+    sensors = [
+        {
+            "pillars": [(1.0, 2.0, 3.0, 0.1, 0.2, 0.3)],
+            "global": (0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        },
+        {
+            "pillars": [(4.0, 5.0, 6.0, 0.4, 0.5, 0.6)],
+            "global": (0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+        },
+    ]
+    with pytest.raises(ProtocolError, match="Type 3 与 Type 4"):
+        parse_packet(
+            build_packet_data(
+                packet_counter=1,
+                timestamp_us=2,
+                sensors=sensors,
+                global_sensors=sensors[:1],
+            )
+        )
+    with pytest.raises(ProtocolError, match="Type 5 与 Type 3"):
+        parse_packet(
+            build_packet_data(
+                packet_counter=1,
+                timestamp_us=2,
+                sensors=sensors,
+                pillar_slip_sensors=sensors[:1],
+            )
+        )
+    with pytest.raises(ProtocolError, match="Type 5 sensor 0"):
+        parse_packet(
+            build_packet_data(
+                packet_counter=1,
+                timestamp_us=2,
+                sensors=sensors,
+                pillar_slip_sensors=[
+                    {
+                        "pillars": [
+                            (1.0, 2.0, 3.0, 0.1, 0.2, 0.3),
+                            (7.0, 8.0, 9.0, 0.7, 0.8, 0.9),
+                        ],
+                        "global": (0.0, 0.0, 0.0, 0.0, 0.0, 0.0),
+                    },
+                    sensors[1],
+                ],
+            )
+        )
+    with pytest.raises(ProtocolError, match="Type 6 与 Type 3"):
+        parse_packet(
+            build_packet_data(
+                packet_counter=1,
+                timestamp_us=2,
+                sensors=sensors,
+                sensor_slip_sensors=sensors[:1],
+            )
+        )
+
+
+def test_stream_reader_recovers_from_noise_bad_frame_and_half_packets() -> None:
+    """读取器跳过噪声与坏帧，并跨多个读取分片重组有效包。"""
+    good = build_packet_data(
+        packet_counter=123,
+        timestamp_us=777_888_999,
+        sensors=[{"pillars": [], "global": (6.0, 5.0, 4.0, 0.6, 0.5, 0.4)}],
+    )
+    bad = bytearray(good)
+    bad[8] ^= 0x10
+    good_frame = START_MARKER + good + END_MARKER
+    bad_frame = START_MARKER + bytes(bad) + END_MARKER
+    reader = PtsStreamReader(
+        FakeReadableSerial(
+            [
+                b"noise\x55\x66",
+                b"\x77\x88" + bad_frame[:19],
+                bad_frame[19:] + good_frame[:7],
+                good_frame[7:25],
+                good_frame[25:],
+            ]
+        )
+    )
+
+    packet = reader.read_packet()
+
+    assert packet.packet_counter == 123
+    assert packet.timestamp_us == 777_888_999
+    npt.assert_allclose(packet.global_forces[0], (6.0, 5.0, 4.0))
+
+
+def test_stream_reader_recovers_good_frame_after_bad_frame_without_end_marker() -> None:
+    """损坏帧缺少结束标志时，不得吞掉紧随其后的完整有效帧。"""
+    good = build_packet_data(
+        packet_counter=124,
+        timestamp_us=777_889_000,
+        sensors=[{"pillars": [], "global": (6.0, 5.0, 4.0, 0.6, 0.5, 0.4)}],
+    )
+    good_frame = START_MARKER + good + END_MARKER
+    reader = PtsStreamReader(FakeReadableSerial([START_MARKER + b"broken" + good_frame]))
+
+    packet = reader.read_packet()
+
+    assert packet.packet_counter == 124
+
+
+def test_stream_reader_accepts_valid_type_7_data_containing_start_marker() -> None:
+    """合法包内偶然出现起始字节序列时，不能错误触发重同步。"""
+    packet_data = build_packet_data(
+        packet_counter=125,
+        timestamp_us=777_889_001,
+        sensors=[{"pillars": [], "global": (6.0, 5.0, 4.0, 0.6, 0.5, 0.4)}],
+        type_7_data=START_MARKER,
+    )
+    reader = PtsStreamReader(FakeReadableSerial([START_MARKER + packet_data + END_MARKER]))
+
+    packet = reader.read_packet()
+
+    assert packet.packet_counter == 125
+    assert packet.type_7_data == START_MARKER
+
+
+def test_stream_reader_discards_oversize_half_packet_and_times_out() -> None:
+    """没有结束标志的超长残片不会令缓冲无限增长。"""
+    reader = PtsStreamReader(
+        FakeReadableSerial([START_MARKER + b"x" * 40, b""]),
+        max_packet_bytes=32,
+    )
+
+    with pytest.raises(TimeoutError, match="超时无数据"):
+        reader.read_packet()
+
+
+def test_verify_checksum_rejects_too_short_data() -> None:
+    """校验函数不会把没有校验字段的短数据误判为有效。"""
+    assert not verify_checksum(b"")
+    assert not verify_checksum(b"\x01")
+
+
+def build_packet_data(
+    *,
+    packet_counter: int,
+    timestamp_us: int,
+    sensors: list[dict[str, object]],
+    include_slip: bool = False,
+    type_7_data: bytes | None = None,
+    global_sensors: list[dict[str, object]] | None = None,
+    pillar_slip_sensors: list[dict[str, object]] | None = None,
+    sensor_slip_sensors: list[dict[str, object]] | None = None,
+) -> bytes:
+    """构造严格符合测试所需布局且带校验和的 PTS 帧内部数据。"""
+    blocks: list[tuple[int, bytes]] = [
+        (1, packet_counter.to_bytes(4, "little") + timestamp_us.to_bytes(8, "little")),
+        (3, build_pillar_block(sensors)),
+        (4, build_global_block(global_sensors if global_sensors is not None else sensors)),
+    ]
+    if include_slip:
+        blocks.extend(
+            ((5, build_pillar_slip_block(sensors)), (6, build_sensor_slip_block(sensors)))
+        )
+    if pillar_slip_sensors is not None:
+        blocks.append((5, build_pillar_slip_block(pillar_slip_sensors)))
+    if sensor_slip_sensors is not None:
+        blocks.append((6, build_sensor_slip_block(sensor_slip_sensors)))
+    if type_7_data is not None:
+        blocks.append((7, type_7_data))
+
+    offset = 1 + len(blocks) * (2 + _INDEX_SIZE)
+    packet = bytearray((_INDEX_SIZE,))
+    for block_type, block in blocks:
+        packet.extend(block_type.to_bytes(2, "little"))
+        packet.extend(offset.to_bytes(_INDEX_SIZE, "little"))
+        offset += len(block)
+    for _, block in blocks:
+        packet.extend(block)
+    packet.extend((sum(packet) & 0xFFFF).to_bytes(2, "little"))
+    return bytes(packet)
+
+
+def build_pillar_block(sensors: list[dict[str, object]]) -> bytes:
+    """构造 Type 3 连续布局。"""
+    sensor_blocks: list[bytes] = []
+    sensor_offsets: list[int] = []
+    running_offset = 2 + len(sensors) * _INDEX_SIZE
+    for sensor in sensors:
+        pillars = list(sensor["pillars"])
+        payload = bytearray(len(pillars).to_bytes(2, "little"))
+        pillar_offsets: list[int] = []
+        pillar_offset = 2 + len(pillars) * _INDEX_SIZE
+        for pillar in pillars:
+            pillar_offsets.append(pillar_offset)
+            payload.extend((2).to_bytes(2, "little"))
+            payload.extend(struct.pack("<6f", *pillar))
+            pillar_offset += 26
+        indexed = bytearray(len(pillars).to_bytes(2, "little"))
+        for value in pillar_offsets:
+            indexed.extend(value.to_bytes(_INDEX_SIZE, "little"))
+        indexed.extend(payload[2:])
+        sensor_offsets.append(running_offset)
+        sensor_blocks.append(bytes(indexed))
+        running_offset += len(indexed)
+
+    result = bytearray(len(sensors).to_bytes(2, "little"))
+    for offset in sensor_offsets:
+        result.extend(offset.to_bytes(_INDEX_SIZE, "little"))
+    for block in sensor_blocks:
+        result.extend(block)
+    return bytes(result)
+
+
+def build_global_block(sensors: list[dict[str, object]]) -> bytes:
+    """构造 Type 4 连续布局。"""
+    sensor_offsets: list[int] = []
+    sensor_blocks: list[bytes] = []
+    running_offset = 2 + len(sensors) * _INDEX_SIZE
+    for sensor in sensors:
+        block = (2).to_bytes(2, "little") + struct.pack("<6f", *sensor["global"])
+        sensor_offsets.append(running_offset)
+        sensor_blocks.append(block)
+        running_offset += len(block)
+    result = bytearray(len(sensors).to_bytes(2, "little"))
+    for offset in sensor_offsets:
+        result.extend(offset.to_bytes(_INDEX_SIZE, "little"))
+    for block in sensor_blocks:
+        result.extend(block)
+    return bytes(result)
+
+
+def build_pillar_slip_block(sensors: list[dict[str, object]]) -> bytes:
+    """构造 Type 5 连续布局，每 pillar 给出确定的状态与摩擦估计。"""
+    sensor_offsets: list[int] = []
+    sensor_blocks: list[bytes] = []
+    running_offset = 2 + len(sensors) * _INDEX_SIZE
+    for sensor_index, sensor in enumerate(sensors):
+        pillars = list(sensor["pillars"])
+        pillar_offsets = [
+            2 + len(pillars) * _INDEX_SIZE + 7 * index for index in range(len(pillars))
+        ]
+        block = bytearray(len(pillars).to_bytes(2, "little"))
+        for offset in pillar_offsets:
+            block.extend(offset.to_bytes(_INDEX_SIZE, "little"))
+        for pillar_index in range(len(pillars)):
+            block.extend((1).to_bytes(2, "little"))
+            block.extend(struct.pack("<bf", 3, 0.72 + sensor_index * 0.1 + pillar_index * 0.1))
+        sensor_offsets.append(running_offset)
+        sensor_blocks.append(bytes(block))
+        running_offset += len(block)
+    result = bytearray(len(sensors).to_bytes(2, "little"))
+    for offset in sensor_offsets:
+        result.extend(offset.to_bytes(_INDEX_SIZE, "little"))
+    for block in sensor_blocks:
+        result.extend(block)
+    return bytes(result)
+
+
+def build_sensor_slip_block(sensors: list[dict[str, object]]) -> bytes:
+    """构造 Type 6 连续布局。"""
+    result = bytearray(len(sensors).to_bytes(2, "little"))
+    running_offset = 2 + len(sensors) * _INDEX_SIZE
+    offsets: list[int] = []
+    blocks: list[bytes] = []
+    for sensor_index, _sensor in enumerate(sensors):
+        block = (1).to_bytes(2, "little") + bytes((2 if sensor_index == 0 else 1,))
+        block += struct.pack("<2f", 0.68 + sensor_index * 0.1, 12.5 + sensor_index)
+        offsets.append(running_offset)
+        blocks.append(block)
+        running_offset += len(block)
+    for offset in offsets:
+        result.extend(offset.to_bytes(_INDEX_SIZE, "little"))
+    for block in blocks:
+        result.extend(block)
+    return bytes(result)
