@@ -5,11 +5,35 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from parallel_gripper_tactile.profiles import ProfileLoadError, TouchGridTactileLayout, load_profile
+from parallel_gripper_tactile.config import (
+    DMAdmittanceControl as ConfigDMAdmittanceControl,
+    ProfileLoadError as ConfigProfileLoadError,
+    STIFFNESS_ESTIMATOR_METHODS as CONFIG_STIFFNESS_ESTIMATOR_METHODS,
+)
+from parallel_gripper_tactile.config import (
+    TouchGridTactileLayout as ConfigTouchGridTactileLayout,
+)
+from parallel_gripper_tactile.config import load_profile as load_config_profile
+from parallel_gripper_tactile.profiles import (
+    DMAdmittanceControl,
+    ProfileLoadError,
+    STIFFNESS_ESTIMATOR_METHODS,
+    TouchGridTactileLayout,
+    load_profile,
+)
 from parallel_gripper_tactile.validation import validate_profile
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_legacy_profiles_module_reexports_config_implementation() -> None:
+    """旧 ``profiles`` 路径与新 ``config`` 路径导出同一实现对象。"""
+    assert ProfileLoadError is ConfigProfileLoadError
+    assert TouchGridTactileLayout is ConfigTouchGridTactileLayout
+    assert DMAdmittanceControl is ConfigDMAdmittanceControl
+    assert STIFFNESS_ESTIMATOR_METHODS is CONFIG_STIFFNESS_ESTIMATOR_METHODS
+    assert load_profile is load_config_profile
 
 
 @pytest.mark.parametrize(

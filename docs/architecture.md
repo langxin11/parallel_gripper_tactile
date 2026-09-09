@@ -21,7 +21,7 @@ flowchart TB
     Control["control<br/>MIT 与法向力控制"]
     Tactile["tactile / contact_taxels<br/>统一触觉读数"]
     Scenes["scenes<br/>模型装配与接触选项"]
-    Profiles["profiles<br/>YAML schema 与路径解析"]
+    Profiles["config/profiles<br/>YAML schema 与路径解析"]
     Shared["simulation / timing / analysis / recording<br/>共享能力"]
   end
 
@@ -47,7 +47,7 @@ manifest。
 
 | 区域 | 主要职责 | 不应承担的职责 |
 | --- | --- | --- |
-| `profiles.py` | 用冻结的 Pydantic 模型校验 YAML，并以 YAML 所在目录解析相对路径 | 启动 MuJoCo 或写运行结果 |
+| `config/profiles.py` | 用冻结的 Pydantic 模型校验 YAML，并以 YAML 所在目录解析相对路径；`profiles.py` 仅保留兼容导出 | 启动 MuJoCo 或写运行结果 |
 | `scenes/` | 装配 MJCF、物体材料、碰撞几何和求解选项 | 控制算法、指标统计 |
 | `tactile.py`、`contact_taxels.py` | 把不同后端统一为局部 `(3, rows, cols)` 力数组 | 决定目标力或控制状态 |
 | `force_scheduling.py` | 由切向载荷和摩擦系数生成受限的平均单侧目标力 | 读取 MuJoCo 状态或直接写执行器 |
