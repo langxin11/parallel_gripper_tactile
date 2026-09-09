@@ -8,7 +8,7 @@ from typing import Annotated
 from rich.table import Table
 import typer
 
-from ..run_artifacts import clean_runs, list_runs, plan_clean
+from ..artifacts import clean_runs, list_runs, plan_clean
 from .common import fail, format_value, state
 
 

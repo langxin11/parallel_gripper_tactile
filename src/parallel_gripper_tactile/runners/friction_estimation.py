@@ -13,7 +13,7 @@ from ..experiments.friction_estimation import (
     run_friction_estimation,
 )
 from ..profiles import load_profile
-from ..run_artifacts import RunDirectory
+from ..artifacts import RunDirectory
 
 
 def execute_friction_estimation(

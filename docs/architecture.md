@@ -13,7 +13,7 @@ flowchart TB
   subgraph Orchestration[编排层]
     Study["studies<br/>study schema 与条件矩阵"]
     Runner["runners<br/>一次运行的生命周期"]
-    Artifacts["run_artifacts<br/>快照、manifest 与目录"]
+    Artifacts["artifacts<br/>快照、manifest 与目录"]
   end
 
   subgraph Domain[实验与领域层]
@@ -48,6 +48,7 @@ manifest。
 | 区域 | 主要职责 | 不应承担的职责 |
 | --- | --- | --- |
 | `config/profiles.py` | 用冻结的 Pydantic 模型校验 YAML，并以 YAML 所在目录解析相对路径；`profiles.py` 仅保留兼容导出 | 启动 MuJoCo 或写运行结果 |
+| `artifacts/` | 管理运行目录、输入快照、manifest 与安全清理；`run_artifacts.py` 仅保留兼容导出 | 推进仿真或决定实验控制逻辑 |
 | `scenes/` | 装配 MJCF、物体材料、碰撞几何和求解选项 | 控制算法、指标统计 |
 | `tactile.py`、`contact_taxels.py` | 把不同后端统一为局部 `(3, rows, cols)` 力数组 | 决定目标力或控制状态 |
 | `force_scheduling.py` | 由切向载荷和摩擦系数生成受限的平均单侧目标力 | 读取 MuJoCo 状态或直接写执行器 |

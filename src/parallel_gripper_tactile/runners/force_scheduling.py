@@ -13,7 +13,7 @@ from ..experiments.force_scheduling import (
     run_force_scheduling,
 )
 from ..profiles import load_profile
-from ..run_artifacts import RunDirectory
+from ..artifacts import RunDirectory
 
 
 def execute_force_scheduling(

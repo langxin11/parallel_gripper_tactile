@@ -98,7 +98,7 @@ DM 核与 Robotiq 核之间不相互导入。真机不能通过导入仿真主�
 
 迁移清单至少覆盖：`profiles.py` → `config`；`scenes`、`simulation.py` 和触觉读取器
 → `simulation`；`tactile_slip.py`、`taxel_friction.py`、摩擦估计 → `perception`；
-`run_artifacts.py` 和 trace 存储 → `artifacts`；`plotstyle.py`、`friction_plots.py`、
+`run_artifacts.py`（保留兼容导出）和 trace 存储 → `artifacts`；`plotstyle.py`、`friction_plots.py`、
 视频展示 → `visualization`。`recording.py` 当前混合演示循环与记录职责，应按函数拆分。
 对同名模块改为包的情况，检查原路径导出、相对导入和包发现配置，不能只批量移动文件。
 
