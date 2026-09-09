@@ -74,6 +74,38 @@ PapillArray 探针超时：等待有效 PTS 包超过总时限。协议诊断：
 
 这类诊断只读取设备输出，探针仍只发送 `f<rate>\n`，不会执行清零或滑动检测命令。
 
+## 示例脚本
+
+探针 CLI 用于快速验证设备是否存活；`examples/` 下的脚本用于演示上层应如何正确使用这一采集边界
+（显式生命周期、控制命令时序、新鲜度检查与丢包统计）。默认端口均为 udev 别名 `/dev/papillarray`。
+
+### 读取触觉数据包
+
+`read_packets.py` 是"最小使用方式"的可运行教学版，读取有限个包并打印指定传感器的全局力表格：
+
+```sh
+uv run --package papillarray-hardware python packages/papillarray_hardware/examples/read_packets.py --port /dev/papillarray
+```
+
+### 滑动检测
+
+`slip_detection.py` 演示探针刻意不发送的滑动检测启停命令，启动滑动检测后打印每传感器的
+pillar 滑动状态与目标抓握力。注意：该示例会向设备发送 `S\n`／`s\n` 命令：
+
+```sh
+uv run --package papillarray-hardware python packages/papillarray_hardware/examples/slip_detection.py --port /dev/papillarray
+```
+
+### 持续监测与丢包统计
+
+`monitor.py` 是最接近驱动主循环的同步教学版，演示观测新鲜度检查与按无符号 32 位半模规则统计丢包。
+启动预热会丢弃设备 FIFO 残留的陈旧包——观察到计数器大步跳变且跳变后恢复连续才作为统计起点，缺包数
+因此不含上次会话与本次运行之间的间隔。注意：只有显式传入 `--bias` 时才会发送 `z\n` 清零命令，且发送前传感器必须完全无负载：
+
+```sh
+uv run --package papillarray-hardware python packages/papillarray_hardware/examples/monitor.py --port /dev/papillarray
+```
+
 ## 协议来源与许可
 
 协议布局与控制命令以本机下列已有实现为参考：
