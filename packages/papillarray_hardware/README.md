@@ -15,6 +15,8 @@ Contactile PapillArray 的 PTS v2.0 纯 Python 同步串口采集边界。它只
 - `PtsStreamReader` 处理半包、前导噪声、坏校验和和异常长度，并保留控制器的 `packet_counter`
   与 `timestamp_us`。Type 1／3／4／5／6 被解码；未定义布局的 Type 7 仅以原始 `bytes`
   保存，绝不猜测其含义。
+- 顶层索引与首个数据块之间允许 Controller v2.0 实际输出的全零对齐填充；非零的未声明
+  字节仍按协议结构错误拒绝。
 - 上层应为实机循环额外实现观测新鲜度、丢包统计、执行器互锁和急停策略。
 
 ## 最小使用方式

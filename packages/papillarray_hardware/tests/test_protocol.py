@@ -15,6 +15,7 @@ from papillarray_hardware.protocol import (
     ProtocolError,
     PtsReadTimeout,
     PtsStreamReader,
+    _parse_top_level_index,
     parse_packet,
     verify_checksum,
 )
@@ -148,6 +149,61 @@ def test_parse_packet_rejects_two_types_sharing_one_top_level_offset() -> None:
 
     with pytest.raises(ProtocolError, match="共用块偏移"):
         parse_packet(bytes(packet_data))
+
+
+@pytest.mark.parametrize("padding", (b"\x00\x00", b"\x00" * 6))
+def test_parse_packet_accepts_zero_top_level_index_padding(padding: bytes) -> None:
+    """顶层索引与首个块之间允许设备写入任意长度的零对齐填充。"""
+    packet = parse_packet(
+        build_packet_data(
+            packet_counter=1,
+            timestamp_us=2,
+            sensors=[{"pillars": [], "global": (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)}],
+            top_level_index_padding=padding,
+        )
+    )
+
+    assert packet.packet_counter == 1
+
+
+def test_parse_packet_rejects_nonzero_top_level_index_padding() -> None:
+    """顶层索引后的填充不能掩盖未声明的数据。"""
+    packet_data = build_packet_data(
+        packet_counter=1,
+        timestamp_us=2,
+        sensors=[{"pillars": [], "global": (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)}],
+        top_level_index_padding=b"\x00\x01",
+    )
+
+    with pytest.raises(ProtocolError, match="填充必须全为零"):
+        parse_packet(packet_data)
+
+
+def test_parse_packet_without_top_level_index_padding_remains_compatible() -> None:
+    """无顶层索引填充的既有连续布局仍可解析。"""
+    packet = parse_packet(
+        build_packet_data(
+            packet_counter=3,
+            timestamp_us=4,
+            sensors=[{"pillars": [], "global": (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)}],
+        )
+    )
+
+    assert packet.packet_counter == 3
+
+
+def test_real_preview_top_level_index_accepts_zero_alignment_padding() -> None:
+    """真实设备预览不会将两字节对齐填充误解为 Type 0 索引项。"""
+    preview = bytes.fromhex(
+        "556677880201001b0003002700040029020500630206000f0307002b030000"
+        "4efa320031aa768f0000000002002d002b01090041005b0075008f00a900c300dd"
+    )
+
+    with pytest.raises(ProtocolError) as caught:
+        _parse_top_level_index(preview[len(START_MARKER) :], _INDEX_SIZE)
+
+    assert "偏移越界" in str(caught.value)
+    assert "Type 0" not in str(caught.value)
 
 
 def test_parse_packet_rejects_inconsistent_type_sensor_and_pillar_counts() -> None:
@@ -442,6 +498,7 @@ def build_packet_data(
     global_sensors: list[dict[str, object]] | None = None,
     pillar_slip_sensors: list[dict[str, object]] | None = None,
     sensor_slip_sensors: list[dict[str, object]] | None = None,
+    top_level_index_padding: bytes = b"",
 ) -> bytes:
     """构造严格符合测试所需布局且带校验和的 PTS 帧内部数据。"""
     blocks: list[tuple[int, bytes]] = [
@@ -460,12 +517,13 @@ def build_packet_data(
     if type_7_data is not None:
         blocks.append((7, type_7_data))
 
-    offset = 1 + len(blocks) * (2 + _INDEX_SIZE)
+    offset = 1 + len(blocks) * (2 + _INDEX_SIZE) + len(top_level_index_padding)
     packet = bytearray((_INDEX_SIZE,))
     for block_type, block in blocks:
         packet.extend(block_type.to_bytes(2, "little"))
         packet.extend(offset.to_bytes(_INDEX_SIZE, "little"))
         offset += len(block)
+    packet.extend(top_level_index_padding)
     for _, block in blocks:
         packet.extend(block)
     packet.extend((sum(packet) & 0xFFFF).to_bytes(2, "little"))

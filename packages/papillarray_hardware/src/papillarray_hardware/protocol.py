@@ -492,16 +492,19 @@ def _parse_top_level_index(data: bytes, index_size: int) -> dict[int, int]:
     payload_end = len(data) - 2
     entry_size = 2 + index_size
     position = 1
-    index_end: int | None = None
+    min_block_offset: int | None = None
     offsets: dict[int, int] = {}
 
-    while index_end is None or position < index_end:
-        if position + entry_size > payload_end:
-            raise ProtocolError("PTS 索引表截断")
+    while True:
+        index_limit = payload_end if min_block_offset is None else min_block_offset
+        if position + entry_size > index_limit:
+            if min_block_offset is None:
+                raise ProtocolError("PTS 索引表截断")
+            break
         block_type = _read_u16(data, position)
-        offset = int.from_bytes(data[position + 2 : position + entry_size], "little")
         if block_type == 0:
-            raise ProtocolError("PTS 索引块类型不能为零")
+            break
+        offset = int.from_bytes(data[position + 2 : position + entry_size], "little")
         if block_type in offsets:
             raise ProtocolError(f"PTS 索引包含重复的 Type {block_type}")
         if offset < position + entry_size or offset >= payload_end:
@@ -509,14 +512,15 @@ def _parse_top_level_index(data: bytes, index_size: int) -> dict[int, int]:
         if offset in offsets.values():
             raise ProtocolError(f"PTS Type {block_type} 与其他 Type 共用块偏移")
         offsets[block_type] = offset
-        index_end = offset if index_end is None else min(index_end, offset)
+        min_block_offset = offset if min_block_offset is None else min(min_block_offset, offset)
         position += entry_size
 
-    if position != index_end:
-        raise ProtocolError("PTS 索引表长度与最小块偏移不一致")
     if not offsets:
         raise ProtocolError("PTS 索引表为空")
-    if any(offset < index_end for offset in offsets.values()):
+    assert min_block_offset is not None
+    if any(data[position:min_block_offset]):
+        raise ProtocolError("PTS 索引表与首个数据块之间的填充必须全为零")
+    if any(offset < min_block_offset for offset in offsets.values()):
         raise ProtocolError("PTS 块偏移落入索引表")
     return offsets
 
