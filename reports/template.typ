@@ -6,8 +6,9 @@
 // （如 `"\\rho"`），否则 `\r`、`\t` 会被 Typst 当成转义符吃掉。
 #import "@preview/mitex:0.2.7": mitex
 
-// 西文用 Typst 内置的 New Computer Modern，中文回退到系统 Noto 宋体系。
-#let cn-serif = ("New Computer Modern", "Noto Serif CJK SC")
+// 西文使用 Times New Roman，中文回退到系统 Noto 宋体系；IEEE 工作稿由
+// wired-ieee 使用度量兼容的 TeX Gyre Termes，二者均为 Times 系衬线风格。
+#let cn-serif = ("Times New Roman", "Noto Serif CJK SC")
 
 // 仅匹配十进制与科学计数法；不匹配布尔、空串与普通文本。
 #let numeric-regex = regex("^-?[0-9]+(\\.[0-9]+)?([eE][+-]?[0-9]+)?$")
@@ -88,8 +89,8 @@
   body,
 )
 
-// 表头单元格：浅底加粗，配合 table.header 使用（table.header 本身不接受 fill）。
-#let header-cell(body) = table.cell(fill: luma(238), strong(body))
+// 三线表表头单元格：不使用底色和竖线，仅加粗。
+#let header-cell(body) = strong(body)
 
 // 读取 CSV 产物并渲染为带表头的表格。
 //
@@ -119,18 +120,21 @@
       left
     }
   })
-  let to-cells(row, shaded) = picked.map(i => {
+  let to-cells(row) = picked.map(i => {
     let content = cell-value(row.at(i), digits: digits)
-    if shaded { table.cell(fill: luma(248), content) } else { content }
+    content
   })
-  let body-content = body-rows.enumerate().map(((i, row)) => to-cells(row, calc.even(i))).flatten()
+  let body-content = body-rows.map(row => to-cells(row)).flatten()
   let table-content = table(
     columns: picked.len(),
     align: aligns,
-    inset: (x: 6pt, y: 4pt),
-    stroke: 0.4pt + luma(170),
+    inset: (x: 4pt, y: 3pt),
+    stroke: none,
+    table.hline(stroke: 0.8pt),
     table.header(..picked.map(i => header-cell(header.at(i)))),
+    table.hline(stroke: 0.45pt),
     ..body-content,
+    table.hline(stroke: 0.8pt),
   )
   if caption != none {
     figure(kind: table, supplement: [表], caption: caption, table-content)
@@ -154,11 +158,14 @@
   table(
     columns: (auto, auto, 1fr),
     align: (left, right, left),
-    inset: (x: 6pt, y: 4pt),
-    stroke: 0.4pt + luma(170),
+    inset: (x: 4pt, y: 3pt),
+    stroke: none,
+    table.hline(stroke: 0.8pt),
     table.header(header-cell([字段]), header-cell([数值]), header-cell([说明])),
+    table.hline(stroke: 0.45pt),
     ..entries.map(((key, desc)) => row-of(key, desc)).flatten(),
     ..(if include-rest { rest.map(key => row-of(key, "")) } else { () }).flatten(),
+    table.hline(stroke: 0.8pt),
   )
 }
 

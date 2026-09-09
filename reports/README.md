@@ -1,13 +1,15 @@
 # 📊 实验报告与论文工作稿（Typst）
 
-本目录存放用 Typst 编写的实验报告与论文工作稿。两者都是时点性交付物：头部记录所引用 run 的 ID 与
-git 提交，正文数值全部程序化读取自 `outputs/` 产物，看到的每个数字都能溯源到具体 run。
-`docs/` 只保留可复现的定性结论，两者互补——报告给出某次实验的定量快照，docs 沉淀跨版本
-仍然成立的结论；报告不回写 docs/。
+本目录存放用 Typst 编写的实验报告、论文工作稿与方法说明。带实验数据的工作稿会在头部记录所引用 run 的
+ID 与 git 提交，正文数值全部程序化读取自 `outputs/` 产物，看到的每个数字都能溯源到具体 run；纯方法说明
+不读取运行产物，只整理控制律、实验口径与验证边界。`docs/` 沉淀跨版本仍然成立的可复现结论；报告给出某次
+实验的定量快照或面向写作的方法整理，且不回写 docs/。
 
 ## 前置要求
 
 - Typst CLI ≥ 0.14（在 0.15.0 上验证通过），需能直接执行 `typst` 命令；
+- 本地安装中文适配版 `@local/wired-ieee:1.0.0`；论文与方法说明统一采用 IEEE 双栏会议版式，
+  西文使用 Times 系的 TeX Gyre Termes，中文回退到 Noto Serif CJK SC；
 - 简体中文字体 Noto Serif CJK SC 与 Noto Sans CJK SC：缺字体时编译不报错，
   但对应文字会渲染成方框；
 - 首次编译需联网下载 `@preview/mitex` 包（0.2.7 已验证），之后使用本地缓存，
@@ -19,11 +21,14 @@ git 提交，正文数值全部程序化读取自 `outputs/` 产物，看到的�
 
 ```bash
 typst compile --root . reports/wired_demo.typ
+typst compile --root . reports/force_control_comparison.typ
 ```
 
 `--root .` 授权 Typst 读取仓库内文件（表格与图直接来自 `outputs/`）。
-输出 `reports/wired_demo.pdf`；产物 PDF 不入库，
+分别输出对应的 `reports/*.pdf`；产物 PDF 不入库，
 `reports/*.pdf` 已加入 `.gitignore`。
+
+`wired_demo.typ` 与 `force_control_comparison.typ` 均使用中文适配的 IEEE 双栏会议模板。后者是一份简短的方法说明，汇总位置式 PID、刚度感知位置增量限幅、二阶导纳与二阶直接力矩 ADRC 的控制律和当前验证边界；它不读取实验产物，也不替代研究脚本给出的统计结论。报告表格统一采用三线表，不使用竖线或交替底色。
 
 ## LaTeX 公式的双反斜杠约定
 
