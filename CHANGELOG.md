@@ -9,6 +9,8 @@
 
 ### 变更
 
+- 仿真步进会话迁入 `simulation/session.py`，摩擦估计、触觉滑移与逐点摩擦算法迁入
+  `perception/`；原模块路径保留完整兼容导出，仿真循环与算法数值行为不变。
 - `dmgripper-hardware` 新增延迟打开的 PySerial 传输和仅发送状态查询帧的单次反馈刷新；
   `robotiq-hardware` 新增严格校验的 `position()` 反馈读取与不可变命令收据。两条路径均不自动
   连接、激活或启动设备。

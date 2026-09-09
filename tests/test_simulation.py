@@ -7,7 +7,19 @@ from dataclasses import dataclass, field
 import mujoco
 import pytest
 
-from parallel_gripper_tactile.simulation import SimulationSession
+from parallel_gripper_tactile.simulation import Experiment, SimulationSession
+from parallel_gripper_tactile.simulation.session import (
+    Experiment as SessionExperiment,
+)
+from parallel_gripper_tactile.simulation.session import (
+    SimulationSession as SessionSimulationSession,
+)
+
+
+def test_public_simulation_imports_reexport_session_objects() -> None:
+    """稳定入口与新实现路径导出同一对象。"""
+    assert Experiment is SessionExperiment
+    assert SimulationSession is SessionSimulationSession
 
 
 def _model() -> mujoco.MjModel:

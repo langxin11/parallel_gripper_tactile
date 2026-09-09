@@ -4,11 +4,19 @@ import math
 
 import pytest
 
+import parallel_gripper_tactile.friction_estimation as legacy_friction
+import parallel_gripper_tactile.perception.friction as canonical_friction
 from parallel_gripper_tactile.friction_estimation import (
     ConservativeFrictionEstimator,
     FrictionEstimatorConfig,
     FrictionProbeObservation,
 )
+
+
+def test_legacy_module_preserves_friction_public_object_identity() -> None:
+    """旧入口导出的公共对象必须与新 perception 实现保持同一对象。"""
+    for name in legacy_friction.__all__:
+        assert getattr(legacy_friction, name) is getattr(canonical_friction, name)
 
 
 def _update(

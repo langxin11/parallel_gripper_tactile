@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Protocol, TypeVar
 import math
+from typing import Protocol, TypeVar
 
 import mujoco
 
-from .timing import SimulationTimer
+from ..timing import SimulationTimer
 
 SampleT = TypeVar("SampleT")
 

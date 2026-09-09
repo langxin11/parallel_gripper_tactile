@@ -6,6 +6,10 @@ import inspect
 import numpy as np
 import pytest
 
+import parallel_gripper_tactile.perception.slip as canonical_slip
+import parallel_gripper_tactile.perception.taxels as canonical_taxels
+import parallel_gripper_tactile.tactile_slip as legacy_slip
+import parallel_gripper_tactile.taxel_friction as legacy_taxels
 from parallel_gripper_tactile.friction_estimation import FrictionEstimatorConfig
 from parallel_gripper_tactile.tactile_slip import (
     TactileFeatures,
@@ -14,6 +18,14 @@ from parallel_gripper_tactile.tactile_slip import (
     TactileFeatureComputer,
 )
 from parallel_gripper_tactile.taxel_friction import TaxelFrictionObserver
+
+
+def test_legacy_perception_modules_preserve_public_object_identity():
+    """旧触觉入口导出的对象必须与新 perception 实现保持同一对象。"""
+    for name in legacy_slip.__all__:
+        assert getattr(legacy_slip, name) is getattr(canonical_slip, name)
+    for name in legacy_taxels.__all__:
+        assert getattr(legacy_taxels, name) is getattr(canonical_taxels, name)
 
 
 def test_interface_excludes_privileged_inputs():

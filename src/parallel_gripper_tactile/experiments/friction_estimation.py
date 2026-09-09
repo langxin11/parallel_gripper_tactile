@@ -16,12 +16,12 @@ import yaml
 
 from ..control import ForceControlObservation, ForceControlReference, NormalForceController
 from ..force_scheduling import OracleTargetForceScheduler
-from ..friction_estimation import (
+from ..perception.friction import (
     FrictionEstimate,
     FrictionEstimatorConfig,
 )
-from ..tactile_slip import TactileFeatureComputer, TactileFrictionEstimator, TactileSlipConfig
-from ..taxel_friction import (
+from ..perception.slip import TactileFeatureComputer, TactileFrictionEstimator, TactileSlipConfig
+from ..perception.taxels import (
     ForceOnlySlipConfig,
     ForceOnlySlipObservation,
     ForceOnlyTaxelSlipDetector,

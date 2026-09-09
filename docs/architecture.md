@@ -55,9 +55,9 @@ manifest。
 | `tactile.py`、`contact_taxels.py` | 把不同后端统一为局部 `(3, rows, cols)` 力数组 | 决定目标力或控制状态 |
 | `force_scheduling.py` | 由切向载荷和摩擦系数生成受限的平均单侧目标力 | 读取 MuJoCo 状态或直接写执行器 |
 | `packages/robotiq_grasp_core` | 在整数命令空间执行稳定判定、单 tick 增益估计、HOLD 与安全动作决策；`discrete_force_control.py` 保留兼容导出 | 推进仿真、读取 oracle 刚度或依赖 DM 控制核 |
-| `tactile_slip.py` | 仅由触觉时序生成变化评分，持续确认后冻结摩擦候选 | 读取外部载荷、探测命令、真值 `μ` 或物体运动 |
-| `friction_estimation.py` | 保留历史估计器和估计结果结构；旧检测器不进入当前实验 | 被当前实验实例化以使用残差检测 |
-| `taxel_friction.py` | 筛选逐 taxel 接触，并用局部摩擦比趋势和剪切重分配生成纯力局部起滑候选 | 把未验证的局部候选直接用于目标力调度 |
+| `perception/slip.py` | 仅由触觉时序生成变化评分，持续确认后冻结摩擦候选；`tactile_slip.py` 保留兼容导出 | 读取外部载荷、探测命令、真值 `μ` 或物体运动 |
+| `perception/friction.py` | 保留历史估计器和估计结果结构；`friction_estimation.py` 保留兼容导出 | 被当前实验实例化以使用残差检测 |
+| `perception/taxels.py` | 筛选逐 taxel 接触，并用局部摩擦比趋势和剪切重分配生成纯力局部起滑候选；`taxel_friction.py` 保留兼容导出 | 把未验证的局部候选直接用于目标力调度 |
 | `control.py` | 接触状态、力语义、MIT 命令与法向力外环 | 创建输出目录或解析 CLI |
 | `experiments/` | 定义阶段机、仿真循环、trace 字段和指标 | 组织跨条件批量研究 |
 | `runners/` | 管理一次运行的输入快照、experiment 调用、产物登记和失败保留 | 展示 Rich 表格或展开 study 矩阵 |
