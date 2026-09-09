@@ -41,6 +41,7 @@ class PtsReadDiagnostics:
 
     Args:
         received_bytes: 本次等待从串口收到的总字节数。
+        empty_reads: 本次等待中底层串口返回空字节串的次数。
         start_markers: 识别到的起始标志次数。
         end_markers: 识别到的结束标志次数。
         candidate_frames: 已取得完整边界的候选帧数。
@@ -60,6 +61,7 @@ class PtsReadDiagnostics:
     oversize_discards: int
     last_protocol_error: str | None
     raw_hex_preview: str
+    empty_reads: int = 0
 
 
 class PtsReadTimeout(TimeoutError):
@@ -86,6 +88,7 @@ class _DiagnosticsAccumulator:
     _start_tail: bytes = b""
     _end_tail: bytes = b""
     received_bytes: int = 0
+    empty_reads: int = 0
     start_markers: int = 0
     end_markers: int = 0
     candidate_frames: int = 0
@@ -108,6 +111,10 @@ class _DiagnosticsAccumulator:
             self.end_markers, self._end_tail, chunk, END_MARKER
         )
 
+    def record_empty_read(self) -> None:
+        """累计一次在单次底层超时后返回的空读取。"""
+        self.empty_reads += 1
+
     @property
     def marker_tails(self) -> tuple[bytes, bytes]:
         """返回供后续等待继承的起止标志跨分片尾部。"""
@@ -117,6 +124,7 @@ class _DiagnosticsAccumulator:
         """冻结当前状态，避免异常抛出后诊断被后续读取改变。"""
         return PtsReadDiagnostics(
             received_bytes=self.received_bytes,
+            empty_reads=self.empty_reads,
             start_markers=self.start_markers,
             end_markers=self.end_markers,
             candidate_frames=self.candidate_frames,
@@ -352,7 +360,7 @@ class PtsStreamReader:
             packet_timeout_s: 覆盖构造配置的单包总等待时限，单位 s。
 
         Raises:
-            PtsReadTimeout: 未收到有效包时达到总时限，或底层读取未返回数据。
+            PtsReadTimeout: 未收到有效包时达到总时限。
         """
         timeout_s = self._packet_timeout_s if packet_timeout_s is None else packet_timeout_s
         if (
@@ -369,10 +377,6 @@ class PtsStreamReader:
         )
         deadline = self._monotonic() + float(timeout_s)
         while True:
-            if self._monotonic() >= deadline:
-                self._last_diagnostics = diagnostics.snapshot()
-                raise PtsReadTimeout("等待有效 PTS 包超过总时限", self._last_diagnostics)
-
             frame = self._pop_candidate_frame(diagnostics)
             if frame is not None:
                 try:
@@ -390,13 +394,14 @@ class PtsStreamReader:
                 self._last_diagnostics = diagnostics.snapshot()
                 return packet
 
+            if self._monotonic() >= deadline:
+                self._last_diagnostics = diagnostics.snapshot()
+                raise PtsReadTimeout("等待有效 PTS 包超过总时限", self._last_diagnostics)
+
             chunk = self._serial_port.read(self._read_size)
             if not chunk:
-                self._last_diagnostics = diagnostics.snapshot()
-                raise PtsReadTimeout(
-                    "PapillArray 串口单次读取超时无数据，请检查传感器供电和接线",
-                    self._last_diagnostics,
-                )
+                diagnostics.record_empty_read()
+                continue
             diagnostics.record_chunk(chunk)
             self._start_marker_tail, self._end_marker_tail = diagnostics.marker_tails
             self._buffer.extend(chunk)

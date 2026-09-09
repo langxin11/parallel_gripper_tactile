@@ -143,6 +143,7 @@ def _format_diagnostics(diagnostics: PtsReadDiagnostics) -> str:
     return (
         "协议诊断："
         f"接收字节={diagnostics.received_bytes}，"
+        f"空读取={diagnostics.empty_reads}，"
         f"起始标志={diagnostics.start_markers}，"
         f"结束标志={diagnostics.end_markers}，"
         f"候选帧={diagnostics.candidate_frames}，"
@@ -176,7 +177,10 @@ def run(
     Returns:
         成功为 `0`，采集错误为非零值。
     """
-    args = build_parser().parse_args(argv)
+    parser = build_parser()
+    args = parser.parse_args(argv)
+    if args.packet_timeout < args.timeout:
+        parser.error("--packet-timeout 必须大于或等于 --timeout")
     config = PapillArraySerialConfig(
         port=args.port,
         baud_rate=args.baud,

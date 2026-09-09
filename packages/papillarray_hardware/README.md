@@ -46,9 +46,11 @@ uv run --package papillarray-hardware papillarray-probe --port /dev/ttyACM0
 
 `--port` 必填；`--baud`、`--rate`、`--expected-sensors`、`--count`、`--timeout` 和
 `--packet-timeout` 分别默认为 `115200`、`500`、`2`、`10`、`1` 秒和 `3` 秒。`--timeout` 是
-一次底层串口 `read()` 的超时；`--packet-timeout` 是等待一个校验通过 PTS 包的总时限，即使设备
-持续输出噪声、坏帧或半包也会退出。由于底层 `read()` 最多可阻塞 `--timeout` 秒，实际总等待可能
-比 `--packet-timeout` 晚至多一个单次读取周期。例如单传感器部署可显式写为：
+一次底层串口 `read()` 的超时；`--packet-timeout` 是等待一个校验通过 PTS 包的总时限，必须不小于
+`--timeout`。Controller 在首次收到 `f<rate>\n` 配置命令后可能存在启动延迟：一次空读取不会立即
+令探针失败，而会在 `--packet-timeout` 到达前继续读取。即使设备持续输出噪声、坏帧或半包也会在总
+时限退出。由于底层 `read()` 最多可阻塞 `--timeout` 秒，实际总等待可能比 `--packet-timeout` 晚至多
+一个单次读取周期。例如单传感器部署可显式写为：
 
 ```sh
 uv run --package papillarray-hardware papillarray-probe \
@@ -62,7 +64,7 @@ uv run --package papillarray-hardware papillarray-probe \
 时为 `null`。计数器按无符号 32 位半模规则判定，因而重复／乱序不会被误报为巨量丢包。传感器数
 不符、协议错误或超时会在标准错误给出诊断并以非零状态退出。
 
-若探针超时，标准错误会输出一次等待的协议诊断，包括“接收字节”“起始标志”“结束标志”“候选帧”、
+若探针超时，标准错误会输出一次等待的协议诊断，包括“接收字节”“空读取”“起始标志”“结束标志”“候选帧”、
 “校验失败”“结构失败”“超长丢弃”“最后协议错误”和最多 64 字节的“原始十六进制预览”。例如
 持续收到非 PTS 数据时，可预期类似：
 

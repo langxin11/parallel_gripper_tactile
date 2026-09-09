@@ -381,14 +381,56 @@ def test_stream_reader_discards_oversize_half_packet_and_times_out() -> None:
     reader = PtsStreamReader(
         FakeReadableSerial([START_MARKER + b"x" * 40, b""]),
         max_packet_bytes=32,
+        packet_timeout_s=3.0,
+        monotonic=StepClock(),
     )
 
-    with pytest.raises(PtsReadTimeout, match="超时无数据") as caught:
+    with pytest.raises(PtsReadTimeout, match="总时限") as caught:
         reader.read_packet()
 
     diagnostics = caught.value.diagnostics
     assert diagnostics.oversize_discards == 1
     assert diagnostics.received_bytes == len(START_MARKER) + 40
+
+
+def test_stream_reader_accepts_packet_after_initial_empty_reads() -> None:
+    """首次配置流后的若干次空读取不应抢先终止总启动等待。"""
+    packet_data = build_packet_data(
+        packet_counter=129,
+        timestamp_us=777_889_005,
+        sensors=[{"pillars": [], "global": (6.0, 5.0, 4.0, 0.6, 0.5, 0.4)}],
+    )
+    frame = START_MARKER + packet_data + END_MARKER
+    reader = PtsStreamReader(
+        FakeReadableSerial([b"", b"", frame]),
+        packet_timeout_s=4.0,
+        monotonic=StepClock(),
+    )
+
+    packet = reader.read_packet()
+
+    assert packet.packet_counter == 129
+    assert reader.last_diagnostics is not None
+    assert reader.last_diagnostics.empty_reads == 2
+    assert reader.last_diagnostics.received_bytes == len(frame)
+
+
+def test_stream_reader_empty_reads_reach_total_deadline_with_diagnostics() -> None:
+    """持续空读取应在总时限退出并冻结准确的空读取次数。"""
+    reader = PtsStreamReader(
+        FakeReadableSerial([b""] * 10),
+        packet_timeout_s=3.0,
+        monotonic=StepClock(),
+    )
+
+    with pytest.raises(PtsReadTimeout, match="总时限") as caught:
+        reader.read_packet()
+
+    diagnostics = caught.value.diagnostics
+    assert diagnostics.empty_reads == 2
+    assert diagnostics.received_bytes == 0
+    assert diagnostics.raw_hex_preview == ""
+    assert reader.last_diagnostics == diagnostics
 
 
 def test_stream_reader_continuous_noise_reaches_total_deadline_with_diagnostics() -> None:
@@ -413,7 +455,8 @@ def test_stream_reader_counts_markers_across_chunks() -> None:
     """跨串口分片拆开的起止标志仍各计数一次。"""
     reader = PtsStreamReader(
         FakeReadableSerial([b"noise\x55\x66", b"\x77\x88bad\xaa", b"\xbb\xcc\xdd"]),
-        monotonic=lambda: 0.0,
+        packet_timeout_s=3.0,
+        monotonic=StepClock(0.5),
     )
 
     with pytest.raises(PtsReadTimeout) as caught:
@@ -447,7 +490,7 @@ def test_stream_reader_counts_second_packet_markers_across_read_calls() -> None:
                 END_MARKER[2:],
             ]
         ),
-        monotonic=lambda: 0.0,
+        monotonic=StepClock(),
     )
 
     first_packet = reader.read_packet()
@@ -467,7 +510,7 @@ def test_stream_reader_reset_clears_cross_chunk_marker_state() -> None:
     """设备清零前后的字节流边界不能拼成虚假的协议标志。"""
     reader = PtsStreamReader(
         FakeReadableSerial([START_MARKER[:2], b"", START_MARKER[2:], b""]),
-        monotonic=lambda: 0.0,
+        monotonic=StepClock(),
     )
 
     with pytest.raises(PtsReadTimeout):
@@ -498,7 +541,7 @@ def test_stream_reader_classifies_checksum_and_structure_failures() -> None:
                 START_MARKER + bytes(structure_bad) + END_MARKER,
             ]
         ),
-        monotonic=lambda: 0.0,
+        monotonic=StepClock(),
     )
 
     with pytest.raises(PtsReadTimeout) as caught:

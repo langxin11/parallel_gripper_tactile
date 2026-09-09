@@ -193,6 +193,7 @@ def test_probe_reports_timeout_diagnostics_and_passes_packet_timeout() -> None:
     """总时限异常应以非零退出、关闭串口并打印可操作中文字段。"""
     diagnostics = PtsReadDiagnostics(
         received_bytes=96,
+        empty_reads=3,
         start_markers=2,
         end_markers=1,
         candidate_frames=1,
@@ -218,9 +219,21 @@ def test_probe_reports_timeout_diagnostics_and_passes_packet_timeout() -> None:
     assert configurations[0].packet_timeout_s == 2.5
     output = stderr.getvalue()
     assert "接收字节=96" in output
+    assert "空读取=3" in output
     assert "起始标志=2" in output
     assert "校验失败=1" in output
     assert "原始十六进制预览=55667788" in output
+
+
+def test_probe_rejects_packet_timeout_shorter_than_read_timeout(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """总等待小于一次读取超时会破坏启动等待语义，应作为 CLI 参数错误拒绝。"""
+    with pytest.raises(SystemExit) as caught:
+        run(["--port", "/dev/fake", "--timeout", "2", "--packet-timeout", "1"])
+
+    assert caught.value.code == 2
+    assert "--packet-timeout 必须大于或等于 --timeout" in capsys.readouterr().err
 
 
 def test_probe_rejects_sensor_count_mismatch_and_closes_client() -> None:

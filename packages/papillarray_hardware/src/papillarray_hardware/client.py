@@ -92,6 +92,8 @@ class PapillArraySerialConfig:
             raise ValueError("单包总等待时限必须是有限正数")
         if not math.isfinite(self.packet_timeout_s) or self.packet_timeout_s <= 0:
             raise ValueError("单包总等待时限必须是有限正数")
+        if self.packet_timeout_s < self.timeout_s:
+            raise ValueError("单包总等待时限不得小于串口超时")
         if isinstance(self.max_packet_bytes, bool) or not isinstance(self.max_packet_bytes, int):
             raise ValueError("单帧最大长度必须是正整数")
         if self.max_packet_bytes < 11:

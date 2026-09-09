@@ -67,6 +67,8 @@ def test_config_defaults_and_sampling_rate_validation_do_not_open_serial() -> No
         PapillArraySerialConfig(expected_sensors=True)
     with pytest.raises(ValueError, match="总等待"):
         PapillArraySerialConfig(packet_timeout_s=0)
+    with pytest.raises(ValueError, match="不得小于"):
+        PapillArraySerialConfig(timeout_s=2.0, packet_timeout_s=1.0)
 
 
 def test_open_and_commands_are_explicit_and_use_expected_wire_values() -> None:
