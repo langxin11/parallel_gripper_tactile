@@ -4,7 +4,8 @@
 `analysis`／`visualization`、`simulation` 与 `perception` 的首轮迁移；P2 已完成 DM 核首轮
 子域整理与 Robotiq 离散控制核心提取；P3 已建立 DM USB2CAN 状态刷新／MIT 离线适配、
 Robotiq 命令／反馈／离散控制单步，以及 PapillArray PTS v2.0 解析／同步串口边界；受控实机
-验证、异步运行时和记录仍待接入。
+验证、异步运行时和正式记录仍待接入；有限次数的 PapillArray 采集探针和 DM 只读状态探针
+已可用于分链路检查。
 
 本计划记录下一阶段的目标布局与验收顺序，不表示所列包、接口或硬件能力已经落地。
 当前架构仍以 [architecture.md](architecture.md) 为准；实施各阶段时同步更新该文档。
@@ -191,6 +192,16 @@ uv run --package robotiq-hardware pytest packages/robotiq_hardware/tests
 uv run --package papillarray-hardware pytest packages/papillarray_hardware/tests
 ```
 
+同步完成后，首次接线只运行有限次数的只读探针。实际端口须由操作者确认并显式填写：
+
+```bash
+uv run --package papillarray-hardware papillarray-probe --port /dev/ttyACM0 --count 10
+uv run --package dmgripper-hardware dmgripper-state-probe --port /dev/ttyUSB0 --count 10
+```
+
+第一条命令会发送采样率配置，但不会清零或启用滑动检测；第二条只发送 DM 状态查询帧，
+不会使能、置零或运动。两者都不能替代急停、机械限位检查和正式实机验收。
+
 具体包创建时再确认 `uv run --package` 与测试依赖组的最终命令。硬件依赖优先放在各成员中，
 不加入仿真主包的基础依赖；需要访问真实设备的测试使用显式标记，与默认无硬件测试分开。
 
@@ -264,7 +275,7 @@ DM 与 Robotiq 分别实现调度和故障策略，记录周期、测量年龄�
 | P0：冻结基线（已完成） | 合并旧分支；记录提交、导入路径、依赖和测试基线 | 工作区干净，原有全量门禁通过，列明跳过项 |
 | P1：包内整理（进行中） | 按职责迁移；旧导入路径兼容层；缩减顶层提前导入 | CLI 与导入回归，固定轨迹一致，默认配置与产物字段不变 |
 | P2：隔离控制核（进行中） | DM、Robotiq 独立包、类型、配置与测试；仿真适配器 | 两核独立安装，在无 ROS／MuJoCo 环境导入和运行；无交叉依赖 |
-| P3：纯 Python 采集（进行中） | 已建立 DM 协议／PySerial／单次状态刷新、Robotiq 3.3.12 非阻塞命令／位置反馈，以及 PapillArray PTS 解析／同步串口客户端；待异步运行时、日志及完整设备状态 | fake 串口已覆盖分片、噪声、坏校验、超时、短写与异常关闭；待设备在线后验证真实采集 |
+| P3：纯 Python 采集（进行中） | 已建立 DM 协议／PySerial／单次状态刷新与只读探针、Robotiq 3.3.12 非阻塞命令／位置反馈，以及 PapillArray PTS 解析／同步串口客户端与只读探针；待异步运行时、正式记录及完整设备状态 | fake 串口已覆盖分片、噪声、坏校验、超时、短写、异常关闭和探针命令边界；待设备在线后验证真实采集 |
 | P4：受限动作 | 分设备的使能、反馈读取、动作和停止流程 | 实机确认方向、行程、设备状态与停止；记录量程和实际时序 |
 | P5：基础闭环 | DM 两基线；Robotiq PI 与固定单步；固定目标与 Ramp | 每台夹爪独立验收误差、峰值、丢数据和故障响应；记录参数与阈值 |
 | P6：完整算法迁移 | DM 剩余控制律；Robotiq 自适应／预测；统一分析入口 | 按夹爪同条件比较，区分仿真与实机结论，完成回放和文档同步 |

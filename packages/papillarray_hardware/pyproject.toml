@@ -11,6 +11,9 @@ requires-python = ">=3.12"
 license = { text = "Proprietary" }
 dependencies = ["numpy>=2.0", "pyserial>=3.5,<4"]
 
+[project.scripts]
+papillarray-probe = "papillarray_hardware.cli:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

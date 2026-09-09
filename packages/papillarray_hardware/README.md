@@ -32,6 +32,29 @@ with PapillArraySerialClient(config) as tactile:
 真实硬件接入前，应先确认设备端口和供电，且在具备急停与无负载条件下才执行
 `clear_bias()`。
 
+## 只读采集探针
+
+安装该 workspace 后，可用下列命令采集有限个包并输出 JSON Lines：
+
+```sh
+uv run --package papillarray-hardware papillarray-probe --port /dev/ttyACM0
+```
+
+`--port` 必填；`--baud`、`--rate`、`--expected-sensors`、`--count` 和 `--timeout` 分别默认
+为 `115200`、`500`、`2`、`10` 和 `1` 秒。例如单传感器部署可显式写为：
+
+```sh
+uv run --package papillarray-hardware papillarray-probe \
+  --port /dev/ttyACM0 --expected-sensors 1 --count 20
+```
+
+探针显式打开端口后只会发送一次采样率配置命令 `f<rate>\n`，绝不会发送清零 `z\n` 或滑动
+检测 `S\n`／`s\n` 命令。每一行包含主机单调时钟接收时间、设备包计数器和时间戳、每个传感器的
+全局力／力矩和 pillar 数。`counter_event` 依次标记 `first`、`consecutive`、`gap`、`wrap`、
+`duplicate` 或 `out_of_order`；前进或回绕时 `counter_gap` 是可解释的缺失包数，首次、重复和乱序
+时为 `null`。计数器按无符号 32 位半模规则判定，因而重复／乱序不会被误报为巨量丢包。传感器数
+不符、协议错误或超时会在标准错误给出诊断并以非零状态退出。
+
 ## 协议来源与许可
 
 协议布局与控制命令以本机下列已有实现为参考：

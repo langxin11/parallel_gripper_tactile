@@ -21,6 +21,25 @@ DM4310P 与 USB2CAN 的纯 Python 硬件基础包。当前版本包含可离线�
   报文或寄存器读写；上层必须单独实现互锁、反馈新鲜度与急停策略。
 - 未实现 USB2CANFD，也不对其帧格式或接口做任何假设。
 
+## 只读状态探针
+
+从仓库根目录可直接运行有限次数的 DM4310P 状态探针：
+
+```sh
+uv run --package dmgripper-hardware dmgripper-state-probe \
+  --port /dev/ttyUSB0 --count 10 --interval 0.1 --timeout 0.05
+```
+
+命令输出稳定的 JSON Lines，包含主机单调时钟接收时间、序号、位置、速度、力矩、状态码、
+故障标记和 `within_mechanical_range`。探针固定使用 `motor_id=1`、`master_id=17`、
+`921600` 波特率以及 `make_dm4310p_gripper_config()` 的协议量程；每次只通过
+`DmStateRefresher` 发送状态查询帧。机械行程外的反馈只会标记为 `false`，不会截断反馈、
+改变目标或发送任何运动命令。
+
+安全警告：这是只读查询，不是急停或安全互锁。首次连接前请在无负载、急停可用的条件下核对
+串口端点、CAN ID、固件量程和 USB2CAN 接线；确认设备不会因状态查询而产生意外动作。发生
+异常或按下 Ctrl-C 时，探针会关闭传输并以非零状态退出。
+
 ## 使用示例
 
 ```python

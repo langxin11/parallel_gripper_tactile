@@ -50,6 +50,9 @@
 
 ### 新增
 
+- 新增 `papillarray-probe` 与 `dmgripper-state-probe` 两个有限次数、JSON Lines 输出的纯 Python
+  真机探针。前者只配置触觉采样率并读取 PTS 包，默认不执行清零或滑动检测命令；后者只发送
+  DM 状态查询帧，不包含使能、置零或运动命令。
 - 新增独立 `papillarray-hardware==0.1.0` workspace 成员：参考现有专有驱动提取 PTS v2.0
   协议解析、字节流重同步和显式生命周期同步串口客户端；保留包计数与设备时间戳，Type 7
   仅保存原始字节，并将设备清零／偏置清除作为显式命令而非传感器标定流程。
