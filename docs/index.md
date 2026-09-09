@@ -13,6 +13,8 @@
 
 工程状态与电机/执行器基线见[自研夹爪配置基线与状态](custom-gripper-next-phase.md)。
 
+下一阶段的目录整理、分夹爪控制核与真机接入见[纯 Python 真机联调计划](python-hardware-roadmap.md)。
+
 <pre><code class="language-bash">
 uv sync
 uv run pgt validate configs/robotiq_2f85.yaml
