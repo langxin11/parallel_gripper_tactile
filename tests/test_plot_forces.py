@@ -2,9 +2,19 @@
 
 from __future__ import annotations
 
+from importlib import import_module
 from pathlib import Path
 
 from parallel_gripper_tactile import analysis as plotter
+
+
+force_csv = import_module("parallel_gripper_tactile.analysis.force_csv")
+
+
+def test_analysis_package_preserves_existing_public_object_identity() -> None:
+    """``analysis`` 包继续导出旧模块的同一函数对象。"""
+    assert plotter.read_force_csv is force_csv.read_force_csv
+    assert plotter.plot_forces is force_csv.plot_forces
 
 
 def test_read_force_csv_parses_recorder_columns(tmp_path: Path) -> None:

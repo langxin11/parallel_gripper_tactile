@@ -785,11 +785,11 @@ def run_friction_estimation(
             writer.writeheader()
             writer.writerows(rows)
     if rows and output_plot is not None:
-        from ..friction_plots import plot_summary
+        from ..visualization.friction import plot_summary
 
         plot_summary(output_plot, rows, task=task)
     if rows and output_taxel_plot is not None:
-        from ..friction_plots import plot_taxel_diagnostics
+        from ..visualization.friction import plot_taxel_diagnostics
 
         plot_taxel_diagnostics(output_taxel_plot, rows, task=task)
 

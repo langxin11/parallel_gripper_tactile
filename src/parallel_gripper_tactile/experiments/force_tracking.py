@@ -22,7 +22,7 @@ from ..control import (
     ForceTrackingController,
     NormalForceController,
 )
-from ..plotstyle import paper_figsize, save_publication_figure, science_pyplot
+from ..visualization import paper_figsize, save_publication_figure, science_pyplot
 from ..profiles import (
     STIFFNESS_ESTIMATOR_METHODS,
     AdrcControl,

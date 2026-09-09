@@ -15,7 +15,7 @@ import numpy as np
 import yaml
 
 from parallel_gripper_tactile.experiments.friction_estimation import FrictionEstimationTask
-from parallel_gripper_tactile.plotstyle import (
+from parallel_gripper_tactile.visualization import (
     paper_figsize,
     save_publication_figure,
     science_pyplot,

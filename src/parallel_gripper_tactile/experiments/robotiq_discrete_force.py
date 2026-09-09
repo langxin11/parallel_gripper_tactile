@@ -16,7 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 import yaml
 
 from ..discrete_force_control import DiscreteForceControlConfig, DiscreteForceController
-from ..plotstyle import paper_figsize, save_publication_figure, science_pyplot
+from ..visualization import paper_figsize, save_publication_figure, science_pyplot
 from ..profiles import load_profile
 from ..scenes.robotiq import RobotiqObjectMaterial, load_grasp_model
 from ..tactile import create_tactile_reader

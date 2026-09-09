@@ -4,6 +4,11 @@ from __future__ import annotations
 
 import matplotlib.pyplot as plt
 
+import parallel_gripper_tactile.friction_plots as legacy_friction_plots
+import parallel_gripper_tactile.plotstyle as legacy_plotstyle
+import parallel_gripper_tactile.visualization as visualization
+from parallel_gripper_tactile.visualization import friction
+from parallel_gripper_tactile.visualization import plotstyle
 from parallel_gripper_tactile.plotstyle import (
     COLUMN_WIDTH_IN,
     FULL_WIDTH_FONT_SCALE,
@@ -11,6 +16,29 @@ from parallel_gripper_tactile.plotstyle import (
     apply_paper_style,
     science_pyplot,
 )
+
+
+def test_visualization_preserves_existing_plotstyle_object_identity() -> None:
+    """旧 ``plotstyle`` 路径与新 ``visualization`` 入口导出同一对象。"""
+    for name in visualization.__all__:
+        if hasattr(plotstyle, name):
+            assert getattr(legacy_plotstyle, name) is getattr(visualization, name)
+    legacy_names = {name for name in dir(legacy_plotstyle) if not name.startswith("_")}
+    implementation_names = {name for name in dir(plotstyle) if not name.startswith("_")}
+    assert legacy_names == implementation_names
+    for name in legacy_names:
+        assert getattr(legacy_plotstyle, name) is getattr(plotstyle, name)
+
+
+def test_visualization_preserves_existing_friction_plot_object_identity() -> None:
+    """旧 ``friction_plots`` 路径与新摩擦绘图模块导出同一函数。"""
+    assert legacy_friction_plots.plot_summary is friction.plot_summary
+    assert legacy_friction_plots.plot_taxel_diagnostics is friction.plot_taxel_diagnostics
+    legacy_names = {name for name in dir(legacy_friction_plots) if not name.startswith("_")}
+    implementation_names = {name for name in dir(friction) if not name.startswith("_")}
+    assert legacy_names == implementation_names
+    for name in legacy_names:
+        assert getattr(legacy_friction_plots, name) is getattr(friction, name)
 
 
 def test_science_pyplot_applies_base_rc_params() -> None:

@@ -49,6 +49,8 @@ manifest。
 | --- | --- | --- |
 | `config/profiles.py` | 用冻结的 Pydantic 模型校验 YAML，并以 YAML 所在目录解析相对路径；`profiles.py` 仅保留兼容导出 | 启动 MuJoCo 或写运行结果 |
 | `artifacts/` | 管理运行目录、输入快照、manifest 与安全清理；`run_artifacts.py` 仅保留兼容导出 | 推进仿真或决定实验控制逻辑 |
+| `analysis/` | 读取触觉力轨迹并提供基础分析；原 `analysis` 导入路径由同名包兼容 | 设定论文样式或改变实验数据口径 |
+| `visualization/` | 提供论文绘图样式与摩擦检测图；`plotstyle.py`、`friction_plots.py` 仅保留兼容导出 | 读取控制状态或重新计算实验指标 |
 | `scenes/` | 装配 MJCF、物体材料、碰撞几何和求解选项 | 控制算法、指标统计 |
 | `tactile.py`、`contact_taxels.py` | 把不同后端统一为局部 `(3, rows, cols)` 力数组 | 决定目标力或控制状态 |
 | `force_scheduling.py` | 由切向载荷和摩擦系数生成受限的平均单侧目标力 | 读取 MuJoCo 状态或直接写执行器 |
@@ -172,7 +174,7 @@ DMgripper 的二阶导纳基线另由 `packages/dm_grasp_core` 独立包提供�
 
 ## 科研绘图公共层
 
-`plotstyle.py` 只负责样式、物理尺寸与文件导出，不处理实验数据和统计。
+`visualization/plotstyle.py` 只负责样式、物理尺寸与文件导出，不处理实验数据和统计。
 `science_pyplot()` 注册 SciencePlots 并应用统一中英文字体；`paper_figsize()` 提供单栏和跨栏宽度；
 `save_publication_figure()` 保存同名 PDF 与 PNG，保留画布尺寸并由调用方关闭图像。
 实验入口负责面板组织、标签与图例，runner 或 CLI 负责产物登记。视频叠加面板不属于论文图。

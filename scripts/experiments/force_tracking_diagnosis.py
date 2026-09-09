@@ -19,7 +19,7 @@ from parallel_gripper_tactile.experiments.force_tracking import (
     CONTROLLER_VARIANTS,
     ControllerVariant,
 )
-from parallel_gripper_tactile.plotstyle import (
+from parallel_gripper_tactile.visualization import (
     FULL_WIDTH_FONT_SCALE,
     paper_figsize,
     save_publication_figure,

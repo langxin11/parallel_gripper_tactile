@@ -31,7 +31,7 @@ import tempfile
 
 import numpy as np
 
-from ..plotstyle import FULL_WIDTH_FONT_SCALE, PAPER_FONT_STACK, science_pyplot
+from ..visualization import FULL_WIDTH_FONT_SCALE, PAPER_FONT_STACK, science_pyplot
 from ..scenes.custom import CUBE_PREFIX, GRIPPER_PREFIX
 from ..video import add_arrow_to_scene, encode_video, save_pixels
 

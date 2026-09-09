@@ -18,7 +18,7 @@ import yaml
 from parallel_gripper_tactile.experiments.robotiq_discrete_force import (
     RobotiqDiscreteForceTask,
 )
-from parallel_gripper_tactile.plotstyle import (
+from parallel_gripper_tactile.visualization import (
     paper_figsize,
     save_publication_figure,
     science_pyplot,

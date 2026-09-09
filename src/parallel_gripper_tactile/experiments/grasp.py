@@ -28,7 +28,7 @@ from ..scenes.custom import (
 )
 from ..contact_taxels import ContactTaxelReader
 from ..control import NormalForceController
-from ..plotstyle import (
+from ..visualization import (
     FULL_WIDTH_FONT_SCALE,
     paper_figsize,
     save_publication_figure,

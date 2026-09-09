@@ -1,6 +1,7 @@
 # 目录重构与纯 Python 真机联调计划
 
-日期：2026-09-09。状态：实施中，P0 已完成，P1 已开始。
+日期：2026-09-09。状态：实施中，P0 已完成；P1 已完成 `config`、`artifacts` 与
+`analysis`／`visualization` 的首轮迁移，其他按职责拆分仍待推进。
 
 本计划记录下一阶段的目标布局与验收顺序，不表示所列包、接口或硬件能力已经落地。
 当前架构仍以 [architecture.md](architecture.md) 为准；实施各阶段时同步更新该文档。
@@ -98,8 +99,9 @@ DM 核与 Robotiq 核之间不相互导入。真机不能通过导入仿真主�
 
 迁移清单至少覆盖：`profiles.py` → `config`；`scenes`、`simulation.py` 和触觉读取器
 → `simulation`；`tactile_slip.py`、`taxel_friction.py`、摩擦估计 → `perception`；
-`run_artifacts.py`（保留兼容导出）和 trace 存储 → `artifacts`；`plotstyle.py`、`friction_plots.py`、
-视频展示 → `visualization`。`recording.py` 当前混合演示循环与记录职责，应按函数拆分。
+`run_artifacts.py`（保留兼容导出）和 trace 存储 → `artifacts`；`analysis.py` 已替换为
+保持原导入路径的 `analysis/` 包；`plotstyle.py`、`friction_plots.py`（保留兼容导出）与视频展示
+→ `visualization`。`recording.py` 当前混合演示循环与记录职责，应按函数拆分。
 对同名模块改为包的情况，检查原路径导出、相对导入和包发现配置，不能只批量移动文件。
 
 ## 4. 两类控制算法的独立边界
