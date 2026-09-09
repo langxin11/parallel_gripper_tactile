@@ -130,6 +130,8 @@ class DMAdmittanceController:
         self.transition = None
         self.started_s = 0.0
         self.reference_position_rad = 0.0
+        self._release_steps = 0
+        self._filtered_force_n: float | None = None
         self.last_requested_command: MITCommand | None = None
 
     def _start_approach(self, q: float, now_s: float) -> None:
@@ -148,6 +150,21 @@ class DMAdmittanceController:
         self.transition = None
         self.detector.reset()
         self.admittance.reset()
+        self._release_steps = 0
+        self._filtered_force_n = None
+
+    def _filter_force(self, measured_force_n: float, dt_s: float) -> float:
+        """以精确离散一阶低通滤波平均单侧原始力。
+
+        该公式与 ``NormalForceController`` 的公共力滤波器一致。接触和释放
+        状态机仍直接使用双侧原始力，避免滤波相位滞后影响安全阶段切换。
+        """
+        if self._filtered_force_n is None:
+            self._filtered_force_n = measured_force_n
+        else:
+            alpha = 1.0 - math.exp(-2.0 * math.pi * self.force.filter_cutoff_hz * dt_s)
+            self._filtered_force_n += alpha * (measured_force_n - self._filtered_force_n)
+        return self._filtered_force_n
 
     def step(
         self,
@@ -182,10 +199,15 @@ class DMAdmittanceController:
             or dt <= 0
         ):
             raise ValueError("DM admittance requires finite dual force, feedback and positive dt")
+        measured = 0.5 * (left + right)
         if self.trajectory is None:
             self._start_approach(q, now)
-        if self.state == "force_tracking" and min(left, right) < self.force.contact_threshold_n:
-            self._start_approach(q, now)
+        if self.state == "force_tracking":
+            one_side_released = min(left, right) <= self.force.release_threshold_n
+            self._release_steps = self._release_steps + 1 if one_side_released else 0
+            if self._release_steps >= self.force.release_confirm_steps:
+                self._start_approach(q, now)
+        filtered = self._filter_force(measured, dt)
         emitted_state = self.state
         cfg = self.config
         if self.state == "force_tracking":
@@ -196,8 +218,8 @@ class DMAdmittanceController:
                 reference_position_rad=self.reference_position_rad,
                 measured_position_rad=q,
                 measured_velocity_rad_s=dq,
-                left_force_n=left,
-                right_force_n=right,
+                left_force_n=filtered,
+                right_force_n=filtered,
                 target_force_n=reference.target_force_n,
                 dt_s=dt,
             )
@@ -238,16 +260,16 @@ class DMAdmittanceController:
                     max(q, cfg.position_min_rad), cfg.position_max_rad
                 )
                 self.state = "force_tracking"
+                self._release_steps = 0
                 self.admittance.reset()
         self.last_requested_command = command
         applied = self.apply_held_command(data)
-        measured = 0.5 * (left + right)
         return NormalForceControlCommand(
             state=emitted_state,
             target_force_n=reference.target_force_n,
             measured_force_n=measured,
-            filtered_force_n=measured,
-            force_error_n=reference.target_force_n - measured,
+            filtered_force_n=filtered,
+            force_error_n=reference.target_force_n - filtered,
             position_adjustment=(
                 command.position_rad - self.reference_position_rad
                 if emitted_state == "force_tracking"

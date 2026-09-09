@@ -1,5 +1,6 @@
 """验证共享 DM 导纳适配、阶段转换和独立仿真入口。"""
 
+import math
 from pathlib import Path
 
 from dm_grasp_core import SecondOrderAdmittance, step_admittance
@@ -29,9 +30,29 @@ def _controller():
     return controller, data
 
 
-def _observation(now=0.0, left=0.4, right=0.6):
+def _observation(now=0.0, left=0.6, right=0.8):
     """提供有限的平均单侧力输入。"""
     return ForceControlObservation(now, 0.0, left + right, left, right, 0.004)
+
+
+def test_example_uses_one_newton_target_and_contact_hysteresis():
+    """示例使用 1 N 目标，并让接触进入阈值高于释放阈值。"""
+    profile = load_profile(PROFILE)
+    task = ForceTrackingTask.load(ROOT / "configs/force_tracking/dm_admittance.yaml")
+
+    assert profile.normal_force.target_n == 1.0
+    assert profile.normal_force.contact_threshold_n == 1.0
+    assert profile.normal_force.release_threshold_n == 0.05
+    assert profile.normal_force.admittance.mass_kg == 0.2
+    assert profile.normal_force.admittance.damping_ns_m == 15.0
+    assert profile.normal_force.admittance.stiffness_n_m == 1.0
+    assert profile.normal_force.filter_cutoff_hz == 2.0
+    assert profile.normal_force.admittance.approach_velocity_rad_s == 0.05
+    assert profile.normal_force.admittance.velocity_limit_rad_s == 0.05
+    assert profile.normal_force.admittance.contact_stable_time_s == 0.0
+    assert profile.normal_force.admittance.contact_transition_time_s == 0.05
+    assert profile.normal_force.admittance.approach_feedforward_force_n == 0.5
+    assert all(waypoint.force_n == 1.0 for waypoint in task.reference.waypoints)
 
 
 def test_admittance_rejects_zero_mit_gain_before_first_step():
@@ -49,9 +70,9 @@ def test_tracking_matches_shared_step_before_protocol_quantization():
     controller, data = _controller()
     controller._start_approach(0.0, 0.0)
     controller.state = "force_tracking"
-    expected_admittance = SecondOrderAdmittance(0.02, 0.2, 1.0)
+    expected_admittance = SecondOrderAdmittance(0.2, 15.0, 1.0)
     for i in range(10):
-        target = 0.6
+        target = 0.8
         expected = step_admittance(
             expected_admittance,
             controller.kinematics,
@@ -59,8 +80,8 @@ def test_tracking_matches_shared_step_before_protocol_quantization():
             reference_position_rad=0.0,
             measured_position_rad=0.0,
             measured_velocity_rad_s=0.0,
-            left_force_n=0.4,
-            right_force_n=0.6,
+            left_force_n=0.6,
+            right_force_n=0.8,
             target_force_n=target,
             dt_s=0.004,
         )
@@ -70,19 +91,108 @@ def test_tracking_matches_shared_step_before_protocol_quantization():
         assert controller.last_requested_command == expected
         assert controller.admittance == expected_admittance
         assert data.ctrl[controller.actuator_id] == output.mit.torque
-        assert output.filtered_force_n == 0.5
+        assert output.filtered_force_n == 0.7
+
+
+def test_tracking_filters_force_impulse_before_admittance_integration():
+    """冲击原始力只以低通后的平均单侧力驱动导纳。"""
+    controller, data = _controller()
+    controller._start_approach(0.0, 0.0)
+    controller.state = "force_tracking"
+    target = 1.0
+    controller.step(
+        data,
+        observation=_observation(0.0, left=1.0, right=1.0),
+        reference=ForceControlReference(target),
+    )
+    expected_filtered = 1.0 + (1.0 - math.exp(-2.0 * math.pi * 2.0 * 0.004)) * 8.0
+    expected_admittance = SecondOrderAdmittance(0.2, 15.0, 1.0)
+    expected_admittance.step(
+        0.0, 0.004, maximum_velocity_m_s=0.05 * controller.kinematics.closure_jacobian(0.0)
+    )
+    expected = step_admittance(
+        expected_admittance,
+        controller.kinematics,
+        controller.command_config,
+        reference_position_rad=0.0,
+        measured_position_rad=0.0,
+        measured_velocity_rad_s=0.0,
+        left_force_n=expected_filtered,
+        right_force_n=expected_filtered,
+        target_force_n=target,
+        dt_s=0.004,
+    )
+
+    output = controller.step(
+        data,
+        observation=_observation(0.004, left=9.0, right=9.0),
+        reference=ForceControlReference(target),
+    )
+
+    assert output.measured_force_n == 9.0
+    assert output.filtered_force_n == pytest.approx(expected_filtered)
+    assert 1.0 < output.filtered_force_n < output.measured_force_n
+    assert output.force_error_n == pytest.approx(target - expected_filtered)
+    assert controller.last_requested_command == expected
+
+
+def test_tracking_filter_holds_constant_input_and_resets_for_reapproach():
+    """恒定输入不产生滤波偏差，复位和重新接近不保留旧滤波状态。"""
+    controller, data = _controller()
+    controller._start_approach(0.0, 0.0)
+    controller.state = "force_tracking"
+    reference = ForceControlReference(1.0)
+    for index in range(3):
+        output = controller.step(
+            data,
+            observation=_observation(index * 0.004, left=0.8, right=0.8),
+            reference=reference,
+        )
+        assert output.filtered_force_n == pytest.approx(0.8)
+    controller.reset()
+    assert controller._filtered_force_n is None
+    controller._start_approach(0.0, 0.02)
+    output = controller.step(
+        data,
+        observation=_observation(0.02, left=0.2, right=0.2),
+        reference=reference,
+    )
+    assert output.filtered_force_n == pytest.approx(0.2)
 
 
 def test_approach_transition_contact_loss_and_reset():
-    """接触确认后经过速度过渡，单侧脱离重新接近，复位不残留状态。"""
+    """接触确认后经过速度过渡，单侧持续脱离才重新接近。"""
     controller, data = _controller()
-    reference = ForceControlReference(0.5)
-    for now in (0.0, 0.05, 0.101):
-        controller.step(data, observation=_observation(now), reference=reference)
+    reference = ForceControlReference(1.0)
+    controller.step(
+        data,
+        observation=_observation(0.0, left=1.1, right=1.2),
+        reference=reference,
+    )
+    controller.step(
+        data,
+        observation=_observation(0.001, left=1.1, right=1.2),
+        reference=reference,
+    )
     assert controller.state == "contact_transition"
-    controller.step(data, observation=_observation(0.252), reference=reference)
+    controller.step(
+        data,
+        observation=_observation(0.052, left=1.1, right=1.2),
+        reference=reference,
+    )
     assert controller.state == "force_tracking"
-    output = controller.step(data, observation=_observation(0.256, left=0.1), reference=reference)
+    for index in range(controller.force.release_confirm_steps - 1):
+        output = controller.step(
+            data,
+            observation=_observation(0.056 + index * 0.004, left=0.01),
+            reference=reference,
+        )
+        assert output.state == "force_tracking"
+    output = controller.step(
+        data,
+        observation=_observation(0.056 + controller.force.release_confirm_steps * 0.004, left=0.01),
+        reference=reference,
+    )
     assert output.state == "approach"
     assert controller.admittance.displacement_m == 0.0
     controller.reset()

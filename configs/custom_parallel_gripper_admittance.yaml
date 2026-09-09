@@ -17,8 +17,8 @@ control:
     kd: 5.0
     t_ff: 0.0
   force:
-    target_n: 0.5
-    contact_threshold_n: 0.2
+    target_n: 1.0
+    contact_threshold_n: 1.0
     contact_confirm_steps: 5
     release_threshold_n: 0.05
     release_confirm_steps: 25
@@ -26,7 +26,7 @@ control:
     ki: 0.0
     kd: 0.0
     max_position_adjustment: 0.15
-    filter_cutoff_hz: 20.0
+    filter_cutoff_hz: 2.0
     sensor_taxel_normal_noise_std_n:
     - 0.0066666667
     - 0.0133333333
@@ -53,20 +53,20 @@ control:
       position_feedforward_gain: 0.25
       torque_feedforward_gain: 1.0
     admittance:
-      mass_kg: 0.02
-      damping_ns_m: 0.2
+      mass_kg: 0.2
+      damping_ns_m: 15.0
       stiffness_n_m: 1.0
       feedforward_ratio: 0.2
-      contact_stable_time_s: 0.1
-      contact_transition_time_s: 0.15
-      approach_velocity_rad_s: 0.2
+      contact_stable_time_s: 0.0
+      contact_transition_time_s: 0.05
+      approach_velocity_rad_s: 0.05
       approach_acceleration_rad_s2: 0.5
       approach_jerk_rad_s3: 2.0
-      approach_feedforward_force_n: 2.0
+      approach_feedforward_force_n: 0.5
       approach_feedforward_ratio: 1.0
       position_min_rad: 0.0
       position_max_rad: 1.5707963267948966
-      velocity_limit_rad_s: 0.3
+      velocity_limit_rad_s: 0.05
       closing_direction: 1
       feedforward_torque_limit_nm: 4.0
       mit_torque_limit_nm: 4.0
