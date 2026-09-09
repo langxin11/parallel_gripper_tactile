@@ -1,18 +1,21 @@
 # dmgripper-hardware 0.1.0
 
-DM4310P 与 USB2CAN 的纯 Python 硬件基础包。当前版本只包含可离线验证的协议编码、反馈解码、
-分段接收帧重组和内存 `FakeTransport`；没有串口、CAN、ROS、MuJoCo、触觉采集或 Robotiq 依赖。
+DM4310P 与 USB2CAN 的纯 Python 硬件基础包。当前版本包含可离线验证的协议编码、反馈解码、
+分段接收帧重组、内存 `FakeTransport`、延迟打开的 `PySerialTransport`，以及只读
+`DmStateRefresher`；没有 CAN、ROS、MuJoCo、触觉采集或 Robotiq 依赖。
 
 ## 边界与安全性
 
 - `Usb2CanProtocol` 只返回或解释 `bytes`，不会打开端口，也不会向设备发送命令。
-- `ByteTransport` 是未来真实串口适配器的最小接口；本批次只实现不接触硬件的
-  `FakeTransport`。因此安装本包或运行其测试不会访问 USB2CAN。
+- `PySerialTransport` 在构造时不会导入 PySerial 或打开端口；只有调用方显式 `open` 才会
+  创建串口。其工厂可注入，测试只使用内存 fake，不访问 `/dev`。
+- `Usb2CanDeviceConfig` 严格校验端点、波特率、不同且非零的电机／主机 CAN ID，以及有限正的
+  刷新超时。默认波特率为 `921600`。
 - `MotorLimits` 没有默认值。实际的 PMAX、VMAX、TMAX 必须由调用方按固件读回值或已验证部署
   配置显式传入，不能仅根据 DM4310P 型号猜测。
-- 本包保留 MIT、位置速度、速度、力位混合、位置速度 CSP、速度 CSP、力矩 CSP、状态刷新与
-  寄存器报文的协议格式，但不实现使能、失能、控制模式切换或寄存器写入的执行流程。上层硬件
-  适配器必须单独实现互锁、时效检查、反馈新鲜度与急停策略。
+- `DmStateRefresher.refresh_once()` 唯一允许写入 `make_feedback_request()` 创建的状态刷新帧；
+  它会按总超时读取、分帧、忽略噪声与无关帧并返回目标反馈。它不实现使能、失能、置零、控制
+  报文或寄存器读写；上层必须单独实现互锁、反馈新鲜度与急停策略。
 - 未实现 USB2CANFD，也不对其帧格式或接口做任何假设。
 
 ## 使用示例
@@ -26,6 +29,28 @@ packet = protocol.make_mit_packet(0x01, MitCommand(0.0, 0.0, 0.0, 0.0, 0.0))
 
 # packet 仅是 30 字节；此处不发生 I/O。
 assert len(packet) == 30
+```
+
+## 只读状态刷新示例
+
+下例显示显式生命周期。真正使用 `PySerialTransport` 前，应先在无负载、急停可用的条件下核对
+端点、CAN ID 和量程；构造刷新器本身不会执行 I/O。
+
+```python
+from dmgripper_hardware import (
+    DmStateRefresher,
+    MotorLimits,
+    PySerialTransport,
+    Usb2CanDeviceConfig,
+    Usb2CanProtocol,
+)
+
+config = Usb2CanDeviceConfig("/dev/ttyUSB0", motor_id=1, master_id=17, timeout_s=0.05)
+protocol = Usb2CanProtocol(MotorLimits(-1.7, 1.7, -8.0, 8.0, -4.0, 4.0))
+refresher = DmStateRefresher(config, protocol, PySerialTransport())
+
+with refresher:
+    feedback = refresher.refresh_once()
 ```
 
 ## 协议来源

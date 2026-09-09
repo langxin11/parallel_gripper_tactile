@@ -179,6 +179,12 @@ source = { editable = "packages/dm_grasp_core" }
 name = "dmgripper-hardware"
 version = "0.1.0"
 source = { editable = "packages/dmgripper_hardware" }
+dependencies = [
+    { name = "pyserial" },
+]
+
+[package.metadata]
+requires-dist = [{ name = "pyserial", specifier = ">=3.5,<4" }]
 
 [[package]]
 name = "etils"

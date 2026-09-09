@@ -12,10 +12,13 @@ MAX_POSITION = 255
 
 
 class RobotiqPositionBackend(Protocol):
-    """接收一个已校验 Robotiq 位置命令的后端协议。"""
+    """接收命令并读取 Robotiq 位置反馈的后端协议。"""
 
     def send_position(self, position: int) -> None:
         """向底层设备发送一个 0–255 的位置命令。"""
+
+    def read_position(self) -> int:
+        """读取并返回一个已校验的 0–255 位置反馈。"""
 
 
 class PyRobotiqGripper3312Like(Protocol):
@@ -33,6 +36,9 @@ class PyRobotiqGripper3312Like(Protocol):
         start: bool,
     ) -> object:
         """执行 3.3.12 版本的位置命令。"""
+
+    def position(self) -> object:
+        """读取 3.3.12 版本的位置反馈。"""
 
 
 @dataclass(frozen=True, slots=True)
@@ -72,31 +78,45 @@ def validate_position_command(position: object) -> int:
     return value
 
 
+@dataclass(frozen=True, slots=True)
+class RobotiqCommandReceipt:
+    """一次成功提交给 Robotiq 后端的最小命令收据。"""
+
+    requested_position: int
+
+    def __post_init__(self) -> None:
+        """确保收据中的请求位置保持与设备命令相同的边界。"""
+        object.__setattr__(
+            self, "requested_position", validate_position_command(self.requested_position)
+        )
+
+
 class Robotiq2F85Hardware:
     """通过依赖注入后端控制 Robotiq 2F85。
 
     本类不负责发现、打开或配置串口。只有调用 `move`、`open` 或 `close` 时，
-    才会调用注入后端的 `send_position` 方法。
+    才会调用注入后端的 `send_position` 方法；`read_position` 只调用读取接口。
     """
 
     def __init__(self, backend: RobotiqPositionBackend) -> None:
         """创建一个不自动连接设备的 Robotiq 2F85 适配器。
 
         Args:
-            backend: 实际传输层实现，需提供 `send_position` 方法。
+            backend: 实际传输层实现，需提供 `send_position` 和 `read_position` 方法。
         """
-        if not callable(getattr(backend, "send_position", None)):
-            raise TypeError("backend must provide a callable send_position method")
+        for method_name in ("send_position", "read_position"):
+            if not callable(getattr(backend, method_name, None)):
+                raise TypeError(f"backend must provide a callable {method_name} method")
         self._backend = backend
 
-    def move(self, position: object) -> int:
+    def move(self, position: object) -> RobotiqCommandReceipt:
         """发送一个经过严格校验的 0–255 位置命令。
 
         Args:
             position: 目标位置，只接受整数 0–255。
 
         Returns:
-            实际交给后端的内置 `int` 命令。
+            表示命令已成功交给后端的不可变收据。
 
         Raises:
             TypeError: 输入不是整数，或输入是布尔值。
@@ -104,13 +124,17 @@ class Robotiq2F85Hardware:
         """
         command = validate_position_command(position)
         self._backend.send_position(command)
-        return command
+        return RobotiqCommandReceipt(command)
 
-    def open(self) -> int:
+    def read_position(self) -> int:
+        """读取并严格校验当前 Robotiq 位置反馈。"""
+        return validate_position_command(self._backend.read_position())
+
+    def open(self) -> RobotiqCommandReceipt:
         """发送完全打开命令 0。"""
         return self.move(MIN_POSITION)
 
-    def close(self) -> int:
+    def close(self) -> RobotiqCommandReceipt:
         """发送完全闭合命令 255。"""
         return self.move(MAX_POSITION)
 
@@ -164,3 +188,7 @@ class PyRobotiqGripper3312Backend:
             refreshStatus=False,
             start=False,
         )
+
+    def read_position(self) -> int:
+        """读取并严格校验 3.3.12 `position()` 返回的位置反馈。"""
+        return validate_position_command(self._gripper.position())
