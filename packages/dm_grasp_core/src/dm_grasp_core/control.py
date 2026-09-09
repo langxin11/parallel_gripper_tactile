@@ -297,12 +297,20 @@ class SecondOrderAdmittance:
         self.displacement_m = 0.0
         self.velocity_m_s = 0.0
 
-    def step(self, force_error_n: float, dt_s: float) -> tuple[float, float]:
+    def step(
+        self,
+        force_error_n: float,
+        dt_s: float,
+        maximum_velocity_m_s: float | None = None,
+    ) -> tuple[float, float]:
         """以半隐式欧拉法更新二阶导纳状态。
 
         Args:
             force_error_n: 目标力减测得力，正值推动夹爪继续闭合 (N)。
             dt_s: 本次离散积分步长 (s)。
+            maximum_velocity_m_s: 可选的虚拟闭合速度绝对值上限 (m/s)。给定时在
+                位移积分前裁剪更新后的速度，确保本步虚拟位移增量不超过
+                ``maximum_velocity_m_s * dt_s``；省略时保持既有积分语义。
 
         Returns:
             tuple[float, float]: 更新后的虚拟位移 (m) 与速度 (m/s)。
@@ -325,12 +333,21 @@ class SecondOrderAdmittance:
             or dt_s <= 0.0
         ):
             raise ValueError("二阶导纳参数或积分输入无效")
+        if maximum_velocity_m_s is not None and (
+            not math.isfinite(maximum_velocity_m_s) or maximum_velocity_m_s <= 0.0
+        ):
+            raise ValueError("二阶导纳虚拟速度上限无效")
         acceleration_m_s2 = (
             force_error_n
             - self.damping_ns_m * self.velocity_m_s
             - self.stiffness_n_m * self.displacement_m
         ) / self.mass_kg
         self.velocity_m_s += acceleration_m_s2 * dt_s
+        if maximum_velocity_m_s is not None:
+            self.velocity_m_s = min(
+                max(self.velocity_m_s, -maximum_velocity_m_s),
+                maximum_velocity_m_s,
+            )
         self.displacement_m += self.velocity_m_s * dt_s
         if not all(math.isfinite(value) for value in (self.displacement_m, self.velocity_m_s)):
             raise ValueError("二阶导纳积分结果非有限")

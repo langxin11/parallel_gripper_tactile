@@ -42,6 +42,40 @@ def test_semi_implicit_euler():
     assert (a.displacement_m, a.velocity_m_s) == (0.0, 0.0)
 
 
+def test_admittance_clips_velocity_before_displacement_integration():
+    """虚拟速度限幅必须在更新位移前生效，避免冲击造成单步位移跳变。"""
+    a = SecondOrderAdmittance(1.0, 0.0, 0.0)
+
+    displacement, velocity = a.step(100.0, 0.1, maximum_velocity_m_s=0.2)
+
+    assert velocity == pytest.approx(0.2)
+    assert displacement == pytest.approx(0.02)
+
+
+def test_step_admittance_limits_single_step_displacement_rate():
+    """共享导纳步骤以实测雅可比换算虚拟速度上限后再积分位移。"""
+    admittance = SecondOrderAdmittance(1.0, 0.0, 0.0)
+    measured_position = 0.3
+    dt_s = 0.1
+    maximum_velocity = C.velocity_limit_rad_s * K.closure_jacobian(measured_position)
+
+    step_admittance(
+        admittance,
+        K,
+        replace(C, torque_limit_nm=100.0),
+        reference_position_rad=measured_position,
+        measured_position_rad=measured_position,
+        measured_velocity_rad_s=0.0,
+        left_force_n=0.0,
+        right_force_n=0.0,
+        target_force_n=1_000.0,
+        dt_s=dt_s,
+    )
+
+    assert admittance.velocity_m_s == pytest.approx(maximum_velocity)
+    assert abs(admittance.displacement_m) <= maximum_velocity * dt_s
+
+
 def test_state_saturation():
     """验证 state saturation。"""
     a = SecondOrderAdmittance(1.0, 0.0, 0.0, 10.0, 10.0)
@@ -207,7 +241,7 @@ def test_step_stops_at_mechanical_bound():
     step_admittance(
         a,
         K,
-        replace(C, torque_limit_nm=100.0),
+        replace(C, torque_limit_nm=100.0, velocity_limit_rad_s=1000.0),
         reference_position_rad=0.3,
         measured_position_rad=0.89,
         measured_velocity_rad_s=0.0,

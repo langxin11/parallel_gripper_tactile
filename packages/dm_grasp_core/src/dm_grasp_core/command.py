@@ -178,7 +178,13 @@ def step_admittance(
         ValueError: 导纳积分、运动学或命令约束失败。
     """
     measured_force_n = 0.5 * (float(left_force_n) + float(right_force_n))
-    displacement_m, velocity_m_s = admittance.step(target_force_n - measured_force_n, dt_s)
+    jacobian_m_per_rad = kinematics.closure_jacobian(float(measured_position_rad))
+    maximum_velocity_m_s = config.velocity_limit_rad_s * jacobian_m_per_rad
+    displacement_m, velocity_m_s = admittance.step(
+        target_force_n - measured_force_n,
+        dt_s,
+        maximum_velocity_m_s=maximum_velocity_m_s,
+    )
     closing_direction = config.closing_direction
     reference_closure_m = kinematics.closure(reference_position_rad)
     position_bounds_m = sorted(
@@ -187,11 +193,10 @@ def step_admittance(
             (kinematics.closure(config.position_max_rad) - reference_closure_m) / closing_direction,
         )
     )
-    jacobian_m_per_rad = kinematics.closure_jacobian(float(measured_position_rad))
     displacement_m, velocity_m_s = admittance.limit_state(
         position_bounds_m[0],
         position_bounds_m[1],
-        config.velocity_limit_rad_s * jacobian_m_per_rad,
+        maximum_velocity_m_s,
     )
     return build_mit_command(
         kinematics,

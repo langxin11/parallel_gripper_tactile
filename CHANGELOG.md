@@ -43,6 +43,8 @@
   边界值、触发状态和触发比例。既有 `pid-stiffness-ff`、`full` 及默认比较矩阵保持不变。
 - 新增独立 `dm-grasp-core==0.1.0`，与 ROS 2 DMgripper 共用二阶导纳、运动学、
   平滑接近/接触过渡及 MIT 请求映射；仿真以 uv workspace 引用，ROS 安装固定 wheel。
+- 共享二阶导纳在半隐式欧拉积分中先按机构雅可比换算虚拟速度上限并裁剪，再更新
+  位移，避免单个外环周期越过限速边界生成位置跳变；golden 轨迹按新积分顺序重新生成。
 - `pgt run force-track` 新增显式 `--controller-variant admittance`、可选
   `control.force.admittance` 配置及 4 ms / 0.5 N 示例。仅该变体在每个物理步重算
   MIT 内环，外环按任务周期运行；默认比较矩阵和旧控制器行为不变。
