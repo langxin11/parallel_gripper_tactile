@@ -45,6 +45,8 @@
   平滑接近/接触过渡及 MIT 请求映射；仿真以 uv workspace 引用，ROS 安装固定 wheel。
 - 共享二阶导纳在半隐式欧拉积分中先按机构雅可比换算虚拟速度上限并裁剪，再更新
   位移，避免单个外环周期越过限速边界生成位置跳变；golden 轨迹按新积分顺序重新生成。
+- 新增 DMgripper Ramp 导纳调参入口，候选使用独立输出目录和进程并行，
+  结果按仿真稳定性、完整力跟踪、物理步进侧力峰值和 RMSE 确定性排名。
 - `pgt run force-track` 新增显式 `--controller-variant admittance`、可选
   `control.force.admittance` 配置及 4 ms / 0.5 N 示例。仅该变体在每个物理步重算
   MIT 内环，外环按任务周期运行；默认比较矩阵和旧控制器行为不变。

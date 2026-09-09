@@ -1,0 +1,31 @@
+# DMgripper 二阶导纳的最小可复现 Ramp 参数调优；不进入默认控制器比较矩阵。
+name: dm_admittance_tuning
+profile: ../custom_parallel_gripper_admittance.yaml
+task: ../force_tracking/dm_admittance_ramp.yaml
+materials: [hard]
+seeds: {start: 0, count: 2}
+max_workers: 4
+output_root: ../../outputs/studies
+
+# 固定第一轮选出的二阶导纳和 2 Hz 低通，集中扫描接近与接触切换参数。
+# 排名优先物理步进后左右触觉侧力的平均峰值，不忽略切入跟踪的首个瞬态。
+candidates:
+  - {mass_kg: 0.2, damping_ns_m: 15.0, stiffness_n_m: 1.0, filter_cutoff_hz: 2.0, velocity_limit_rad_s: 0.05, approach_velocity_rad_s: 0.05, contact_stable_time_s: 0.0, contact_transition_time_s: 0.05, approach_feedforward_force_n: 0.5}
+  - {mass_kg: 0.2, damping_ns_m: 15.0, stiffness_n_m: 1.0, filter_cutoff_hz: 2.0, velocity_limit_rad_s: 0.05, approach_velocity_rad_s: 0.05, contact_stable_time_s: 0.0, contact_transition_time_s: 0.05, approach_feedforward_force_n: 1.0}
+  - {mass_kg: 0.2, damping_ns_m: 15.0, stiffness_n_m: 1.0, filter_cutoff_hz: 2.0, velocity_limit_rad_s: 0.05, approach_velocity_rad_s: 0.05, contact_stable_time_s: 0.0, contact_transition_time_s: 0.2, approach_feedforward_force_n: 0.5}
+  - {mass_kg: 0.2, damping_ns_m: 15.0, stiffness_n_m: 1.0, filter_cutoff_hz: 2.0, velocity_limit_rad_s: 0.05, approach_velocity_rad_s: 0.05, contact_stable_time_s: 0.0, contact_transition_time_s: 0.2, approach_feedforward_force_n: 1.0}
+  - {mass_kg: 0.2, damping_ns_m: 15.0, stiffness_n_m: 1.0, filter_cutoff_hz: 2.0, velocity_limit_rad_s: 0.05, approach_velocity_rad_s: 0.05, contact_stable_time_s: 0.02, contact_transition_time_s: 0.05, approach_feedforward_force_n: 0.5}
+  - {mass_kg: 0.2, damping_ns_m: 15.0, stiffness_n_m: 1.0, filter_cutoff_hz: 2.0, velocity_limit_rad_s: 0.05, approach_velocity_rad_s: 0.05, contact_stable_time_s: 0.02, contact_transition_time_s: 0.05, approach_feedforward_force_n: 1.0}
+  - {mass_kg: 0.2, damping_ns_m: 15.0, stiffness_n_m: 1.0, filter_cutoff_hz: 2.0, velocity_limit_rad_s: 0.05, approach_velocity_rad_s: 0.05, contact_stable_time_s: 0.02, contact_transition_time_s: 0.2, approach_feedforward_force_n: 0.5}
+  - {mass_kg: 0.2, damping_ns_m: 15.0, stiffness_n_m: 1.0, filter_cutoff_hz: 2.0, velocity_limit_rad_s: 0.05, approach_velocity_rad_s: 0.05, contact_stable_time_s: 0.02, contact_transition_time_s: 0.2, approach_feedforward_force_n: 1.0}
+  - {mass_kg: 0.2, damping_ns_m: 15.0, stiffness_n_m: 1.0, filter_cutoff_hz: 2.0, velocity_limit_rad_s: 0.1, approach_velocity_rad_s: 0.1, contact_stable_time_s: 0.0, contact_transition_time_s: 0.05, approach_feedforward_force_n: 0.5}
+  - {mass_kg: 0.2, damping_ns_m: 15.0, stiffness_n_m: 1.0, filter_cutoff_hz: 2.0, velocity_limit_rad_s: 0.1, approach_velocity_rad_s: 0.1, contact_stable_time_s: 0.0, contact_transition_time_s: 0.05, approach_feedforward_force_n: 1.0}
+  - {mass_kg: 0.2, damping_ns_m: 15.0, stiffness_n_m: 1.0, filter_cutoff_hz: 2.0, velocity_limit_rad_s: 0.1, approach_velocity_rad_s: 0.1, contact_stable_time_s: 0.0, contact_transition_time_s: 0.2, approach_feedforward_force_n: 0.5}
+  - {mass_kg: 0.2, damping_ns_m: 15.0, stiffness_n_m: 1.0, filter_cutoff_hz: 2.0, velocity_limit_rad_s: 0.1, approach_velocity_rad_s: 0.1, contact_stable_time_s: 0.0, contact_transition_time_s: 0.2, approach_feedforward_force_n: 1.0}
+  - {mass_kg: 0.2, damping_ns_m: 15.0, stiffness_n_m: 1.0, filter_cutoff_hz: 2.0, velocity_limit_rad_s: 0.1, approach_velocity_rad_s: 0.1, contact_stable_time_s: 0.02, contact_transition_time_s: 0.05, approach_feedforward_force_n: 0.5}
+  - {mass_kg: 0.2, damping_ns_m: 15.0, stiffness_n_m: 1.0, filter_cutoff_hz: 2.0, velocity_limit_rad_s: 0.1, approach_velocity_rad_s: 0.1, contact_stable_time_s: 0.02, contact_transition_time_s: 0.05, approach_feedforward_force_n: 1.0}
+  - {mass_kg: 0.2, damping_ns_m: 15.0, stiffness_n_m: 1.0, filter_cutoff_hz: 2.0, velocity_limit_rad_s: 0.1, approach_velocity_rad_s: 0.1, contact_stable_time_s: 0.02, contact_transition_time_s: 0.2, approach_feedforward_force_n: 0.5}
+  - {mass_kg: 0.2, damping_ns_m: 15.0, stiffness_n_m: 1.0, filter_cutoff_hz: 2.0, velocity_limit_rad_s: 0.1, approach_velocity_rad_s: 0.1, contact_stable_time_s: 0.02, contact_transition_time_s: 0.2, approach_feedforward_force_n: 1.0}
+
+# 跟踪段中不低于该占比才算完整 force_tracking。
+minimum_force_tracking_ratio: 0.995
