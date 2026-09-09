@@ -5,6 +5,7 @@ requires-python = ">=3.12"
 [manifest]
 members = [
     "dm-grasp-core",
+    "dmgripper-experiments",
     "dmgripper-hardware",
     "papillarray-hardware",
     "parallel-gripper-tactile",
@@ -175,6 +176,23 @@ wheels = [
 name = "dm-grasp-core"
 version = "0.1.0"
 source = { editable = "packages/dm_grasp_core" }
+
+[[package]]
+name = "dmgripper-experiments"
+version = "0.1.0"
+source = { editable = "packages/dmgripper_experiments" }
+dependencies = [
+    { name = "dm-grasp-core" },
+    { name = "dmgripper-hardware" },
+    { name = "papillarray-hardware" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "dm-grasp-core", editable = "packages/dm_grasp_core" },
+    { name = "dmgripper-hardware", editable = "packages/dmgripper_hardware" },
+    { name = "papillarray-hardware", editable = "packages/papillarray_hardware" },
+]
 
 [[package]]
 name = "dmgripper-hardware"

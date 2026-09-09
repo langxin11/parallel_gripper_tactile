@@ -46,6 +46,7 @@ testpaths = [
     "packages/dm_grasp_core/tests",
     "packages/robotiq_grasp_core/tests",
     "packages/dmgripper_hardware/tests",
+    "packages/dmgripper_experiments/tests",
     "packages/robotiq_hardware/tests",
     "packages/papillarray_hardware/tests",
 ]
@@ -56,12 +57,15 @@ members = [
     "packages/dm_grasp_core",
     "packages/robotiq_grasp_core",
     "packages/dmgripper_hardware",
+    "packages/dmgripper_experiments",
     "packages/robotiq_hardware",
     "packages/papillarray_hardware",
 ]
 
 [tool.uv.sources]
 dm-grasp-core = { workspace = true }
+dmgripper-hardware = { workspace = true }
+papillarray-hardware = { workspace = true }
 robotiq-grasp-core = { workspace = true }
 
 [tool.ruff]
