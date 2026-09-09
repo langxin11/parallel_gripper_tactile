@@ -217,29 +217,32 @@ def parse_packet(data: bytes) -> PtsPacket:
 
     index_size = data[0]
     offsets = _parse_top_level_index(data, index_size)
-    hub = _block_bytes(data, offsets, _TYPE_HUB)
-    if hub is None:
+    hub_bounds = _block_bounds(data, offsets, _TYPE_HUB)
+    if hub_bounds is None:
         raise ProtocolError("PTS 数据包缺少 Type 1 Hub 块")
+    hub = data[slice(*hub_bounds)]
     if len(hub) != 12:
         raise ProtocolError("Type 1 Hub 块长度必须为 12 字节")
 
-    pillar = _block_bytes(data, offsets, _TYPE_PILLAR)
-    global_data = _block_bytes(data, offsets, _TYPE_GLOBAL)
-    if pillar is None or global_data is None:
+    pillar_bounds = _block_bounds(data, offsets, _TYPE_PILLAR)
+    global_bounds = _block_bounds(data, offsets, _TYPE_GLOBAL)
+    if pillar_bounds is None or global_bounds is None:
         raise ProtocolError("PTS 数据包缺少 Type 3 pillar 或 Type 4 global 块")
 
     packet_counter = int.from_bytes(hub[:4], "little")
     timestamp_us = int.from_bytes(hub[4:], "little")
-    pillar_forces, pillar_displacements = _parse_pillar_block(pillar, index_size)
-    global_forces, global_torques = _parse_global_block(global_data, index_size)
-    pillar_slip = _block_bytes(data, offsets, _TYPE_PILLAR_SLIP)
-    sensor_slip = _block_bytes(data, offsets, _TYPE_SENSOR_SLIP)
+    pillar_forces, pillar_displacements = _parse_pillar_block(data, *pillar_bounds, index_size)
+    global_forces, global_torques = _parse_global_block(data, *global_bounds, index_size)
+    pillar_slip_bounds = _block_bounds(data, offsets, _TYPE_PILLAR_SLIP)
+    sensor_slip_bounds = _block_bounds(data, offsets, _TYPE_SENSOR_SLIP)
     slip_states, pillar_friction = (
-        _parse_pillar_slip_block(pillar_slip, index_size) if pillar_slip is not None else ([], [])
+        _parse_pillar_slip_block(data, *pillar_slip_bounds, index_size)
+        if pillar_slip_bounds is not None
+        else ([], [])
     )
     active, reference_loaded, sensor_friction, target_grip = (
-        _parse_sensor_slip_block(sensor_slip, index_size)
-        if sensor_slip is not None
+        _parse_sensor_slip_block(data, *sensor_slip_bounds, index_size)
+        if sensor_slip_bounds is not None
         else ([], [], [], [])
     )
     _validate_sensor_counts(
@@ -251,8 +254,8 @@ def parse_packet(data: bytes) -> PtsPacket:
         reference_loaded,
         sensor_friction,
         target_grip,
-        has_pillar_slip=pillar_slip is not None,
-        has_sensor_slip=sensor_slip is not None,
+        has_pillar_slip=pillar_slip_bounds is not None,
+        has_sensor_slip=sensor_slip_bounds is not None,
     )
 
     return PtsPacket(
@@ -525,141 +528,219 @@ def _parse_top_level_index(data: bytes, index_size: int) -> dict[int, int]:
     return offsets
 
 
-def _block_bytes(data: bytes, offsets: dict[int, int], block_type: int) -> bytes | None:
-    """按顶层索引边界提取一个完整数据块。"""
+def _block_bounds(data: bytes, offsets: dict[int, int], block_type: int) -> tuple[int, int] | None:
+    """按顶层索引返回一个完整数据块在整帧中的绝对范围。"""
     start = offsets.get(block_type)
     if start is None:
         return None
     end = min((offset for offset in offsets.values() if offset > start), default=len(data) - 2)
     if start >= end:
         raise ProtocolError(f"PTS Type {block_type} 的块范围为空或重叠")
-    return data[start:end]
+    return start, end
 
 
-def _parse_pillar_block(block: bytes, index_size: int) -> tuple[list[np.ndarray], list[np.ndarray]]:
-    """解析 Type 3 的每 pillar 力与位移。"""
-    reader = _BlockReader(block)
+def _block_bytes(data: bytes, offsets: dict[int, int], block_type: int) -> bytes | None:
+    """按顶层索引边界提取一个完整数据块。"""
+    bounds = _block_bounds(data, offsets, block_type)
+    return None if bounds is None else data[slice(*bounds)]
+
+
+def _parse_pillar_block(
+    data: bytes, block_start: int, block_end: int, index_size: int
+) -> tuple[list[np.ndarray], list[np.ndarray]]:
+    """解析 Type 3 的每 pillar 力与位移。
+
+    所有嵌套索引均为相对于完整帧数据起点的绝对偏移。
+    """
+    reader = _BlockReader(data, block_start, block_end)
     sensor_count = reader.read_u16()
     sensor_offsets = reader.read_offsets(sensor_count, index_size)
+    _validate_offsets(sensor_offsets, reader.position, block_end, "Type 3 sensor")
+    _require_zero_padding(
+        data,
+        reader.position,
+        sensor_offsets[0] if sensor_offsets else block_end,
+        "Type 3 索引头后的填充",
+    )
     forces: list[np.ndarray] = []
     displacements: list[np.ndarray] = []
     for sensor_index in range(sensor_count):
-        _require_offset(
-            sensor_offsets[sensor_index], reader.position, f"Type 3 sensor {sensor_index}"
+        sensor_start = sensor_offsets[sensor_index]
+        sensor_end = _next_offset(sensor_offsets, sensor_index, block_end)
+        sensor_reader = _BlockReader(data, sensor_start, sensor_end)
+        pillar_count = sensor_reader.read_u16()
+        pillar_offsets = sensor_reader.read_offsets(pillar_count, index_size)
+        _validate_offsets(
+            pillar_offsets,
+            sensor_reader.position,
+            sensor_end,
+            f"Type 3 sensor {sensor_index} pillar",
         )
-        sensor_start = reader.position
-        pillar_count = reader.read_u16()
-        pillar_offsets = reader.read_offsets(pillar_count, index_size)
+        _require_zero_padding(
+            data,
+            sensor_reader.position,
+            pillar_offsets[0] if pillar_offsets else sensor_end,
+            f"Type 3 sensor {sensor_index} 索引头后的填充",
+        )
         force = np.empty((pillar_count, 3), dtype=np.float64)
         displacement = np.empty((pillar_count, 3), dtype=np.float64)
         for pillar_index in range(pillar_count):
-            _require_offset(
-                pillar_offsets[pillar_index],
-                reader.position - sensor_start,
-                f"Type 3 sensor {sensor_index} pillar {pillar_index}",
-            )
-            entry_type = reader.read_u16()
+            entry_start = pillar_offsets[pillar_index]
+            entry_end = _next_offset(pillar_offsets, pillar_index, sensor_end)
+            entry_reader = _BlockReader(data, entry_start, entry_end)
+            entry_type = entry_reader.read_u16()
             if entry_type != 2:
                 raise ProtocolError(f"Type 3 pillar 条目类型必须为 2，实际为 {entry_type}")
-            fx, fy, fz, dx, dy, dz = reader.read_floats(6)
+            fx, fy, fz, dx, dy, dz = entry_reader.read_floats(6)
+            _require_zero_padding(
+                data,
+                entry_reader.position,
+                entry_end,
+                f"Type 3 sensor {sensor_index} pillar {pillar_index} 条目后的填充",
+            )
             force[pillar_index] = (fx, fy, fz)
             displacement[pillar_index] = (dx, dy, dz)
         forces.append(force)
         displacements.append(displacement)
-    reader.require_end()
     return forces, displacements
 
 
-def _parse_global_block(block: bytes, index_size: int) -> tuple[list[np.ndarray], list[np.ndarray]]:
+def _parse_global_block(
+    data: bytes, block_start: int, block_end: int, index_size: int
+) -> tuple[list[np.ndarray], list[np.ndarray]]:
     """解析 Type 4 的每传感器全局力与力矩。"""
-    reader = _BlockReader(block)
+    reader = _BlockReader(data, block_start, block_end)
     sensor_count = reader.read_u16()
     sensor_offsets = reader.read_offsets(sensor_count, index_size)
+    _validate_offsets(sensor_offsets, reader.position, block_end, "Type 4 sensor")
+    _require_zero_padding(
+        data,
+        reader.position,
+        sensor_offsets[0] if sensor_offsets else block_end,
+        "Type 4 索引头后的填充",
+    )
     forces: list[np.ndarray] = []
     torques: list[np.ndarray] = []
     for sensor_index in range(sensor_count):
-        _require_offset(
-            sensor_offsets[sensor_index], reader.position, f"Type 4 sensor {sensor_index}"
-        )
-        entry_type = reader.read_u16()
+        entry_end = _next_offset(sensor_offsets, sensor_index, block_end)
+        entry_reader = _BlockReader(data, sensor_offsets[sensor_index], entry_end)
+        entry_type = entry_reader.read_u16()
         if entry_type != 2:
             raise ProtocolError(f"Type 4 sensor 条目类型必须为 2，实际为 {entry_type}")
-        fx, fy, fz, tx, ty, tz = reader.read_floats(6)
+        fx, fy, fz, tx, ty, tz = entry_reader.read_floats(6)
+        _require_zero_padding(
+            data,
+            entry_reader.position,
+            entry_end,
+            f"Type 4 sensor {sensor_index} 条目后的填充",
+        )
         forces.append(np.array((fx, fy, fz), dtype=np.float64))
         torques.append(np.array((tx, ty, tz), dtype=np.float64))
-    reader.require_end()
     return forces, torques
 
 
 def _parse_pillar_slip_block(
-    block: bytes, index_size: int
+    data: bytes, block_start: int, block_end: int, index_size: int
 ) -> tuple[list[np.ndarray], list[np.ndarray]]:
     """解析 Type 5 的每 pillar 滑动状态与摩擦估计。"""
-    reader = _BlockReader(block)
+    reader = _BlockReader(data, block_start, block_end)
     sensor_count = reader.read_u16()
     sensor_offsets = reader.read_offsets(sensor_count, index_size)
+    _validate_offsets(sensor_offsets, reader.position, block_end, "Type 5 sensor")
+    _require_zero_padding(
+        data,
+        reader.position,
+        sensor_offsets[0] if sensor_offsets else block_end,
+        "Type 5 索引头后的填充",
+    )
     states_by_sensor: list[np.ndarray] = []
     friction_by_sensor: list[np.ndarray] = []
     for sensor_index in range(sensor_count):
-        _require_offset(
-            sensor_offsets[sensor_index], reader.position, f"Type 5 sensor {sensor_index}"
+        sensor_start = sensor_offsets[sensor_index]
+        sensor_end = _next_offset(sensor_offsets, sensor_index, block_end)
+        sensor_reader = _BlockReader(data, sensor_start, sensor_end)
+        pillar_count = sensor_reader.read_u16()
+        pillar_offsets = sensor_reader.read_offsets(pillar_count, index_size)
+        _validate_offsets(
+            pillar_offsets,
+            sensor_reader.position,
+            sensor_end,
+            f"Type 5 sensor {sensor_index} pillar",
         )
-        sensor_start = reader.position
-        pillar_count = reader.read_u16()
-        pillar_offsets = reader.read_offsets(pillar_count, index_size)
+        _require_zero_padding(
+            data,
+            sensor_reader.position,
+            pillar_offsets[0] if pillar_offsets else sensor_end,
+            f"Type 5 sensor {sensor_index} 索引头后的填充",
+        )
         states = np.empty(pillar_count, dtype=np.int8)
         friction = np.empty(pillar_count, dtype=np.float64)
         for pillar_index in range(pillar_count):
-            _require_offset(
-                pillar_offsets[pillar_index],
-                reader.position - sensor_start,
-                f"Type 5 sensor {sensor_index} pillar {pillar_index}",
-            )
-            entry_type = reader.read_u16()
+            entry_start = pillar_offsets[pillar_index]
+            entry_end = _next_offset(pillar_offsets, pillar_index, sensor_end)
+            entry_reader = _BlockReader(data, entry_start, entry_end)
+            entry_type = entry_reader.read_u16()
             if entry_type != 1:
                 raise ProtocolError(f"Type 5 pillar 条目类型必须为 1，实际为 {entry_type}")
-            states[pillar_index] = reader.read_int8()
-            friction[pillar_index] = reader.read_floats(1)[0]
+            states[pillar_index] = entry_reader.read_int8()
+            friction[pillar_index] = entry_reader.read_floats(1)[0]
+            _require_zero_padding(
+                data,
+                entry_reader.position,
+                entry_end,
+                f"Type 5 sensor {sensor_index} pillar {pillar_index} 条目后的填充",
+            )
         states_by_sensor.append(states)
         friction_by_sensor.append(friction)
-    reader.require_end()
     return states_by_sensor, friction_by_sensor
 
 
 def _parse_sensor_slip_block(
-    block: bytes, index_size: int
+    data: bytes, block_start: int, block_end: int, index_size: int
 ) -> tuple[list[bool], list[bool], list[float], list[float]]:
     """解析 Type 6 的传感器级滑动检测与抓握力估计。"""
-    reader = _BlockReader(block)
+    reader = _BlockReader(data, block_start, block_end)
     sensor_count = reader.read_u16()
     sensor_offsets = reader.read_offsets(sensor_count, index_size)
+    _validate_offsets(sensor_offsets, reader.position, block_end, "Type 6 sensor")
+    _require_zero_padding(
+        data,
+        reader.position,
+        sensor_offsets[0] if sensor_offsets else block_end,
+        "Type 6 索引头后的填充",
+    )
     active: list[bool] = []
     reference_loaded: list[bool] = []
     friction: list[float] = []
     target_grip: list[float] = []
     for sensor_index in range(sensor_count):
-        _require_offset(
-            sensor_offsets[sensor_index], reader.position, f"Type 6 sensor {sensor_index}"
-        )
-        entry_type = reader.read_u16()
+        entry_end = _next_offset(sensor_offsets, sensor_index, block_end)
+        entry_reader = _BlockReader(data, sensor_offsets[sensor_index], entry_end)
+        entry_type = entry_reader.read_u16()
         if entry_type != 1:
             raise ProtocolError(f"Type 6 sensor 条目类型必须为 1，实际为 {entry_type}")
-        state = reader.read_uint8()
-        friction_estimate, target_grip_force = reader.read_floats(2)
+        state = entry_reader.read_uint8()
+        friction_estimate, target_grip_force = entry_reader.read_floats(2)
+        _require_zero_padding(
+            data,
+            entry_reader.position,
+            entry_end,
+            f"Type 6 sensor {sensor_index} 条目后的填充",
+        )
         active.append(state != 0)
         reference_loaded.append(state == 2)
         friction.append(friction_estimate)
         target_grip.append(target_grip_force)
-    reader.require_end()
     return active, reference_loaded, friction, target_grip
 
 
 @dataclass
 class _BlockReader:
-    """只在单个已切分块内移动的带边界检查读取器。"""
+    """在整帧绝对位置范围内移动的带边界检查读取器。"""
 
     data: bytes
-    position: int = 0
+    position: int
+    end: int
 
     def read_u16(self) -> int:
         """读取一个小端无符号 16 位整数。"""
@@ -683,7 +764,7 @@ class _BlockReader:
         return value
 
     def read_offsets(self, count: int, width: int) -> list[int]:
-        """读取指定数量的相对偏移。"""
+        """读取指定数量的整帧绝对偏移。"""
         self._require(count * width)
         offsets = [
             int.from_bytes(self.data[position : position + width], "little")
@@ -700,21 +781,34 @@ class _BlockReader:
         self.position += size
         return values
 
-    def require_end(self) -> None:
-        """确保块没有未解释的尾部字节。"""
-        if self.position != len(self.data):
-            raise ProtocolError("PTS 数据块长度与其声明结构不一致")
-
     def _require(self, size: int) -> None:
         """确保接下来读取不会越过块边界。"""
-        if self.position + size > len(self.data):
+        if self.position + size > self.end:
             raise ProtocolError("PTS 数据块在字段中途结束")
 
 
-def _require_offset(actual: int, expected: int, label: str) -> None:
-    """验证连续布局的声明偏移恰好指向当前条目起点。"""
-    if actual != expected:
-        raise ProtocolError(f"{label} 相对偏移应为 {expected}，实际为 {actual}")
+def _validate_offsets(offsets: list[int], lower: int, upper: int, label: str) -> None:
+    """验证索引严格递增，且只指向所属范围中索引头之后的数据。"""
+    previous: int | None = None
+    for index, offset in enumerate(offsets):
+        if offset < lower:
+            raise ProtocolError(f"{label} {index} 绝对偏移落入索引头")
+        if offset >= upper:
+            raise ProtocolError(f"{label} {index} 绝对偏移越界")
+        if previous is not None and offset <= previous:
+            raise ProtocolError(f"{label} 偏移必须严格递增")
+        previous = offset
+
+
+def _next_offset(offsets: list[int], index: int, fallback: int) -> int:
+    """返回当前索引条目的声明边界。"""
+    return offsets[index + 1] if index + 1 < len(offsets) else fallback
+
+
+def _require_zero_padding(data: bytes, start: int, end: int, label: str) -> None:
+    """拒绝索引未声明的非零间隙数据。"""
+    if any(data[start:end]):
+        raise ProtocolError(f"{label} 必须全为零")
 
 
 def _read_u16(data: bytes, position: int) -> int:

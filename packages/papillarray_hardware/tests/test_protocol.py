@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 import struct
 
 import numpy as np
@@ -89,6 +90,55 @@ def test_parse_packet_preserves_hub_timestamp_and_type_7_data() -> None:
     assert packet.type_7_data == b"\xde\xad\xbe\xef"
 
 
+def test_parse_packet_accepts_controller_v20_absolute_nested_offsets() -> None:
+    """真实 Controller v2.0 帧头的 Type 3 两级绝对偏移可进入条目解析。"""
+    sensors = [
+        {
+            "pillars": [(float(index), 2.0, 3.0, 0.1, 0.2, 0.3) for index in range(9)],
+            "global": (4.0, 5.0, 6.0, 0.4, 0.5, 0.6),
+        },
+        {
+            "pillars": [(float(index), 8.0, 9.0, 0.7, 0.8, 0.9) for index in range(9)],
+            "global": (13.0, 14.0, 15.0, 1.3, 1.4, 1.5),
+        },
+    ]
+    type_3_offset = 0x0027
+    pillar = build_pillar_block(sensors, type_3_offset)
+    type_4_offset = type_3_offset + len(pillar)
+    global_data = build_global_block(sensors, type_4_offset)
+    type_5_offset = type_4_offset + len(global_data)
+    pillar_slip = build_pillar_slip_block(sensors, type_5_offset)
+    type_6_offset = type_5_offset + len(pillar_slip)
+    sensor_slip = build_sensor_slip_block(sensors, type_6_offset)
+    type_7_offset = type_6_offset + len(sensor_slip)
+
+    assert (type_4_offset, type_5_offset, type_6_offset, type_7_offset) == (
+        0x0229,
+        0x0263,
+        0x030F,
+        0x032B,
+    )
+    data = bytearray.fromhex("0201001b0003002700040029020500630206000f0307002b030000")
+    data.extend((1234).to_bytes(4, "little") + (5678).to_bytes(8, "little"))
+    data.extend(pillar)
+    data.extend(global_data)
+    data.extend(pillar_slip)
+    data.extend(sensor_slip)
+    data.extend(b"\x00")
+    data.extend((sum(data) & 0xFFFF).to_bytes(2, "little"))
+
+    assert int.from_bytes(data[7:9], "little") == type_3_offset
+    assert int.from_bytes(data[41:43], "little") == 45
+    assert int.from_bytes(data[43:45], "little") == 299
+    assert int.from_bytes(data[47:49], "little") == 65
+
+    packet = parse_packet(bytes(data))
+
+    assert packet.n_sensors == 2
+    assert [len(force) for force in packet.pillar_forces] == [9, 9]
+    npt.assert_allclose(packet.pillar_forces[1][8], (8.0, 8.0, 9.0))
+
+
 def test_parse_packet_rejects_bad_checksum_and_invalid_offsets() -> None:
     """直接解析时明确报告坏校验和和越界偏移。"""
     good = build_packet_data(
@@ -109,8 +159,8 @@ def test_parse_packet_rejects_bad_checksum_and_invalid_offsets() -> None:
         parse_packet(bytes(invalid))
 
 
-def test_parse_packet_rejects_misaligned_nested_pillar_offset() -> None:
-    """Type 3 pillar 偏移即使仍在块内，也必须指向声明的连续条目起点。"""
+def test_parse_packet_rejects_nested_pillar_offset_into_its_index_header() -> None:
+    """Type 3 pillar 偏移不得回指传感器索引头。"""
     packet_data = bytearray(
         build_packet_data(
             packet_counter=1,
@@ -130,7 +180,7 @@ def test_parse_packet_rejects_misaligned_nested_pillar_offset() -> None:
     )
     packet_data[-2:] = (sum(packet_data[:-2]) & 0xFFFF).to_bytes(2, "little")
 
-    with pytest.raises(ProtocolError, match="Type 3 sensor 0 pillar 0 相对偏移"):
+    with pytest.raises(ProtocolError, match="Type 3 sensor 0 pillar 0 绝对偏移落入索引头"):
         parse_packet(bytes(packet_data))
 
 
@@ -501,24 +551,43 @@ def build_packet_data(
     top_level_index_padding: bytes = b"",
 ) -> bytes:
     """构造严格符合测试所需布局且带校验和的 PTS 帧内部数据。"""
-    blocks: list[tuple[int, bytes]] = [
-        (1, packet_counter.to_bytes(4, "little") + timestamp_us.to_bytes(8, "little")),
-        (3, build_pillar_block(sensors)),
-        (4, build_global_block(global_sensors if global_sensors is not None else sensors)),
+    block_builders: list[tuple[int, Callable[[int], bytes]]] = [
+        (
+            1,
+            lambda _base: packet_counter.to_bytes(4, "little") + timestamp_us.to_bytes(8, "little"),
+        ),
+        (3, lambda base: build_pillar_block(sensors, base)),
+        (
+            4,
+            lambda base: build_global_block(
+                global_sensors if global_sensors is not None else sensors, base
+            ),
+        ),
     ]
     if include_slip:
-        blocks.extend(
-            ((5, build_pillar_slip_block(sensors)), (6, build_sensor_slip_block(sensors)))
+        block_builders.extend(
+            (
+                (5, lambda base: build_pillar_slip_block(sensors, base)),
+                (6, lambda base: build_sensor_slip_block(sensors, base)),
+            )
         )
     if pillar_slip_sensors is not None:
-        blocks.append((5, build_pillar_slip_block(pillar_slip_sensors)))
+        block_builders.append((5, lambda base: build_pillar_slip_block(pillar_slip_sensors, base)))
     if sensor_slip_sensors is not None:
-        blocks.append((6, build_sensor_slip_block(sensor_slip_sensors)))
+        block_builders.append((6, lambda base: build_sensor_slip_block(sensor_slip_sensors, base)))
     if type_7_data is not None:
-        blocks.append((7, type_7_data))
+        type_7_raw = type_7_data
+        block_builders.append((7, lambda _base: type_7_raw))
 
-    offset = 1 + len(blocks) * (2 + _INDEX_SIZE) + len(top_level_index_padding)
+    first_block_offset = 1 + len(block_builders) * (2 + _INDEX_SIZE) + len(top_level_index_padding)
+    offset = first_block_offset
+    blocks: list[tuple[int, bytes]] = []
+    for block_type, builder in block_builders:
+        block = builder(offset)
+        blocks.append((block_type, block))
+        offset += len(block)
     packet = bytearray((_INDEX_SIZE,))
+    offset = first_block_offset
     for block_type, block in blocks:
         packet.extend(block_type.to_bytes(2, "little"))
         packet.extend(offset.to_bytes(_INDEX_SIZE, "little"))
@@ -530,8 +599,8 @@ def build_packet_data(
     return bytes(packet)
 
 
-def build_pillar_block(sensors: list[dict[str, object]]) -> bytes:
-    """构造 Type 3 连续布局。"""
+def build_pillar_block(sensors: list[dict[str, object]], base_offset: int = 0) -> bytes:
+    """构造 Type 3，其嵌套偏移均以整帧起点为基址。"""
     sensor_blocks: list[bytes] = []
     sensor_offsets: list[int] = []
     running_offset = 2 + len(sensors) * _INDEX_SIZE
@@ -539,7 +608,7 @@ def build_pillar_block(sensors: list[dict[str, object]]) -> bytes:
         pillars = list(sensor["pillars"])
         payload = bytearray(len(pillars).to_bytes(2, "little"))
         pillar_offsets: list[int] = []
-        pillar_offset = 2 + len(pillars) * _INDEX_SIZE
+        pillar_offset = base_offset + running_offset + 2 + len(pillars) * _INDEX_SIZE
         for pillar in pillars:
             pillar_offsets.append(pillar_offset)
             payload.extend((2).to_bytes(2, "little"))
@@ -549,7 +618,7 @@ def build_pillar_block(sensors: list[dict[str, object]]) -> bytes:
         for value in pillar_offsets:
             indexed.extend(value.to_bytes(_INDEX_SIZE, "little"))
         indexed.extend(payload[2:])
-        sensor_offsets.append(running_offset)
+        sensor_offsets.append(base_offset + running_offset)
         sensor_blocks.append(bytes(indexed))
         running_offset += len(indexed)
 
@@ -561,14 +630,14 @@ def build_pillar_block(sensors: list[dict[str, object]]) -> bytes:
     return bytes(result)
 
 
-def build_global_block(sensors: list[dict[str, object]]) -> bytes:
-    """构造 Type 4 连续布局。"""
+def build_global_block(sensors: list[dict[str, object]], base_offset: int = 0) -> bytes:
+    """构造 Type 4，其传感器偏移以整帧起点为基址。"""
     sensor_offsets: list[int] = []
     sensor_blocks: list[bytes] = []
     running_offset = 2 + len(sensors) * _INDEX_SIZE
     for sensor in sensors:
         block = (2).to_bytes(2, "little") + struct.pack("<6f", *sensor["global"])
-        sensor_offsets.append(running_offset)
+        sensor_offsets.append(base_offset + running_offset)
         sensor_blocks.append(block)
         running_offset += len(block)
     result = bytearray(len(sensors).to_bytes(2, "little"))
@@ -579,15 +648,16 @@ def build_global_block(sensors: list[dict[str, object]]) -> bytes:
     return bytes(result)
 
 
-def build_pillar_slip_block(sensors: list[dict[str, object]]) -> bytes:
-    """构造 Type 5 连续布局，每 pillar 给出确定的状态与摩擦估计。"""
+def build_pillar_slip_block(sensors: list[dict[str, object]], base_offset: int = 0) -> bytes:
+    """构造 Type 5，其嵌套偏移以整帧起点为基址。"""
     sensor_offsets: list[int] = []
     sensor_blocks: list[bytes] = []
     running_offset = 2 + len(sensors) * _INDEX_SIZE
     for sensor_index, sensor in enumerate(sensors):
         pillars = list(sensor["pillars"])
         pillar_offsets = [
-            2 + len(pillars) * _INDEX_SIZE + 7 * index for index in range(len(pillars))
+            base_offset + running_offset + 2 + len(pillars) * _INDEX_SIZE + 7 * index
+            for index in range(len(pillars))
         ]
         block = bytearray(len(pillars).to_bytes(2, "little"))
         for offset in pillar_offsets:
@@ -595,7 +665,7 @@ def build_pillar_slip_block(sensors: list[dict[str, object]]) -> bytes:
         for pillar_index in range(len(pillars)):
             block.extend((1).to_bytes(2, "little"))
             block.extend(struct.pack("<bf", 3, 0.72 + sensor_index * 0.1 + pillar_index * 0.1))
-        sensor_offsets.append(running_offset)
+        sensor_offsets.append(base_offset + running_offset)
         sensor_blocks.append(bytes(block))
         running_offset += len(block)
     result = bytearray(len(sensors).to_bytes(2, "little"))
@@ -606,8 +676,8 @@ def build_pillar_slip_block(sensors: list[dict[str, object]]) -> bytes:
     return bytes(result)
 
 
-def build_sensor_slip_block(sensors: list[dict[str, object]]) -> bytes:
-    """构造 Type 6 连续布局。"""
+def build_sensor_slip_block(sensors: list[dict[str, object]], base_offset: int = 0) -> bytes:
+    """构造 Type 6，其传感器偏移以整帧起点为基址。"""
     result = bytearray(len(sensors).to_bytes(2, "little"))
     running_offset = 2 + len(sensors) * _INDEX_SIZE
     offsets: list[int] = []
@@ -615,7 +685,7 @@ def build_sensor_slip_block(sensors: list[dict[str, object]]) -> bytes:
     for sensor_index, _sensor in enumerate(sensors):
         block = (1).to_bytes(2, "little") + bytes((2 if sensor_index == 0 else 1,))
         block += struct.pack("<2f", 0.68 + sensor_index * 0.1, 12.5 + sensor_index)
-        offsets.append(running_offset)
+        offsets.append(base_offset + running_offset)
         blocks.append(block)
         running_offset += len(block)
     for offset in offsets:
