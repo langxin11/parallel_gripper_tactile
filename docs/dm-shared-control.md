@@ -29,15 +29,39 @@ uv run pgt run force-track \
   --controller-variant admittance
 ```
 
-需要查看动画时添加 `--viewer`。示例为 4 ms 外环和 0.5 N 平均单侧目标；MIT 使用
-ROS 当前参考值 kp=10、kd=5。原始平均单侧力直接进入导纳，不经过旧 PID 的低通和
-刚度估计。原 `CONTROLLER_VARIANTS` 默认实验矩阵不含本变体。
+需要查看动画时添加 `--viewer`。示例为 4 ms 外环、1 N 平均单侧目标和 1 N
+双侧接触进入阈值；MIT 使用 ROS 当前参考值 kp=10、kd=5。平均单侧力经过 2 Hz
+一阶低通后进入导纳，原始双侧力仍用于接触与释放判定。原 `CONTROLLER_VARIANTS`
+默认实验矩阵不含本变体。
+
+接触进入和退出使用滞回：两侧达到 1 N 后进入接触过渡；跟踪阶段只有任一侧
+连续 `release_confirm_steps` 个周期不高于 `release_threshold_n` 才重新接近。示例中
+释放阈值为 0.05 N，25 个 4 ms 周期对应 100 ms，瞬时单侧掉力不会重置导纳。
+
+示例导纳参数为 `M=0.20 kg`、`B=15 N·s/m`、`K=1 N/m`，接近速度和跟踪速度
+上限均为 `0.05 rad/s`，接触过渡为 50 ms，接近前馈为 0.5 N。参数由
+1.0→1.4→1.0 N 的 Ramp 任务筛选，最低目标与接触阈值一致。调参排序使用物理步进后
+左右触觉侧力的平均值，并包含切入跟踪的首个瞬态，避免低通或忽略窗口掩盖冲击。
+在 hard/explicit 接触、固定噪声种子 0 和 1 下，物理力峰值绝对误差平均为
+0.086 N，忽略最初 0.2 s 后的物理力 RMSE 为 0.022 N，滤波跟踪 RMSE 为
+0.007 N；Ramp 阶段的 `force_tracking` 占比为 100%，且未触发位置或力矩饱和。
+低峰值的代价是该场景从全开位置建立 1 N 接触约需 41.5 s；这仍是仿真调参结果，
+不代表已通过实机安全验收。
+可用下列入口以进程并行方式重跑候选：
+
+```bash
+uv run python scripts/experiments/dm_admittance_tuning.py \
+  --config configs/studies/dm_admittance_tuning.yaml
+```
 
 `control.force.admittance` 只由 `admittance` 入口使用，和 ADRC/直接力矩反馈互斥。
 接近轨迹、前馈和接触过渡由此段配置；任务的接近超时、参考曲线、控制周期和接触后
 等待仍有效。`control.force.geometry` 及 `control.mit` 提供机构几何与内环参数。
 使用不带导纳配置的普通 profile 时，该变体注入导纳默认值，但沿用该 profile 的
 MIT 参数；要重现实机基线，应使用专门的示例 profile。
+
+共享二阶导纳在更新位移前先按当前机构雅可比裁剪速度，再积分位移；仿真适配器不再在
+积分完成后才补做角速度裁剪。这一顺序用于避免单个外环周期生成越过限速边界的位置跳变。
 
 ## 两层控制周期与量化边界
 
