@@ -6,12 +6,13 @@ import io
 import json
 
 from dmgripper_hardware import (
+    DEFAULT_USB2CAN_PORT,
     FakeTransport,
     MotorFeedback,
     Usb2CanProtocol,
     make_dm4310p_gripper_config,
 )
-from dmgripper_hardware.motion_cli import run
+from dmgripper_hardware.motion_cli import build_parser, run
 
 
 def _register_reply(value: int) -> bytes:
@@ -33,6 +34,14 @@ class ScriptedTransport(FakeTransport):
         if self._responses:
             self.inject_received(self._responses.pop(0))
         return written
+
+
+def test_motion_parser_uses_udev_port_by_default_and_allows_override() -> None:
+    """运动探针省略端口时使用 udev 别名，仍允许显式覆盖。"""
+    parser = build_parser()
+
+    assert parser.parse_args([]).port == DEFAULT_USB2CAN_PORT
+    assert parser.parse_args(["--port", "fake://usb2can"]).port == "fake://usb2can"
 
 
 def test_cli_defaults_to_dry_run_without_actuator_commands() -> None:

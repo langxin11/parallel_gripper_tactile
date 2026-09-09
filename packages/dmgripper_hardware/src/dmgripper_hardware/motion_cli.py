@@ -10,6 +10,7 @@ from collections.abc import Callable, Sequence
 from typing import NoReturn, TextIO
 
 from .cli import TransportFactory, _default_transport_factory, _positive_float
+from .config import DEFAULT_USB2CAN_PORT
 from .deployment import make_dm4310p_gripper_config
 from .motion import DmSafeMotionProbe, MotionProbeSafetyConfig, MotionProbePlan, MotionStageResult
 from .protocol import Usb2CanProtocol
@@ -21,7 +22,11 @@ def build_parser() -> argparse.ArgumentParser:
         description="DM4310P 受限小步运动探针（默认 dry-run；仅 --execute 才会驱动电机）",
         allow_abbrev=False,
     )
-    parser.add_argument("--port", required=True, help="USB2CAN 串口端点")
+    parser.add_argument(
+        "--port",
+        default=DEFAULT_USB2CAN_PORT,
+        help=f"USB2CAN 串口端点，默认 {DEFAULT_USB2CAN_PORT}",
+    )
     parser.add_argument(
         "--execute",
         action="store_true",

@@ -193,15 +193,17 @@ uv run --package robotiq-hardware pytest packages/robotiq_hardware/tests
 uv run --package papillarray-hardware pytest packages/papillarray_hardware/tests
 ```
 
-同步完成后，首次接线只运行有限次数的只读探针。实际端口须由操作者确认并显式填写：
+同步完成后，首次接线只运行有限次数的只读探针。当前实验台由
+`deploy/udev/99-parallel-gripper-tactile.rules` 提供稳定别名，因此可省略 `--port`：
 
 ```bash
-uv run --package papillarray-hardware papillarray-probe --port /dev/ttyACM0 --count 10
-uv run --package dmgripper-hardware dmgripper-state-probe --port /dev/ttyUSB0 --count 10
+uv run --package papillarray-hardware papillarray-probe --count 10
+uv run --package dmgripper-hardware dmgripper-state-probe --count 10
 ```
 
 第一条命令会发送采样率配置，但不会清零或启用滑动检测；第二条只发送 DM 状态查询帧，
-不会使能、置零或运动。两者都不能替代急停、机械限位检查和正式实机验收。
+不会使能、置零或运动。别名未安装或需临时调试其他设备时，仍可通过 `--port`
+显式覆盖。两者都不能替代急停、机械限位检查和正式实机验收。
 PapillArray 探针默认以 `--timeout 1` 限制单次串口读取，并以 `--packet-timeout 3` 限制等待
 一个有效包的总时长；总时限内只有噪声、坏帧或半包时，会输出有界协议诊断后自动退出。
 Controller 首次收到采样率配置后可能短暂无输出；单次空读取会累计到诊断，但只有总等待时限

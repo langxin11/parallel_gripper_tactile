@@ -10,6 +10,7 @@ import time
 from collections.abc import Callable, Sequence
 from typing import NoReturn, TextIO
 
+from .config import DEFAULT_USB2CAN_PORT
 from .deployment import Dm4310PGripperConfig, make_dm4310p_gripper_config
 from .protocol import MotorFeedback, Usb2CanProtocol, motor_status_is_fault
 from .runtime import DmStateRefresher
@@ -65,7 +66,11 @@ def _positive_int(value: str) -> int:
 def build_parser() -> argparse.ArgumentParser:
     """创建状态探针参数解析器。"""
     parser = argparse.ArgumentParser(description="DM4310P 只读状态探针（不会发送运动命令）")
-    parser.add_argument("--port", required=True, help="USB2CAN 串口端点")
+    parser.add_argument(
+        "--port",
+        default=DEFAULT_USB2CAN_PORT,
+        help=f"USB2CAN 串口端点，默认 {DEFAULT_USB2CAN_PORT}",
+    )
     parser.add_argument(
         "--count",
         type=_positive_int,

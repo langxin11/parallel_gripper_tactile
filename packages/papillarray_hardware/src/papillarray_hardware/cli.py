@@ -10,7 +10,12 @@ import time
 from collections.abc import Callable, Sequence
 from typing import NoReturn, TextIO
 
-from .client import PapillArraySerialClient, PapillArraySerialConfig, SUPPORTED_SAMPLING_RATES
+from .client import (
+    DEFAULT_PAPILLARRAY_PORT,
+    PapillArraySerialClient,
+    PapillArraySerialConfig,
+    SUPPORTED_SAMPLING_RATES,
+)
 from .protocol import ProtocolError, PtsPacket, PtsReadDiagnostics, PtsReadTimeout
 
 _COUNTER_MODULUS = 2**32
@@ -52,7 +57,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         description="从 PapillArray 输出有限个只读触觉包，每行输出一个 JSON 对象。"
     )
-    parser.add_argument("--port", required=True, type=_port, help="串口端点，例如 /dev/ttyACM0")
+    parser.add_argument(
+        "--port",
+        type=_port,
+        default=DEFAULT_PAPILLARRAY_PORT,
+        help=f"串口端点，默认 {DEFAULT_PAPILLARRAY_PORT}",
+    )
     parser.add_argument("--baud", type=_positive_int, default=115200, help="波特率，默认 115200")
     parser.add_argument(
         "--rate",

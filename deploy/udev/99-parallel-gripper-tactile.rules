@@ -1,0 +1,10 @@
+# 触觉抓取工作区串口设备别名规则
+#
+# 为 PapillArray Controller 与达妙 USB2CAN 建立固定别名，避免 ttyACM 编号随插拔顺序漂移。
+# 安装方法见同目录 README_zh.md；更换硬件后需同步更新序列号。
+
+# PapillArray Controller（Contactile，/dev/papillarray）
+SUBSYSTEM=="tty", ATTRS{idVendor}=="16c0", ATTRS{idProduct}=="0483", ATTRS{serial}=="15954100", SYMLINK+="papillarray", GROUP="dialout", MODE="0660", ENV{ID_MM_DEVICE_IGNORE}="1"
+
+# 达妙 USB2CAN（HDSC，/dev/dmj4310_can）
+SUBSYSTEM=="tty", ATTRS{idVendor}=="2e88", ATTRS{idProduct}=="4603", ATTRS{serial}=="00000000050C", SYMLINK+="dmj4310_can", GROUP="dialout", MODE="0660", ENV{ID_MM_DEVICE_IGNORE}="1"

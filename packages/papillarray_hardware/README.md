@@ -8,7 +8,7 @@ Contactile PapillArray 的 PTS v2.0 纯 Python 同步串口采集边界。它只
 
 - `PapillArraySerialClient` 构造时不会导入 PySerial 或访问设备；只有显式调用 `open()` 才会
   创建串口。测试可注入内存 fake serial。
-- 默认串口配置为 `/dev/ttyACM0`、`115200 baud`、`500 Hz`。可选采样率严格限于
+- 默认串口配置为 udev 别名 `/dev/papillarray`、`115200 baud`、`500 Hz`。可选采样率严格限于
   `100`、`250`、`500`、`1000 Hz`；默认要求每包报告 `2` 个传感器，数量不符时拒绝上送。
 - `configure_stream()` 才会写入采样率命令；`clear_bias()` 会写入设备清零／偏置清除命令
   `z\n`，调用前必须确保传感器无负载。该包不会自动执行清零。
@@ -26,7 +26,7 @@ Contactile PapillArray 的 PTS v2.0 纯 Python 同步串口采集边界。它只
 ```python
 from papillarray_hardware import PapillArraySerialClient, PapillArraySerialConfig
 
-config = PapillArraySerialConfig(port="/dev/ttyACM0")
+config = PapillArraySerialConfig()
 with PapillArraySerialClient(config) as tactile:
     tactile.configure_stream()
     packet = tactile.read_packet()
@@ -41,10 +41,10 @@ with PapillArraySerialClient(config) as tactile:
 安装该 workspace 后，可用下列命令采集有限个包并输出 JSON Lines：
 
 ```sh
-uv run --package papillarray-hardware papillarray-probe --port /dev/ttyACM0
+uv run --package papillarray-hardware papillarray-probe
 ```
 
-`--port` 必填；`--baud`、`--rate`、`--expected-sensors`、`--count`、`--timeout` 和
+`--port` 默认使用 `/dev/papillarray`，仍可显式覆盖；`--baud`、`--rate`、`--expected-sensors`、`--count`、`--timeout` 和
 `--packet-timeout` 分别默认为 `115200`、`500`、`2`、`10`、`1` 秒和 `3` 秒。`--timeout` 是
 一次底层串口 `read()` 的超时；`--packet-timeout` 是等待一个校验通过 PTS 包的总时限，必须不小于
 `--timeout`。Controller 在首次收到 `f<rate>\n` 配置命令后可能存在启动延迟：一次空读取不会立即
@@ -54,7 +54,7 @@ uv run --package papillarray-hardware papillarray-probe --port /dev/ttyACM0
 
 ```sh
 uv run --package papillarray-hardware papillarray-probe \
-  --port /dev/ttyACM0 --expected-sensors 1 --count 20 --packet-timeout 3
+  --expected-sensors 1 --count 20 --packet-timeout 3
 ```
 
 探针显式打开端口后只会发送一次采样率配置命令 `f<rate>\n`，绝不会发送清零 `z\n` 或滑动

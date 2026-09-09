@@ -9,6 +9,9 @@
 
 ### 变更
 
+- PapillArray 与 DM USB2CAN 的纯 Python 探针分别默认使用 `/dev/papillarray`
+  和 `/dev/dmj4310_can`，同时保留 `--port` 显式覆盖；仓库新增当前实验台的 udev
+  规则与安装说明。
 - `dmgripper-motion-probe` 在三阶段成功且最终失能读回确认后，额外输出
   `event=complete`、`disable_confirmed=true` 的 terminal JSON；该事件不推断机械回位误差。
 - `dmgripper-motion-probe` 的 MIT 阶段改为固定 `--stage-duration` 运行：`q_des` 作为阻抗平衡点，

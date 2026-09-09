@@ -5,7 +5,12 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from papillarray_hardware import PapillArraySerialClient, PapillArraySerialConfig, PtsPacket
+from papillarray_hardware import (
+    DEFAULT_PAPILLARRAY_PORT,
+    PapillArraySerialClient,
+    PapillArraySerialConfig,
+    PtsPacket,
+)
 
 
 class FakeSerial:
@@ -54,7 +59,7 @@ def test_config_defaults_and_sampling_rate_validation_do_not_open_serial() -> No
     """配置构造保持纯数据，且拒绝设备不支持的采样率。"""
     config = PapillArraySerialConfig()
 
-    assert config.port == "/dev/ttyACM0"
+    assert config.port == DEFAULT_PAPILLARRAY_PORT
     assert config.baud_rate == 115200
     assert config.sampling_rate == 500
     assert config.expected_sensors == 2
@@ -91,7 +96,7 @@ def test_open_and_commands_are_explicit_and_use_expected_wire_values() -> None:
     client.stop_slip_detection()
     client.close()
 
-    assert calls == [("/dev/ttyACM0", 115200, 1.0)]
+    assert calls == [(DEFAULT_PAPILLARRAY_PORT, 115200, 1.0)]
     assert serial_port.writes == [b"f500\n", b"z\n", b"S\n", b"s\n"]
     assert serial_port.flush_count == 4
     assert serial_port.close_count == 1

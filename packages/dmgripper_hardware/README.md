@@ -35,9 +35,11 @@ Robotiq 依赖。
 `kp`／`kd`、闭合步长与阶段持续时间，供执行前人工核对：
 
 ```sh
-uv run --package dmgripper-hardware dmgripper-motion-probe \
-  --port /dev/serial/by-id/usb-HDSC_CDC_Device_00000000050C-if00
+uv run --package dmgripper-hardware dmgripper-motion-probe
 ```
+
+`dmgripper-motion-probe` 与 `dmgripper-state-probe` 默认使用 udev 别名
+`/dev/dmj4310_can`；可通过 `--port` 显式覆盖。
 
 `--execute` 会拒绝非 MIT 模式（寄存器 `10` 必须为 `1`），并且使能后必须收到新的
 `status_code=1` 反馈；不会隐式切换控制模式。每条使能或 MIT 命令后只等待并解析该命令产生的
@@ -62,7 +64,6 @@ uv run --package dmgripper-hardware dmgripper-motion-probe \
 
 ```sh
 uv run --package dmgripper-hardware dmgripper-motion-probe \
-  --port /dev/serial/by-id/usb-HDSC_CDC_Device_00000000050C-if00 \
   --mit-kp 5.0 --closing-step 0.06 --stage-duration 1.0 \
   --execute
 ```
@@ -83,7 +84,7 @@ uv run --package dmgripper-hardware dmgripper-motion-probe \
 
 ```sh
 uv run --package dmgripper-hardware dmgripper-state-probe \
-  --port /dev/ttyUSB0 --count 10 --interval 0.1 --timeout 0.05
+  --count 10 --interval 0.1 --timeout 0.05
 ```
 
 命令输出稳定的 JSON Lines，包含主机单调时钟接收时间、序号、位置、速度、力矩、状态码、
@@ -101,7 +102,7 @@ uv run --package dmgripper-hardware dmgripper-state-probe \
 ```python
 from dmgripper_hardware import MitCommand, Usb2CanProtocol, make_dm4310p_gripper_config
 
-deployment = make_dm4310p_gripper_config("/dev/ttyUSB0")
+deployment = make_dm4310p_gripper_config("/dev/dmj4310_can")
 target_joint_rad = deployment.validate_joint_position(0.2)
 protocol = Usb2CanProtocol(deployment.motor_limits)
 packet = protocol.make_mit_packet(
@@ -131,7 +132,7 @@ from dmgripper_hardware import (
     Usb2CanProtocol,
 )
 
-config = Usb2CanDeviceConfig("/dev/ttyUSB0", motor_id=1, master_id=17, timeout_s=0.05)
+config = Usb2CanDeviceConfig("/dev/dmj4310_can", motor_id=1, master_id=17, timeout_s=0.05)
 protocol = Usb2CanProtocol(MotorLimits(-1.7, 1.7, -8.0, 8.0, -4.0, 4.0))
 refresher = DmStateRefresher(config, protocol, PySerialTransport())
 

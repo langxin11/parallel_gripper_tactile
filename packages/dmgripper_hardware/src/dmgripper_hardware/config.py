@@ -9,6 +9,9 @@ from dataclasses import dataclass
 DEFAULT_USB2CAN_BAUD_RATE = 921600
 """参考 USB2CAN 串口波特率。"""
 
+DEFAULT_USB2CAN_PORT = "/dev/dmj4310_can"
+"""本工作区 DM4310P USB2CAN 的默认 udev 串口别名。"""
+
 
 @dataclass(frozen=True, slots=True)
 class Usb2CanDeviceConfig:

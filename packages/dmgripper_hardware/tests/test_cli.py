@@ -8,12 +8,21 @@ import json
 import pytest
 
 from dmgripper_hardware import (
+    DEFAULT_USB2CAN_PORT,
     FakeTransport,
     MotorFeedback,
     Usb2CanProtocol,
     make_dm4310p_gripper_config,
 )
-from dmgripper_hardware.cli import run_probe
+from dmgripper_hardware.cli import build_parser, run_probe
+
+
+def test_probe_parser_uses_udev_port_by_default_and_allows_override() -> None:
+    """状态探针省略端口时使用 udev 别名，仍允许显式覆盖。"""
+    parser = build_parser()
+
+    assert parser.parse_args([]).port == DEFAULT_USB2CAN_PORT
+    assert parser.parse_args(["--port", "fake://usb2can"]).port == "fake://usb2can"
 
 
 def test_probe_writes_only_feedback_requests_and_emits_json_lines() -> None:

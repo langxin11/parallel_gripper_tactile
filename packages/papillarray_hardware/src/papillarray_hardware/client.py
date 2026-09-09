@@ -12,6 +12,9 @@ from .protocol import PtsPacket, PtsStreamReader
 SUPPORTED_SAMPLING_RATES = frozenset((100, 250, 500, 1000))
 """PTS 控制器已知支持的采样率，单位 Hz。"""
 
+DEFAULT_PAPILLARRAY_PORT = "/dev/papillarray"
+"""本工作区 PapillArray 控制器的默认 udev 串口别名。"""
+
 _CLEAR_BIAS_COMMAND = b"z\n"
 _START_SLIP_COMMAND = b"S\n"
 _STOP_SLIP_COMMAND = b"s\n"
@@ -55,7 +58,7 @@ class PapillArraySerialConfig:
         max_packet_bytes: 含起止标志的 PTS 单帧最大长度。
     """
 
-    port: str = "/dev/ttyACM0"
+    port: str = DEFAULT_PAPILLARRAY_PORT
     baud_rate: int = 115200
     sampling_rate: int = 500
     expected_sensors: int = 2

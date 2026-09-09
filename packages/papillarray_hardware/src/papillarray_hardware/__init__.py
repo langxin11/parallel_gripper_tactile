@@ -1,6 +1,6 @@
 """Contactile PapillArray 的 PTS v2.0 同步串口采集接口。"""
 
-from .client import PapillArraySerialClient, PapillArraySerialConfig
+from .client import DEFAULT_PAPILLARRAY_PORT, PapillArraySerialClient, PapillArraySerialConfig
 from .protocol import (
     PacketChecksumError,
     ProtocolError,
@@ -13,6 +13,7 @@ from .protocol import (
 
 __all__ = [
     "PacketChecksumError",
+    "DEFAULT_PAPILLARRAY_PORT",
     "PapillArraySerialClient",
     "PapillArraySerialConfig",
     "ProtocolError",

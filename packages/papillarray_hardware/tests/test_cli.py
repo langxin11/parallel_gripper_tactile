@@ -8,7 +8,7 @@ import json
 import numpy as np
 import pytest
 
-from papillarray_hardware import PtsPacket
+from papillarray_hardware import DEFAULT_PAPILLARRAY_PORT, PtsPacket
 from papillarray_hardware.cli import _counter_status, build_parser, run
 from papillarray_hardware.protocol import ProtocolError, PtsReadDiagnostics, PtsReadTimeout
 
@@ -76,14 +76,15 @@ def make_packet(counter: int, sensor_count: int = 2) -> PtsPacket:
     )
 
 
-def test_probe_parser_requires_port_and_has_safe_finite_defaults() -> None:
-    """端口必须显式提供，其他采集参数使用有限且可审计的默认值。"""
+def test_probe_parser_uses_udev_port_and_has_safe_finite_defaults() -> None:
+    """端口默认使用 udev 别名，其他采集参数保持有限且可审计。"""
     parser = build_parser()
 
-    with pytest.raises(SystemExit):
-        parser.parse_args([])
+    default_args = parser.parse_args([])
     args = parser.parse_args(["--port", "/dev/fake"])
 
+    assert default_args.port == DEFAULT_PAPILLARRAY_PORT
+    assert args.port == "/dev/fake"
     assert args.baud == 115200
     assert args.rate == 500
     assert args.expected_sensors == 2
