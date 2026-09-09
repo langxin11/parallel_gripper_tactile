@@ -54,7 +54,7 @@ manifest。
 | `scenes/` | 装配 MJCF、物体材料、碰撞几何和求解选项 | 控制算法、指标统计 |
 | `tactile.py`、`contact_taxels.py` | 把不同后端统一为局部 `(3, rows, cols)` 力数组 | 决定目标力或控制状态 |
 | `force_scheduling.py` | 由切向载荷和摩擦系数生成受限的平均单侧目标力 | 读取 MuJoCo 状态或直接写执行器 |
-| `discrete_force_control.py` | 在整数命令空间执行稳定判定、单 tick 增益估计、HOLD 与安全动作决策 | 推进仿真或读取 oracle 刚度 |
+| `packages/robotiq_grasp_core` | 在整数命令空间执行稳定判定、单 tick 增益估计、HOLD 与安全动作决策；`discrete_force_control.py` 保留兼容导出 | 推进仿真、读取 oracle 刚度或依赖 DM 控制核 |
 | `tactile_slip.py` | 仅由触觉时序生成变化评分，持续确认后冻结摩擦候选 | 读取外部载荷、探测命令、真值 `μ` 或物体运动 |
 | `friction_estimation.py` | 保留历史估计器和估计结果结构；旧检测器不进入当前实验 | 被当前实验实例化以使用残差检测 |
 | `taxel_friction.py` | 筛选逐 taxel 接触，并用局部摩擦比趋势和剪切重分配生成纯力局部起滑候选 | 把未验证的局部候选直接用于目标力调度 |
@@ -159,12 +159,17 @@ Step、Ramp、Mixed/Smoothstep 任务分别突出瞬态、滞后和 waypoint 误
 
 ## 依赖规则
 
-DMgripper 的二阶导纳基线另由 `packages/dm_grasp_core` 独立包提供，与 ROS 2 共用。
+DMgripper 的二阶导纳基线另由 `packages/dm_grasp_core` 独立包提供，与 ROS 2 共用；
+包内按 `control`、`grasp` 与 `tactile` 子域组织，同时保留旧导入路径。
 `dm_admittance.py` 只负责把共享算法接入 MuJoCo；既有 PID/ADRC 暂保留历史实现。
 共享核无 ROS、MuJoCo 或 profile 依赖，安装 ROS 侧时不需要安装仿真主包。
 导纳外环按任务周期生成 MIT 请求，执行器适配每个物理步用最新 q/dq 重算内环力矩，
 模拟电机内部持续执行目标。此路径不改变旧实验的控制时序。详情见
 [DMgripper 共享控制核](dm-shared-control.md)。
+
+Robotiq 离散力控制由独立 workspace 成员 `packages/robotiq_grasp_core` 提供；仿真主包通过
+兼容模块接入。该核心仅依赖 NumPy，不依赖 ROS、MuJoCo、profile、DM 核或仿真主包。
+DM 与 Robotiq 分别维护控制算法、命令类型和状态机。
 
 1. `src/parallel_gripper_tactile` 不依赖 `scripts/` 或 CLI 输出格式；
 2. study 直接调用 runner，不通过子进程拼接 `pgt` 命令；

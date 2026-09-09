@@ -1,13 +1,19 @@
 """独立数学期望和迁移前节点固定观测回放。"""
 
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
 import json
 import math
 from pathlib import Path
 import pytest
+import dm_grasp_core.command as legacy_command
+import dm_grasp_core.control as legacy_control
+from dm_grasp_core.control import admittance, kinematics
+from dm_grasp_core.grasp import command, motion
+from dm_grasp_core.tactile import contact
 from dm_grasp_core import (
     CrankSliderKinematics,
     SecondOrderAdmittance,
+    MITCommand,
     MITCommandConfig,
     build_mit_command,
     step_admittance,
@@ -21,6 +27,57 @@ from dm_grasp_core import (
 
 K = CrankSliderKinematics(math.pi / 4, 0.03, 0.04, 0.021213203435596423)
 C = MITCommandConfig(0.0, 0.9, 0.4, 1, 8.0, 0.2, 0.7, 0.2, 0.6)
+
+
+def test_domain_packages_preserve_top_level_and_legacy_object_identity():
+    """新子域、顶层和旧子模块均指向同一算法对象。"""
+    assert CrankSliderKinematics is kinematics.CrankSliderKinematics
+    assert SecondOrderAdmittance is admittance.SecondOrderAdmittance
+    assert limit_mit_position_for_torque is admittance.limit_mit_position_for_torque
+    assert MinimumJerkTrajectory is motion.MinimumJerkTrajectory
+    assert ContactTransition is motion.ContactTransition
+    assert quintic_blend is motion.quintic_blend
+    assert within_zero_window is contact.within_zero_window
+    assert ContactDetector is contact.ContactDetector
+    assert MITCommand is command.MITCommand
+    assert MITCommandConfig is command.MITCommandConfig
+    assert build_mit_command is command.build_mit_command
+    assert step_admittance is command.step_admittance
+
+    for name in (
+        "CrankSliderKinematics",
+        "MinimumJerkTrajectory",
+        "quintic_blend",
+        "within_zero_window",
+        "ContactTransition",
+        "SecondOrderAdmittance",
+        "limit_mit_position_for_torque",
+        "ContactDetector",
+    ):
+        assert getattr(legacy_control, name) is globals()[name]
+    for name in ("MITCommand", "MITCommandConfig", "build_mit_command", "step_admittance"):
+        assert getattr(legacy_command, name) is globals()[name]
+    assert legacy_command.dataclass is dataclass
+
+
+def test_legacy_control_star_import_keeps_original_non_private_exports():
+    """旧 ``control`` 路径的星号导入继续包含原先可见的辅助对象。"""
+    namespace: dict[str, object] = {}
+    exec("from dm_grasp_core.control import *", namespace)
+
+    assert namespace["math"] is math
+    assert namespace["dataclass"] is dataclass
+    assert namespace["ContactDetector"] is ContactDetector
+
+
+def test_legacy_command_keeps_original_non_private_exports():
+    """旧 ``command`` 路径完整转发原实现曾公开的名称。"""
+    implementation_names = {name for name in dir(command) if not name.startswith("_")}
+    legacy_names = {name for name in dir(legacy_command) if not name.startswith("_")}
+
+    assert legacy_names == implementation_names
+    for name in legacy_names:
+        assert getattr(legacy_command, name) is getattr(command, name)
 
 
 def test_geometry_derivative_and_inverse():

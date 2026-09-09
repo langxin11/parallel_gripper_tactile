@@ -1,12 +1,14 @@
-"""Robotiq 离散力控制器的兼容导出。"""
+"""无 ROS、MuJoCo 依赖的 Robotiq 离散力控制核。"""
 
-from robotiq_grasp_core.discrete_force_control import (
+from .discrete_force_control import (
     DiscreteControllerVariant,
     DiscreteControlSnapshot,
     DiscreteControlState,
     DiscreteForceControlConfig,
     DiscreteForceController,
 )
+
+__version__ = "0.1.0"
 
 __all__ = [
     "DiscreteControllerVariant",

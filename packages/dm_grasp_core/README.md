@@ -3,6 +3,15 @@
 DMgripper 的共享 Python 控制核，要求 Python >=3.12，无第三方运行依赖。
 安装本目录后，两端使用 `from dm_grasp_core import ...`；版本为 `__version__`。
 
+## 子域边界
+
+- `control/`：曲柄滑块运动学、二阶导纳状态与 MIT 合成力矩约束。
+- `grasp/`：minimum-jerk 接近／接触过渡，以及导纳状态到 MIT 命令的映射。
+- `tactile/`：仅提供双侧法向力零窗口和稳定接触判定；不包含传感器解析、滤波、标定或设备 I/O。
+
+顶层 `dm_grasp_core` 继续导出全部既有公共对象。兼容期内，
+`dm_grasp_core.control` 和 `dm_grasp_core.command` 仍可导入，且导出与新子域完全相同的对象。
+
 ## 控制约定
 
 - 力反馈为左右法向力的平均值（N），不是两侧之和。
@@ -27,4 +36,4 @@ PYTHONPATH=packages/dm_grasp_core/src python -m pytest packages/dm_grasp_core/te
 
 Apache-2.0。原 `dm_gripper_control/package.xml` 声明 Apache-2.0；本目录 `LICENSE` 原样复制自承载仓库 `parallel_gripper_tactile/LICENSE`，保留其中 Copyright 2026 langxin11。ROS 控制包没有独立 LICENSE 文件。
 
-`control.py` 的八项公共算法来自 `tactile_grasp_ros2/src/dm_gripper_control/dm_gripper_control/dm_gripper_control/control.py`，仅移除机械端点搜索类并调整模块说明与导入；`command.py` 从 `force_tracking_node.py` 的 `_build_command` 和 FORCE_TRACKING 积分段抽取，改用显式参数和 dataclass 返回值，保留数学顺序和限幅行为。原始文件 SHA256 记录在 `tests/golden_tracking.json`。没有从不再维护的实验或传感器原型仓库复制实现。
+原 `control.py` 的八项公共算法来自 `tactile_grasp_ros2/src/dm_gripper_control/dm_gripper_control/dm_gripper_control/control.py`，仅移除机械端点搜索类并调整模块说明与导入；现按职责置于 `control/`、`grasp/` 与 `tactile/`。原 `command.py` 从 `force_tracking_node.py` 的 `_build_command` 和 FORCE_TRACKING 积分段抽取，现实现置于 `grasp/command.py`，改用显式参数和 dataclass 返回值，保留数学顺序和限幅行为。原始文件 SHA256 记录在 `tests/golden_tracking.json`。没有从不再维护的实验或传感器原型仓库复制实现。

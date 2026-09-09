@@ -2,7 +2,7 @@
 
 import pytest
 
-from parallel_gripper_tactile.discrete_force_control import (
+from robotiq_grasp_core.discrete_force_control import (
     DiscreteControlState,
     DiscreteForceControlConfig,
     DiscreteForceController,

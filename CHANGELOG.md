@@ -9,6 +9,9 @@
 
 ### 变更
 
+- `dm-grasp-core` 按 `control`、`grasp` 与 `tactile` 子域整理内部实现，并保留顶层及
+  `dm_grasp_core.control`、`dm_grasp_core.command` 兼容入口；算法公式、固定轨迹与版本号不变。
+
 - 演示视频默认升级为 1920×1080 @30 fps 与 H.264 CRF 18；实时曲线面板复用
   `plotstyle.science_pyplot()` 的 SciencePlots IEEE 样式。自定义力箭头先经
   `mjv_initGeom()` 初始化，再由 `mjv_connector()` 设置起终点，避免复用槽位残留。
@@ -37,6 +40,9 @@
 
 ### 新增
 
+- 新增独立 uv workspace 成员 `robotiq-grasp-core==0.1.0`，承载 Robotiq 整数量化离散力控制、
+  单 tick 力增益、HOLD／再激活与有限动作预测；仿真旧导入路径保留兼容出口，且该核心不依赖
+  ROS、MuJoCo、profile 或仿真主包。
 - 新增平行夹爪力控制方法说明报告，采用中文适配的 IEEE 双栏会议版式和 Times 系西文字体，集中整理位置式 PID、刚度感知位置增量限幅、二阶导纳与二阶直接力矩 ADRC 的控制律及验证边界；报告表格统一为三线表。
 - 新增 `pid-stiffness-limit` 力跟踪变体：保留 PID 与机构力矩前馈，关闭基于同一力误差的刚度位置前馈，
   改用在线刚度和机构雅可比把允许力变化率换算为 PID 位置目标的周期增量边界；trace 与 metrics 记录

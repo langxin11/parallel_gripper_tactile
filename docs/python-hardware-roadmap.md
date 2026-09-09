@@ -1,7 +1,8 @@
 # 目录重构与纯 Python 真机联调计划
 
 日期：2026-09-09。状态：实施中，P0 已完成；P1 已完成 `config`、`artifacts` 与
-`analysis`／`visualization` 的首轮迁移，其他按职责拆分仍待推进。
+`analysis`／`visualization` 的首轮迁移；P2 已完成 DM 核首轮子域整理与 Robotiq
+离散控制核心提取，其他控制律仍待迁移。
 
 本计划记录下一阶段的目标布局与验收顺序，不表示所列包、接口或硬件能力已经落地。
 当前架构仍以 [architecture.md](architecture.md) 为准；实施各阶段时同步更新该文档。
@@ -43,28 +44,73 @@ ROS 工作区来源根目录：
 
 ## 3. 目标目录与依赖方向
 
-以下包名为实施目标；首阶段完成依赖审计后，在不改变隔离原则的前提下细化文件拆分。
+DMgripper 采用“实验编排—仿真／真机适配—核心算法”结构：
+
+```mermaid
+flowchart TB
+  Experiments["DMgripper experiments"]
+  Sim["dmgripper_sim"]
+  Real["dmgripper_hardware"]
+  Core["dmgripper_core<br/>现有发行包：dm-grasp-core"]
+  Tactile["tactile algorithms"]
+  Control["control algorithms"]
+  Grasp["grasp logic"]
+
+  Experiments --> Sim
+  Experiments --> Real
+  Sim --> Core
+  Real --> Core
+  Core --> Tactile
+  Core --> Control
+  Core --> Grasp
+```
+
+图中的 `tactile algorithms` 只处理已经适配的触觉观测，例如滤波、接触判定、
+滑移特征和力语义；商业传感器的串口、协议解析、清零命令、左右设备映射和时间戳
+属于 `dmgripper_hardware/tactile`。`grasp logic` 负责接近、接触过渡、跟踪、保持和释放等
+夹持状态，不负责设备通信。
+
+`dmgripper_sim` 与 `dmgripper_hardware` 是同级适配器：前者把 MuJoCo 状态转换为核心观测并把
+核心命令应用到仿真执行器，后者把商业触觉和 DM4310P 反馈转换为核心观测并通过 USB2CAN
+发送命令。实验层选择运行后端、目标曲线和产物目录，不包含控制公式。
+
+现有 Python 发行包名 `dm-grasp-core` 和导入名 `dm_grasp_core` 暂时保持，避免破坏 ROS 工作区
+固定的 wheel、回放测试和导入路径；文档中的 `dmgripper_core` 表示其架构角色。若未来确需改名，
+应单独发布新主版本并提供迁移期，不能夹带在目录整理中完成。
+
+Robotiq 使用一棵平行结构：`robotiq experiments → robotiq_sim / robotiq_hardware →
+robotiq_grasp_core`。两棵结构不共享控制算法、状态机、命令类型或调度周期。可共享的基础设施
+仅限运行目录、日志格式工具、绘图样式和不带设备语义的时间序列任务描述；共享项不得反向依赖
+任一夹爪核心。
+
+对应的实施目标如下；首阶段完成依赖审计后，在不改变隔离原则的前提下细化文件拆分。
 
 ```text
 packages/
-├── dm_grasp_core/                  # DM 独立控制核，沿用已有包
+├── dm_grasp_core/                  # dmgripper_core，沿用已有发行包和导入名
 │   └── src/dm_grasp_core/
 │       ├── interfaces.py          # DM 观测、参考与 MIT 请求
-│       ├── kinematics.py
-│       ├── pid.py
-│       ├── stiffness.py
-│       ├── admittance.py
-│       └── adrc.py
-├── robotiq_grasp_core/             # Robotiq 独立控制核
+│       ├── tactile/               # DM 触觉算法，不含串口和设备适配
+│       ├── control/               # 运动学、PID、刚度、导纳与 ADRC
+│       └── grasp/                 # 接近、接触过渡、跟踪、保持与释放逻辑
+├── robotiq_grasp_core/             # Robotiq 独立核心
 │   └── src/robotiq_grasp_core/
 │       ├── interfaces.py          # 整数命令与设备反馈语义
-│       ├── quantized_pi.py
-│       └── discrete_force.py      # 状态机、增益与动作选择，按需继续拆分
-└── gripper_hardware/               # 无 ROS、MuJoCo 的硬件程序
-    └── src/gripper_hardware/
+│       ├── tactile/               # Robotiq 触觉算法
+│       ├── control/               # 量化 PI、单 tick 增益与动作选择
+│       └── grasp/                 # WAIT_STABLE、ADJUST、HOLD 与 RELEASE
+├── dmgripper_hardware/             # 无 ROS、MuJoCo 的 DM 真机程序
+│   └── src/dmgripper_hardware/
+│       ├── tactile/               # 双侧采集、协议解析与数据适配
+│       ├── motor/                 # USB2CAN、DM4310P 协议与设备状态
+│       ├── runtime.py
+│       ├── recording.py
+│       └── cli.py
+└── robotiq_hardware/               # 无 ROS、MuJoCo 的 Robotiq 真机程序
+    └── src/robotiq_hardware/
         ├── tactile/               # 双侧采集、协议解析与数据适配
-        ├── dm/                    # 传输、协议适配、设备状态与 DM 循环
-        ├── robotiq/               # 库适配、设备状态与 Robotiq 循环
+        ├── gripper/               # pyrobotiqgripper 适配与设备状态
+        ├── runtime.py
         ├── recording.py
         └── cli.py
 
@@ -76,9 +122,9 @@ src/parallel_gripper_tactile/
 │   ├── scenes/
 │   ├── tactile/                   # 仿真触觉后端
 │   └── actuators/                 # DM、Robotiq 分别适配
-├── controllers/
-│   ├── dm/                        # 仿真配置／观测到 DM 核的适配
-│   └── robotiq/                   # 仿真配置／观测到 Robotiq 核的适配
+├── backends/                      # dmgripper_sim 与 robotiq_sim 的仿真适配
+│   ├── dm/                        # 仿真观测／执行器到 DM 核的适配
+│   └── robotiq/                   # 仿真观测／执行器到 Robotiq 核的适配
 ├── perception/                    # 滑移与摩擦估计
 ├── tasks/                         # 参考曲线、力调度与扰动描述
 ├── experiments/
@@ -93,9 +139,50 @@ src/parallel_gripper_tactile/
 └── assets/                        # 资产生成和转换工具
 ```
 
-两个控制核均不依赖 ROS、MuJoCo、串口、CLI 或模型路径；硬件包和仿真包分别依赖控制核。
+两个核心均不依赖 ROS、MuJoCo、串口、CLI 或模型路径；硬件包和仿真适配分别依赖对应核心。
 DM 核与 Robotiq 核之间不相互导入。真机不能通过导入仿真主包获得通用工具。
 确需跨两端共享的记录或数据类型先审计依赖，再决定是否提取小型公共包，避免过早建通用框架。
+
+### uv workspace 组织
+
+根项目继续作为 uv workspace 根。每个核心与硬件包拥有独立 `pyproject.toml`、发行包名、
+运行依赖和测试目录；根锁文件统一固定开发环境。目标配置在相应目录实际创建后逐项加入，
+不为尚不存在的包提前声明成员：
+
+当前已登记 `packages/dm_grasp_core` 与 `packages/robotiq_grasp_core`；两个硬件成员将在对应包
+创建时加入。完整目标配置如下：
+
+```toml
+[tool.uv.workspace]
+members = [
+    "packages/dm_grasp_core",
+    "packages/robotiq_grasp_core",
+    "packages/dmgripper_hardware",
+    "packages/robotiq_hardware",
+]
+
+[tool.uv.sources]
+dm-grasp-core = { workspace = true }
+robotiq-grasp-core = { workspace = true }
+```
+
+`parallel-gripper-tactile` 依赖两个控制核心，用于仿真适配；`dmgripper-hardware` 只依赖
+`dm-grasp-core` 和 DM／触觉通信依赖；`robotiq-hardware` 只依赖 `robotiq-grasp-core`、
+`pyrobotiqgripper` 和触觉通信依赖。两个硬件包互不依赖，也不依赖仿真主包。
+
+开发时可从 workspace 根统一同步和测试，也必须验证成员可独立安装，防止根环境中偶然存在的
+MuJoCo、ROS 或另一夹爪依赖掩盖边界错误：
+
+```bash
+uv sync --all-groups
+uv run --package dm-grasp-core pytest packages/dm_grasp_core/tests
+uv run --package robotiq-grasp-core pytest packages/robotiq_grasp_core/tests
+uv run --package dmgripper-hardware pytest packages/dmgripper_hardware/tests
+uv run --package robotiq-hardware pytest packages/robotiq_hardware/tests
+```
+
+具体包创建时再确认 `uv run --package` 与测试依赖组的最终命令。硬件依赖优先放在各成员中，
+不加入仿真主包的基础依赖；需要访问真实设备的测试使用显式标记，与默认无硬件测试分开。
 
 迁移清单至少覆盖：`profiles.py` → `config`；`scenes`、`simulation.py` 和触觉读取器
 → `simulation`；`tactile_slip.py`、`taxel_friction.py`、摩擦估计 → `perception`；
@@ -167,7 +254,7 @@ DM 与 Robotiq 分别实现调度和故障策略，记录周期、测量年龄�
 | --- | --- | --- |
 | P0：冻结基线（已完成） | 合并旧分支；记录提交、导入路径、依赖和测试基线 | 工作区干净，原有全量门禁通过，列明跳过项 |
 | P1：包内整理（进行中） | 按职责迁移；旧导入路径兼容层；缩减顶层提前导入 | CLI 与导入回归，固定轨迹一致，默认配置与产物字段不变 |
-| P2：隔离控制核 | DM、Robotiq 独立包、类型、配置与测试；仿真适配器 | 两核独立安装，在无 ROS／MuJoCo 环境导入和运行；无交叉依赖 |
+| P2：隔离控制核（进行中） | DM、Robotiq 独立包、类型、配置与测试；仿真适配器 | 两核独立安装，在无 ROS／MuJoCo 环境导入和运行；无交叉依赖 |
 | P3：纯 Python 采集 | 触觉读取、DM 与 Robotiq 驱动适配、日志及设备状态 | fake 串口／回放覆盖拆帧、错误帧、重复帧、超时、断连、旧反馈；待设备在线后验证真实采集 |
 | P4：受限动作 | 分设备的使能、反馈读取、动作和停止流程 | 实机确认方向、行程、设备状态与停止；记录量程和实际时序 |
 | P5：基础闭环 | DM 两基线；Robotiq PI 与固定单步；固定目标与 Ramp | 每台夹爪独立验收误差、峰值、丢数据和故障响应；记录参数与阈值 |
