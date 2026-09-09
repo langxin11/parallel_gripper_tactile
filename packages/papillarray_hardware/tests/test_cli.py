@@ -10,7 +10,7 @@ import pytest
 
 from papillarray_hardware import PtsPacket
 from papillarray_hardware.cli import _counter_status, build_parser, run
-from papillarray_hardware.protocol import ProtocolError
+from papillarray_hardware.protocol import ProtocolError, PtsReadDiagnostics, PtsReadTimeout
 
 
 class FakeClient:
@@ -89,6 +89,7 @@ def test_probe_parser_requires_port_and_has_safe_finite_defaults() -> None:
     assert args.expected_sensors == 2
     assert args.count == 10
     assert args.timeout == 1.0
+    assert args.packet_timeout == 3.0
 
 
 @pytest.mark.parametrize("port", ("", " /dev/fake", "/dev/fake ", "/dev/\x00fake"))
@@ -186,6 +187,40 @@ def test_probe_closes_client_and_reports_actionable_read_errors(
     assert result == 1
     assert client.closed
     assert expected_text in stderr.getvalue()
+
+
+def test_probe_reports_timeout_diagnostics_and_passes_packet_timeout() -> None:
+    """总时限异常应以非零退出、关闭串口并打印可操作中文字段。"""
+    diagnostics = PtsReadDiagnostics(
+        received_bytes=96,
+        start_markers=2,
+        end_markers=1,
+        candidate_frames=1,
+        checksum_failures=1,
+        protocol_failures=0,
+        oversize_discards=0,
+        last_protocol_error="PTS 帧校验和不匹配",
+        raw_hex_preview="55667788",
+    )
+    client = FakeClient([PtsReadTimeout("等待有效 PTS 包超过总时限", diagnostics)])
+    stderr = io.StringIO()
+    configurations: list[object] = []
+
+    result = run(
+        ["--port", "/dev/fake", "--packet-timeout", "2.5"],
+        client_factory=lambda config: configurations.append(config) or client,
+        stdout=io.StringIO(),
+        stderr=stderr,
+    )
+
+    assert result == 1
+    assert client.closed
+    assert configurations[0].packet_timeout_s == 2.5
+    output = stderr.getvalue()
+    assert "接收字节=96" in output
+    assert "起始标志=2" in output
+    assert "校验失败=1" in output
+    assert "原始十六进制预览=55667788" in output
 
 
 def test_probe_rejects_sensor_count_mismatch_and_closes_client() -> None:

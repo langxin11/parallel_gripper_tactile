@@ -13,6 +13,7 @@ from papillarray_hardware.protocol import (
     START_MARKER,
     PacketChecksumError,
     ProtocolError,
+    PtsReadTimeout,
     PtsStreamReader,
     parse_packet,
     verify_checksum,
@@ -31,6 +32,21 @@ class FakeReadableSerial:
     def read(self, _size: int) -> bytes:
         """返回下一个分片，耗尽后模拟读取超时。"""
         return self._chunks.pop(0) if self._chunks else b""
+
+
+class StepClock:
+    """每次读取单调时钟都前进固定步长，无需测试休眠。"""
+
+    def __init__(self, step_s: float = 1.0) -> None:
+        """从零开始保存每次调用的推进量。"""
+        self._value = 0.0
+        self._step_s = step_s
+
+    def __call__(self) -> float:
+        """返回当前时刻并推进至下一离散时刻。"""
+        value = self._value
+        self._value += self._step_s
+        return value
 
 
 def test_parse_packet_preserves_hub_timestamp_and_type_7_data() -> None:
@@ -261,8 +277,153 @@ def test_stream_reader_discards_oversize_half_packet_and_times_out() -> None:
         max_packet_bytes=32,
     )
 
-    with pytest.raises(TimeoutError, match="超时无数据"):
+    with pytest.raises(PtsReadTimeout, match="超时无数据") as caught:
         reader.read_packet()
+
+    diagnostics = caught.value.diagnostics
+    assert diagnostics.oversize_discards == 1
+    assert diagnostics.received_bytes == len(START_MARKER) + 40
+
+
+def test_stream_reader_continuous_noise_reaches_total_deadline_with_diagnostics() -> None:
+    """持续收到不可解析字节时，单包总时限仍必须终止读取。"""
+    reader = PtsStreamReader(
+        FakeReadableSerial([b"noise"] * 10),
+        packet_timeout_s=3.0,
+        monotonic=StepClock(),
+    )
+
+    with pytest.raises(PtsReadTimeout, match="总时限") as caught:
+        reader.read_packet()
+
+    diagnostics = caught.value.diagnostics
+    assert diagnostics.received_bytes == 10
+    assert diagnostics.candidate_frames == 0
+    assert diagnostics.raw_hex_preview == b"noisenoise".hex()
+    assert reader.last_diagnostics == diagnostics
+
+
+def test_stream_reader_counts_markers_across_chunks() -> None:
+    """跨串口分片拆开的起止标志仍各计数一次。"""
+    reader = PtsStreamReader(
+        FakeReadableSerial([b"noise\x55\x66", b"\x77\x88bad\xaa", b"\xbb\xcc\xdd"]),
+        monotonic=lambda: 0.0,
+    )
+
+    with pytest.raises(PtsReadTimeout) as caught:
+        reader.read_packet()
+
+    diagnostics = caught.value.diagnostics
+    assert diagnostics.start_markers == 1
+    assert diagnostics.end_markers == 1
+    assert diagnostics.candidate_frames == 1
+    assert diagnostics.checksum_failures == 1
+
+
+def test_stream_reader_counts_second_packet_markers_across_read_calls() -> None:
+    """前一包返回时留下的第二包标志半段必须记入下一次等待诊断。"""
+    first_data = build_packet_data(
+        packet_counter=127,
+        timestamp_us=777_889_003,
+        sensors=[{"pillars": [], "global": (6.0, 5.0, 4.0, 0.6, 0.5, 0.4)}],
+    )
+    second_data = build_packet_data(
+        packet_counter=128,
+        timestamp_us=777_889_004,
+        sensors=[{"pillars": [], "global": (5.0, 4.0, 3.0, 0.5, 0.4, 0.3)}],
+    )
+    first_frame = START_MARKER + first_data + END_MARKER
+    reader = PtsStreamReader(
+        FakeReadableSerial(
+            [
+                first_frame + START_MARKER[:2],
+                START_MARKER[2:] + second_data + END_MARKER[:2],
+                END_MARKER[2:],
+            ]
+        ),
+        monotonic=lambda: 0.0,
+    )
+
+    first_packet = reader.read_packet()
+    first_diagnostics = reader.last_diagnostics
+    second_packet = reader.read_packet()
+    second_diagnostics = reader.last_diagnostics
+
+    assert first_packet.packet_counter == 127
+    assert first_diagnostics is not None
+    assert second_packet.packet_counter == 128
+    assert second_diagnostics is not None
+    assert second_diagnostics.start_markers == 1
+    assert second_diagnostics.end_markers == 1
+
+
+def test_stream_reader_reset_clears_cross_chunk_marker_state() -> None:
+    """设备清零前后的字节流边界不能拼成虚假的协议标志。"""
+    reader = PtsStreamReader(
+        FakeReadableSerial([START_MARKER[:2], b"", START_MARKER[2:], b""]),
+        monotonic=lambda: 0.0,
+    )
+
+    with pytest.raises(PtsReadTimeout):
+        reader.read_packet()
+    reader.reset_buffer()
+    with pytest.raises(PtsReadTimeout) as caught:
+        reader.read_packet()
+
+    assert caught.value.diagnostics.start_markers == 0
+
+
+def test_stream_reader_classifies_checksum_and_structure_failures() -> None:
+    """坏校验和与通过校验但结构错误的候选帧必须分开计数。"""
+    good = build_packet_data(
+        packet_counter=1,
+        timestamp_us=2,
+        sensors=[{"pillars": [], "global": (0.0, 0.0, 0.0, 0.0, 0.0, 0.0)}],
+    )
+    checksum_bad = bytearray(good)
+    checksum_bad[-3] ^= 0x01
+    structure_bad = bytearray(good)
+    structure_bad[3:5] = (65_535).to_bytes(2, "little")
+    structure_bad[-2:] = (sum(structure_bad[:-2]) & 0xFFFF).to_bytes(2, "little")
+    reader = PtsStreamReader(
+        FakeReadableSerial(
+            [
+                START_MARKER + bytes(checksum_bad) + END_MARKER,
+                START_MARKER + bytes(structure_bad) + END_MARKER,
+            ]
+        ),
+        monotonic=lambda: 0.0,
+    )
+
+    with pytest.raises(PtsReadTimeout) as caught:
+        reader.read_packet()
+
+    diagnostics = caught.value.diagnostics
+    assert diagnostics.candidate_frames == 2
+    assert diagnostics.checksum_failures == 1
+    assert diagnostics.protocol_failures == 1
+    assert diagnostics.last_protocol_error is not None
+    assert "偏移越界" in diagnostics.last_protocol_error
+
+
+def test_stream_reader_limits_preview_and_exposes_success_diagnostics() -> None:
+    """诊断预览有固定上限，且成功读取后调用方仍可检查诊断。"""
+    packet_data = build_packet_data(
+        packet_counter=126,
+        timestamp_us=777_889_002,
+        sensors=[{"pillars": [], "global": (6.0, 5.0, 4.0, 0.6, 0.5, 0.4)}],
+    )
+    frame = START_MARKER + packet_data + END_MARKER
+    reader = PtsStreamReader(FakeReadableSerial([frame]), monotonic=lambda: 0.0, preview_bytes=8)
+
+    packet = reader.read_packet()
+
+    diagnostics = reader.last_diagnostics
+    assert packet.packet_counter == 126
+    assert diagnostics is not None
+    assert diagnostics.received_bytes == len(frame)
+    assert diagnostics.raw_hex_preview == frame[:8].hex()
+    assert diagnostics.candidate_frames == 1
 
 
 def test_verify_checksum_rejects_too_short_data() -> None:

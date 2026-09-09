@@ -51,6 +51,7 @@ class PapillArraySerialConfig:
         sampling_rate: 请求控制器输出的频率，单位 Hz。
         expected_sensors: 此部署应接入的传感器数。
         timeout_s: 单次底层读取超时，单位 s。
+        packet_timeout_s: 单次等待有效 PTS 包的总单调时钟时限，单位 s。
         max_packet_bytes: 含起止标志的 PTS 单帧最大长度。
     """
 
@@ -59,6 +60,7 @@ class PapillArraySerialConfig:
     sampling_rate: int = 500
     expected_sensors: int = 2
     timeout_s: float = 1.0
+    packet_timeout_s: float = 3.0
     max_packet_bytes: int = 8192
 
     def __post_init__(self) -> None:
@@ -84,6 +86,12 @@ class PapillArraySerialConfig:
             raise ValueError("串口超时必须是有限正数")
         if not math.isfinite(self.timeout_s) or self.timeout_s <= 0:
             raise ValueError("串口超时必须是有限正数")
+        if isinstance(self.packet_timeout_s, bool) or not isinstance(
+            self.packet_timeout_s, (int, float)
+        ):
+            raise ValueError("单包总等待时限必须是有限正数")
+        if not math.isfinite(self.packet_timeout_s) or self.packet_timeout_s <= 0:
+            raise ValueError("单包总等待时限必须是有限正数")
         if isinstance(self.max_packet_bytes, bool) or not isinstance(self.max_packet_bytes, int):
             raise ValueError("单帧最大长度必须是正整数")
         if self.max_packet_bytes < 11:
@@ -134,7 +142,11 @@ class PapillArraySerialClient:
             finally:
                 raise RuntimeError("串口工厂返回了未打开的对象")
         self._serial_port = serial_port
-        self._reader = PtsStreamReader(serial_port, self._config.max_packet_bytes)
+        self._reader = PtsStreamReader(
+            serial_port,
+            self._config.max_packet_bytes,
+            packet_timeout_s=self._config.packet_timeout_s,
+        )
 
     def close(self) -> None:
         """关闭串口并释放协议读取状态；重复关闭安全。"""

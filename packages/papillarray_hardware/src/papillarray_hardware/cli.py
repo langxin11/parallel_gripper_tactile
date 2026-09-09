@@ -11,7 +11,7 @@ from collections.abc import Callable, Sequence
 from typing import NoReturn, TextIO
 
 from .client import PapillArraySerialClient, PapillArraySerialConfig, SUPPORTED_SAMPLING_RATES
-from .protocol import ProtocolError, PtsPacket
+from .protocol import ProtocolError, PtsPacket, PtsReadDiagnostics, PtsReadTimeout
 
 _COUNTER_MODULUS = 2**32
 
@@ -65,7 +65,18 @@ def build_parser() -> argparse.ArgumentParser:
         "--expected-sensors", type=_positive_int, default=2, help="期望传感器数，默认 2"
     )
     parser.add_argument("--count", type=_positive_int, default=10, help="采集包数，默认 10")
-    parser.add_argument("--timeout", type=_positive_float, default=1.0, help="串口超时秒数，默认 1")
+    parser.add_argument(
+        "--timeout",
+        type=_positive_float,
+        default=1.0,
+        help="单次底层串口读取超时秒数，默认 1",
+    )
+    parser.add_argument(
+        "--packet-timeout",
+        type=_positive_float,
+        default=3.0,
+        help="单包等待有效 PTS 帧的总时限秒数，默认 3",
+    )
     return parser
 
 
@@ -126,6 +137,23 @@ def _default_client_factory(config: PapillArraySerialConfig) -> PapillArraySeria
     return PapillArraySerialClient(config)
 
 
+def _format_diagnostics(diagnostics: PtsReadDiagnostics) -> str:
+    """将读取器诊断压缩为适合标准错误的一行中文摘要。"""
+    last_error = diagnostics.last_protocol_error or "无"
+    return (
+        "协议诊断："
+        f"接收字节={diagnostics.received_bytes}，"
+        f"起始标志={diagnostics.start_markers}，"
+        f"结束标志={diagnostics.end_markers}，"
+        f"候选帧={diagnostics.candidate_frames}，"
+        f"校验失败={diagnostics.checksum_failures}，"
+        f"结构失败={diagnostics.protocol_failures}，"
+        f"超长丢弃={diagnostics.oversize_discards}，"
+        f"最后协议错误={last_error}，"
+        f"原始十六进制预览={diagnostics.raw_hex_preview or '无'}。"
+    )
+
+
 def run(
     argv: Sequence[str] | None = None,
     *,
@@ -155,6 +183,7 @@ def run(
         sampling_rate=args.rate,
         expected_sensors=args.expected_sensors,
         timeout_s=args.timeout,
+        packet_timeout_s=args.packet_timeout,
     )
     client: PapillArraySerialClient | None = None
     previous_counter: int | None = None
@@ -183,8 +212,18 @@ def run(
     except KeyboardInterrupt:
         print("采集已由 Ctrl-C 中断，串口已关闭。", file=stderr)
         result = 130
+    except PtsReadTimeout as exc:
+        print(
+            f"PapillArray 探针超时：{exc}。{_format_diagnostics(exc.diagnostics)}"
+            "请检查供电、接线、设备协议，以及 --packet-timeout／--timeout。",
+            file=stderr,
+        )
+        result = 1
     except TimeoutError as exc:
-        print(f"PapillArray 探针超时：{exc}。请检查供电、接线和 --timeout。", file=stderr)
+        print(
+            f"PapillArray 探针超时：{exc}。请检查供电、接线和 --packet-timeout／--timeout。",
+            file=stderr,
+        )
         result = 1
     except ProtocolError as exc:
         print(f"PapillArray 探针协议错误：{exc}。请检查设备输出与协议版本。", file=stderr)

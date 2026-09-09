@@ -58,12 +58,15 @@ def test_config_defaults_and_sampling_rate_validation_do_not_open_serial() -> No
     assert config.baud_rate == 115200
     assert config.sampling_rate == 500
     assert config.expected_sensors == 2
+    assert config.packet_timeout_s == 3.0
     with pytest.raises(ValueError, match="采样率"):
         PapillArraySerialConfig(sampling_rate=333)
     with pytest.raises(ValueError, match="期望传感器数"):
         PapillArraySerialConfig(expected_sensors=0)
     with pytest.raises(ValueError, match="期望传感器数"):
         PapillArraySerialConfig(expected_sensors=True)
+    with pytest.raises(ValueError, match="总等待"):
+        PapillArraySerialConfig(packet_timeout_s=0)
 
 
 def test_open_and_commands_are_explicit_and_use_expected_wire_values() -> None:
