@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
-import sys
 import xml.etree.ElementTree as ET
 
 import mujoco
@@ -28,15 +27,10 @@ def _generator_module():
 
 
 def _diagnosis_module():
-    """Load the explicit force-tracking diagnosis protocol."""
-    path = ROOT / "scripts" / "experiments" / "force_tracking_diagnosis.py"
-    module_name = "force_tracking_diagnosis_protocol"
-    spec = importlib.util.spec_from_file_location(module_name, path)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
+    """加载包内的因果诊断 protocol。"""
+    from parallel_gripper_tactile.studies import protocols
+
+    return protocols.force_tracking_diagnosis
 
 
 def _named_elements(root: ET.Element, expression: str) -> dict[str, ET.Element]:
@@ -97,8 +91,12 @@ def test_custom_scene_can_disable_multiccd_without_changing_the_model() -> None:
 
 def test_diagnosis_protocol_contains_baselines_and_three_causal_controls() -> None:
     """碰撞几何阶段按固定顺序运行两个端点和三个新增对照。"""
+    from parallel_gripper_tactile.studies.force_tracking_diagnosis import (
+        load_diagnosis_config,
+    )
+
     diagnosis = _diagnosis_module()
-    config = diagnosis.load_config(ROOT / "configs" / "studies" / "force_tracking_diagnosis.yaml")
+    config = load_diagnosis_config(ROOT / "configs" / "studies" / "force_tracking_diagnosis.yaml")
     conditions = diagnosis._conditions(config, "collision-geometry")
 
     assert [condition[0] for condition in conditions] == [

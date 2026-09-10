@@ -1,8 +1,8 @@
-"""直接调用 runner 执行聚焦的力跟踪诊断研究。"""
+"""运行单 phase 的力跟踪因果诊断研究。"""
 
 from __future__ import annotations
 
-import argparse
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 from datetime import UTC, datetime
 import json
@@ -13,22 +13,8 @@ from uuid import uuid4
 import yaml
 
 from parallel_gripper_tactile.control import ForceSemantics
-from parallel_gripper_tactile.experiments.force_tracking import ControllerVariant
-from parallel_gripper_tactile.runners import execute_force_tracking
-from parallel_gripper_tactile.scenes.custom import ObjectContactModel, ObjectMaterial
-from parallel_gripper_tactile.studies.force_tracking_diagnosis import ALL_PHASES, Phase
-from parallel_gripper_tactile.studies.force_tracking_diagnosis import (
-    CollisionGeometryCondition,  # noqa: F401 - 既有测试经脚本模块属性引用
-    DiagnosisConfig,
-    DiagnosisConfigError,
-)
-from parallel_gripper_tactile.studies.force_tracking_diagnosis import (
-    load_diagnosis_config as load_config,
-)
-from parallel_gripper_tactile.studies.tabular import (
-    read_trace_rows,
-    write_resolved_config,
-    write_rows_csv_and_parquet,
+from parallel_gripper_tactile.experiments.force_tracking import (
+    ControllerVariant,
 )
 from parallel_gripper_tactile.visualization import (
     FULL_WIDTH_FONT_SCALE,
@@ -36,8 +22,33 @@ from parallel_gripper_tactile.visualization import (
     save_publication_figure,
     science_pyplot,
 )
+from parallel_gripper_tactile.runners import execute_force_tracking
+from parallel_gripper_tactile.scenes.custom import ObjectContactModel, ObjectMaterial
+from parallel_gripper_tactile.studies.force_tracking_diagnosis import (
+    DiagnosisConfig,
+    DiagnosisConfigError,
+    Phase,
+)
+from parallel_gripper_tactile.studies.lifecycle import (
+    ConditionExecution,
+    ConditionOutcome,
+    StudyCondition,
+    StudyPlan,
+    StudyPostprocessResult,
+    execute_study_lifecycle,
+    execution_failure_rows,
+    file_sha256,
+    require_matching_study_plan,
+    scientific_configuration_hash,
+)
+from parallel_gripper_tactile.studies.tabular import (
+    read_trace_rows,
+    write_resolved_config,
+    write_rows_csv_and_parquet,
+)
 
 
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 _NUMERIC_SCAN_FIELDS: dict[Phase, tuple[str, str]] = {
     "force-scale": ("force_scale", "Target force scale"),
     "position-limit": ("max_position_adjustment_rad", "Max. position adjustment (rad)"),
@@ -63,6 +74,13 @@ _EMPTY_CONTACT_DIAGNOSTICS: dict[str, object] = {
     "stiffness_position_adjustment_peak_to_peak_rad": None,
     "force_feedforward_torque_peak_to_peak_nm": None,
     "motor_torque_peak_to_peak_nm": None,
+}
+# 单因素设计中的对照条件：全控制器、标称力比例、显式接触模型与当前力语义。
+_DIAGNOSIS_BASELINE_LABELS: dict[Phase, str] = {
+    "controllers": "full",
+    "force-scale": "scale-1.000",
+    "contact-model": "explicit",
+    "force-semantics": "average-8N-current",
 }
 
 
@@ -574,127 +592,223 @@ def _conditions(
     )
 
 
-def run_phase(config: DiagnosisConfig, phase: Phase, *, config_source: Path) -> Path:
-    """执行一个诊断 phase，并返回其 study 目录。"""
-    study_dir = _study_directory(config, phase)
-    (study_dir / "study.yaml").write_bytes(config_source.read_bytes())
-    resolved_config = write_resolved_config(study_dir / "study.resolved.json", config)
-    rows: list[dict[str, object]] = []
-    for (
-        label,
-        controller,
-        material,
-        scale,
-        contact_model,
-        force_semantics,
-        scale_parameters,
-        tuning_override,
-        collision_model_path,
-        multiccd_enabled,
-    ) in _conditions(config, phase):
-        task_path = _scaled_task(config.task, scale, study_dir / "tasks")
-        profile_path = (
-            _semantics_scaled_profile(config.profile, study_dir / "profiles")
-            if scale_parameters
-            else config.profile
-        )
-        if tuning_override is not None:
-            profile_path = _tuning_profile(
-                config.profile, study_dir / "profiles", label, tuning_override
-            )
-        if collision_model_path is not None:
-            profile_path = _model_profile(
-                config.profile,
-                study_dir / "profiles",
-                label,
-                collision_model_path,
-            )
-        targets = _task_targets(task_path, force_semantics)
-        run, result = execute_force_tracking(
-            profile=profile_path,
-            task_path=task_path,
-            output_root=study_dir / "runs",
-            run_prefix=label,
-            object_material=material,
-            object_contact_model=contact_model,
-            multiccd_enabled=multiccd_enabled,
-            force_semantics=force_semantics,
-            controller_variant=controller,
-            sensor_noise_seed=config.sensor_noise_seed,
-        )
-        rows.append(
-            {
+def _baseline_role(phase: Phase, label: str) -> str | None:
+    """返回单因素设计中的对照条件角色；扫描与重复 phase 无对照。"""
+    baseline = _DIAGNOSIS_BASELINE_LABELS.get(phase)
+    return baseline if label == baseline else None
+
+
+def build_plan(config: DiagnosisConfig, *, phase: Phase) -> StudyPlan:
+    """从权威 domain config 与 phase 生成因果诊断的唯一有序计划。"""
+    conditions = tuple(
+        StudyCondition(
+            condition_id=label,
+            parameters={
                 "label": label,
                 "controller_variant": controller,
                 "object_material": material,
                 "object_contact_model": contact_model,
-                "collision_model": (
-                    None if collision_model_path is None else collision_model_path.name
-                ),
-                "multiccd_enabled": multiccd_enabled,
                 "force_semantics": force_semantics,
                 "force_scale": scale,
                 "parameter_scale_conversion": scale_parameters,
                 "swept_parameter": None if tuning_override is None else tuning_override[0],
                 "swept_value": None if tuning_override is None else tuning_override[1],
+                "collision_model": (
+                    None if collision_model_path is None else str(collision_model_path)
+                ),
+                "multiccd_enabled": multiccd_enabled,
                 "sensor_noise_seed": config.sensor_noise_seed,
-                "run_directory": str(run.path.relative_to(study_dir)),
-                "passed": result.passed,
-                **targets,
-                **_force_parameters(profile_path),
-                **asdict(result),
-                **_contact_diagnostics(run.path),
-            }
-        )
-    summary_csv, summary_parquet = write_rows_csv_and_parquet(study_dir / "summary.csv", rows)
-    summary_json = study_dir / "summary.json"
-    summary_json.write_text(
-        json.dumps({"phase": phase, "runs": rows}, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    figure_artifacts = render_phase_figures(rows, study_dir, phase=phase)
-    (study_dir / "study_manifest.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "name": config.name,
-                "phase": phase,
-                "config": "study.yaml",
-                "resolved_config": str(resolved_config.relative_to(study_dir)),
-                "runs": [row["run_directory"] for row in rows],
-                "failed_runs": [row["run_directory"] for row in rows if not bool(row["passed"])],
-                "artifacts": [
-                    str(path.relative_to(study_dir))
-                    for path in (
-                        summary_csv,
-                        summary_parquet,
-                        summary_json,
-                        resolved_config,
-                        *figure_artifacts,
-                    )
-                ],
             },
-            indent=2,
-            sort_keys=True,
+            pair_key=phase,
+            baseline_role=_baseline_role(phase, label),
         )
-        + "\n",
-        encoding="utf-8",
+        for (
+            label,
+            controller,
+            material,
+            scale,
+            contact_model,
+            force_semantics,
+            scale_parameters,
+            tuning_override,
+            collision_model_path,
+            multiccd_enabled,
+        ) in _conditions(config, phase)
     )
-    return study_dir
+    definition = {
+        "hash_schema_version": 1,
+        "protocol_revision": "force_tracking_diagnosis.v1",
+        "phase": phase,
+        "study": config.model_dump(mode="python", exclude={"output_root"}),
+        "resources": {
+            "profile_sha256": file_sha256(config.profile),
+            "task_sha256": file_sha256(config.task),
+            "collision_models": {
+                condition.label: file_sha256(condition.model)
+                for condition in config.collision_geometry_models
+            },
+        },
+        "aggregation": "none; per-run causal single-factor rows v1",
+    }
+    definition_hash = scientific_configuration_hash(definition, repository_root=_REPOSITORY_ROOT)
+    plan_hash = scientific_configuration_hash(
+        {
+            "study_definition_sha256": definition_hash,
+            "stage": phase,
+            "conditions": [condition.model_dump(mode="python") for condition in conditions],
+        },
+        repository_root=_REPOSITORY_ROOT,
+    )
+    return StudyPlan(
+        study_kind="force_tracking_diagnosis",
+        stage=phase,
+        study_definition_sha256=definition_hash,
+        scientific_configuration_sha256=plan_hash,
+        conditions=conditions,
+        seeds=(config.sensor_noise_seed,),
+        preflight={"status": "pending", "checks": ["profile", "task", "collision_models"]},
+    )
 
 
-def main() -> None:
-    """解析诊断配置并执行选定 phase。"""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", type=Path, required=True, help="诊断 study YAML 路径")
-    parser.add_argument("--phase", choices=(*ALL_PHASES, "all"), required=True)
-    arguments = parser.parse_args()
-    config_path = arguments.config.resolve()
-    config = load_config(config_path)
-    phases: tuple[Phase, ...] = ALL_PHASES if arguments.phase == "all" else (arguments.phase,)
-    for phase in phases:
-        print(f"{phase}: {run_phase(config, phase, config_source=config_path)}")
+def run_study(
+    config: DiagnosisConfig,
+    *,
+    phase: Phase,
+    config_source: Path | None = None,
+    study_directory: Path | None = None,
+    study_plan: StudyPlan | None = None,
+    additional_artifacts: Sequence[Path] = (),
+    lifecycle_manifest_fields: Mapping[str, object] | None = None,
+) -> Path:
+    """通过公共生命周期执行一个诊断 phase，并返回 study 父目录。"""
+    study_dir = (
+        _study_directory(config, phase) if study_directory is None else study_directory.resolve()
+    )
+    study_dir.mkdir(parents=True, exist_ok=True)
+    if config_source is not None:
+        (study_dir / "study.yaml").write_bytes(config_source.read_bytes())
+    else:
+        (study_dir / "study.yaml").write_text(
+            yaml.safe_dump(config.model_dump(mode="json"), sort_keys=False), encoding="utf-8"
+        )
+    resolved_config = write_resolved_config(study_dir / "study.resolved.json", config)
+    expected_plan = build_plan(config, phase=phase)
+    plan = (
+        expected_plan
+        if study_plan is None
+        else require_matching_study_plan(expected_plan, study_plan)
+    )
 
+    def execute(condition: StudyCondition) -> ConditionExecution:
+        parameters = condition.parameters
+        label = str(parameters["label"])
+        task_path = _scaled_task(config.task, float(parameters["force_scale"]), study_dir / "tasks")
+        profile_path = (
+            _semantics_scaled_profile(config.profile, study_dir / "profiles")
+            if bool(parameters["parameter_scale_conversion"])
+            else config.profile
+        )
+        swept_parameter = parameters["swept_parameter"]
+        if swept_parameter is not None:
+            profile_path = _tuning_profile(
+                config.profile,
+                study_dir / "profiles",
+                label,
+                (str(swept_parameter), float(parameters["swept_value"])),
+            )
+        collision_model = parameters["collision_model"]
+        if collision_model is not None:
+            profile_path = _model_profile(
+                config.profile,
+                study_dir / "profiles",
+                label,
+                Path(str(collision_model)),
+            )
+        targets = _task_targets(task_path, str(parameters["force_semantics"]))
+        run, result = execute_force_tracking(
+            profile=profile_path,
+            task_path=task_path,
+            output_root=study_dir / "runs",
+            run_prefix=condition.condition_id,
+            object_material=str(parameters["object_material"]),
+            object_contact_model=str(parameters["object_contact_model"]),
+            multiccd_enabled=bool(parameters["multiccd_enabled"]),
+            force_semantics=str(parameters["force_semantics"]),
+            controller_variant=str(parameters["controller_variant"]),
+            sensor_noise_seed=int(parameters["sensor_noise_seed"]),
+        )
+        row = {
+            "label": label,
+            "controller_variant": parameters["controller_variant"],
+            "object_material": parameters["object_material"],
+            "object_contact_model": parameters["object_contact_model"],
+            "collision_model": (
+                None if collision_model is None else Path(str(collision_model)).name
+            ),
+            "multiccd_enabled": parameters["multiccd_enabled"],
+            "force_semantics": parameters["force_semantics"],
+            "force_scale": parameters["force_scale"],
+            "parameter_scale_conversion": parameters["parameter_scale_conversion"],
+            "swept_parameter": swept_parameter,
+            "swept_value": parameters["swept_value"],
+            "sensor_noise_seed": int(parameters["sensor_noise_seed"]),
+            "run_directory": str(run.path.relative_to(study_dir)),
+            "passed": result.passed,
+            **targets,
+            **_force_parameters(profile_path),
+            **asdict(result),
+            **_contact_diagnostics(run.path),
+        }
+        return ConditionExecution(
+            row=row,
+            run_directory=str(row["run_directory"]),
+            passed=result.passed,
+        )
 
-if __name__ == "__main__":
-    main()
+    def aggregate_and_persist(
+        rows: list[dict[str, object]],
+        outcomes: tuple[ConditionOutcome, ...],
+        directory: Path,
+    ) -> StudyPostprocessResult:
+        artifacts: list[Path] = []
+        if rows:
+            artifacts.extend(write_rows_csv_and_parquet(directory / "summary.csv", rows))
+        summary_json = directory / "summary.json"
+        summary_json.write_text(
+            json.dumps(
+                {
+                    "phase": phase,
+                    "runs": rows,
+                    "failures": execution_failure_rows(outcomes),
+                },
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
+        artifacts.append(summary_json)
+        return StudyPostprocessResult(tuple(artifacts), {}, rows)
+
+    def render(rows: list[dict[str, object]], payload: object, directory: Path) -> tuple[Path, ...]:
+        if not rows:
+            return ()
+        return tuple(render_phase_figures(rows, directory, phase=phase))
+
+    manifest_fields: dict[str, object] = {
+        "schema_version": 1,
+        "name": config.name,
+        "phase": phase,
+        "config": "study.yaml",
+        "resolved_config": str(resolved_config.relative_to(study_dir)),
+    }
+    manifest_fields.update(lifecycle_manifest_fields or {})
+    return execute_study_lifecycle(
+        plan,
+        study_directory=study_dir,
+        execute_condition=execute,
+        aggregate_and_persist=aggregate_and_persist,
+        render=render,
+        initial_artifacts=(study_dir / "study.yaml", resolved_config, *additional_artifacts),
+        legacy_manifest_fields=manifest_fields,
+    )

@@ -31,6 +31,11 @@ from ..studies.force_tracking_comparison import (
     ForceTrackingComparisonConfig,
     load_comparison_config,
 )
+from ..studies.force_tracking_diagnosis import (
+    DiagnosisConfig,
+    Phase as DiagnosisPhase,
+    load_diagnosis_config,
+)
 from ..studies.force_tracking_stiffness_estimator_comparison import (
     ForceTrackingStiffnessEstimatorComparisonConfig,
     load_stiffness_estimator_comparison_config,
@@ -46,6 +51,7 @@ from ..studies.robotiq_discrete_force import (
     load_robotiq_discrete_force_study_config,
 )
 from ..studies.protocols import force_tracking_ablation as ablation_protocol
+from ..studies.protocols import force_tracking_diagnosis as diagnosis_protocol
 from ..studies.protocols import friction_estimation_local_slip as friction_local_slip_protocol
 from ..studies.protocols import (
     force_tracking_controller_comparison as comparison_protocol,
@@ -71,6 +77,7 @@ StudyKind = Literal[
     "force_tracking_stiffness_estimator_comparison",
     "dm_admittance_tuning",
     "robotiq_discrete_force",
+    "force_tracking_diagnosis",
 ]
 SetupFailureStage = Literal["configuration", "preflight"]
 
@@ -97,20 +104,28 @@ class StudySelection(_StudyModel):
     config: Path
     stage: TorqueAdrcTuningStageName | None = None
     coarse_study_dir: Path | None = None
+    phase: DiagnosisPhase | None = None
 
     @model_validator(mode="after")
     def validate_stage_fields(self) -> "StudySelection":
-        """只允许 Torque ADRC tuning 使用 coarse/confirm 字段。"""
-        if self.kind != "force_tracking_torque_adrc_tuning":
-            if self.stage is not None or self.coarse_study_dir is not None:
-                raise ValueError("stage fields are supported only by torque ADRC tuning")
+        """只允许 Torque ADRC tuning 使用 coarse/confirm 字段、诊断研究使用 phase 字段。"""
+        if self.kind == "force_tracking_torque_adrc_tuning":
+            if self.phase is not None:
+                raise ValueError("phase field is supported only by force_tracking_diagnosis")
+            if self.stage is None:
+                raise ValueError("torque ADRC tuning requires stage")
+            if self.stage == "coarse" and self.coarse_study_dir is not None:
+                raise ValueError("coarse stage forbids coarse_study_dir")
+            if self.stage == "confirm" and self.coarse_study_dir is None:
+                raise ValueError("confirm stage requires coarse_study_dir")
             return self
-        if self.stage is None:
-            raise ValueError("torque ADRC tuning requires stage")
-        if self.stage == "coarse" and self.coarse_study_dir is not None:
-            raise ValueError("coarse stage forbids coarse_study_dir")
-        if self.stage == "confirm" and self.coarse_study_dir is None:
-            raise ValueError("confirm stage requires coarse_study_dir")
+        if self.stage is not None or self.coarse_study_dir is not None:
+            raise ValueError("stage fields are supported only by torque ADRC tuning")
+        if self.kind == "force_tracking_diagnosis":
+            if self.phase is None:
+                raise ValueError("force_tracking_diagnosis requires phase")
+        elif self.phase is not None:
+            raise ValueError("phase field is supported only by force_tracking_diagnosis")
         return self
 
 
@@ -138,6 +153,7 @@ StudyDomainConfig = (
     | ForceTrackingStiffnessEstimatorComparisonConfig
     | DMAdmittanceTuningConfig
     | RobotiqDiscreteForceStudyConfig
+    | DiagnosisConfig
 )
 
 
@@ -237,6 +253,15 @@ def _validate_stiffness_estimator_comparison(
         for task in tasks.values():
             for material in config.materials:
                 validate_force_tracking_configuration(profile, task=task, object_material=material)
+
+
+def _validate_diagnosis(config: DiagnosisConfig) -> None:
+    """预检诊断方案的 profile、任务与碰撞几何模型文件。"""
+    load_profile(config.profile)
+    ForceTrackingTask.load(config.task)
+    for condition in config.collision_geometry_models:
+        if not condition.model.is_file():
+            raise ValueError(f"collision geometry model not found: {condition.model}")
 
 
 def _validate_torque_tuning(
@@ -357,6 +382,8 @@ def resolve_research_study(
             domain_config = load_dm_admittance_tuning_config(source)
         elif selection.study.kind == "robotiq_discrete_force":
             domain_config = load_robotiq_discrete_force_study_config(source)
+        elif selection.study.kind == "force_tracking_diagnosis":
+            domain_config = load_diagnosis_config(source)
         else:  # pragma: no cover - Literal 与 Pydantic 已阻止未知研究类型。
             raise ValueError(f"unsupported study kind: {selection.study.kind}")
     except (OSError, ValidationError, ValueError) as error:
@@ -381,6 +408,10 @@ def resolve_research_study(
         elif isinstance(domain_config, RobotiqDiscreteForceStudyConfig):
             _validate_robotiq_discrete_force(domain_config)
             plan = robotiq_discrete_force_protocol.build_plan(domain_config)
+        elif isinstance(domain_config, DiagnosisConfig):
+            assert selection.study.phase is not None
+            _validate_diagnosis(domain_config)
+            plan = diagnosis_protocol.build_plan(domain_config, phase=selection.study.phase)
         else:
             assert selection.study.stage is not None
             plan = torque_tuning_protocol.build_plan(
@@ -496,6 +527,13 @@ def execute_research_study(
         return dm_admittance_tuning_protocol.run_study(resolved.domain_config, **common_arguments)
     if isinstance(resolved.domain_config, RobotiqDiscreteForceStudyConfig):
         return robotiq_discrete_force_protocol.run_study(resolved.domain_config, **common_arguments)
+    if isinstance(resolved.domain_config, DiagnosisConfig):
+        assert resolved.selection.study.phase is not None
+        return diagnosis_protocol.run_study(
+            resolved.domain_config,
+            phase=resolved.selection.study.phase,
+            **common_arguments,
+        )
     assert resolved.selection.study.stage is not None
     return torque_tuning_protocol.run_study(
         resolved.domain_config,

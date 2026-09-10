@@ -132,6 +132,122 @@ def test_formal_ablation_preserves_pairing_and_complete_matrix() -> None:
     assert len({row["pair_key"] for row in resolved.conditions}) == 9
 
 
+def test_formal_diagnosis_preserves_phase_matrices_and_baseline_roles() -> None:
+    """迁移后 10 个 phase 的条件数量、顺序与对照角色与领域定义一致。"""
+    from parallel_gripper_tactile.studies.protocols import (
+        force_tracking_diagnosis as diagnosis_protocol,
+    )
+
+    resolved = _resolved(
+        "force_tracking_diagnosis",
+        overrides=["study.phase=collision-geometry"],
+    )
+    assert [row["condition_id"] for row in resolved.conditions] == [
+        "original-mesh-multiccd",
+        "height-spheres-multiccd",
+        "coplanar-mesh-multiccd",
+        "original-mesh-single-contact",
+        "coplanar-spheres-multiccd",
+    ]
+    assert [row["multiccd_enabled"] for row in resolved.conditions] == [
+        True,
+        True,
+        True,
+        False,
+        True,
+    ]
+    assert {row["pair_key"] for row in resolved.conditions} == {"collision-geometry"}
+    assert {row["baseline_role"] for row in resolved.conditions} == {None}
+
+    expected_counts = {
+        "reproducibility": 2,
+        "controllers": 4,
+        "materials": 3,
+        "force-scale": 5,
+        "contact-model": 2,
+        "collision-geometry": 5,
+        "force-semantics": 4,
+        "position-limit": 5,
+        "integral-gain": 5,
+        "filter-cutoff": 4,
+    }
+    for phase, count in expected_counts.items():
+        phase_rows = _resolved(
+            "force_tracking_diagnosis",
+            overrides=[f"study.phase={phase}"],
+        ).conditions
+        assert len(phase_rows) == count, phase
+        assert all(row["pair_key"] == phase for row in phase_rows), phase
+
+    controllers_rows = _resolved(
+        "force_tracking_diagnosis",
+        overrides=["study.phase=controllers"],
+    ).conditions
+    assert [row["baseline_role"] for row in controllers_rows][-1] == "full"
+    assert diagnosis_protocol._DIAGNOSIS_BASELINE_LABELS["controllers"] == "full"
+
+
+def test_diagnosis_phase_selection_is_validated() -> None:
+    """诊断研究必须显式选择 phase，其他研究禁止 phase 字段。"""
+    raw = {
+        "schema_version": 1,
+        "study": {
+            "kind": "force_tracking_diagnosis",
+            "config": "configs/studies/force_tracking_diagnosis.yaml",
+        },
+        "execution": {
+            "mode": "plan",
+            "output_root": "outputs/research/studies",
+            "recovery_source": None,
+        },
+    }
+    with pytest.raises(ResearchStudySetupError, match="requires phase"):
+        resolve_research_study(raw)
+    ablation_raw = {
+        **raw,
+        "study": {
+            "kind": "force_tracking_ablation",
+            "config": "configs/studies/force_tracking_ablation.yaml",
+            "phase": "controllers",
+        },
+    }
+    with pytest.raises(ResearchStudySetupError, match="phase field is supported only"):
+        resolve_research_study(ablation_raw)
+    torque_raw = {
+        **raw,
+        "study": {
+            "kind": "force_tracking_torque_adrc_tuning",
+            "config": "configs/studies/force_tracking_torque_adrc_tuning.yaml",
+            "stage": "coarse",
+            "phase": "controllers",
+        },
+    }
+    with pytest.raises(ResearchStudySetupError, match="phase field is supported only"):
+        resolve_research_study(torque_raw)
+
+
+def test_diagnosis_plan_registers_phase_and_condition_count(tmp_path: Path) -> None:
+    """诊断 plan 产物登记 phase 与该 phase 的条件数，且不创建任何 run。"""
+    resolved = _resolved(
+        "force_tracking_diagnosis",
+        overrides=["study.phase=force-semantics"],
+    )
+    result = execute_research_study(
+        resolved,
+        hydra_output_directory=tmp_path,
+        provenance={"choices": {}, "overrides": []},
+    )
+
+    plan = json.loads((result / "plan.json").read_text(encoding="utf-8"))
+    assert plan["study"] == "force_tracking_diagnosis"
+    assert plan["stage"] == "force-semantics"
+    assert plan["condition_count"] == 4
+    manifest = json.loads((result / "study_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["state"] == "planned"
+    assert manifest["stage"] == "force-semantics"
+    assert not (result / "runs").exists()
+
+
 def test_formal_local_slip_preserves_scenario_and_seed_matrix() -> None:
     """迁移后的 15 条局部起滑条件与旧 study 配置逐项一致。"""
     from parallel_gripper_tactile.studies.friction_estimation_local_slip import (

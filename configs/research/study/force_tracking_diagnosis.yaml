@@ -1,0 +1,5 @@
+# @package study
+# 因果诊断研究的 Hydra 选择器：phase 必选，条件矩阵权威文件仍由 configs/studies/ 提供。
+kind: force_tracking_diagnosis
+config: configs/studies/force_tracking_diagnosis.yaml
+phase: reproducibility

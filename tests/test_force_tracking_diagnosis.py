@@ -3,29 +3,23 @@
 from __future__ import annotations
 
 import csv
-import importlib.util
 import json
 import math
 from pathlib import Path
-import sys
 from types import SimpleNamespace
 
 from parallel_gripper_tactile.experiments.force_tracking import ForceTrackingResult
+from parallel_gripper_tactile.studies.protocols import (
+    force_tracking_diagnosis as protocol,
+)
+from parallel_gripper_tactile.studies.force_tracking_diagnosis import (
+    CollisionGeometryCondition,
+    DiagnosisConfig,
+)
 from parallel_gripper_tactile.studies.tabular import write_rows_csv_and_parquet
 
 
 ROOT = Path(__file__).resolve().parents[1]
-
-
-def _protocol_module() -> object:
-    """加载仓库中的 diagnosis study 入口脚本。"""
-    path = ROOT / "scripts/experiments/force_tracking_diagnosis.py"
-    spec = importlib.util.spec_from_file_location("force_tracking_diagnosis_protocol", path)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
 
 
 def _result(*, passed: bool) -> ForceTrackingResult:
@@ -103,16 +97,13 @@ def test_render_phase_figures_uses_numeric_x_and_skips_missing_traces(
     tmp_path: Path, fast_plot_render: None
 ) -> None:
     """数值扫描输出双格式图表，缺失 trace 的失败运行不会中止绘图。"""
-    protocol = _protocol_module()
     _write_trace(tmp_path / "runs" / "parquet" / "trace.csv", parquet=True)
     rows = [
         _diagnosis_row("scale-0.500", run_directory="runs/parquet", force_scale=0.5),
         _diagnosis_row("scale-1.000", run_directory="runs/missing", force_scale=1.0, passed=False),
     ]
 
-    artifacts = protocol.render_phase_figures(  # type: ignore[attr-defined]
-        rows, tmp_path, phase="force-scale"
-    )
+    artifacts = protocol.render_phase_figures(rows, tmp_path, phase="force-scale")
 
     expected = {
         "figures/diagnostic_metrics.png",
@@ -126,21 +117,20 @@ def test_render_phase_figures_uses_numeric_x_and_skips_missing_traces(
 
 def test_historical_summary_infers_passed_from_stability_and_finite_rmse() -> None:
     """旧汇总缺少 passed 字段时，仍可识别稳定且指标有限的有效运行。"""
-    protocol = _protocol_module()
-
-    assert protocol._row_passed({"simulation_stable": True, "rmse_n": 0.2})  # type: ignore[attr-defined]
-    assert not protocol._row_passed({"simulation_stable": False, "rmse_n": 0.2})  # type: ignore[attr-defined]
-    assert not protocol._row_passed({"simulation_stable": True, "rmse_n": math.inf})  # type: ignore[attr-defined]
+    assert protocol._row_passed({"simulation_stable": True, "rmse_n": 0.2})
+    assert not protocol._row_passed({"simulation_stable": False, "rmse_n": 0.2})
+    assert not protocol._row_passed({"simulation_stable": True, "rmse_n": math.inf})
 
 
 def test_run_phase_registers_figures_and_keeps_failed_run_without_trace(
-    tmp_path: Path, monkeypatch, fast_plot_render: None
+    tmp_path, monkeypatch, fast_plot_render: None
 ) -> None:
     """phase 收尾登记 PNG/PDF，并让没有跟踪段的失败 run 留在 manifest。"""
-    protocol = _protocol_module()
     profile = tmp_path / "profile.yaml"
     task = tmp_path / "task.yaml"
     config_source = tmp_path / "diagnosis.yaml"
+    collision_model = tmp_path / "unused.xml"
+    collision_model.write_text("<mujoco/>", encoding="utf-8")
     profile.write_text(
         """
 model:
@@ -172,14 +162,14 @@ reference:
         encoding="utf-8",
     )
     config_source.write_text("name: 合成诊断\n", encoding="utf-8")
-    config = protocol.DiagnosisConfig(  # type: ignore[attr-defined]
+    config = DiagnosisConfig(
         name="synthetic",
         profile=profile,
         task=task,
         output_root=tmp_path / "outputs",
         controllers=("pid-only", "full"),
         collision_geometry_models=(
-            protocol.CollisionGeometryCondition(label="unused", model=tmp_path / "unused.xml"),
+            CollisionGeometryCondition(label="unused", model=collision_model),
         ),
     )
 
@@ -192,8 +182,11 @@ reference:
         return SimpleNamespace(path=run_path), _result(passed=passed)
 
     monkeypatch.setattr(protocol, "execute_force_tracking", fake_execute_force_tracking)
-    study_dir = protocol.run_phase(  # type: ignore[attr-defined]
-        config, "controllers", config_source=config_source
+    study_dir = protocol.run_study(
+        config,
+        phase="controllers",
+        config_source=config_source,
+        study_directory=tmp_path / "study",
     )
 
     manifest = json.loads((study_dir / "study_manifest.json").read_text(encoding="utf-8"))

@@ -54,6 +54,11 @@ RELATED_PREFIXES = {
         "tests/test_force_tracking_stiffness_estimator_comparison.py",
         "tests/test_research_study.py",
     ),
+    "configs/studies/force_tracking_diagnosis.yaml": (
+        "tests/test_force_tracking_diagnosis.py",
+        "tests/test_pillar_collision_controls.py",
+        "tests/test_research_study.py",
+    ),
     "configs/studies/friction_estimation_local_slip.yaml": (
         "tests/test_friction_estimation_local_slip_study.py",
         "tests/test_research_study.py",
