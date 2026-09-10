@@ -7,6 +7,14 @@
 
 ## [Unreleased]
 
+### 变更
+
+- 7 个研究脚本的 `aggregate_rows` 手写聚合统一收敛到 `studies/aggregation.py` 的声明式
+  polars 聚合层（列规格加 `aggregate_records` 解释器），三份逐字节相同的 `_transient_stats`
+  副本一并合并；输出列名、列序、行序与数值口径不变（均值完全一致，标准差与
+  `statistics.stdev` 存在不超过 1e-16 相对偏差的浮点舍入差异），新增
+  `tests/test_study_aggregation.py` 十八项回归锚点。
+
 ## [0.4.0] - 2026-09-10
 
 ### 变更
