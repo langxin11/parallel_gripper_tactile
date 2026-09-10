@@ -5,20 +5,12 @@ import math
 import numpy as np
 import pytest
 
-import parallel_gripper_tactile.perception.taxels as canonical_taxels
-import parallel_gripper_tactile.taxel_friction as legacy_taxels
-from parallel_gripper_tactile.taxel_friction import (
+from parallel_gripper_tactile.perception.taxels import (
     ForceOnlySlipConfig,
     ForceOnlyTaxelSlipDetector,
     TaxelFrictionConfig,
     TaxelFrictionObserver,
 )
-
-
-def test_legacy_module_preserves_taxel_public_object_identity() -> None:
-    """旧入口导出的公共对象必须与新 perception 实现保持同一对象。"""
-    for name in legacy_taxels.__all__:
-        assert getattr(legacy_taxels, name) is getattr(canonical_taxels, name)
 
 
 def _forces(normals: list[list[float]], shears: list[list[float]]) -> np.ndarray:

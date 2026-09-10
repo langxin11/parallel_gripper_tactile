@@ -7,7 +7,7 @@ where = ["src"]
 
 [project]
 name = "parallel-gripper-tactile"
-version = "0.3.0"
+version = "0.4.0"
 description = "MuJoCo 平行夹爪指尖触觉仿真、资产与实验工具"
 readme = "README.md"
 license = { file = "LICENSE" }
@@ -76,7 +76,7 @@ layers = [
     "parallel_gripper_tactile.studies",
     "parallel_gripper_tactile.runners",
     "parallel_gripper_tactile.experiments",
-    "parallel_gripper_tactile.control : parallel_gripper_tactile.perception : parallel_gripper_tactile.scenes : parallel_gripper_tactile.tactile : parallel_gripper_tactile.contact_taxels : parallel_gripper_tactile.force_scheduling : parallel_gripper_tactile.dm_admittance : parallel_gripper_tactile.asset_tools : parallel_gripper_tactile.profiles : parallel_gripper_tactile.run_artifacts : parallel_gripper_tactile.plotstyle : parallel_gripper_tactile.friction_plots : parallel_gripper_tactile.taxel_friction : parallel_gripper_tactile.tactile_slip : parallel_gripper_tactile.friction_estimation : parallel_gripper_tactile.discrete_force_control",
+    "parallel_gripper_tactile.control : parallel_gripper_tactile.perception : parallel_gripper_tactile.scenes : parallel_gripper_tactile.tactile : parallel_gripper_tactile.contact_taxels : parallel_gripper_tactile.force_scheduling : parallel_gripper_tactile.dm_admittance : parallel_gripper_tactile.asset_tools",
     "parallel_gripper_tactile.config : parallel_gripper_tactile.simulation : parallel_gripper_tactile.timing : parallel_gripper_tactile.analysis : parallel_gripper_tactile.visualization : parallel_gripper_tactile.artifacts : parallel_gripper_tactile.validation : parallel_gripper_tactile.protocols : parallel_gripper_tactile.recording : parallel_gripper_tactile.video",
 ]
 
@@ -111,21 +111,6 @@ forbidden_modules = [
     "parallel_gripper_tactile.control",
     "parallel_gripper_tactile.force_scheduling",
     "parallel_gripper_tactile.dm_admittance",
-]
-
-[[tool.importlinter.contracts]]
-name = "主包内部不回引兼容层"
-type = "forbidden"
-source_modules = ["parallel_gripper_tactile"]
-forbidden_modules = [
-    "parallel_gripper_tactile.profiles",
-    "parallel_gripper_tactile.run_artifacts",
-    "parallel_gripper_tactile.plotstyle",
-    "parallel_gripper_tactile.friction_plots",
-    "parallel_gripper_tactile.taxel_friction",
-    "parallel_gripper_tactile.tactile_slip",
-    "parallel_gripper_tactile.friction_estimation",
-    "parallel_gripper_tactile.discrete_force_control",
 ]
 
 [[tool.importlinter.contracts]]

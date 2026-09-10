@@ -8,10 +8,7 @@ from pathlib import Path
 
 import pytest
 
-import parallel_gripper_tactile.artifacts as artifacts
-from parallel_gripper_tactile.artifacts import run_artifacts as artifacts_implementation
-import parallel_gripper_tactile.run_artifacts as legacy_artifacts
-from parallel_gripper_tactile.run_artifacts import (
+from parallel_gripper_tactile.artifacts import (
     ArtifactError,
     CleanPreview,
     RunDirectory,
@@ -26,38 +23,6 @@ def _profile(tmp_path: Path) -> Path:
     profile = tmp_path / "profile.yaml"
     profile.write_text("schema_version: 1\nname: test\n", encoding="utf-8")
     return profile
-
-
-@pytest.mark.parametrize(
-    "name",
-    (
-        "ArtifactError",
-        "CleanPreview",
-        "GitState",
-        "RunDirectory",
-        "RunInfo",
-        "RunManifest",
-        "clean_runs",
-        "collect_dependency_versions",
-        "collect_git_state",
-        "list_runs",
-        "plan_clean",
-    ),
-)
-def test_legacy_run_artifacts_module_reexports_artifacts_implementation(name: str) -> None:
-    """旧入口与新 ``artifacts`` 入口导出同一运行产物对象。"""
-    assert getattr(legacy_artifacts, name) is getattr(artifacts, name)
-
-
-def test_legacy_run_artifacts_module_keeps_all_non_private_imports() -> None:
-    """旧入口完整保留历史非私有导入与星号导入可见性。"""
-    legacy_names = {name for name in dir(legacy_artifacts) if not name.startswith("_")}
-    implementation_names = {
-        name for name in dir(artifacts_implementation) if not name.startswith("_")
-    }
-    assert legacy_names == implementation_names
-    for name in legacy_names:
-        assert getattr(legacy_artifacts, name) is getattr(artifacts_implementation, name)
 
 
 def test_run_snapshot_manifest_and_artifact_registration(tmp_path: Path) -> None:

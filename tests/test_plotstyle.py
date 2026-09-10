@@ -5,41 +5,13 @@ from __future__ import annotations
 import matplotlib.pyplot as plt
 import pytest
 
-import parallel_gripper_tactile.friction_plots as legacy_friction_plots
-import parallel_gripper_tactile.plotstyle as legacy_plotstyle
-import parallel_gripper_tactile.visualization as visualization
-from parallel_gripper_tactile.visualization import friction
-from parallel_gripper_tactile.visualization import plotstyle
-from parallel_gripper_tactile.plotstyle import (
+from parallel_gripper_tactile.visualization.plotstyle import (
     COLUMN_WIDTH_IN,
     FULL_WIDTH_FONT_SCALE,
     TEXT_WIDTH_IN,
     apply_paper_style,
     science_pyplot,
 )
-
-
-def test_visualization_preserves_existing_plotstyle_object_identity() -> None:
-    """旧 ``plotstyle`` 路径与新 ``visualization`` 入口导出同一对象。"""
-    for name in visualization.__all__:
-        if hasattr(plotstyle, name):
-            assert getattr(legacy_plotstyle, name) is getattr(visualization, name)
-    legacy_names = {name for name in dir(legacy_plotstyle) if not name.startswith("_")}
-    implementation_names = {name for name in dir(plotstyle) if not name.startswith("_")}
-    assert legacy_names == implementation_names
-    for name in legacy_names:
-        assert getattr(legacy_plotstyle, name) is getattr(plotstyle, name)
-
-
-def test_visualization_preserves_existing_friction_plot_object_identity() -> None:
-    """旧 ``friction_plots`` 路径与新摩擦绘图模块导出同一函数。"""
-    assert legacy_friction_plots.plot_summary is friction.plot_summary
-    assert legacy_friction_plots.plot_taxel_diagnostics is friction.plot_taxel_diagnostics
-    legacy_names = {name for name in dir(legacy_friction_plots) if not name.startswith("_")}
-    implementation_names = {name for name in dir(friction) if not name.startswith("_")}
-    assert legacy_names == implementation_names
-    for name in legacy_names:
-        assert getattr(legacy_friction_plots, name) is getattr(friction, name)
 
 
 def test_science_pyplot_applies_base_rc_params() -> None:
@@ -104,7 +76,10 @@ def test_publication_export_preserves_width_and_requested_format(tmp_path) -> No
 
     from PIL import Image
 
-    from parallel_gripper_tactile.plotstyle import paper_figsize, save_publication_figure
+    from parallel_gripper_tactile.visualization.plotstyle import (
+        paper_figsize,
+        save_publication_figure,
+    )
 
     with plt.rc_context():
         science_pyplot()
@@ -129,7 +104,7 @@ def test_paper_figsize_rejects_invalid_dimensions() -> None:
     """无效尺寸在创建图像前报告明确错误。"""
     import pytest
 
-    from parallel_gripper_tactile.plotstyle import paper_figsize
+    from parallel_gripper_tactile.visualization.plotstyle import paper_figsize
 
     for height in (0, -1, float("nan"), float("inf")):
         with pytest.raises(ValueError):
@@ -145,7 +120,10 @@ def test_chinese_math_label_renders_without_missing_glyphs(tmp_path, caplog) -> 
     import pytest
     from matplotlib import font_manager
 
-    from parallel_gripper_tactile.plotstyle import paper_figsize, save_publication_figure
+    from parallel_gripper_tactile.visualization.plotstyle import (
+        paper_figsize,
+        save_publication_figure,
+    )
 
     if "Noto Serif CJK SC" not in {font.name for font in font_manager.fontManager.ttflist}:
         pytest.skip("环境未安装论文中文字体。")
