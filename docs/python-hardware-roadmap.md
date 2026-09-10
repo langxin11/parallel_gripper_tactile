@@ -114,8 +114,12 @@ packages/
 │       ├── tactile/               # DM 专属左右映射与观测适配
 │       ├── motor/                 # USB2CAN、DM4310P 协议与设备状态
 │       ├── runtime.py
-│       ├── recording.py
 │       └── cli.py
+├── dmgripper_experiments/          # 组合 DM 硬件与触觉采集，不定义控制公式
+│   └── src/dmgripper_experiments/
+│       ├── runtime.py             # 双设备调度、快照和生命周期
+│       ├── recording.py           # JSONL 事件流与有界写队列
+│       └── cli.py                 # dmgripper-tactile-record
 └── robotiq_hardware/               # 无 ROS、MuJoCo 的 Robotiq 真机程序
     └── src/robotiq_hardware/
         ├── tactile/               # Robotiq 专属左右映射与观测适配
@@ -319,13 +323,60 @@ uv run pytest
 硬件安装隔离测试和回放测试不能替代实机验收。真机性能阈值在 P4 测量后、P5 实验前固定，
 不从仿真数字直接推定，也不在看到结果后修改验收口径。
 
-## 7. 分支与下一次入口
+## 7. 当前下一步：DM 与触觉同步记录
 
-将 `codex/friction-aware-force-scheduling` 快进合并到本地 `main`，保留原分支。
-从合并后的 `main` 创建 `codex/python-hardware-architecture`，提交本计划，后续实现沿此分支推进。
-本轮不推送远端。下一次从 P1 的导入／依赖审计与文件迁移清单开始，不直接启动硬件闭环。
+当前开发分支为 `codex/python-hardware-architecture`。P1～P3 的首轮架构拆分、
+PapillArray 与 DM 单设备真机探针、DM 固定时长阻抗动作均已完成。
+下一个明确交付为 P3-R1：在不启用触觉闭环的前提下，实现 DM4310P 与
+PapillArray 的并行采集、时间对齐和可回放记录。
 
-实施前仍需核实：USB2CANFD 的实际型号与 SDK、Robotiq 串口配置、PapillArray 实际端口与
-触觉左右映射，以及设备是否在线。DM4310P 参数已经写成当前部署配置，但首次动作前仍须通过
-只读反馈和无负载低速步骤复核方向、零位与行程。
-这些事项不阻塞 P1、P2 和 P3 的无硬件部分。
+### 7.1 交付边界
+
+新增独立 workspace 包 `packages/dmgripper_experiments`，依赖
+`dmgripper-hardware` 与 `papillarray-hardware`，但不依赖 ROS、MuJoCo、
+`robotiq-hardware` 或 Robotiq 控制核。该包只组合设备、试验流程和运行产物；
+MIT 命令、触觉观测和控制算法继续由各自所属包定义。
+
+首个 CLI 为：
+
+```bash
+uv run --package dmgripper-experiments dmgripper-tactile-record \
+  --duration 10 \
+  --output outputs/real/dm_baseline.jsonl
+```
+
+默认模式只读两台设备，不使能 DM。带动作的试验必须使用独立的显式参数，
+并复用已验收的 MIT 模式检查、使能确认、机械行程检查和最终失能确认；
+不通过子进程同时打开同一 DM 串口。
+
+### 7.2 运行时与记录格式
+
+- PapillArray 采集与 DM I/O 分别由唯一通信所有者运行，日志写入使用第三条
+  执行路径和有界队列。任何线程都不越过所有者直接访问串口。
+- 原始记录保留设备原生频率，不先强制重采样成同一行。JSONL 每行使用
+  `record_type`区分 `metadata`、`tactile`、`dm_state`、`dm_command` 和 `event`。
+- 每条设备记录都保留 `host_monotonic_receipt_ns`。触觉记录另存设备
+  `timestamp_us`、`packet_counter`、原始 `sensor_index` 与全局力／力矩；DM 记录
+  另存位置、速度、力矩、状态码和使能状态。
+- `dm_command` 分别保留请求值与实际编码值，不把串口写入成功当成电机已执行。
+  `metadata` 记录 CLI 参数、代码版本、设备别名与采样配置；`event` 记录启停、中断、
+  计数器跳变、队列溢出和设备错误。
+- 触觉 `sensor_index` 暂不直接命名为左／右。先通过分别按压两侧的真机数据
+  确认安装映射和法向力轴，再将映射写入 DM 专属配置，不改动原始记录。
+
+### 7.3 分步验收
+
+1. 离线用 fake 设备验证线程启停、单调拥有权、单调时钟、有界队列、完整关闭和
+   JSONL schema；开发时只运行新包的定向测试。
+2. 真机只读记录 `10 s`：验证两类记录的时间单调、包计数事件、实测频率、
+   队列溢出数和 Ctrl-C 关闭；此阶段不使能电机。
+3. 分别按压 `sensor_index=0/1`，确认两个物理手指的映射、接触法向力轴与符号。
+4. 在同一运行时中记录“MIT 保持→固定时长闭合平衡点→恢复初始平衡点→
+   失能”，验证命令、DM 反馈与触觉变化可以按主机单调时钟离线对齐。
+5. 固定记录 schema 与触觉映射后，才进入 P5 的 DM 基础力控；Robotiq 由
+   `robotiq_experiments` 使用自身的整数命令和调度节拍单独实现。
+
+P3-R1 的完成标准是：一条命令能产生可回放的双设备 JSONL，原始记录无静默丢弃，
+丢包、过期、队列溢出和关闭原因均有显式事件，且真机只读与阻抗动作两种记录都完成验收。
+完成前不将 PapillArray 输出直接接入力控回路。USB2CANFD 的实际型号与 SDK、
+Robotiq 串口配置可以作为独立后续项，不阻塞 P3-R1。
