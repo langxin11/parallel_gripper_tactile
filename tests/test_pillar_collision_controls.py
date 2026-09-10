@@ -27,10 +27,10 @@ def _generator_module():
 
 
 def _diagnosis_module():
-    """加载包内的因果诊断 protocol。"""
-    from parallel_gripper_tactile.studies import protocols
+    """加载包内的因果诊断 protocol；显式导入子模块，不依赖其他测试的导入副作用。"""
+    from parallel_gripper_tactile.studies.protocols import force_tracking_diagnosis
 
-    return protocols.force_tracking_diagnosis
+    return force_tracking_diagnosis
 
 
 def _named_elements(root: ET.Element, expression: str) -> dict[str, ET.Element]:
