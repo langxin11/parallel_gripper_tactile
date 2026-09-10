@@ -261,6 +261,51 @@ def test_dm_admittance_tuning_plan_registers_expected_condition_count(tmp_path: 
     assert not (result / "runs").exists()
 
 
+def test_formal_robotiq_discrete_force_preserves_matrix() -> None:
+    """迁移后的 60 条离散力条件与旧 study 配置逐项一致，仅量化 PI 行有基线角色。"""
+    from parallel_gripper_tactile.studies.robotiq_discrete_force import (
+        load_robotiq_discrete_force_study_config,
+    )
+
+    resolved = _resolved("robotiq_discrete_force")
+    legacy = load_robotiq_discrete_force_study_config(
+        REPOSITORY_ROOT / "configs/studies/robotiq_discrete_force.yaml"
+    )
+
+    actual = tuple(
+        (
+            row["controller_variant"],
+            row["object_material"],
+            float(row["force_noise_std_n"]),
+            int(row["sensor_noise_seed"]),
+        )
+        for row in resolved.conditions
+    )
+    assert actual == legacy.conditions()
+    assert len({row["condition_id"] for row in resolved.conditions}) == 60
+    assert all(
+        (row["baseline_role"] == "quantized_pi") == (row["controller_variant"] == "quantized-pi")
+        for row in resolved.conditions
+    )
+
+
+def test_robotiq_discrete_force_plan_registers_expected_condition_count(tmp_path: Path) -> None:
+    """离散力 plan 产物登记 60 条条件且不创建任何 run。"""
+    resolved = _resolved("robotiq_discrete_force")
+    result = execute_research_study(
+        resolved,
+        hydra_output_directory=tmp_path,
+        provenance={"choices": {}, "overrides": []},
+    )
+
+    plan = json.loads((result / "plan.json").read_text(encoding="utf-8"))
+    assert plan["study"] == "robotiq_discrete_force"
+    assert plan["condition_count"] == 60
+    manifest = json.loads((result / "study_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["state"] == "planned"
+    assert not (result / "runs").exists()
+
+
 def test_local_slip_protocol_preserves_validation_semantics(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

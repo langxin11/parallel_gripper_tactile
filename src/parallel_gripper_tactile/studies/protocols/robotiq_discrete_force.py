@@ -1,13 +1,12 @@
-"""运行 Robotiq 单 tick 力增量离散控制的完整消融矩阵。"""
+"""串行运行 Robotiq 单 tick 力增量离散控制的完整消融矩阵。"""
 
 from __future__ import annotations
 
-import argparse
-from concurrent.futures import ProcessPoolExecutor, as_completed
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 from datetime import UTC, datetime
 import json
-import os
+import math
 from pathlib import Path
 from statistics import fmean
 from uuid import uuid4
@@ -18,11 +17,6 @@ import yaml
 from parallel_gripper_tactile.experiments.robotiq_discrete_force import (
     RobotiqDiscreteForceTask,
 )
-from parallel_gripper_tactile.visualization import (
-    paper_figsize,
-    save_publication_figure,
-    science_pyplot,
-)
 from parallel_gripper_tactile.runners import execute_robotiq_discrete_force
 from parallel_gripper_tactile.studies.aggregation import (
     aggregate_records,
@@ -32,42 +26,33 @@ from parallel_gripper_tactile.studies.aggregation import (
     optional_mean,
     plain_mean,
 )
+from parallel_gripper_tactile.studies.lifecycle import (
+    ConditionExecution,
+    ConditionOutcome,
+    StudyCondition,
+    StudyPlan,
+    StudyPostprocessResult,
+    execute_study_lifecycle,
+    execution_failure_rows,
+    file_sha256,
+    require_matching_study_plan,
+    scientific_configuration_hash,
+)
 from parallel_gripper_tactile.studies.robotiq_discrete_force import (
     RobotiqDiscreteForceStudyConfig,
-    load_robotiq_discrete_force_study_config,
 )
 from parallel_gripper_tactile.studies.tabular import (
     write_resolved_config,
     write_rows_csv_and_parquet,
 )
+from parallel_gripper_tactile.visualization import (
+    paper_figsize,
+    save_publication_figure,
+    science_pyplot,
+)
 
 
-_MAX_AUTO_JOBS = 12
-
-
-def _available_cpu_count() -> int:
-    """返回当前进程实际可用的 CPU 数，优先遵守亲和性限制。"""
-    try:
-        return max(1, len(os.sched_getaffinity(0)))
-    except (AttributeError, OSError):
-        return max(1, os.cpu_count() or 1)
-
-
-def _resolve_worker_count(
-    jobs: int | None,
-    condition_count: int,
-    *,
-    available_cpus: int | None = None,
-) -> int:
-    """解析并行进程数；自动模式兼顾 CPU、条件数与内存压力。"""
-    if condition_count < 1:
-        raise ValueError("condition_count must be positive")
-    if jobs is not None and jobs < 1:
-        raise ValueError("jobs must be a positive integer")
-    if jobs is not None:
-        return min(jobs, condition_count)
-    cpu_count = _available_cpu_count() if available_cpus is None else max(1, available_cpus)
-    return min(cpu_count, condition_count, _MAX_AUTO_JOBS)
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 
 
 def aggregate_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -95,6 +80,17 @@ def aggregate_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
             optional_mean("prediction_mae_n"),
         ),
     )
+
+
+def json_compatible(value: object) -> object:
+    """把非有限浮点数转换为标准 JSON 的 ``null``。"""
+    if isinstance(value, float) and not math.isfinite(value):
+        return None
+    if isinstance(value, dict):
+        return {str(key): json_compatible(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [json_compatible(item) for item in value]
+    return value
 
 
 # 总览图中的控制器展示顺序：量化 PI 为连续对照，其余按消融链排序。
@@ -354,183 +350,187 @@ def _create_study_directory(config: RobotiqDiscreteForceStudyConfig) -> Path:
     return directory
 
 
-def _evaluate_condition(
-    payload: dict[str, object],
-) -> tuple[int, dict[str, object], list[dict[str, object]]]:
-    """运行单个 study 条件，返回条件序号、汇总行与平台指标行。
-
-    作为进程池工作函数使用：各条件相互独立且种子固定，结果与串行执行一致。
-    """
-
-    def _base_row(run_path: Path) -> dict[str, object]:
-        return {
-            "controller_variant": payload["controller_variant"],
-            "object_material": payload["object_material"],
-            "force_noise_std_n": payload["force_noise_std_n"],
-            "noise_seed": payload["noise_seed"],
-            "run_directory": str(run_path.relative_to(payload["study_dir"])),
-        }
-
-    task = RobotiqDiscreteForceTask.load(Path(str(payload["task_path"])))
-    run, result = execute_robotiq_discrete_force(
-        profile=Path(str(payload["profile"])),
-        task_path=Path(str(payload["task_path"])),
-        discrete_task=task,
-        output_root=Path(str(payload["output_root"])),
-        run_prefix=str(payload["run_prefix"]),
-        controller_variant=payload["controller_variant"],
-        object_material=payload["object_material"],
-        force_noise_std_n=float(payload["force_noise_std_n"]),
-        noise_seed=int(payload["noise_seed"]),
+def build_plan(config: RobotiqDiscreteForceStudyConfig) -> StudyPlan:
+    """从权威 domain config 生成离散力消融矩阵的唯一有序计划。"""
+    conditions = tuple(
+        StudyCondition(
+            condition_id=f"{controller}-{material}-noise{noise}-seed{seed:03d}",
+            parameters={
+                "controller_variant": controller,
+                "object_material": material,
+                "force_noise_std_n": noise,
+                "sensor_noise_seed": seed,
+            },
+            pair_key=f"{material}:noise{noise}:seed{seed:03d}",
+            baseline_role="quantized_pi" if controller == "quantized-pi" else None,
+        )
+        for controller, material, noise, seed in config.conditions()
     )
-    result_values = asdict(result)
-    platforms = result_values.pop("platform_metrics")
-    row = {**_base_row(run.path), **result_values}
-    platform_rows = [{**_base_row(run.path), **platform} for platform in platforms]
-    return int(payload["condition_index"]), row, platform_rows
+    definition = {
+        "hash_schema_version": 1,
+        "protocol_revision": "robotiq_discrete_force.v1",
+        "study": config.model_dump(mode="python", exclude={"output_root"}),
+        "resources": {
+            "profile_sha256": file_sha256(config.profile),
+            "task_sha256": file_sha256(config.task),
+        },
+        # 延续旧脚本的 17 列控制器聚合口径；quantized-pi 为连续对照基线。
+        "aggregation": "controller_variant; safety/action/oscillation/error columns v1",
+    }
+    definition_hash = scientific_configuration_hash(definition, repository_root=_REPOSITORY_ROOT)
+    plan_hash = scientific_configuration_hash(
+        {
+            "study_definition_sha256": definition_hash,
+            "stage": None,
+            "conditions": [condition.model_dump(mode="python") for condition in conditions],
+        },
+        repository_root=_REPOSITORY_ROOT,
+    )
+    return StudyPlan(
+        study_kind="robotiq_discrete_force",
+        study_definition_sha256=definition_hash,
+        scientific_configuration_sha256=plan_hash,
+        conditions=conditions,
+        seeds=tuple(config.seeds.values()),
+        preflight={"status": "pending", "checks": ["profile", "task", "materials"]},
+    )
 
 
 def run_study(
     config: RobotiqDiscreteForceStudyConfig,
     *,
     config_source: Path | None = None,
-    jobs: int | None = None,
+    study_directory: Path | None = None,
+    study_plan: StudyPlan | None = None,
+    additional_artifacts: Sequence[Path] = (),
+    lifecycle_manifest_fields: Mapping[str, object] | None = None,
 ) -> Path:
-    """执行矩阵全部条件并写入逐次、聚合、图像和 manifest 产物。
-
-    Args:
-        config: 已解析的 study 配置。
-        config_source: 配置文件原始路径，会原样存档到 study 目录。
-        jobs: 并行工作进程数；``None`` 自动选择，1 强制串行。
-
-    Returns:
-        本次 study 的输出目录。
-    """
-    conditions = config.conditions()
-    worker_count = _resolve_worker_count(jobs, len(conditions))
-    study_dir = _create_study_directory(config)
+    """通过公共生命周期串行执行离散力消融矩阵，并返回 study 目录。"""
+    study_dir = (
+        _create_study_directory(config) if study_directory is None else study_directory.resolve()
+    )
+    study_dir.mkdir(parents=True, exist_ok=True)
     if config_source is not None:
         (study_dir / "study.yaml").write_bytes(config_source.read_bytes())
     else:
         (study_dir / "study.yaml").write_text(
-            yaml.safe_dump(config.model_dump(mode="json"), sort_keys=False),
+            yaml.safe_dump(config.model_dump(mode="json"), sort_keys=False), encoding="utf-8"
+        )
+    resolved_config = write_resolved_config(study_dir / "study.resolved.json", config)
+    expected_plan = build_plan(config)
+    plan = (
+        expected_plan
+        if study_plan is None
+        else require_matching_study_plan(expected_plan, study_plan)
+    )
+    # 逐平台指标行不进入 summary 行，按计划执行顺序单独收集，保持旧 platforms.csv 口径。
+    platform_rows: list[dict[str, object]] = []
+
+    def execute(condition: StudyCondition) -> ConditionExecution:
+        parameters = condition.parameters
+        controller_variant = str(parameters["controller_variant"])
+        material = str(parameters["object_material"])
+        noise_std_n = float(parameters["force_noise_std_n"])
+        noise_seed = int(parameters["sensor_noise_seed"])
+        # 沿用旧脚本的 run 目录命名：小数点替换为 p，避免噪声档位被误读为扩展名。
+        run_prefix = (
+            f"{controller_variant}-{material}-noise{noise_std_n:g}-seed{noise_seed:03d}".replace(
+                ".", "p"
+            )
+        )
+
+        def _base_row(run_path: Path) -> dict[str, object]:
+            return {
+                "controller_variant": controller_variant,
+                "object_material": material,
+                "force_noise_std_n": noise_std_n,
+                "noise_seed": noise_seed,
+                "run_directory": str(run_path.relative_to(study_dir)),
+            }
+
+        task = RobotiqDiscreteForceTask.load(config.task)
+        run, result = execute_robotiq_discrete_force(
+            profile=config.profile,
+            task_path=config.task,
+            discrete_task=task,
+            output_root=study_dir / "runs",
+            run_prefix=run_prefix,
+            controller_variant=controller_variant,
+            object_material=material,
+            force_noise_std_n=noise_std_n,
+            noise_seed=noise_seed,
+        )
+        result_values = asdict(result)
+        platforms = result_values.pop("platform_metrics")
+        row = {**_base_row(run.path), **result_values}
+        platform_rows.extend({**_base_row(run.path), **platform} for platform in platforms)
+        return ConditionExecution(
+            row=row,
+            run_directory=str(row["run_directory"]),
+            passed=result.passed,
+        )
+
+    def aggregate_and_persist(
+        rows: list[dict[str, object]],
+        outcomes: tuple[ConditionOutcome, ...],
+        directory: Path,
+    ) -> StudyPostprocessResult:
+        aggregates = aggregate_rows(rows) if rows else []
+        artifacts: list[Path] = []
+        if rows:
+            artifacts.extend(write_rows_csv_and_parquet(directory / "summary.csv", rows))
+        if aggregates:
+            artifacts.extend(write_rows_csv_and_parquet(directory / "aggregate.csv", aggregates))
+        if platform_rows:
+            artifacts.extend(write_rows_csv_and_parquet(directory / "platforms.csv", platform_rows))
+        summary_json = directory / "summary.json"
+        summary_json.write_text(
+            json.dumps(
+                json_compatible(
+                    {
+                        "runs": rows,
+                        "platforms": platform_rows,
+                        "aggregates": aggregates,
+                        "failures": execution_failure_rows(outcomes),
+                    }
+                ),
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
             encoding="utf-8",
         )
-    write_resolved_config(study_dir / "study.resolved.json", config)
-    payloads: list[dict[str, object]] = []
-    for index, (controller, material, noise, seed) in enumerate(conditions):
-        condition = f"{controller}-{material}-noise{noise:g}-seed{seed:03d}".replace(".", "p")
-        payloads.append(
-            {
-                "condition_index": index,
-                "profile": config.profile,
-                "task_path": config.task,
-                "study_dir": study_dir,
-                "output_root": study_dir / "runs",
-                "run_prefix": condition,
-                "controller_variant": controller,
-                "object_material": material,
-                "force_noise_std_n": noise,
-                "noise_seed": seed,
-            }
+        artifacts.append(summary_json)
+        return StudyPostprocessResult(tuple(artifacts), {}, aggregates)
+
+    def render(rows: list[dict[str, object]], payload: object, directory: Path) -> tuple[Path, ...]:
+        if not rows:
+            return ()
+        controller_pdf = plot_controller_summary(rows, directory / "controller_comparison.png")
+        ablation_pdf = plot_ablation_summary(rows, directory / "controller_ablation.png")
+        platform_pdf = plot_platform_error(platform_rows, directory / "platform_error.png")
+        return (
+            controller_pdf.with_suffix(".png"),
+            controller_pdf,
+            ablation_pdf.with_suffix(".png"),
+            ablation_pdf,
+            platform_pdf.with_suffix(".png"),
+            platform_pdf,
         )
 
-    results: list[tuple[int, dict[str, object], list[dict[str, object]]]] = []
-    if worker_count == 1:
-        for payload in payloads:
-            results.append(_evaluate_condition(payload))
-    else:
-        print(f"使用 {worker_count} 个进程并行执行 {len(payloads)} 个条件", flush=True)
-        with ProcessPoolExecutor(max_workers=worker_count) as executor:
-            futures = {executor.submit(_evaluate_condition, item): item for item in payloads}
-            for done, future in enumerate(as_completed(futures), start=1):
-                results.append(future.result())
-                print(f"[{done}/{len(futures)}] {futures[future]['run_prefix']} 完成", flush=True)
-    results.sort(key=lambda item: item[0])
-    rows = [row for _, row, _ in results]
-    platform_rows = [
-        platform_row
-        for _, _, condition_platforms in results
-        for platform_row in condition_platforms
-    ]
-    aggregates = aggregate_rows(rows)
-    summary_csv, summary_parquet = write_rows_csv_and_parquet(study_dir / "summary.csv", rows)
-    aggregate_csv, aggregate_parquet = write_rows_csv_and_parquet(
-        study_dir / "aggregate.csv", aggregates
-    )
-    platforms_csv, platforms_parquet = write_rows_csv_and_parquet(
-        study_dir / "platforms.csv", platform_rows
-    )
-    figure_pdf = plot_controller_summary(rows, study_dir / "controller_comparison.png")
-    ablation_pdf = plot_ablation_summary(rows, study_dir / "controller_ablation.png")
-    platform_pdf = plot_platform_error(platform_rows, study_dir / "platform_error.png")
-    summary_json = study_dir / "summary.json"
-    summary_json.write_text(
-        json.dumps(
-            {"runs": rows, "platforms": platform_rows, "aggregates": aggregates},
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n",
-        encoding="utf-8",
-    )
-    manifest = {
+    manifest_fields: dict[str, object] = {
         "schema_version": 1,
-        "runs": len(rows),
-        "worker_count": worker_count,
-        "passed_runs": sum(bool(row["passed"]) for row in rows),
-        "safety_violations": sum(bool(row["safety_violated"]) for row in rows),
-        "artifacts": sorted(
-            path.name
-            for path in (
-                summary_csv,
-                summary_parquet,
-                aggregate_csv,
-                aggregate_parquet,
-                platforms_csv,
-                platforms_parquet,
-                summary_json,
-                figure_pdf,
-                figure_pdf.with_suffix(".png"),
-                ablation_pdf,
-                ablation_pdf.with_suffix(".png"),
-                platform_pdf,
-                platform_pdf.with_suffix(".png"),
-            )
-        ),
+        "name": config.name,
+        "config": "study.yaml",
+        "resolved_config": str(resolved_config.relative_to(study_dir)),
     }
-    (study_dir / "study_manifest.json").write_text(
-        json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+    manifest_fields.update(lifecycle_manifest_fields or {})
+    return execute_study_lifecycle(
+        plan,
+        study_directory=study_dir,
+        execute_condition=execute,
+        aggregate_and_persist=aggregate_and_persist,
+        render=render,
+        initial_artifacts=(study_dir / "study.yaml", resolved_config, *additional_artifacts),
+        legacy_manifest_fields=manifest_fields,
     )
-    return study_dir
-
-
-def main() -> None:
-    """解析命令行，预览或执行离散力控制 study。"""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument(
-        "--config",
-        type=Path,
-        default=Path("configs/studies/robotiq_discrete_force.yaml"),
-    )
-    parser.add_argument("--dry-run", action="store_true")
-    parser.add_argument(
-        "--jobs",
-        type=int,
-        default=None,
-        help="并行工作进程数；默认自动选择且最多 12，设为 1 可强制串行",
-    )
-    arguments = parser.parse_args()
-    config_path = arguments.config.resolve()
-    config = load_robotiq_discrete_force_study_config(config_path)
-    if arguments.dry_run:
-        print(f"conditions={len(config.conditions())}")
-        print(f"workers={_resolve_worker_count(arguments.jobs, len(config.conditions()))}")
-        for condition in config.conditions():
-            print(" ".join(str(value) for value in condition))
-        return
-    print(run_study(config, config_source=config_path, jobs=arguments.jobs))
-
-
-if __name__ == "__main__":
-    main()

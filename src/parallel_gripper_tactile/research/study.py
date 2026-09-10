@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 from pathlib import Path
-from typing import Literal, Mapping
+from typing import Literal, Mapping, get_args
 
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
@@ -16,6 +16,8 @@ from ..experiments.force_tracking import (
     validate_force_tracking_configuration,
 )
 from ..experiments.friction_estimation import FrictionEstimationTask
+from ..experiments.robotiq_discrete_force import RobotiqDiscreteForceTask
+from ..scenes.robotiq import RobotiqObjectMaterial
 from ..studies.dm_admittance_tuning import (
     DMAdmittanceTuningConfig,
     load_dm_admittance_tuning_config,
@@ -39,6 +41,10 @@ from ..studies.force_tracking_torque_adrc_tuning import (
     load_torque_adrc_tuning_config,
 )
 from ..studies.lifecycle import StudyPlan, assess_recovery, write_planned_study_manifest
+from ..studies.robotiq_discrete_force import (
+    RobotiqDiscreteForceStudyConfig,
+    load_robotiq_discrete_force_study_config,
+)
 from ..studies.protocols import force_tracking_ablation as ablation_protocol
 from ..studies.protocols import friction_estimation_local_slip as friction_local_slip_protocol
 from ..studies.protocols import (
@@ -51,6 +57,9 @@ from ..studies.protocols import (
     force_tracking_torque_adrc_tuning as torque_tuning_protocol,
 )
 from ..studies.protocols import dm_admittance_tuning as dm_admittance_tuning_protocol
+from ..studies.protocols import (
+    robotiq_discrete_force as robotiq_discrete_force_protocol,
+)
 from .configuration import REPOSITORY_ROOT, ResearchConfigurationError
 
 
@@ -61,6 +70,7 @@ StudyKind = Literal[
     "friction_estimation_local_slip",
     "force_tracking_stiffness_estimator_comparison",
     "dm_admittance_tuning",
+    "robotiq_discrete_force",
 ]
 SetupFailureStage = Literal["configuration", "preflight"]
 
@@ -127,6 +137,7 @@ StudyDomainConfig = (
     | FrictionEstimationLocalSlipStudyConfig
     | ForceTrackingStiffnessEstimatorComparisonConfig
     | DMAdmittanceTuningConfig
+    | RobotiqDiscreteForceStudyConfig
 )
 
 
@@ -277,6 +288,16 @@ def _validate_dm_admittance_tuning(config: DMAdmittanceTuningConfig) -> None:
         raise ValueError("导纳调参仅接受线性 Ramp 力跟踪任务。")
 
 
+def _validate_robotiq_discrete_force(config: RobotiqDiscreteForceStudyConfig) -> None:
+    """预检 Robotiq 离散力方案的 profile、任务文件与材料枚举。"""
+    load_profile(config.profile)
+    RobotiqDiscreteForceTask.load(config.task)
+    valid_materials = get_args(RobotiqObjectMaterial)
+    for material in config.materials:
+        if material not in valid_materials:
+            raise ValueError(f"unknown Robotiq object material: {material}")
+
+
 def _resolved_selection(
     selection: ResearchStudyConfig,
     *,
@@ -334,6 +355,8 @@ def resolve_research_study(
             domain_config = load_stiffness_estimator_comparison_config(source)
         elif selection.study.kind == "dm_admittance_tuning":
             domain_config = load_dm_admittance_tuning_config(source)
+        elif selection.study.kind == "robotiq_discrete_force":
+            domain_config = load_robotiq_discrete_force_study_config(source)
         else:  # pragma: no cover - Literal 与 Pydantic 已阻止未知研究类型。
             raise ValueError(f"unsupported study kind: {selection.study.kind}")
     except (OSError, ValidationError, ValueError) as error:
@@ -355,6 +378,9 @@ def resolve_research_study(
         elif isinstance(domain_config, DMAdmittanceTuningConfig):
             _validate_dm_admittance_tuning(domain_config)
             plan = dm_admittance_tuning_protocol.build_plan(domain_config)
+        elif isinstance(domain_config, RobotiqDiscreteForceStudyConfig):
+            _validate_robotiq_discrete_force(domain_config)
+            plan = robotiq_discrete_force_protocol.build_plan(domain_config)
         else:
             assert selection.study.stage is not None
             plan = torque_tuning_protocol.build_plan(
@@ -468,6 +494,8 @@ def execute_research_study(
         return stiffness_comparison_protocol.run_study(resolved.domain_config, **common_arguments)
     if isinstance(resolved.domain_config, DMAdmittanceTuningConfig):
         return dm_admittance_tuning_protocol.run_study(resolved.domain_config, **common_arguments)
+    if isinstance(resolved.domain_config, RobotiqDiscreteForceStudyConfig):
+        return robotiq_discrete_force_protocol.run_study(resolved.domain_config, **common_arguments)
     assert resolved.selection.study.stage is not None
     return torque_tuning_protocol.run_study(
         resolved.domain_config,

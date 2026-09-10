@@ -1,26 +1,14 @@
-"""验证 Robotiq 离散力控制 study 的矩阵、聚合与并行度。"""
+"""验证 Robotiq 离散力控制 study 的矩阵与正式协议计划。"""
 
-import importlib.util
 from pathlib import Path
-import sys
 
+from parallel_gripper_tactile.studies.protocols import robotiq_discrete_force as protocol
 from parallel_gripper_tactile.studies.robotiq_discrete_force import (
     load_robotiq_discrete_force_study_config,
 )
 
 
 ROOT = Path(__file__).resolve().parents[1]
-
-
-def _protocol_module() -> object:
-    """加载 Robotiq 离散力 study 入口脚本。"""
-    path = ROOT / "scripts/experiments/robotiq_discrete_force.py"
-    spec = importlib.util.spec_from_file_location("robotiq_discrete_force_protocol", path)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[spec.name] = module
-    spec.loader.exec_module(module)
-    return module
 
 
 def test_default_study_expands_complete_ablation_matrix() -> None:
@@ -37,11 +25,19 @@ def test_default_study_expands_complete_ablation_matrix() -> None:
     assert config.task == (ROOT / "configs/discrete_force/robotiq_delta_f_tick.yaml").resolve()
 
 
-def test_default_worker_count_uses_bounded_parallelism() -> None:
-    """默认并行度受 CPU、条件数量和十二进程上限共同约束。"""
-    protocol = _protocol_module()
+def test_protocol_plan_preserves_matrix_and_baseline_role() -> None:
+    """协议计划展开 60 条条件，且仅量化 PI 对照行登记基线角色。"""
+    config = load_robotiq_discrete_force_study_config(
+        ROOT / "configs/studies/robotiq_discrete_force.yaml"
+    )
+    plan = protocol.build_plan(config)
 
-    assert protocol._resolve_worker_count(None, 60, available_cpus=32) == 12
-    assert protocol._resolve_worker_count(None, 60, available_cpus=4) == 4
-    assert protocol._resolve_worker_count(None, 3, available_cpus=32) == 3
-    assert protocol._resolve_worker_count(1, 60, available_cpus=32) == 1
+    assert len(plan.conditions) == len(config.conditions())
+    assert plan.conditions[0].condition_id == "quantized-pi-soft-noise0.0-seed000"
+    assert plan.conditions[-1].condition_id == "dynamic-step-stiff-noise0.1-seed000"
+    assert plan.conditions[-1].pair_key == "stiff:noise0.1:seed000"
+    assert all(
+        (condition.baseline_role == "quantized_pi")
+        == (condition.parameters["controller_variant"] == "quantized-pi")
+        for condition in plan.conditions
+    )

@@ -70,6 +70,10 @@ RELATED_PREFIXES = {
         "tests/test_dm_admittance_tuning.py",
         "tests/test_research_study.py",
     ),
+    "configs/studies/robotiq_discrete_force.yaml": (
+        "tests/test_robotiq_discrete_force_study.py",
+        "tests/test_research_study.py",
+    ),
     "src/parallel_gripper_tactile/control/": (
         "tests/test_control.py",
         "tests/test_force_tracking.py",
