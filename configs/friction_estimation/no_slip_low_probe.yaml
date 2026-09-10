@@ -1,3 +1,4 @@
+# 无起滑场景（阴性对照）：用于验证误报率与 false-positive 控制。
 schema_version: 1
 name: no_slip_low_probe
 

@@ -1,18 +1,23 @@
 name: force_tracking_stiffness_estimator_comparison
 profile: ../custom_parallel_gripper.yaml
+# 刚度估计器消融研究：仅比较 secant_ewma / window_linear / window_quadratic 三套估计器。
 tasks:
   - ../force_tracking/step.yaml
   - ../force_tracking/ramp.yaml
   - ../force_tracking/mixed_waypoints.yaml
+# 研究目标是评估同一控制策略下估计器差异对动力学跟踪的影响。
 estimators:
   - secant_ewma
   - window_linear
   - window_quadratic
+# 仅跨三种接触 preset 执行，与其他控制变量隔离。
 materials:
   - medium
   - hard
   - stiff
+# 固定三种随机种子，便于与官方基线复现。
 seeds:
   start: 0
   count: 3
+# 输出到 study 统一目录，保持与历史聚合脚本兼容。
 output_root: ../../outputs/studies

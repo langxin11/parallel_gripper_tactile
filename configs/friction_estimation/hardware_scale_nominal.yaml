@@ -1,3 +1,4 @@
+# 硬件量程对齐场景：按单 taxel 读数标准（0.05N）扩大绝对加载窗口，校验估计的稳定性。
 schema_version: 1
 name: hardware_scale_nominal_friction_probe
 

@@ -1,16 +1,20 @@
 name: force_tracking_ablation
 profile: ../custom_parallel_gripper.yaml
 task: ../force_tracking/default_waypoints.yaml
+# PID 模块消融研究的官方矩阵定义：单任务下对不同控制器、材料和 seed 做完整交叉。
 controllers:
   - pid-only
   - pid-torque-ff
   - pid-stiffness-ff
   - full
+# 固定三类接触 preset，用于控制器行为对材料刚度的敏感性比较。
 materials:
   - medium
   - hard
   - stiff
+# 以固定随机种子段落复现实验噪声影响。
 seeds:
   start: 0
   count: 3
+# 结果统一落在 studies 产物目录，兼容历史统计入口。
 output_root: ../../outputs/studies

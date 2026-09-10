@@ -1,3 +1,4 @@
+# 标称摩擦场景：用于日常摩擦估计 baseline 与大多数演示命令。
 schema_version: 1
 name: nominal_friction_probe
 
