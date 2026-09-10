@@ -744,10 +744,10 @@ def test_normal_force_controller_adrc_branch_integrates_velocity_into_adjustment
 
     assert command.state == "force_tracking"
     # 接触确认时 LADRC 复位：z1 对齐滤波力 0.2，z2 与积分修正清零。
-    assert controller._adrc_z1 == pytest.approx(0.2)
-    assert controller._adrc_z2 == 0.0
+    assert controller._core._adrc_z1 == pytest.approx(0.2)
+    assert controller._core._adrc_z2 == 0.0
     # 未裁剪控制律 u = ω_c·(f_ref−z1)/b0 = 10·(8−0.2)/780 ≈ 0.1，超出 ±0.02 被裁剪。
-    assert controller._adrc_u == pytest.approx(0.02)
+    assert controller._core._adrc_u == pytest.approx(0.02)
     # 闭合速度经闭合雅可比换算为电机角速度后积分：u_max/J_c·dt。
     jacobian = command.closure_jacobian_m_per_rad
     assert jacobian is not None and jacobian > 0.0
@@ -779,8 +779,8 @@ def test_normal_force_controller_adrc_branch_integrates_velocity_into_adjustment
         right_normal_force_n=0.2,
         dt=0.002,
     )
-    assert controller._adrc_z2 == 0.0
-    assert controller._adrc_u == pytest.approx(0.02)
+    assert controller._core._adrc_z2 == 0.0
+    assert controller._core._adrc_u == pytest.approx(0.02)
     assert command.position_adjustment == pytest.approx(2 * 0.02 / jacobian * 0.002)
 
     # 力升高后 innovation 非零，LESO 的扰动估计 z2 开始积累。
@@ -792,7 +792,7 @@ def test_normal_force_controller_adrc_branch_integrates_velocity_into_adjustment
         right_normal_force_n=0.4,
         dt=0.002,
     )
-    assert controller._adrc_z2 > 0.0
+    assert controller._core._adrc_z2 > 0.0
 
 
 def test_normal_force_controller_resets_adrc_state_on_release_and_recontact() -> None:
@@ -813,7 +813,7 @@ def test_normal_force_controller_resets_adrc_state_on_release_and_recontact() ->
             dt=0.002,
         )
     assert controller.state == "force_tracking"
-    assert controller._adrc_adjustment > 0.0
+    assert controller._core._adrc_adjustment > 0.0
 
     assert source.normal_force is not None
     for _ in range(source.normal_force.release_confirm_steps):
@@ -827,9 +827,9 @@ def test_normal_force_controller_resets_adrc_state_on_release_and_recontact() ->
         )
     assert command.state == "approach"
     # 释放复位：z1/z2 与积分位置修正全部清零。
-    assert controller._adrc_z1 == 0.0
-    assert controller._adrc_z2 == 0.0
-    assert controller._adrc_adjustment == 0.0
+    assert controller._core._adrc_z1 == 0.0
+    assert controller._core._adrc_z2 == 0.0
+    assert controller._core._adrc_adjustment == 0.0
 
     # 重新确认接触后，LADRC 再次从当前滤波力起步，积分修正从零重新累积。
     for _ in range(5):
@@ -842,8 +842,8 @@ def test_normal_force_controller_resets_adrc_state_on_release_and_recontact() ->
             dt=0.002,
         )
     assert command.state == "force_tracking"
-    assert controller._adrc_z1 == pytest.approx(0.2)
-    assert controller._adrc_z2 == 0.0
+    assert controller._core._adrc_z1 == pytest.approx(0.2)
+    assert controller._core._adrc_z2 == 0.0
     jacobian = command.closure_jacobian_m_per_rad
     assert jacobian is not None and jacobian > 0.0
     assert command.position_adjustment == pytest.approx(0.02 / jacobian * 0.002)
