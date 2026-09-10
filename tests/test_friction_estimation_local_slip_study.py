@@ -1,25 +1,17 @@
 """验证纯力局部起滑多种子 study 配置与聚合。"""
 
 from pathlib import Path
-import importlib.util
 
 import pytest
 
 from parallel_gripper_tactile.studies.friction_estimation_local_slip import (
     load_local_slip_study_config,
 )
+from parallel_gripper_tactile.studies.protocols import (
+    friction_estimation_local_slip as protocol,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
-
-
-def _protocol_module() -> object:
-    """加载仓库内的局部起滑 study 入口脚本。"""
-    path = ROOT / "scripts/experiments/friction_estimation_local_slip.py"
-    spec = importlib.util.spec_from_file_location("friction_estimation_local_slip", path)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 def test_default_local_slip_study_expands_scenarios_and_seeds() -> None:
@@ -66,8 +58,8 @@ def test_aggregate_rows_reports_detection_and_false_positive_rates() -> None:
         },
     ]
 
-    protocol = _protocol_module()
-    aggregates = {row["scenario"]: row for row in protocol.aggregate_rows(rows)}
+    protocol_rows = protocol.aggregate_rows(rows)
+    aggregates = {row["scenario"]: row for row in protocol_rows}
 
     assert aggregates["positive"]["detection_rate"] == pytest.approx(0.5)
     assert aggregates["positive"]["false_positive_rate"] == 0.0

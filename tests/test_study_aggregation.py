@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import importlib
 import importlib.util
 import json
 import math
@@ -33,7 +34,11 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _protocol_module(stem: str) -> object:
-    """按既有测试的方式从 scripts/experiments 加载脚本模块。"""
+    """优先加载包内 protocol 的聚合实现，未迁移研究仍从旧脚本加载。"""
+    try:
+        return importlib.import_module(f"parallel_gripper_tactile.studies.protocols.{stem}")
+    except ModuleNotFoundError:
+        pass
     path = ROOT / "scripts" / "experiments" / f"{stem}.py"
     spec = importlib.util.spec_from_file_location(f"{stem}_aggregation_protocol", path)
     assert spec and spec.loader

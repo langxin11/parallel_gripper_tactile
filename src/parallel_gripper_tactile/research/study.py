@@ -15,6 +15,11 @@ from ..experiments.force_tracking import (
     configure_force_controller,
     validate_force_tracking_configuration,
 )
+from ..experiments.friction_estimation import FrictionEstimationTask
+from ..studies.friction_estimation_local_slip import (
+    FrictionEstimationLocalSlipStudyConfig,
+    load_local_slip_study_config,
+)
 from ..studies.force_tracking_ablation import ForceTrackingAblationConfig, load_study_config
 from ..studies.force_tracking_comparison import (
     ForceTrackingComparisonConfig,
@@ -27,6 +32,7 @@ from ..studies.force_tracking_torque_adrc_tuning import (
 )
 from ..studies.lifecycle import StudyPlan, assess_recovery, write_planned_study_manifest
 from ..studies.protocols import force_tracking_ablation as ablation_protocol
+from ..studies.protocols import friction_estimation_local_slip as friction_local_slip_protocol
 from ..studies.protocols import (
     force_tracking_controller_comparison as comparison_protocol,
 )
@@ -40,6 +46,7 @@ StudyKind = Literal[
     "force_tracking_controller_comparison",
     "force_tracking_ablation",
     "force_tracking_torque_adrc_tuning",
+    "friction_estimation_local_slip",
 ]
 SetupFailureStage = Literal["configuration", "preflight"]
 
@@ -103,6 +110,7 @@ StudyDomainConfig = (
     ForceTrackingComparisonConfig
     | ForceTrackingAblationConfig
     | ForceTrackingTorqueAdrcTuningConfig
+    | FrictionEstimationLocalSlipStudyConfig
 )
 
 
@@ -217,6 +225,13 @@ def _validate_torque_tuning(
         validated.add(key)
 
 
+def _validate_local_slip(config: FrictionEstimationLocalSlipStudyConfig) -> None:
+    """逐场景预检局部起滑方案的 profile 与任务文件。"""
+    load_profile(config.profile)
+    for scenario in config.scenarios:
+        FrictionEstimationTask.load(scenario.task)
+
+
 def _resolved_selection(
     selection: ResearchStudyConfig,
     *,
@@ -268,6 +283,8 @@ def resolve_research_study(
             domain_config = load_study_config(source)
         elif selection.study.kind == "force_tracking_torque_adrc_tuning":
             domain_config = load_torque_adrc_tuning_config(source)
+        elif selection.study.kind == "friction_estimation_local_slip":
+            domain_config = load_local_slip_study_config(source)
         else:  # pragma: no cover - Literal 与 Pydantic 已阻止未知研究类型。
             raise ValueError(f"unsupported study kind: {selection.study.kind}")
     except (OSError, ValidationError, ValueError) as error:
@@ -280,6 +297,9 @@ def resolve_research_study(
         elif isinstance(domain_config, ForceTrackingAblationConfig):
             _validate_ablation(domain_config)
             plan = ablation_protocol.build_plan(domain_config)
+        elif isinstance(domain_config, FrictionEstimationLocalSlipStudyConfig):
+            _validate_local_slip(domain_config)
+            plan = friction_local_slip_protocol.build_plan(domain_config)
         else:
             assert selection.study.stage is not None
             plan = torque_tuning_protocol.build_plan(
@@ -387,6 +407,8 @@ def execute_research_study(
         return comparison_protocol.run_study(resolved.domain_config, **common_arguments)
     if isinstance(resolved.domain_config, ForceTrackingAblationConfig):
         return ablation_protocol.run_study(resolved.domain_config, **common_arguments)
+    if isinstance(resolved.domain_config, FrictionEstimationLocalSlipStudyConfig):
+        return friction_local_slip_protocol.run_study(resolved.domain_config, **common_arguments)
     assert resolved.selection.study.stage is not None
     return torque_tuning_protocol.run_study(
         resolved.domain_config,

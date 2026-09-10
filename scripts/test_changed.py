@@ -50,6 +50,10 @@ RELATED_PREFIXES = {
         "tests/test_force_tracking_controller_comparison_script.py",
         "tests/test_force_tracking_torque_adrc_tuning.py",
     ),
+    "configs/studies/friction_estimation_local_slip.yaml": (
+        "tests/test_friction_estimation_local_slip_study.py",
+        "tests/test_research_study.py",
+    ),
     "configs/studies/force_tracking_torque_adrc_tuning.yaml": (
         "tests/test_force_tracking_torque_adrc_tuning.py",
         "tests/test_research_study.py",

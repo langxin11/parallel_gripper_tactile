@@ -132,6 +132,171 @@ def test_formal_ablation_preserves_pairing_and_complete_matrix() -> None:
     assert len({row["pair_key"] for row in resolved.conditions}) == 9
 
 
+def test_formal_local_slip_preserves_scenario_and_seed_matrix() -> None:
+    """迁移后的 15 条局部起滑条件与旧 study 配置逐项一致。"""
+    from parallel_gripper_tactile.studies.friction_estimation_local_slip import (
+        load_local_slip_study_config,
+    )
+
+    resolved = _resolved("friction_estimation_local_slip")
+    legacy = load_local_slip_study_config(
+        REPOSITORY_ROOT / "configs/studies/friction_estimation_local_slip.yaml"
+    )
+
+    actual = tuple(
+        (
+            Path(str(row["task_path"])),
+            row["expect_local_slip"],
+            row["seed"],
+        )
+        for row in resolved.conditions
+    )
+    expected = tuple(
+        (scenario.task, scenario.expect_local_slip, seed) for scenario, seed in legacy.conditions()
+    )
+    assert actual == expected
+    assert len({row["condition_id"] for row in resolved.conditions}) == 15
+
+
+def test_local_slip_plan_registers_expected_condition_count(tmp_path: Path) -> None:
+    """局部起滑 plan 产物登记 15 条条件且不创建任何 run。"""
+    resolved = _resolved("friction_estimation_local_slip")
+    result = execute_research_study(
+        resolved,
+        hydra_output_directory=tmp_path,
+        provenance={"choices": {}, "overrides": []},
+    )
+
+    plan = json.loads((result / "plan.json").read_text(encoding="utf-8"))
+    assert plan["study"] == "friction_estimation_local_slip"
+    assert plan["condition_count"] == 15
+    manifest = json.loads((result / "study_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["state"] == "planned"
+    assert not (result / "runs").exists()
+
+
+def test_local_slip_protocol_preserves_validation_semantics(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """局部起滑以 validation_passed 作为科学验收并保留期望汇总字段。"""
+    from parallel_gripper_tactile.experiments.friction_estimation import (
+        FrictionEstimationResult,
+        FrictionEstimationTask,
+    )
+    from parallel_gripper_tactile.studies.friction_estimation_local_slip import (
+        load_local_slip_study_config,
+    )
+    from parallel_gripper_tactile.studies.protocols import (
+        friction_estimation_local_slip as protocol,
+    )
+
+    source = REPOSITORY_ROOT / "configs/studies/friction_estimation_local_slip.yaml"
+    original = load_local_slip_study_config(source)
+    scenario = next(s for s in original.scenarios if s.expect_local_slip)
+    config = original.model_copy(
+        update={
+            "scenarios": (scenario,),
+            "seeds": original.seeds.model_copy(update={"count": 1}),
+        }
+    )
+
+    def fake_execute(**kwargs: object):
+        run_path = Path(str(kwargs["output_root"])) / f"{kwargs['run_prefix']}-synthetic"
+        run_path.mkdir(parents=True)
+        result = FrictionEstimationResult(
+            true_friction_coefficient=0.4,
+            estimated_friction_coefficient=0.35,
+            raw_friction_coefficient=0.36,
+            estimate_ratio=0.875,
+            absolute_estimation_error=0.05,
+            slip_detected=True,
+            using_fallback=False,
+            probe_detection_time_s=2.5,
+            probe_force_at_detection_n=1.0,
+            max_probe_displacement_m=0.001,
+            max_hold_displacement_m=0.002,
+            hold_force_tracking_rmse_n=0.05,
+            minimum_hold_friction_margin_n=0.5,
+            peak_active_taxel_count=4,
+            peak_local_friction_ratio=0.9,
+            local_weighted_ratio_at_detection=0.85,
+            local_ratio_p90_at_detection=0.9,
+            local_slip_detection_time_s=2.0,
+            local_slip_detected_taxel_count=2,
+            local_left_friction_estimate=None,
+            local_right_friction_estimate=None,
+            simulation_stable=True,
+            detection_passed=True,
+            conservatism_passed=True,
+            informativeness_passed=True,
+            probe_slip_passed=True,
+            hold_slip_passed=True,
+            force_tracking_passed=True,
+            detection_reason="synthetic",
+            detection_features={"peak_local_friction_ratio": 0.9},
+            relative_estimation_error=0.125,
+            probe_displacement_limit_exceeded=False,
+            hold_succeeded=True,
+        )
+        return SimpleNamespace(path=run_path), result
+
+    monkeypatch.setattr(protocol, "execute_friction_estimation", fake_execute)
+    protocol.run_study(config, config_source=source, study_directory=tmp_path)
+
+    manifest = json.loads((tmp_path / "study_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["state"] == "completed"
+    assert manifest["scientific_failure_count"] == 1
+    assert manifest["all_event_expectations_passed"] is True
+    assert manifest["all_expectations_passed"] is False
+    summary = json.loads((tmp_path / "summary.json").read_text(encoding="utf-8"))
+    row = summary["runs"][0]
+    task_name = FrictionEstimationTask.load(scenario.task).name
+    assert row["scenario"] == task_name
+    assert row["detection_lead_s"] == pytest.approx(0.5)
+    assert row["validation_passed"] is False
+    assert row["control_candidate_qualified"] is False
+    assert (tmp_path / "local_slip_validation.png").exists()
+    assert (tmp_path / "local_slip_validation.pdf").exists()
+
+
+def test_local_slip_protocol_records_condition_exceptions(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """单条件异常仍生成完整失败账本，不伪装成未执行计划。"""
+    from parallel_gripper_tactile.experiments.friction_estimation import (
+        FrictionEstimationTask,
+    )
+    from parallel_gripper_tactile.studies.friction_estimation_local_slip import (
+        load_local_slip_study_config,
+    )
+    from parallel_gripper_tactile.studies.protocols import (
+        friction_estimation_local_slip as protocol,
+    )
+
+    source = REPOSITORY_ROOT / "configs/studies/friction_estimation_local_slip.yaml"
+    original = load_local_slip_study_config(source)
+    config = original.model_copy(
+        update={
+            "scenarios": original.scenarios[:1],
+            "seeds": original.seeds.model_copy(update={"count": 1}),
+        }
+    )
+
+    def fail(**kwargs: object):
+        raise RuntimeError("synthetic failure")
+
+    monkeypatch.setattr(protocol, "execute_friction_estimation", fail)
+    result = protocol.run_study(config, config_source=source, study_directory=tmp_path)
+
+    task_name = FrictionEstimationTask.load(config.scenarios[0].task).name
+    manifest = json.loads((result / "study_manifest.json").read_text(encoding="utf-8"))
+    failures = json.loads((result / "failed_conditions.json").read_text(encoding="utf-8"))
+    assert manifest["state"] == "failed"
+    assert manifest["planned_condition_count"] == 1
+    assert failures[0]["condition_id"] == f"{task_name}-seed000"
+    assert failures[0]["error_type"] == "RuntimeError"
+
+
 def test_plan_serializes_the_same_validated_condition_collection(tmp_path: Path) -> None:
     """计划产物直接序列化 resolver 交给执行层的同一条件集合。"""
     resolved = _resolved("force_tracking_ablation")
