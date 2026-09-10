@@ -14,6 +14,7 @@ from uuid import uuid4
 import numpy as np
 import yaml
 
+from parallel_gripper_tactile.config.profiles import GripperProfile
 from parallel_gripper_tactile.experiments.force_tracking import ForceTrackingTask
 from parallel_gripper_tactile.visualization import (
     FULL_WIDTH_FONT_SCALE,
@@ -434,6 +435,7 @@ def build_plan(config: ForceTrackingStiffnessEstimatorComparisonConfig) -> Study
 def run_study(
     config: ForceTrackingStiffnessEstimatorComparisonConfig,
     *,
+    resolved_profile: GripperProfile | None = None,
     config_source: Path | None = None,
     study_directory: Path | None = None,
     study_plan: StudyPlan | None = None,
@@ -469,6 +471,7 @@ def run_study(
         task = tasks[task_path]
         run, result = execute_force_tracking(
             profile=config.profile,
+            resolved_profile=resolved_profile,
             task_path=task_path,
             tracking_task=task,
             output_root=study_dir / "runs",

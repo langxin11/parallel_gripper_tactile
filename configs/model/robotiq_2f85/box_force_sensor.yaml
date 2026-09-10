@@ -1,0 +1,12 @@
+# @package model
+family: robotiq
+name: box_force_sensor
+profile_name: robotiq_2f85_box_taxels
+path: assets/grippers/robotiq_2f85/2f85_taxels_box.xml
+closed: 220.0
+tactile:
+  mode: force_sensor
+  rows: 3
+  cols: 3
+  left_prefix: left_taxel_force_
+  right_prefix: right_taxel_force_

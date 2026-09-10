@@ -23,44 +23,39 @@ def test_root_and_subcommand_help_are_available() -> None:
         app, ["run", "force-schedule", "--help"], terminal_width=160
     )
     assert force_schedule_help.exit_code == 0
-    for option in ("--profile", "--task", "--output-root", "--run-prefix", "--run-suffix"):
+    for option in ("--experiment", "--set", "--run-prefix", "--run-suffix"):
         assert option in force_schedule_help.output
     friction_estimate_help = RUNNER.invoke(
         app, ["run", "friction-estimate", "--help"], terminal_width=160
     )
     assert friction_estimate_help.exit_code == 0
-    for option in ("--profile", "--task", "--output-root", "--run-prefix", "--run-suffix"):
+    for option in ("--experiment", "--set", "--run-prefix", "--run-suffix"):
         assert option in friction_estimate_help.output
     discrete_force_help = RUNNER.invoke(
         app, ["run", "discrete-force", "--help"], terminal_width=180
     )
     assert discrete_force_help.exit_code == 0
     for option in (
-        "--profile",
-        "--task",
-        "--controller-variant",
-        "--object-material",
-        "--force-noise-std",
-        "--noise-seed",
+        "--experiment",
+        "--set",
+        "--run-prefix",
+        "--run-suffix",
     ):
         assert option in discrete_force_help.output
     force_track_help = RUNNER.invoke(app, ["run", "force-track", "--help"], terminal_width=160)
     assert force_track_help.exit_code == 0
     for option in (
-        "--viewer",
-        "--render-fps",
-        "--realtime-factor",
+        "--experiment",
+        "--set",
         "--run-prefix",
         "--run-suffix",
-        "--controller-variant",
-        "--sensor-noise-seed",
-        "--trace-period",
-        "--event-window",
-        "--disable-multiccd",
     ):
         assert option in force_track_help.output
     assert RUNNER.invoke(app, ["run", "force-track-ablation", "--help"]).exit_code != 0
-    assert RUNNER.invoke(app, ["compare", "tactile", "--help"]).exit_code == 0
+    tactile_help = RUNNER.invoke(app, ["compare", "tactile", "--help"])
+    assert tactile_help.exit_code == 0
+    for option in ("--left-experiment", "--right-experiment", "--left-set", "--right-set"):
+        assert option in tactile_help.output
 
 
 def test_validate_profile_and_invalid_yaml_exit_codes(tmp_path: Path) -> None:

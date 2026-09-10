@@ -1,0 +1,28 @@
+# @package platform
+# DM 仿真机构和硬件边界；不携带控制器与任务参数。
+family: dm
+backend: simulation
+profile_name: dm_gripper
+actuator: gripper_drive
+open: 0.05
+closed: 1.3
+mit_limits:
+  p_min: 0.0
+  p_max: 1.7
+  v_max: 8.0
+  t_max: 4.0
+  t_ff: 0.0
+mount:
+  pos: [0.0, 0.0, 0.18]
+  quat: [0.7071067811865476, 0.7071067811865476, 0.0, 0.0]
+geometry:
+  theta0_rad: 0.7853981633974483
+  crank_radius_m: 0.03
+  link_length_m: 0.04
+  offset_m: 0.021213203435596423
+admittance_limits:
+  position_min_rad: 0.0
+  position_max_rad: 1.5707963267948966
+  closing_direction: 1
+  feedforward_torque_limit_nm: 4.0
+  mit_torque_limit_nm: 4.0

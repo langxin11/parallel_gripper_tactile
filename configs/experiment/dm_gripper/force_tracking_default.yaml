@@ -1,0 +1,14 @@
+# @package _global_
+defaults:
+  - override /platform: dm_gripper/simulation
+  - override /model: dm_gripper/height_spheres
+  - override /controller: dm_gripper/adrc_torque
+  - override /estimator: window_linear
+  - override /task: force_tracking/ramp
+  - override /material: hard
+  - override /execution: run
+  - _self_
+
+experiment:
+  name: dm_force_tracking
+  kind: force_tracking

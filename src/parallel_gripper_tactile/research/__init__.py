@@ -7,6 +7,7 @@ from .configuration import (
     ResolvedResearchRun,
     resolve_research_run,
 )
+from .composition import compose_research_run
 from .execution import ResearchRunOutcome, execute_research_run
 
 __all__ = [
@@ -15,6 +16,7 @@ __all__ = [
     "ResearchRunConfig",
     "ResearchRunOutcome",
     "ResolvedResearchRun",
+    "compose_research_run",
     "execute_research_run",
     "resolve_research_run",
 ]

@@ -38,7 +38,7 @@ def test_force_reference_waypoints_interpolate_targets() -> None:
 
 def test_force_tracking_task_loads_default_waypoint_config() -> None:
     """默认动态力跟踪任务来自 YAML 配置文件。"""
-    task = ForceTrackingTask.load(ROOT / "configs/force_tracking/default_waypoints.yaml")
+    task = ForceTrackingTask.load(ROOT / "configs/task/force_tracking/default_waypoints.yaml")
 
     assert task.name == "default_waypoint_force_tracking"
     assert task.approach.feedforward_force_n == pytest.approx(1.0)

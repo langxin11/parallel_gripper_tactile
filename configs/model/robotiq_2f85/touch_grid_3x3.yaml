@@ -1,0 +1,10 @@
+# @package model
+family: robotiq
+name: touch_grid_3x3
+profile_name: robotiq_2f85_touch_grid_3x3
+path: assets/grippers/robotiq_2f85/2f85_touch_grid_3x3.xml
+closed: 220.0
+tactile:
+  mode: touch_grid
+  left_sensor: touch_left
+  right_sensor: touch_right

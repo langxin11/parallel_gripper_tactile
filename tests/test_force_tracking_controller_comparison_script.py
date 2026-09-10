@@ -1,9 +1,8 @@
-"""验证控制器对比脚本的聚合、矩阵说明和图表生成。"""
+"""验证控制器对比 protocol 的聚合、矩阵说明和图表生成。"""
 
 from __future__ import annotations
 
 import csv
-import importlib.util
 import math
 from pathlib import Path
 
@@ -14,19 +13,12 @@ from parallel_gripper_tactile.studies.force_tracking_comparison import (
     ForceTrackingComparisonConfig,
 )
 from parallel_gripper_tactile.studies.tabular import write_rows_csv_and_parquet
+from parallel_gripper_tactile.studies.protocols import (
+    force_tracking_controller_comparison as protocol,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
-
-
-def _protocol_module() -> object:
-    """加载仓库内的 comparison 入口脚本。"""
-    path = ROOT / "scripts/experiments/force_tracking_controller_comparison.py"
-    spec = importlib.util.spec_from_file_location("force_tracking_controller_comparison", path)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 def _result_row(
@@ -63,7 +55,6 @@ def _result_row(
 
 def test_aggregate_rows_groups_controller_task_and_material() -> None:
     """聚合维度包含控制器、任务和材料，并忽略非有限值。"""
-    protocol = _protocol_module()
     rows = [
         _result_row("full", seed=0, rmse=0.2),
         _result_row("full", seed=1, rmse=0.4),
@@ -82,7 +73,6 @@ def test_aggregate_rows_groups_controller_task_and_material() -> None:
 
 def test_describe_conditions_is_stable_and_complete(tmp_path: Path) -> None:
     """dry-run 文本包含条件总数和每个矩阵维度。"""
-    protocol = _protocol_module()
     config = ForceTrackingComparisonConfig(
         profile=tmp_path / "profile.yaml",
         tasks=(tmp_path / "step.yaml",),
@@ -101,7 +91,6 @@ def test_describe_conditions_is_stable_and_complete(tmp_path: Path) -> None:
 
 def test_summary_plots_are_generated(tmp_path: Path, fast_plot_render: None) -> None:
     """聚合指标、饱和比例和消融增量均生成非空图片。"""
-    protocol = _protocol_module()
     controllers = ("pid-only", "pid-torque-ff", "pid-stiffness-ff", "full")
     aggregates = protocol.aggregate_rows(  # type: ignore[attr-defined]
         [
@@ -163,7 +152,6 @@ def _write_trace(path: Path, *, offset: float) -> None:
 
 def test_tracking_overlay_uses_common_seed(tmp_path: Path, fast_plot_render: None) -> None:
     """轨迹对比选择所有控制器共有的最小 seed。"""
-    protocol = _protocol_module()
     figures = tmp_path / "figures"
     figures.mkdir()
     controllers = ("pid-only", "full")
@@ -195,7 +183,6 @@ def test_tracking_overlay_uses_common_seed(tmp_path: Path, fast_plot_render: Non
 
 def test_tracking_rows_prefer_parquet_over_legacy_csv(tmp_path: Path) -> None:
     """轨迹读取在新旧文件同时存在时优先使用 Parquet。"""
-    protocol = _protocol_module()
     run_directory = tmp_path / "runs" / "example"
     run_directory.mkdir(parents=True)
     write_rows_csv_and_parquet(
@@ -243,7 +230,6 @@ def test_tracking_rows_prefer_parquet_over_legacy_csv(tmp_path: Path) -> None:
 
 def test_tracking_overlay_skips_failed_conditions_without_trace(tmp_path: Path) -> None:
     """未形成跟踪段的失败条件不阻断其他 study 产物生成。"""
-    protocol = _protocol_module()
     figures = tmp_path / "figures"
     figures.mkdir()
     rows = [

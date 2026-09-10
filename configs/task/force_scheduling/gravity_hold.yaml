@@ -1,0 +1,41 @@
+# @package task
+family: force_scheduling
+path: configs/task/force_scheduling/gravity_hold.yaml
+definition:
+  schema_version: 1
+  name: gravity_hold
+  
+  # 50 g 方块撤去支撑后，调度器只需生成克服重力的法向夹持力。
+  cube_mass_kg: 0.05
+  friction_coefficient: 0.8
+  object_material: hard
+  
+  approach:
+    duration_s: 1.0
+    timeout_s: 3.0
+    settle_after_contact_s: 0.3
+    feedforward_force_n: 1.0
+  
+  scheduler:
+    safety_factor: 1.5
+    min_force_n: 0.5
+    max_force_n: 8.0
+    max_force_rate_n_s: 1.0
+    friction_floor: 0.05
+  
+  downward_load:
+    interpolation: linear
+    waypoints:
+      - {t_s: 0.0, force_n: 0.0}
+      - {t_s: 3.0, force_n: 0.0}
+  
+  metrics:
+    ignore_initial_s: 0.2
+    slip_threshold_m: 0.002
+    force_rmse_threshold_n: 0.5
+  
+  # 长时准静态保持显式启用 noslip 后处理，避免软约束在摩擦锥内长期爬移。
+  solver:
+    noslip_iterations: 5
+  
+  control_period_s: 0.002

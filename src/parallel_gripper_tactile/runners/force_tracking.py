@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 import sys
 
+import yaml
+
 from ..experiments.force_tracking import (
     ControllerVariant,
     ForceTrackingResult,
@@ -28,7 +30,7 @@ from ..scenes.custom import ObjectContactModel, ObjectMaterial
 
 def execute_force_tracking(
     *,
-    profile: Path,
+    profile: Path | str,
     resolved_profile: GripperProfile | None = None,
     task_path: Path,
     tracking_task: ForceTrackingTask | None = None,
@@ -53,7 +55,13 @@ def execute_force_tracking(
     """运行一次完整力跟踪，并返回其目录与结构化结果。"""
     task = tracking_task or ForceTrackingTask.load(task_path)
     configured = (
-        validate_resolved_profile(resolved_profile)
+        configure_force_controller(
+            validate_resolved_profile(resolved_profile),
+            variant=controller_variant,
+            stiffness_estimator_method=stiffness_estimator_method,
+            sensor_noise_seed=sensor_noise_seed,
+            torque_adrc_override=torque_adrc_override,
+        )
         if resolved_profile is not None
         else configure_force_controller(
             load_profile(profile),
@@ -84,7 +92,11 @@ def execute_force_tracking(
         output_root,
         profile_name=configured.name,
         experiment="force-track",
-        profile_source=profile,
+        profile_source=(
+            yaml.safe_dump(configured.model_dump(mode="json"), allow_unicode=True, sort_keys=True)
+            if resolved_profile is not None
+            else profile
+        ),
         command=tuple(sys.argv),
         parameters={
             **core_metadata,
@@ -118,7 +130,17 @@ def execute_force_tracking(
     )
     try:
         task_snapshot = run.artifact_path("task.yaml")
-        task_snapshot.write_bytes(task_path.read_bytes())
+        if tracking_task is None:
+            task_snapshot.write_bytes(task_path.read_bytes())
+        else:
+            task_snapshot.write_text(
+                yaml.safe_dump(
+                    task.model_dump(mode="json"),
+                    allow_unicode=True,
+                    sort_keys=True,
+                ),
+                encoding="utf-8",
+            )
         run.register_artifact(task_snapshot)
         effective_parameters_path = run.artifact_path("effective_parameters.json")
         effective_parameters_path.write_text(
@@ -129,7 +151,13 @@ def execute_force_tracking(
                     "task": task.model_dump(mode="json"),
                     "runtime": {
                         **core_metadata,
-                        "profile_path": str(profile.resolve()),
+                        "profile_path": (
+                            "composed_profile"
+                            if resolved_profile is not None
+                            else str(profile.resolve())
+                            if isinstance(profile, Path)
+                            else "serialized_profile"
+                        ),
                         "task_path": str(task_path.resolve()),
                         "object_material": object_material,
                         "object_contact_model": object_contact_model,

@@ -10,7 +10,7 @@ from parallel_gripper_tactile.experiments.force_tracking import (
 )
 
 
-# 与 configs/force_tracking/step.yaml 同构的阶跃曲线：t_0=1.01，平台段止于 3.01。
+# 与 configs/task/force_tracking/step.yaml 同构的阶跃曲线：t_0=1.01，平台段止于 3.01。
 STEP_WAYPOINTS = (
     ForceWaypoint(t_s=0.0, force_n=1.0),
     ForceWaypoint(t_s=1.0, force_n=1.0),

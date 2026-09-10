@@ -22,7 +22,7 @@ from ..scenes.custom import (
     build_custom_grasp_model,
 )
 from ..control import NormalForceController
-from ..config.profiles import load_profile
+from ..config.profiles import GripperProfile, load_profile, validate_resolved_profile
 from ..protocols import DisturbanceProtocol
 from ..timing import SimulationTimer
 from ..video import add_arrow_to_scene, encode_video, save_pixels
@@ -100,7 +100,8 @@ def _annotate_pixels(
 
 def record_custom_grasp_video(
     *,
-    profile_path: Path = DEFAULT_PROFILE,
+    profile_path: Path | str = DEFAULT_PROFILE,
+    resolved_profile: GripperProfile | None = None,
     output: Path = DEFAULT_OUTPUT,
     width: int = 1920,
     height: int = 1080,
@@ -117,7 +118,11 @@ def record_custom_grasp_video(
     """录制水平 DM_Gripper 抓取视频，并返回仿真稳定性。"""
     if width <= 0 or height <= 0 or fps <= 0 or control_period_s <= 0:
         raise ValueError("width, height, fps, and control_period_s must be positive")
-    profile = load_profile(profile_path)
+    profile = (
+        load_profile(profile_path)
+        if resolved_profile is None
+        else validate_resolved_profile(resolved_profile)
+    )
     if target_force_n is not None:
         if target_force_n <= 0:
             raise ValueError("target_force_n must be positive")

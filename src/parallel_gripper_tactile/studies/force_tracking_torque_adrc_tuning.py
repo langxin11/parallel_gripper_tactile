@@ -174,11 +174,15 @@ def load_torque_adrc_tuning_config(path: str | Path) -> ForceTrackingTorqueAdrcT
         raise StudyConfigError(f"invalid YAML in {config_path}") from error
     if not isinstance(raw, dict):
         raise StudyConfigError(f"torque ADRC tuning config root must be a mapping: {config_path}")
+    base = config_path.parent
+    study = raw.get("study")
+    if isinstance(study, dict) and isinstance(study.get("definition"), dict):
+        raw = study["definition"]
+        base = Path(__file__).resolve().parents[3]
     try:
         config = ForceTrackingTorqueAdrcTuningConfig.model_validate(raw)
     except ValidationError as error:
         raise StudyConfigError(str(error)) from error
-    base = config_path.parent
     return config.model_copy(
         update={
             "profile": _resolve(config.profile, base),

@@ -77,11 +77,15 @@ def load_robotiq_discrete_force_study_config(
         raise StudyConfigError(f"invalid YAML in {config_path}") from error
     if not isinstance(raw, dict):
         raise StudyConfigError(f"study config root must be a mapping: {config_path}")
+    base = config_path.parent
+    study = raw.get("study")
+    if isinstance(study, dict) and isinstance(study.get("definition"), dict):
+        raw = study["definition"]
+        base = Path(__file__).resolve().parents[3]
     try:
         config = RobotiqDiscreteForceStudyConfig.model_validate(raw)
     except ValidationError as error:
         raise StudyConfigError(str(error)) from error
-    base = config_path.parent
     return config.model_copy(
         update={
             "profile": (base / config.profile).resolve()

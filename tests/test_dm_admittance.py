@@ -14,16 +14,24 @@ from parallel_gripper_tactile.experiments.force_tracking import (
     configure_force_controller,
     run_force_tracking,
 )
-from parallel_gripper_tactile.config.profiles import DMAdmittanceControl, load_profile
+from parallel_gripper_tactile.config.profiles import DMAdmittanceControl
+from parallel_gripper_tactile.research import compose_research_run
 from parallel_gripper_tactile.scenes.custom import GRIPPER_PREFIX, build_custom_grasp_model
 
 ROOT = Path(__file__).resolve().parents[1]
-PROFILE = ROOT / "configs/dm_gripper_admittance.yaml"
+
+
+def _profile():
+    """通过正式组合入口返回导纳冻结 profile。"""
+    return compose_research_run(
+        experiment="dm_gripper/force_tracking_admittance",
+        overrides=("seed=20260814", "execution=plan"),
+    ).profile
 
 
 def _controller():
     """创建不推进物理时钟的真实 MuJoCo 执行器适配器。"""
-    profile = load_profile(PROFILE)
+    profile = _profile()
     model = build_custom_grasp_model(profile)
     data = mujoco.MjData(model)
     controller = DMAdmittanceController.from_profile(model, profile, name_prefix=GRIPPER_PREFIX)
@@ -37,8 +45,8 @@ def _observation(now=0.0, left=0.6, right=0.8):
 
 def test_example_uses_one_newton_target_and_contact_hysteresis():
     """示例使用 1 N 目标，并让接触进入阈值高于释放阈值。"""
-    profile = load_profile(PROFILE)
-    task = ForceTrackingTask.load(ROOT / "configs/force_tracking/dm_admittance.yaml")
+    profile = _profile()
+    task = ForceTrackingTask.load(ROOT / "configs/task/force_tracking/dm_admittance.yaml")
 
     assert profile.normal_force.target_n == 1.0
     assert profile.normal_force.contact_threshold_n == 1.0
@@ -58,7 +66,7 @@ def test_example_uses_one_newton_target_and_contact_hysteresis():
 def test_admittance_rejects_zero_mit_gain_before_first_step():
     """导纳依赖位置增益修正合成力矩，构造时拒绝零增益而非运行后失败。"""
     controller, _ = _controller()
-    profile = load_profile(PROFILE)
+    profile = _profile()
     with pytest.raises(ValueError, match="positive MIT kp"):
         DMAdmittanceController(
             controller.motor, profile.normal_force, profile.mit.model_copy(update={"kp": 0.0})
@@ -219,8 +227,8 @@ def test_invalid_admittance_config_is_rejected(update):
 
 def test_admittance_variant_is_explicit_and_average_side_only():
     """带导纳的 profile 不能静默进入旧 PID 入口，总力语义被拒绝。"""
-    profile = load_profile(PROFILE)
-    with pytest.raises(ValueError, match="controller-variant"):
+    profile = _profile()
+    with pytest.raises(ValueError, match="admittance controller variant"):
         configure_force_controller(profile)
     controller, _data = _controller()
     with pytest.raises(ValueError, match="average_side"):
@@ -231,9 +239,9 @@ def test_admittance_variant_is_explicit_and_average_side_only():
 
 def test_mujoco_force_tracking_admittance_smoke(tmp_path):
     """4 ms 仿真入口完成接近并输出有限跟踪指标，测试不评价硬件稳定性。"""
-    task = ForceTrackingTask.load(ROOT / "configs/force_tracking/dm_admittance.yaml")
+    task = ForceTrackingTask.load(ROOT / "configs/task/force_tracking/dm_admittance.yaml")
     result = run_force_tracking(
-        PROFILE, task=task, controller_variant="admittance", output_csv=tmp_path / "trace.csv"
+        _profile(), task=task, controller_variant="admittance", output_csv=tmp_path / "trace.csv"
     )
     assert result.simulation_stable
     assert result.passed
@@ -258,7 +266,10 @@ def test_explicit_variant_injects_config_without_old_feedback_or_default_matrix(
     """显式变体注入可复现参数并关闭旧反馈，历史默认矩阵不增加条件。"""
     from parallel_gripper_tactile.experiments.force_tracking import CONTROLLER_VARIANTS
 
-    baseline = load_profile(ROOT / "configs/dm_gripper.yaml")
+    baseline = compose_research_run(
+        experiment="dm_gripper/force_tracking_default",
+        overrides=("controller=dm_gripper/full", "seed=20260814", "execution=plan"),
+    ).profile
     configured = configure_force_controller(baseline, variant="admittance")
     assert configured.normal_force.admittance is not None
     assert configured.normal_force.kp == configured.normal_force.ki == 0.0

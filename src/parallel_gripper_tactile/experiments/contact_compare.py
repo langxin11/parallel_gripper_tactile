@@ -20,7 +20,7 @@ from ..visualization import (
     science_pyplot,
 )
 
-from ..config.profiles import load_profile
+from ..config.profiles import GripperProfile, load_profile, validate_resolved_profile
 from ..video import encode_video, save_pixels
 from .custom_demo import build_demo_model
 
@@ -175,7 +175,8 @@ def _camera() -> mujoco.MjvCamera:
 def record_contact_ab(
     *,
     output_dir: Path,
-    profile_path: Path = CONTACT_PROFILE,
+    profile_path: Path | str = CONTACT_PROFILE,
+    resolved_profile: GripperProfile | None = None,
     taxel: tuple[str, int, int],
     cube_half_size: float,
     steps: int,
@@ -186,7 +187,11 @@ def record_contact_ab(
     keep_frames: bool,
 ) -> tuple[Path, Path, Path]:
     """生成 A/B CSV、曲线和并排 MP4，并返回三个文件路径。"""
-    profile = load_profile(profile_path)
+    profile = (
+        load_profile(profile_path)
+        if resolved_profile is None
+        else validate_resolved_profile(resolved_profile)
+    )
     native_model = build_demo_model(profile, taxel, cube_half_size)
     sdf_model = build_demo_model(profile, taxel, cube_half_size, pillar_type="sdf")
     native_data = mujoco.MjData(native_model)

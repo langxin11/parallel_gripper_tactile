@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 from datetime import UTC, datetime
@@ -25,7 +24,7 @@ from parallel_gripper_tactile.visualization import (
     save_publication_figure,
     science_pyplot,
 )
-from parallel_gripper_tactile.config.profiles import load_profile
+from parallel_gripper_tactile.config.profiles import GripperProfile, load_profile
 from parallel_gripper_tactile.runners import execute_force_tracking
 from parallel_gripper_tactile.studies.aggregation import (
     aggregate_records,
@@ -39,7 +38,6 @@ from parallel_gripper_tactile.studies.aggregation import (
 )
 from parallel_gripper_tactile.studies.force_tracking_comparison import (
     ForceTrackingComparisonConfig,
-    load_comparison_config,
 )
 from parallel_gripper_tactile.studies.lifecycle import (
     ConditionExecution,
@@ -435,9 +433,14 @@ def _create_study_directory(config: ForceTrackingComparisonConfig) -> Path:
     return directory
 
 
-def validate_inputs(config: ForceTrackingComparisonConfig) -> dict[Path, ForceTrackingTask]:
+def validate_inputs(
+    config: ForceTrackingComparisonConfig,
+    *,
+    resolved_profile: GripperProfile | None = None,
+) -> dict[Path, ForceTrackingTask]:
     """加载 profile 和所有任务，确保 dry-run 也完成输入校验。"""
-    load_profile(config.profile)
+    if resolved_profile is None:
+        load_profile(config.profile)
     return {task_path: ForceTrackingTask.load(task_path) for task_path in config.tasks}
 
 
@@ -528,6 +531,7 @@ def build_plan(config: ForceTrackingComparisonConfig) -> StudyPlan:
 def run_study(
     config: ForceTrackingComparisonConfig,
     *,
+    resolved_profile: GripperProfile | None = None,
     config_source: Path | None = None,
     study_directory: Path | None = None,
     study_plan: StudyPlan | None = None,
@@ -535,7 +539,7 @@ def run_study(
     lifecycle_manifest_fields: Mapping[str, object] | None = None,
 ) -> Path:
     """通过公共生命周期执行 comparison protocol 并返回 study 目录。"""
-    tasks = validate_inputs(config)
+    tasks = validate_inputs(config, resolved_profile=resolved_profile)
     study_dir = (
         _create_study_directory(config) if study_directory is None else study_directory.resolve()
     )
@@ -561,6 +565,7 @@ def run_study(
         task = tasks[task_path]
         run, result = execute_force_tracking(
             profile=config.profile,
+            resolved_profile=resolved_profile,
             task_path=task_path,
             tracking_task=task,
             output_root=study_dir / "runs",
@@ -698,40 +703,3 @@ def render_existing_study(study_dir: Path) -> list[Path]:
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     return figure_artifacts
-
-
-def main() -> None:
-    """解析 study 配置，打印矩阵或执行完整研究。"""
-    parser = argparse.ArgumentParser(description=__doc__)
-    input_group = parser.add_mutually_exclusive_group(required=True)
-    input_group.add_argument("--config", type=Path, help="Study YAML path")
-    input_group.add_argument(
-        "--render-study-dir",
-        type=Path,
-        help="Regenerate publication figures from an existing study directory",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Validate inputs and print the condition matrix without running MuJoCo",
-    )
-    arguments = parser.parse_args()
-    if arguments.render_study_dir is not None:
-        if arguments.dry_run:
-            parser.error("--dry-run requires --config")
-        artifacts = render_existing_study(arguments.render_study_dir.resolve())
-        print(f"Publication figures: {len(artifacts)} files")
-        return
-    assert arguments.config is not None
-    config_path = arguments.config.resolve()
-    config = load_comparison_config(config_path)
-    validate_inputs(config)
-    if arguments.dry_run:
-        print(describe_conditions(config))
-        return
-    result = run_study(config, config_source=config_path)
-    print(f"Study: {result}")
-
-
-if __name__ == "__main__":
-    main()

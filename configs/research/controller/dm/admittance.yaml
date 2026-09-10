@@ -1,5 +1,0 @@
-# @package controller
-# DM 共享导纳控制器入口（兼容 `dm_admittance` 研究/脚本）。
-family: dm
-name: admittance
-torque_adrc: null

@@ -1,5 +1,0 @@
-# @package controller
-# PID 控制器的刚度上限约束版本，兼容消融链路中的抗饱和评估。
-family: dm
-name: pid-stiffness-limit
-torque_adrc: null

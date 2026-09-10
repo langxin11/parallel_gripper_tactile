@@ -29,22 +29,14 @@ def _parser() -> argparse.ArgumentParser:
         help="要录制的演示：ramp 力跟踪、friction 摩擦估计或两者（默认 both）。",
     )
     parser.add_argument(
-        "--profile",
-        type=Path,
-        default="configs/dm_gripper.yaml",
-        help="DM_Gripper profile 路径（默认 configs/dm_gripper.yaml）。",
+        "--ramp-experiment",
+        default="dm_gripper/force_tracking_default",
+        help="Ramp 演示使用的命名 experiment。",
     )
     parser.add_argument(
-        "--ramp-task",
-        type=Path,
-        default="configs/force_tracking/ramp.yaml",
-        help="Ramp 力跟踪任务 YAML（默认 configs/force_tracking/ramp.yaml）。",
-    )
-    parser.add_argument(
-        "--friction-task",
-        type=Path,
-        default="configs/friction_estimation/nominal_friction.yaml",
-        help="摩擦估计任务 YAML（默认 nominal_friction.yaml）。",
+        "--friction-experiment",
+        default="dm_gripper/friction_estimation_nominal",
+        help="摩擦演示使用的命名 experiment。",
     )
     parser.add_argument(
         "--output-dir",
@@ -99,6 +91,9 @@ def main(argv: list[str] | None = None) -> None:
         record_force_tracking_ramp_video,
         record_friction_demo_video,
     )
+    from parallel_gripper_tactile.experiments.force_tracking import ForceTrackingTask
+    from parallel_gripper_tactile.experiments.friction_estimation import FrictionEstimationTask
+    from parallel_gripper_tactile.research import compose_research_run
 
     args = _parser().parse_args(argv)
     output_dir = Path(args.output_dir)
@@ -106,9 +101,16 @@ def main(argv: list[str] | None = None) -> None:
     demos = ("ramp", "friction") if args.demo == "both" else (args.demo,)
     for demo in demos:
         if demo == "ramp":
+            resolved = compose_research_run(
+                experiment=args.ramp_experiment,
+                overrides=("task=force_tracking/ramp",),
+            )
+            if not isinstance(resolved.task, ForceTrackingTask):
+                raise TypeError("ramp experiment must resolve a force-tracking task")
             result, frames = record_force_tracking_ramp_video(
-                profile_path=Path(args.profile),
-                task_path=Path(args.ramp_task),
+                profile_path=resolved.profile,
+                task_path=resolved.task_source,
+                resolved_task=resolved.task,
                 output=output_dir / "force_tracking_ramp.mp4",
                 width=args.width,
                 height=args.height,
@@ -117,9 +119,13 @@ def main(argv: list[str] | None = None) -> None:
                 sensor_noise_seed=args.noise_seed,
             )
         else:
+            resolved = compose_research_run(experiment=args.friction_experiment)
+            if not isinstance(resolved.task, FrictionEstimationTask):
+                raise TypeError("friction experiment must resolve a friction-estimation task")
             result, frames = record_friction_demo_video(
-                profile_path=Path(args.profile),
-                task_path=Path(args.friction_task),
+                profile_path=resolved.profile,
+                task_path=resolved.task_source,
+                resolved_task=resolved.task,
                 output=output_dir / "friction_estimation_with_curves.mp4",
                 width=args.width,
                 height=args.height,

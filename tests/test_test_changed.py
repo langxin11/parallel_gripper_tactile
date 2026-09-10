@@ -61,7 +61,7 @@ def test_research_entry_and_config_map_to_complete_research_tests() -> None:
     )
 
     assert module.select_tests(["scripts/research/run.py"]) == expected
-    assert module.select_tests(["configs/research/controller/dm/full.yaml"]) == expected
+    assert module.select_tests(["configs/controller/dm_gripper/full.yaml"]) == expected
 
 
 def test_study_lifecycle_maps_to_all_migrated_protocol_tests() -> None:

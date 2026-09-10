@@ -1,4 +1,0 @@
-# @package study
-# 正式控制器对比矩阵引用；与 stage/run 机制解耦，仅保存研究类型与 domain 文件路径。
-kind: force_tracking_controller_comparison
-config: configs/studies/force_tracking_controller_comparison.yaml

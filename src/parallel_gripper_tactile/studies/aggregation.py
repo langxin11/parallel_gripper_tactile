@@ -1,6 +1,6 @@
 """研究脚本共享的声明式行聚合工具。
 
-各研究脚本（``scripts/experiments``）把逐次运行的 ``list[dict]`` 行按分组键汇总成
+各研究 protocol 把逐次运行的 ``list[dict]`` 行按分组键汇总成
 聚合行。历史上每个脚本手写一套循环，语义在 None／NaN／inf 处理上有细微差别；
 本模块用 polars 表达式把这些口径固化为可声明的列规格（column spec），由
 :func:`aggregate_records` 统一解释执行。

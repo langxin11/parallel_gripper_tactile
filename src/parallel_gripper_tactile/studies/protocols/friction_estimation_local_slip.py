@@ -13,6 +13,7 @@ from uuid import uuid4
 import numpy as np
 import yaml
 
+from parallel_gripper_tactile.config.profiles import GripperProfile
 from parallel_gripper_tactile.experiments.friction_estimation import FrictionEstimationTask
 from parallel_gripper_tactile.runners import execute_friction_estimation
 from parallel_gripper_tactile.studies.aggregation import (
@@ -199,6 +200,7 @@ def build_plan(config: FrictionEstimationLocalSlipStudyConfig) -> StudyPlan:
 def run_study(
     config: FrictionEstimationLocalSlipStudyConfig,
     *,
+    resolved_profile: GripperProfile | None = None,
     config_source: Path | None = None,
     study_directory: Path | None = None,
     study_plan: StudyPlan | None = None,
@@ -231,6 +233,7 @@ def run_study(
         task = FrictionEstimationTask.load(task_path)
         run, result = execute_friction_estimation(
             profile=config.profile,
+            resolved_profile=resolved_profile,
             task_path=task_path,
             estimation_task=task,
             output_root=study_dir / "runs",

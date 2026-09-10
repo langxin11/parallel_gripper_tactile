@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib.util
 import math
 from pathlib import Path
 
@@ -12,18 +11,10 @@ from parallel_gripper_tactile.studies.force_tracking_ablation import (
     StudyConfigError,
     load_study_config,
 )
+from parallel_gripper_tactile.studies.protocols import force_tracking_ablation as protocol
 
 
 ROOT = Path(__file__).resolve().parents[1]
-
-
-def _protocol_module() -> object:
-    path = Path(__file__).parents[1] / "scripts" / "experiments" / "force_tracking_ablation.py"
-    spec = importlib.util.spec_from_file_location("force_tracking_ablation_protocol", path)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 def _row(*, seed: int, rmse: float, stiffness: float) -> dict[str, object]:
@@ -68,7 +59,7 @@ output_root: results
 
 def test_default_ablation_uses_shifted_contact_presets() -> None:
     """默认消融矩阵排除旧 soft，并加入 stiff。"""
-    config = load_study_config(ROOT / "configs/studies/force_tracking_ablation.yaml")
+    config = load_study_config(ROOT / "configs/research/force_controller_ablation/study.yaml")
 
     assert config.materials == ("medium", "hard", "stiff")
 
@@ -99,7 +90,6 @@ def test_study_config_rejects_invalid_conditions(tmp_path: Path, contents: str) 
 
 def test_aggregation_skips_nonfinite_values_and_uses_json_null() -> None:
     """聚合跳过非有限数，并为 JSON 规范化其原始行。"""
-    protocol = _protocol_module()
     rows = [_row(seed=1, rmse=0.2, stiffness=math.nan), _row(seed=2, rmse=0.4, stiffness=math.inf)]
     aggregate = protocol.aggregate_rows(rows)[0]  # type: ignore[attr-defined]
     assert aggregate["runs"] == 2
@@ -113,7 +103,6 @@ def test_aggregation_skips_nonfinite_values_and_uses_json_null() -> None:
 
 def test_single_sample_aggregate_has_no_sample_standard_deviation() -> None:
     """一个样本没有可定义的样本标准差。"""
-    protocol = _protocol_module()
     aggregate = protocol.aggregate_rows([_row(seed=1, rmse=0.2, stiffness=10.0)])[0]  # type: ignore[attr-defined]
     assert aggregate["rmse_n_std"] is None
 
@@ -122,7 +111,6 @@ def test_ablation_figures_render_paired_factorial_effects(
     tmp_path: Path, fast_plot_render: None
 ) -> None:
     """小型合成数据可生成材料总览和按相同 seed 配对的 PID 效应图。"""
-    protocol = _protocol_module()
     rows = []
     for controller, rmse in (
         ("pid-only", 0.50),
@@ -155,7 +143,6 @@ def test_ablation_figures_render_paired_factorial_effects(
 
 def test_factorial_effects_ignore_incomplete_material_seed_blocks() -> None:
     """缺少任一 PID 变体的材料与 seed 组合不得进入 2×2 配对统计。"""
-    protocol = _protocol_module()
     rows = []
     for controller, rmse in (
         ("pid-only", 0.50),

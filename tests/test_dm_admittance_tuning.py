@@ -9,6 +9,7 @@ from types import SimpleNamespace
 import pytest
 
 from parallel_gripper_tactile.experiments.force_tracking import ForceTrackingResult
+from parallel_gripper_tactile.research import compose_research_run
 from parallel_gripper_tactile.studies.dm_admittance_tuning import (
     DMAdmittanceCandidate,
     load_dm_admittance_tuning_config,
@@ -18,6 +19,14 @@ from parallel_gripper_tactile.studies.protocols import dm_admittance_tuning as p
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def _resolved_profile():
+    """返回正式调参入口使用的组合后导纳 profile。"""
+    return compose_research_run(
+        experiment="dm_gripper/force_tracking_admittance",
+        overrides=("task=force_tracking/dm_admittance_ramp", "execution=plan"),
+    ).profile
 
 
 def _candidate(
@@ -104,7 +113,6 @@ def test_config_resolves_paths_and_expands_candidates(tmp_path: Path) -> None:
     """配置解析相对路径，并以候选、材料、seed 顺序展开条件。"""
     config_path = tmp_path / "tuning.yaml"
     config_path.write_text(
-        "profile: profile.yaml\n"
         "task: ramp.yaml\n"
         "materials: [medium, hard]\n"
         "seeds: {start: 3, count: 2}\n"
@@ -122,7 +130,6 @@ def test_config_resolves_paths_and_expands_candidates(tmp_path: Path) -> None:
 
     config = load_dm_admittance_tuning_config(config_path)
 
-    assert config.profile == tmp_path / "profile.yaml"
     assert config.task == tmp_path / "ramp.yaml"
     assert len(config.conditions()) == 8
     assert config.conditions()[0][0].identifier == (
@@ -133,7 +140,9 @@ def test_config_resolves_paths_and_expands_candidates(tmp_path: Path) -> None:
 
 def test_repository_config_scans_contact_transition_parameters() -> None:
     """仓库调参入口扫描接近和接触切换参数。"""
-    config = load_dm_admittance_tuning_config(ROOT / "configs/studies/dm_admittance_tuning.yaml")
+    config = load_dm_admittance_tuning_config(
+        ROOT / "configs/research/dm_admittance_tuning/study.yaml"
+    )
 
     assert len(config.candidates) == 16
     assert (
@@ -195,11 +204,7 @@ def test_config_rejects_invalid_admittance_parameters(
     """质量必须为正，虚拟阻尼和刚度不能为负。"""
     config_path = tmp_path / "invalid.yaml"
     config_path.write_text(
-        "profile: profile.yaml\n"
-        "task: ramp.yaml\n"
-        "materials: [medium]\n"
-        "candidates:\n"
-        f"  - {candidate}\n",
+        f"task: ramp.yaml\nmaterials: [medium]\ncandidates:\n  - {candidate}\n",
         encoding="utf-8",
     )
 
@@ -211,7 +216,6 @@ def test_config_rejects_duplicate_candidates(tmp_path: Path) -> None:
     """候选必须唯一，重复候选直接拒绝。"""
     config_path = tmp_path / "invalid.yaml"
     config_path.write_text(
-        "profile: profile.yaml\n"
         "task: ramp.yaml\n"
         "materials: [medium]\n"
         "candidates:\n"
@@ -270,7 +274,7 @@ def test_serial_execution_preserves_condition_order_and_ranking_is_deterministic
 ) -> None:
     """串行执行按配置顺序产出逐 run 行，候选排名只由聚合指标决定。"""
     config = load_dm_admittance_tuning_config(
-        ROOT / "configs/studies/dm_admittance_tuning.yaml"
+        ROOT / "configs/research/dm_admittance_tuning/study.yaml"
     ).model_copy(update={"output_root": tmp_path / "studies"})
     trace_rows = [
         {
@@ -308,7 +312,11 @@ def test_serial_execution_preserves_condition_order_and_ranking_is_deterministic
     monkeypatch.setattr(protocol, "execute_force_tracking", fake_execute)
     monkeypatch.setattr(protocol, "read_trace_rows", lambda _: trace_rows)
 
-    study_dir = protocol.run_study(config, study_directory=tmp_path / "study")
+    study_dir = protocol.run_study(
+        config,
+        resolved_profile=_resolved_profile(),
+        study_directory=tmp_path / "study",
+    )
 
     summary = json.loads((study_dir / "summary.json").read_text(encoding="utf-8"))
     assert [row["candidate_id"] for row in summary["runs"]] == [

@@ -25,7 +25,7 @@ from parallel_gripper_tactile.control import (
     MITControlCommand,
 )
 from parallel_gripper_tactile.dm_admittance import DMAdmittanceController
-from parallel_gripper_tactile.config.profiles import load_profile
+from parallel_gripper_tactile.research import compose_research_run
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -109,7 +109,10 @@ def test_ros_and_simulation_emit_equal_tracking_requests(periods, monkeypatch) -
     """两个真实适配路径对相同观测与复位产生一致的五字段 MIT 请求和积分状态。"""
     ros_config = Path(ros_module.__file__).resolve().parents[1] / "config/dm_force_tracking.yaml"
     parameters = yaml.safe_load(ros_config.read_text())["dm_force_tracking"]["ros__parameters"]
-    profile = load_profile(ROOT / "configs/dm_gripper_admittance.yaml")
+    profile = compose_research_run(
+        experiment="dm_gripper/force_tracking_admittance",
+        overrides=("seed=20260814", "execution=plan"),
+    ).profile
     simulator = DMAdmittanceController(_ReplayMotor(), profile.normal_force, profile.mit)
     node = _ROSReplay(parameters)
     assert simulator.command_config == node._command_config()

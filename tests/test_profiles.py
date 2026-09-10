@@ -22,6 +22,7 @@ from parallel_gripper_tactile.config.profiles import (
     load_profile,
 )
 from parallel_gripper_tactile.validation import validate_profile
+from parallel_gripper_tactile.research import compose_research_run
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,7 +41,6 @@ def test_legacy_profiles_module_reexports_config_implementation() -> None:
     "profile_name, actuator, channels",
     [
         ("robotiq_2f85.yaml", "fingers_actuator", 18),
-        ("robotiq_2f85_box.yaml", "fingers_actuator", 18),
         ("dm_gripper.yaml", "gripper_drive", 18),
     ],
 )
@@ -142,11 +142,26 @@ def test_stiffness_profile_validates_window_method_requirements() -> None:
 
 def test_touch_grid_profile_reads_dimensions_from_plugin_configuration() -> None:
     """touch_grid profile 不在 YAML 中重复网格尺寸，而是从 MJCF 插件读取。"""
-    profile = load_profile(ROOT / "configs" / "robotiq_2f85_touch_grid.yaml")
+    profile = compose_research_run(
+        experiment="robotiq_2f85/discrete_force",
+        overrides=("model=robotiq_2f85/touch_grid_3x3", "execution=plan"),
+    ).profile
 
     assert isinstance(profile.tactile, TouchGridTactileLayout)
     assert (profile.tactile.rows, profile.tactile.cols) == (3, 3)
     assert profile.tactile.names("left") == ("touch_left",)
+
+
+def test_box_sensor_model_group_compiles() -> None:
+    """Robotiq box taxel 变体由 model 组组合后仍满足通道契约。"""
+    profile = compose_research_run(
+        experiment="robotiq_2f85/discrete_force",
+        overrides=("model=robotiq_2f85/box_force_sensor", "execution=plan"),
+    ).profile
+
+    report = validate_profile(profile)
+    assert report.actuator == "fingers_actuator"
+    assert report.tactile_channels == 18
 
 
 def test_relative_model_path_is_resolved_from_profile_file(tmp_path: Path) -> None:

@@ -20,8 +20,8 @@ from parallel_gripper_tactile.runners import execute_force_scheduling
 
 ROOT = Path(__file__).resolve().parents[1]
 PROFILE = ROOT / "configs/dm_gripper.yaml"
-GRAVITY_TASK = ROOT / "configs/force_scheduling/gravity_hold.yaml"
-FILLING_TASK = ROOT / "configs/force_scheduling/dynamic_filling.yaml"
+GRAVITY_TASK = ROOT / "configs/task/force_scheduling/gravity_hold.yaml"
+FILLING_TASK = ROOT / "configs/task/force_scheduling/dynamic_filling.yaml"
 
 
 def test_downward_load_reference_samples_linear_ramp() -> None:

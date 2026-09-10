@@ -1,5 +1,0 @@
-# @package controller
-# PID + 刚度前馈变体，用于评估显式刚度估计是否改善步进响应。
-family: dm
-name: pid-stiffness-ff
-torque_adrc: null

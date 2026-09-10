@@ -1,5 +1,0 @@
-# @package controller
-# 历史兼容位：ADR C 位姿式控制入口，当前正式 study 不纳入默认矩阵。
-family: dm
-name: adrc
-torque_adrc: null

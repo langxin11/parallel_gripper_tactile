@@ -1,5 +1,0 @@
-# @package platform
-# 共享导纳研究专用 DM 仿真平台，profile 与 control 模型解耦于主力控矩阵。
-family: dm
-backend: simulation
-profile: configs/dm_gripper_admittance.yaml

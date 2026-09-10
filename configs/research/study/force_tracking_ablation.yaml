@@ -1,4 +1,0 @@
-# @package study
-# 官方计划与执行只读取该 study 类型与来源配置；运行时由上层生命周期统一下发 seeds 与统计策略。
-kind: force_tracking_ablation
-config: configs/studies/force_tracking_ablation.yaml

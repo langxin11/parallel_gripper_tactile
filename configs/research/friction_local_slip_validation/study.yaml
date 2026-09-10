@@ -1,0 +1,42 @@
+# @package _global_
+# 目的导向研究定义；本文件同时拥有研究元数据与唯一条件矩阵。
+study:
+  kind: friction_estimation_local_slip
+  source: configs/research/friction_local_slip_validation/study.yaml
+  profile:
+    experiment: dm_gripper/friction_estimation_nominal
+    overrides: [controller=dm_gripper/full, estimator=window_linear, seed=20260814, execution=plan]
+  rationale:
+    question: 纯触觉局部起滑检测能否区分正例与低探测载荷阴性对照？
+    decision: 判断局部候选是否具备接管目标力调度的证据。
+    inclusion_criteria: [四个正例场景, 一个阴性对照, 固定配对 seed]
+    task_rationale: 摩擦、噪声和探测载荷变化共同覆盖检测边界。
+    primary_metrics: [检测率, 误报率, 局部估计与真值比]
+    stop_conditions: [完成十五条条件, 检测与控制候选门槛分别判定]
+    exclusions: {历史局部结果: 当前总体检测改变了终止时刻，旧通过率不得沿用。}
+  definition:
+    name: friction_estimation_local_slip
+    profile: configs/dm_gripper.yaml
+    # 纯局部起滑研究：同一个 profile 下覆盖多组摩擦场景，记录局部候选与全局基线的一致性。
+    scenarios:
+      # 正常起滑场景：触发局部摩擦先验，验证局部检测是否可提前识别。
+      - task: configs/task/friction_estimation/low_friction.yaml
+        expect_local_slip: true
+      # 标称摩擦场景：作为算法中位数基准场景。
+      - task: configs/task/friction_estimation/nominal_friction.yaml
+        expect_local_slip: true
+      # 高摩擦场景：验证检测不会过度触发。
+      - task: configs/task/friction_estimation/high_friction.yaml
+        expect_local_slip: true
+      # 噪声场景：验证局部指标在传感噪声下的稳健性。
+      - task: configs/task/friction_estimation/noisy_friction.yaml
+        expect_local_slip: true
+      # 无起滑场景：检验误报率，建立阴性对照。
+      - task: configs/task/friction_estimation/no_slip_low_probe.yaml
+        expect_local_slip: false
+    # 统一复现种子段落，便于统计显著性与误报率估计。
+    seeds:
+      start: 0
+      count: 3
+    # 产物输出目录指向 studies，兼容研究聚合命名规则。
+    output_root: outputs/studies

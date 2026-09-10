@@ -20,7 +20,7 @@ from robotiq_grasp_core.discrete_force_control import (
     DiscreteForceController,
 )
 from ..visualization import paper_figsize, save_publication_figure, science_pyplot
-from ..config.profiles import load_profile
+from ..config.profiles import GripperProfile, load_profile, validate_resolved_profile
 from ..scenes.robotiq import RobotiqObjectMaterial, load_grasp_model
 from ..tactile import create_tactile_reader
 from ..timing import SimulationTimer
@@ -227,7 +227,10 @@ class RobotiqDiscreteForceTask(_TaskModel):
             documents = list(yaml.safe_load_all(stream))
         if len(documents) != 1 or not isinstance(documents[0], dict):
             raise ValueError("discrete force task must contain exactly one YAML mapping")
-        return cls.model_validate(documents[0])
+        raw = documents[0]
+        if isinstance(raw.get("definition"), dict):
+            raw = raw["definition"]
+        return cls.model_validate(raw)
 
     def controller_config(self) -> DiscreteForceControlConfig:
         """转换为不依赖 Pydantic 的领域控制器配置。"""
@@ -524,7 +527,7 @@ def _platform_results(
 
 
 def run_robotiq_discrete_force(
-    profile_path: str | Path,
+    profile_path: str | Path | GripperProfile,
     *,
     task: RobotiqDiscreteForceTask,
     controller_variant: ControllerVariant | None = None,
@@ -539,7 +542,11 @@ def run_robotiq_discrete_force(
     RMSE 与平台统计采用均匀控制周期样本，绘图采用持久化 trace；安全、有限性、
     接触与峰值则在每个物理步在线累计，避免保存完整的 500 Hz 物理轨迹。
     """
-    profile = load_profile(profile_path)
+    profile = (
+        validate_resolved_profile(profile_path)
+        if isinstance(profile_path, GripperProfile)
+        else load_profile(profile_path)
+    )
     if profile.control_mode != "position":
         raise ValueError("Robotiq discrete force control requires a position-control profile")
     variant = controller_variant or task.controller_variant

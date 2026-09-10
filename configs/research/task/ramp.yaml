@@ -1,4 +1,0 @@
-# @package task
-# 斜坡任务入口，关注线性加载/卸载与迟滞性能。
-family: force_tracking
-path: configs/force_tracking/ramp.yaml

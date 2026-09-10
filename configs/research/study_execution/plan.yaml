@@ -1,5 +1,0 @@
-# @package execution
-# 仅完成 study 计划校验与状态登记，不执行 runner。
-mode: plan
-output_root: ${pgt_repo:}/outputs/research/studies
-recovery_source: null

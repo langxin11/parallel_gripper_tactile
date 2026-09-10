@@ -1,5 +1,0 @@
-# @package controller
-# 仅 PID 力控基线，作为对照组。
-family: dm
-name: pid-only
-torque_adrc: null

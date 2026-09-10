@@ -39,8 +39,8 @@ def reject_outer_multirun(arguments: list[str]) -> None:
 
 @hydra.main(
     version_base="1.3",
-    config_path="../../configs/research",
-    config_name="force_tracking_controller_comparison",
+    config_path="../../configs",
+    config_name="study",
 )
 def main(config: DictConfig) -> None:
     """在外层 Multirun 防护后解析、计划或执行正式研究。"""

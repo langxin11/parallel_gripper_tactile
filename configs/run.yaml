@@ -1,0 +1,23 @@
+# 统一 DM 单次科研入口；实验组只选择其他片段，不复制完整 profile。
+defaults:
+  - platform: dm_gripper/simulation
+  - model: dm_gripper/height_spheres
+  - controller: dm_gripper/adrc_torque
+  - estimator: window_linear
+  - task: force_tracking/ramp
+  - material: hard
+  - execution: run
+  - experiment: dm_gripper/force_tracking_default
+  - _self_
+
+schema_version: 1
+seed: 0
+
+hydra:
+  job:
+    chdir: false
+  run:
+    dir: ${execution.output_root}/run/${now:%Y%m%dT%H%M%S%f}
+  sweep:
+    dir: ${execution.output_root}/multirun/${now:%Y%m%dT%H%M%S%f}
+    subdir: ${hydra.job.num}

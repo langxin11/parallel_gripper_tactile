@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def test_default_local_slip_study_expands_scenarios_and_seeds() -> None:
     """默认 study 同时包含正例、负例和三个噪声种子。"""
     config = load_local_slip_study_config(
-        ROOT / "configs/studies/friction_estimation_local_slip.yaml"
+        ROOT / "configs/research/friction_local_slip_validation/study.yaml"
     )
 
     assert len(config.conditions()) == 15

@@ -33,14 +33,35 @@ from parallel_gripper_tactile.studies.protocols import (
 from parallel_gripper_tactile.studies.tabular import write_rows_csv
 
 
-CONFIG_ROOT = REPOSITORY_ROOT / "configs" / "research"
+CONFIG_ROOT = REPOSITORY_ROOT / "configs"
+STUDY_GROUPS = {
+    "force_tracking_controller_comparison": ("force_controller_selection/study", []),
+    "force_tracking_ablation": ("force_controller_ablation/study", []),
+    "force_tracking_diagnosis": ("archive/model_bug_diagnosis/study", []),
+    "friction_estimation_local_slip": ("friction_local_slip_validation/study", []),
+    "force_tracking_stiffness_estimator_comparison": (
+        "stiffness_estimator_validation/study",
+        [],
+    ),
+    "dm_admittance_tuning": ("dm_admittance_tuning/study", []),
+    "robotiq_discrete_force": ("robotiq_discrete_force_validation/study", []),
+    "force_tracking_torque_adrc_tuning_coarse": ("torque_adrc_tuning/study", []),
+    "force_tracking_torque_adrc_tuning_confirm": (
+        "torque_adrc_tuning/study",
+        ["study.stage=confirm"],
+    ),
+}
 
 
 def _resolved(name: str, *, overrides: list[str] | None = None):
     """组合并解析一个正式研究 preset。"""
     register_resolvers()
+    research, defaults = STUDY_GROUPS[name]
     with initialize_config_dir(version_base="1.3", config_dir=str(CONFIG_ROOT)):
-        config = compose(config_name=name, overrides=overrides or [])
+        config = compose(
+            config_name="study",
+            overrides=[f"research={research}", *defaults, *(overrides or [])],
+        )
     return resolve_research_study(resolved_mapping(config))
 
 
@@ -88,6 +109,15 @@ def _write_coarse_reference(
     return candidates
 
 
+def _migrated_task(path: Path) -> Path:
+    """把冻结基线 task 路径映射到目标权威配置目录。"""
+    relative = path.relative_to(REPOSITORY_ROOT / "configs")
+    if relative.parts[0] == "task":
+        return path
+    name = "mixed.yaml" if relative.name == "mixed_waypoints.yaml" else relative.name
+    return REPOSITORY_ROOT / "configs" / "task" / relative.parent / name
+
+
 def _entry_module():
     """加载 study 薄入口以测试调度前防护。"""
     path = REPOSITORY_ROOT / "scripts/research/study.py"
@@ -102,7 +132,7 @@ def test_formal_comparison_preserves_the_complete_ordered_matrix() -> None:
     """迁移后的 162 条条件与旧 Pydantic study 的完整 tuple 逐项一致。"""
     resolved = _resolved("force_tracking_controller_comparison")
     legacy = load_comparison_config(
-        REPOSITORY_ROOT / "configs/studies/force_tracking_controller_comparison.yaml"
+        REPOSITORY_ROOT / "configs/research/force_controller_selection/study.yaml"
     )
     expected_controllers = (
         "pid-only",
@@ -118,14 +148,32 @@ def test_formal_comparison_preserves_the_complete_ordered_matrix() -> None:
         for row in resolved.conditions
     )
     assert legacy.controllers == expected_controllers
-    assert actual == legacy.conditions()
+    expected = tuple(
+        (controller, _migrated_task(task), material, seed)
+        for controller, task, material, seed in legacy.conditions()
+    )
+    assert actual == expected
     assert len(set(str(row["condition_id"]) for row in resolved.conditions)) == 162
+
+
+def test_default_formal_selection_excludes_historical_low_performers() -> None:
+    """默认选型矩阵排除 direct-torque，并在配置中保留退出证据。"""
+    resolved = _resolved("force_tracking_controller_comparison")
+
+    assert isinstance(resolved.domain_config, type(load_comparison_config(resolved.config_source)))
+    assert "direct-torque" not in resolved.domain_config.controllers
+    exclusions = resolved.selection.study.rationale.exclusions
+    assert "direct-torque" in exclusions
+    assert "135-run" in exclusions["direct-torque"]
+    assert "archive" not in str(resolved.config_source.relative_to(CONFIG_ROOT))
 
 
 def test_formal_ablation_preserves_pairing_and_complete_matrix() -> None:
     """迁移后的 36 条 PID 2×2 条件保持材料—seed 配对关系。"""
     resolved = _resolved("force_tracking_ablation")
-    legacy = load_study_config(REPOSITORY_ROOT / "configs/studies/force_tracking_ablation.yaml")
+    legacy = load_study_config(
+        REPOSITORY_ROOT / "configs/research/force_controller_ablation/study.yaml"
+    )
 
     actual = tuple((row["controller"], row["material"], row["seed"]) for row in resolved.conditions)
     assert actual == legacy.conditions()
@@ -193,7 +241,21 @@ def test_diagnosis_phase_selection_is_validated() -> None:
         "schema_version": 1,
         "study": {
             "kind": "force_tracking_diagnosis",
-            "config": "configs/studies/force_tracking_diagnosis.yaml",
+            "source": "configs/research/archive/model_bug_diagnosis/study.yaml",
+            "profile": {
+                "experiment": "dm_gripper/force_tracking_default",
+                "overrides": ["execution=plan"],
+            },
+            "rationale": {
+                "question": "测试问题",
+                "decision": "测试决策",
+                "inclusion_criteria": [],
+                "task_rationale": "测试任务理由",
+                "primary_metrics": [],
+                "stop_conditions": [],
+                "exclusions": {},
+            },
+            "definition": {},
         },
         "execution": {
             "mode": "plan",
@@ -207,7 +269,10 @@ def test_diagnosis_phase_selection_is_validated() -> None:
         **raw,
         "study": {
             "kind": "force_tracking_ablation",
-            "config": "configs/studies/force_tracking_ablation.yaml",
+            "source": "configs/research/force_controller_ablation/study.yaml",
+            "profile": raw["study"]["profile"],
+            "rationale": raw["study"]["rationale"],
+            "definition": {},
             "phase": "controllers",
         },
     }
@@ -217,7 +282,10 @@ def test_diagnosis_phase_selection_is_validated() -> None:
         **raw,
         "study": {
             "kind": "force_tracking_torque_adrc_tuning",
-            "config": "configs/studies/force_tracking_torque_adrc_tuning.yaml",
+            "source": "configs/research/torque_adrc_tuning/study.yaml",
+            "profile": raw["study"]["profile"],
+            "rationale": raw["study"]["rationale"],
+            "definition": {},
             "stage": "coarse",
             "phase": "controllers",
         },
@@ -256,7 +324,7 @@ def test_formal_local_slip_preserves_scenario_and_seed_matrix() -> None:
 
     resolved = _resolved("friction_estimation_local_slip")
     legacy = load_local_slip_study_config(
-        REPOSITORY_ROOT / "configs/studies/friction_estimation_local_slip.yaml"
+        REPOSITORY_ROOT / "configs/research/friction_local_slip_validation/study.yaml"
     )
 
     actual = tuple(
@@ -268,7 +336,8 @@ def test_formal_local_slip_preserves_scenario_and_seed_matrix() -> None:
         for row in resolved.conditions
     )
     expected = tuple(
-        (scenario.task, scenario.expect_local_slip, seed) for scenario, seed in legacy.conditions()
+        (_migrated_task(scenario.task), scenario.expect_local_slip, seed)
+        for scenario, seed in legacy.conditions()
     )
     assert actual == expected
     assert len({row["condition_id"] for row in resolved.conditions}) == 15
@@ -299,7 +368,7 @@ def test_formal_stiffness_comparison_preserves_matrix() -> None:
 
     resolved = _resolved("force_tracking_stiffness_estimator_comparison")
     legacy = load_stiffness_estimator_comparison_config(
-        REPOSITORY_ROOT / "configs/studies/force_tracking_stiffness_estimator_comparison.yaml"
+        REPOSITORY_ROOT / "configs/research/stiffness_estimator_validation/study.yaml"
     )
 
     actual = tuple(
@@ -311,7 +380,11 @@ def test_formal_stiffness_comparison_preserves_matrix() -> None:
         )
         for row in resolved.conditions
     )
-    assert actual == legacy.conditions()
+    expected = tuple(
+        (estimator, _migrated_task(task), material, seed)
+        for estimator, task, material, seed in legacy.conditions()
+    )
+    assert actual == expected
     assert len({row["condition_id"] for row in resolved.conditions}) == 81
     assert all(
         (row["baseline_role"] == "secant_ewma")
@@ -345,7 +418,7 @@ def test_formal_dm_admittance_tuning_preserves_matrix() -> None:
 
     resolved = _resolved("dm_admittance_tuning")
     legacy = load_dm_admittance_tuning_config(
-        REPOSITORY_ROOT / "configs/studies/dm_admittance_tuning.yaml"
+        REPOSITORY_ROOT / "configs/research/dm_admittance_tuning/study.yaml"
     )
 
     actual = tuple(
@@ -385,7 +458,7 @@ def test_formal_robotiq_discrete_force_preserves_matrix() -> None:
 
     resolved = _resolved("robotiq_discrete_force")
     legacy = load_robotiq_discrete_force_study_config(
-        REPOSITORY_ROOT / "configs/studies/robotiq_discrete_force.yaml"
+        REPOSITORY_ROOT / "configs/research/robotiq_discrete_force_validation/study.yaml"
     )
 
     actual = tuple(
@@ -437,7 +510,7 @@ def test_local_slip_protocol_preserves_validation_semantics(
         friction_estimation_local_slip as protocol,
     )
 
-    source = REPOSITORY_ROOT / "configs/studies/friction_estimation_local_slip.yaml"
+    source = REPOSITORY_ROOT / "configs/research/friction_local_slip_validation/study.yaml"
     original = load_local_slip_study_config(source)
     scenario = next(s for s in original.scenarios if s.expect_local_slip)
     config = original.model_copy(
@@ -520,7 +593,7 @@ def test_local_slip_protocol_records_condition_exceptions(
         friction_estimation_local_slip as protocol,
     )
 
-    source = REPOSITORY_ROOT / "configs/studies/friction_estimation_local_slip.yaml"
+    source = REPOSITORY_ROOT / "configs/research/friction_local_slip_validation/study.yaml"
     original = load_local_slip_study_config(source)
     config = original.model_copy(
         update={
@@ -575,9 +648,8 @@ def test_plan_serializes_the_same_validated_condition_collection(tmp_path: Path)
 def test_formal_torque_coarse_preserves_all_102_ordered_conditions() -> None:
     """正式 coarse 的 34 候选×3 任务完整顺序与领域模型逐项一致。"""
     resolved = _resolved("force_tracking_torque_adrc_tuning_coarse")
-    config = load_torque_adrc_tuning_config(
-        REPOSITORY_ROOT / "configs/studies/force_tracking_torque_adrc_tuning.yaml"
-    )
+    config = resolved.domain_config
+    assert isinstance(config, ForceTrackingTorqueAdrcTuningConfig)
     actual = tuple(
         (
             TorqueAdrcCandidate(
@@ -598,9 +670,9 @@ def test_formal_torque_coarse_preserves_all_102_ordered_conditions() -> None:
 
 def test_torque_confirm_uses_validated_ranking_and_preserves_order(tmp_path: Path) -> None:
     """confirm 只按 coarse 可行排名选前五，并在缺席时追加基线。"""
-    config = load_torque_adrc_tuning_config(
-        REPOSITORY_ROOT / "configs/studies/force_tracking_torque_adrc_tuning.yaml"
-    )
+    coarse = _resolved("force_tracking_torque_adrc_tuning_coarse")
+    config = coarse.domain_config
+    assert isinstance(config, ForceTrackingTorqueAdrcTuningConfig)
     ranked = _write_coarse_reference(tmp_path, config)
     resolved = _resolved(
         "force_tracking_torque_adrc_tuning_confirm",
@@ -639,7 +711,7 @@ def test_torque_confirm_rejects_incompatible_coarse_manifest(
 ) -> None:
     """confirm 在形成任何计划前拒绝错误类型、阶段或配置哈希。"""
     config = load_torque_adrc_tuning_config(
-        REPOSITORY_ROOT / "configs/studies/force_tracking_torque_adrc_tuning.yaml"
+        REPOSITORY_ROOT / "configs/research/torque_adrc_tuning/study.yaml"
     )
     _write_coarse_reference(tmp_path, config)
     manifest_path = tmp_path / "study_manifest.json"
@@ -653,7 +725,7 @@ def test_torque_confirm_rejects_incompatible_coarse_manifest(
 def test_torque_confirm_rejects_missing_or_modified_ranking(tmp_path: Path) -> None:
     """confirm 校验排名产物的登记、存在性和内容摘要。"""
     config = load_torque_adrc_tuning_config(
-        REPOSITORY_ROOT / "configs/studies/force_tracking_torque_adrc_tuning.yaml"
+        REPOSITORY_ROOT / "configs/research/torque_adrc_tuning/study.yaml"
     )
     _write_coarse_reference(tmp_path, config)
     (tmp_path / "candidate_ranking.csv").write_text("modified\n", encoding="utf-8")
@@ -670,7 +742,7 @@ def test_confirm_reports_configuration_and_preflight_failures_separately(
     assert missing.value.stage == "configuration"
 
     config = load_torque_adrc_tuning_config(
-        REPOSITORY_ROOT / "configs/studies/force_tracking_torque_adrc_tuning.yaml"
+        REPOSITORY_ROOT / "configs/research/torque_adrc_tuning/study.yaml"
     )
     _write_coarse_reference(tmp_path, config)
     manifest_path = tmp_path / "study_manifest.json"
@@ -688,7 +760,7 @@ def test_confirm_reports_configuration_and_preflight_failures_separately(
 def test_study_hash_ignores_output_root_but_changes_with_science() -> None:
     """输出位置不进入科学哈希，而验收约束变化必须改变哈希。"""
     config = load_torque_adrc_tuning_config(
-        REPOSITORY_ROOT / "configs/studies/force_tracking_torque_adrc_tuning.yaml"
+        REPOSITORY_ROOT / "configs/research/torque_adrc_tuning/study.yaml"
     )
     original = torque_protocol.build_plan(config, stage="coarse")
     moved = torque_protocol.build_plan(
@@ -715,7 +787,9 @@ def test_study_hash_is_independent_of_current_working_directory(
     """同一已解析科学配置从不同 cwd 生成相同哈希。"""
     from parallel_gripper_tactile.studies.protocols import force_tracking_ablation as protocol
 
-    config = load_study_config(REPOSITORY_ROOT / "configs/studies/force_tracking_ablation.yaml")
+    config = load_study_config(
+        REPOSITORY_ROOT / "configs/research/force_controller_ablation/study.yaml"
+    )
     expected = protocol.build_plan(config).scientific_configuration_sha256
     monkeypatch.chdir(tmp_path)
     actual = protocol.build_plan(config).scientific_configuration_sha256
@@ -746,6 +820,7 @@ def test_execution_passes_the_exact_resolved_plan_to_protocol(
         provenance={"choices": {}, "overrides": []},
     )
     assert captured["study_plan"] is resolved.plan
+    assert captured["resolved_profile"] is resolved.profile
     assert {Path(path).name for path in captured["additional_artifacts"]} == {
         "effective_study_configuration.json",
         "composition_provenance.json",
@@ -759,7 +834,7 @@ def test_protocol_records_condition_exceptions_and_finishes_manifest(
     from parallel_gripper_tactile.studies.protocols import force_tracking_ablation as protocol
 
     config = load_study_config(
-        REPOSITORY_ROOT / "configs/studies/smoke/force_tracking_ablation.yaml"
+        REPOSITORY_ROOT / "tests/fixtures/studies/force_tracking_ablation.yaml"
     )
 
     def fail(**kwargs: object):
@@ -768,7 +843,7 @@ def test_protocol_records_condition_exceptions_and_finishes_manifest(
     monkeypatch.setattr(protocol, "execute_force_tracking", fail)
     result = protocol.run_study(
         config,
-        config_source=REPOSITORY_ROOT / "configs/studies/smoke/force_tracking_ablation.yaml",
+        config_source=REPOSITORY_ROOT / "tests/fixtures/studies/force_tracking_ablation.yaml",
         study_directory=tmp_path,
     )
 
@@ -801,7 +876,7 @@ def test_ablation_protocol_preserves_partial_and_scientific_failure_semantics(
     """协议集成层对部分异常和全科学失败保持公共生命周期语义。"""
     from parallel_gripper_tactile.studies.protocols import force_tracking_ablation as protocol
 
-    source = REPOSITORY_ROOT / "configs/studies/smoke/force_tracking_ablation.yaml"
+    source = REPOSITORY_ROOT / "tests/fixtures/studies/force_tracking_ablation.yaml"
     config = load_study_config(source).model_copy(update={"controllers": ("pid-only", "full")})
 
     def fake_execute(**kwargs: object):
@@ -847,7 +922,7 @@ def test_comparison_protocol_continues_after_a_condition_exception(
         force_tracking_controller_comparison as protocol,
     )
 
-    source = REPOSITORY_ROOT / "configs/studies/force_tracking_controller_comparison.yaml"
+    source = REPOSITORY_ROOT / "configs/research/force_controller_selection/study.yaml"
     original = load_comparison_config(source)
     config = original.model_copy(
         update={

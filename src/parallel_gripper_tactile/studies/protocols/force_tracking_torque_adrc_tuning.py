@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
 from collections.abc import Mapping, Sequence
 import csv
 from dataclasses import asdict, dataclass
@@ -21,7 +20,7 @@ from parallel_gripper_tactile.visualization import (
     save_publication_figure,
     science_pyplot,
 )
-from parallel_gripper_tactile.config.profiles import TorqueAdrcControl, load_profile
+from parallel_gripper_tactile.config.profiles import GripperProfile, TorqueAdrcControl, load_profile
 from parallel_gripper_tactile.runners import execute_force_tracking
 from parallel_gripper_tactile.studies.aggregation import (
     aggregate_records,
@@ -36,7 +35,6 @@ from parallel_gripper_tactile.studies.force_tracking_torque_adrc_tuning import (
     ForceTrackingTorqueAdrcTuningConfig,
     TorqueAdrcCandidate,
     TorqueAdrcTuningStageName,
-    load_torque_adrc_tuning_config,
 )
 from parallel_gripper_tactile.studies.lifecycle import (
     ConditionExecution,
@@ -626,6 +624,7 @@ def run_study(
     *,
     stage: TorqueAdrcTuningStageName,
     config_source: Path,
+    resolved_profile: GripperProfile | None = None,
     coarse_study_dir: Path | None = None,
     study_directory: Path | None = None,
     study_plan: StudyPlan | None = None,
@@ -633,7 +632,8 @@ def run_study(
     lifecycle_manifest_fields: Mapping[str, object] | None = None,
 ) -> Path:
     """通过公共生命周期执行调参阶段并生成候选排名。"""
-    load_profile(config.profile)
+    if resolved_profile is None:
+        load_profile(config.profile)
     tasks = {path: ForceTrackingTask.load(path) for path in config.tasks}
     expected_plan = build_plan(
         config,
@@ -672,6 +672,7 @@ def run_study(
         seed = int(parameters["sensor_noise_seed"])
         run, result = execute_force_tracking(
             profile=config.profile,
+            resolved_profile=resolved_profile,
             task_path=task_path,
             tracking_task=task,
             output_root=study_dir / "runs",
@@ -804,34 +805,3 @@ def run_study(
         initial_artifacts=(study_dir / "study.yaml", resolved_config, *additional_artifacts),
         legacy_manifest_fields=manifest_fields,
     )
-
-
-def main() -> None:
-    """解析参数并执行粗扫或确认阶段。"""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", required=True, type=Path)
-    parser.add_argument("--stage", required=True, choices=("coarse", "confirm"))
-    parser.add_argument("--coarse-study-dir", type=Path)
-    parser.add_argument("--dry-run", action="store_true")
-    arguments = parser.parse_args()
-    config_path = arguments.config.resolve()
-    config = load_torque_adrc_tuning_config(config_path)
-    if arguments.stage == "confirm" and arguments.coarse_study_dir is None:
-        parser.error("--coarse-study-dir is required for confirm stage")
-    coarse_study_dir = (
-        None if arguments.coarse_study_dir is None else arguments.coarse_study_dir.resolve()
-    )
-    if arguments.dry_run:
-        print(describe_conditions(config, stage=arguments.stage, coarse_study_dir=coarse_study_dir))
-        return
-    result = run_study(
-        config,
-        stage=arguments.stage,
-        config_source=config_path,
-        coarse_study_dir=coarse_study_dir,
-    )
-    print(f"Study: {result}")
-
-
-if __name__ == "__main__":
-    main()

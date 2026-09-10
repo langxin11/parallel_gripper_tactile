@@ -1,4 +1,0 @@
-# @package study
-# Robotiq 离散力研究的 Hydra 选择器：条件矩阵权威文件仍由 configs/studies/ 提供。
-kind: robotiq_discrete_force
-config: configs/studies/robotiq_discrete_force.yaml

@@ -1,5 +1,0 @@
-# @package controller
-# PID + 力矩前馈变体，强调高频扰动与摩擦补偿对比。
-family: dm
-name: pid-torque-ff
-torque_adrc: null

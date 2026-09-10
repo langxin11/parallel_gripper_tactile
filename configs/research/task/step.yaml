@@ -1,4 +1,0 @@
-# @package task
-# 阶跃任务入口，主要用于上升时间、超调与稳态误差分析。
-family: force_tracking
-path: configs/force_tracking/step.yaml

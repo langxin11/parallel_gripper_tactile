@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib.util
 from pathlib import Path
 
 import pytest
@@ -18,16 +17,6 @@ from parallel_gripper_tactile.studies.protocols import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-
-
-def _protocol_module() -> object:
-    """加载仓库内的 ADRC 调参入口脚本。"""
-    path = ROOT / "scripts/experiments/force_tracking_torque_adrc_tuning.py"
-    spec = importlib.util.spec_from_file_location("force_tracking_torque_adrc_tuning", path)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
 
 
 def test_tuning_config_filters_observer_faster_than_measurement_candidates(tmp_path: Path) -> None:
@@ -73,18 +62,9 @@ def test_tuning_config_rejects_unknown_fields(tmp_path: Path) -> None:
         load_torque_adrc_tuning_config(config_path)
 
 
-def test_legacy_script_is_a_thin_alias_of_package_protocol() -> None:
-    """旧入口直接暴露包内实现，不保留第二份矩阵或执行逻辑。"""
-    legacy = _protocol_module()
-
-    assert legacy.run_study is package_protocol.run_study  # type: ignore[attr-defined]
-    assert legacy.rank_candidates is package_protocol.rank_candidates  # type: ignore[attr-defined]
-    assert legacy._aggregate is package_protocol._aggregate  # type: ignore[attr-defined]
-
-
 def test_rank_candidates_prefers_lower_step_overshoot_with_continuous_constraints() -> None:
     """可行候选优先按阶跃超调排序，连续任务劣化超过约束则淘汰。"""
-    protocol = _protocol_module()
+    protocol = package_protocol
     baseline = TorqueAdrcCandidate(40.0, 60.0, 3.0)
     preferred = TorqueAdrcCandidate(40.0, 40.0, 3.0)
     rejected = TorqueAdrcCandidate(60.0, 60.0, 3.0)
@@ -136,7 +116,7 @@ def test_tuning_figures_render_with_missing_step_metrics(
     tmp_path: Path, fast_plot_render: None
 ) -> None:
     """coarse 或 confirm 缺少部分瞬态指标时，调参图仍保留可用性能点。"""
-    protocol = _protocol_module()
+    protocol = package_protocol
     baseline = TorqueAdrcCandidate(40.0, 60.0, 3.0)
     candidate = TorqueAdrcCandidate(50.0, 50.0, 3.0)
     aggregates = []

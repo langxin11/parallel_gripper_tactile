@@ -7,8 +7,19 @@ import json
 from pathlib import Path
 from typing import Mapping
 
-from ..runners import execute_force_tracking
-from .configuration import ResolvedResearchRun
+import yaml
+
+from ..experiments.force_scheduling import ForceSchedulingTask
+from ..experiments.force_tracking import ForceTrackingTask
+from ..experiments.friction_estimation import FrictionEstimationTask
+from ..experiments.robotiq_discrete_force import RobotiqDiscreteForceTask
+from ..runners import (
+    execute_force_scheduling,
+    execute_force_tracking,
+    execute_friction_estimation,
+    execute_robotiq_discrete_force,
+)
+from .configuration import DMControllerSelection, ResolvedResearchRun
 
 
 @dataclass(frozen=True, slots=True)
@@ -65,26 +76,55 @@ def execute_research_run(
         )
         return ResearchRunOutcome("plan", output_directory, None, None)
 
-    run, result = execute_force_tracking(
-        profile=resolved.profile_source,
-        resolved_profile=resolved.profile,
-        task_path=resolved.task_source,
-        tracking_task=resolved.task,
-        output_root=output_directory / "artifacts",
-        object_material=selection.material.name,
-        multiccd_enabled=selection.execution.multiccd_enabled,
-        controller_variant=selection.controller.name,
-        stiffness_estimator_method=(
-            None if selection.estimator.name == "none" else selection.estimator.name
-        ),
-        sensor_noise_seed=selection.seed,
-        torque_adrc_override=selection.controller.torque_adrc,
-        trace_sample_period_s=selection.execution.trace_sample_period_s,
-        trace_event_window_s=selection.execution.trace_event_window_s,
-        viewer=selection.execution.viewer,
-        render_fps=selection.execution.render_fps,
-        realtime_factor=selection.execution.realtime_factor,
+    profile_snapshot = yaml.safe_dump(
+        resolved.profile.model_dump(mode="json"),
+        allow_unicode=True,
+        sort_keys=True,
     )
+    common = {
+        "profile": profile_snapshot,
+        "resolved_profile": resolved.profile,
+        "task_path": resolved.task_source,
+        "output_root": output_directory / "artifacts",
+    }
+    if isinstance(resolved.task, ForceTrackingTask):
+        if not isinstance(selection.controller, DMControllerSelection):
+            raise TypeError("force tracking requires a DM controller")
+        run, result = execute_force_tracking(
+            **common,
+            tracking_task=resolved.task,
+            object_material=selection.material.name,
+            multiccd_enabled=selection.execution.multiccd_enabled,
+            controller_variant=selection.controller.name,
+            stiffness_estimator_method=(
+                None if selection.estimator.name == "none" else selection.estimator.name
+            ),
+            sensor_noise_seed=selection.seed,
+            torque_adrc_override=selection.controller.torque_adrc,
+            trace_sample_period_s=selection.execution.trace_sample_period_s,
+            trace_event_window_s=selection.execution.trace_event_window_s,
+            viewer=selection.execution.viewer,
+            render_fps=selection.execution.render_fps,
+            realtime_factor=selection.execution.realtime_factor,
+        )
+    elif isinstance(resolved.task, ForceSchedulingTask):
+        run, result = execute_force_scheduling(**common, scheduling_task=resolved.task)
+    elif isinstance(resolved.task, FrictionEstimationTask):
+        run, result = execute_friction_estimation(
+            **common,
+            estimation_task=resolved.task,
+            sensor_noise_seed=selection.seed,
+        )
+    elif isinstance(resolved.task, RobotiqDiscreteForceTask):
+        run, result = execute_robotiq_discrete_force(
+            **common,
+            discrete_task=resolved.task,
+            controller_variant=selection.controller.name,
+            object_material=selection.material.name,
+            noise_seed=selection.seed,
+        )
+    else:
+        raise TypeError(f"unsupported run task: {type(resolved.task).__name__}")
     _write_json(
         output_directory / "execution.json",
         {

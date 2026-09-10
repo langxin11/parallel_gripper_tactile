@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import argparse
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 from datetime import UTC, datetime
@@ -16,7 +15,7 @@ from uuid import uuid4
 import numpy as np
 import yaml
 
-from parallel_gripper_tactile.config.profiles import load_profile
+from parallel_gripper_tactile.config.profiles import GripperProfile, load_profile
 from parallel_gripper_tactile.experiments.force_tracking import (
     ForceTrackingTask,
     configure_force_controller,
@@ -39,7 +38,6 @@ from parallel_gripper_tactile.studies.aggregation import (
 )
 from parallel_gripper_tactile.studies.force_tracking_ablation import (
     ForceTrackingAblationConfig,
-    load_study_config,
 )
 from parallel_gripper_tactile.studies.lifecycle import (
     ConditionExecution,
@@ -380,6 +378,7 @@ def build_plan(config: ForceTrackingAblationConfig) -> StudyPlan:
 def run_study(
     config: ForceTrackingAblationConfig,
     *,
+    resolved_profile: GripperProfile | None = None,
     config_source: Path | None = None,
     study_directory: Path | None = None,
     study_plan: StudyPlan | None = None,
@@ -413,6 +412,7 @@ def run_study(
         seed = int(parameters["sensor_noise_seed"])
         run, result = execute_force_tracking(
             profile=config.profile,
+            resolved_profile=resolved_profile,
             task_path=config.task,
             tracking_task=task,
             output_root=study_dir / "runs",
@@ -494,17 +494,3 @@ def run_study(
         initial_artifacts=(study_dir / "study.yaml", resolved_config, *additional_artifacts),
         legacy_manifest_fields=manifest_fields,
     )
-
-
-def main() -> None:
-    """解析配置文件并运行该科研 protocol。"""
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--config", type=Path, required=True, help="Study YAML path")
-    arguments = parser.parse_args()
-    config_path = arguments.config.resolve()
-    result = run_study(load_study_config(config_path), config_source=config_path)
-    print(f"Study: {result}")
-
-
-if __name__ == "__main__":
-    main()

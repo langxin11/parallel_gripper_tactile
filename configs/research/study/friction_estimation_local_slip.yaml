@@ -1,4 +1,0 @@
-# @package study
-# 局部起滑研究的 Hydra 选择器：条件矩阵权威文件仍由 configs/studies/ 提供。
-kind: friction_estimation_local_slip
-config: configs/studies/friction_estimation_local_slip.yaml

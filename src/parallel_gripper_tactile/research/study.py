@@ -9,7 +9,7 @@ from typing import Literal, Mapping, get_args
 
 from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
 
-from ..config.profiles import TorqueAdrcControl, load_profile
+from ..config.profiles import GripperProfile, TorqueAdrcControl, load_profile
 from ..experiments.force_tracking import (
     ForceTrackingTask,
     configure_force_controller,
@@ -20,35 +20,28 @@ from ..experiments.robotiq_discrete_force import RobotiqDiscreteForceTask
 from ..scenes.robotiq import RobotiqObjectMaterial
 from ..studies.dm_admittance_tuning import (
     DMAdmittanceTuningConfig,
-    load_dm_admittance_tuning_config,
 )
 from ..studies.friction_estimation_local_slip import (
     FrictionEstimationLocalSlipStudyConfig,
-    load_local_slip_study_config,
 )
-from ..studies.force_tracking_ablation import ForceTrackingAblationConfig, load_study_config
+from ..studies.force_tracking_ablation import ForceTrackingAblationConfig
 from ..studies.force_tracking_comparison import (
     ForceTrackingComparisonConfig,
-    load_comparison_config,
 )
 from ..studies.force_tracking_diagnosis import (
     DiagnosisConfig,
     Phase as DiagnosisPhase,
-    load_diagnosis_config,
 )
 from ..studies.force_tracking_stiffness_estimator_comparison import (
     ForceTrackingStiffnessEstimatorComparisonConfig,
-    load_stiffness_estimator_comparison_config,
 )
 from ..studies.force_tracking_torque_adrc_tuning import (
     ForceTrackingTorqueAdrcTuningConfig,
     TorqueAdrcTuningStageName,
-    load_torque_adrc_tuning_config,
 )
 from ..studies.lifecycle import StudyPlan, assess_recovery, write_planned_study_manifest
 from ..studies.robotiq_discrete_force import (
     RobotiqDiscreteForceStudyConfig,
-    load_robotiq_discrete_force_study_config,
 )
 from ..studies.protocols import force_tracking_ablation as ablation_protocol
 from ..studies.protocols import force_tracking_diagnosis as diagnosis_protocol
@@ -67,6 +60,7 @@ from ..studies.protocols import (
     robotiq_discrete_force as robotiq_discrete_force_protocol,
 )
 from .configuration import REPOSITORY_ROOT, ResearchConfigurationError
+from .composition import compose_research_run
 
 
 StudyKind = Literal[
@@ -97,11 +91,33 @@ class _StudyModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
+class StudyRationale(_StudyModel):
+    """研究问题、决策边界与已有排除证据。"""
+
+    question: str
+    decision: str
+    inclusion_criteria: tuple[str, ...]
+    task_rationale: str
+    primary_metrics: tuple[str, ...]
+    stop_conditions: tuple[str, ...]
+    exclusions: dict[str, str]
+
+
+class StudyProfileSelection(_StudyModel):
+    """正式研究复用的命名 experiment 与 profile 组合覆盖。"""
+
+    experiment: str
+    overrides: tuple[str, ...] = ()
+
+
 class StudySelection(_StudyModel):
     """正式研究方案及可选阶段谱系。"""
 
     kind: StudyKind
-    config: Path
+    source: Path
+    profile: StudyProfileSelection
+    rationale: StudyRationale
+    definition: dict[str, object]
     stage: TorqueAdrcTuningStageName | None = None
     coarse_study_dir: Path | None = None
     phase: DiagnosisPhase | None = None
@@ -163,6 +179,7 @@ class ResolvedResearchStudy:
 
     selection: ResearchStudyConfig
     config_source: Path
+    profile: GripperProfile
     domain_config: StudyDomainConfig
     plan: StudyPlan
 
@@ -194,6 +211,7 @@ class ResolvedResearchStudy:
             "schema_version": 1,
             "selection": self.selection.model_dump(mode="json"),
             "source": str(self.config_source),
+            "profile": self.profile.model_dump(mode="json"),
             "study": self.domain_config.model_dump(mode="json"),
             "study_plan": self.plan.model_dump(mode="json"),
         }
@@ -204,9 +222,20 @@ def _repository_path(path: Path, *, repository_root: Path) -> Path:
     return path.resolve() if path.is_absolute() else (repository_root / path).resolve()
 
 
-def _validate_comparison(config: ForceTrackingComparisonConfig) -> None:
+def _validate_profile_source_equivalence(
+    profile: GripperProfile,
+    source: Path,
+) -> None:
+    """迁移期确保组合对象与保留的基础 profile 来源逐字段等价。"""
+    legacy = load_profile(source)
+    if profile != legacy:
+        raise ValueError(f"composed study profile differs from its legacy source: {source}")
+
+
+def _validate_comparison(
+    config: ForceTrackingComparisonConfig, base_profile: GripperProfile
+) -> None:
     """逐组件和科学维度预检控制器对比方案。"""
-    base_profile = load_profile(config.profile)
     tasks = {path: ForceTrackingTask.load(path) for path in config.tasks}
     seed = config.seeds.values()[0]
     for controller in config.controllers:
@@ -221,9 +250,8 @@ def _validate_comparison(config: ForceTrackingComparisonConfig) -> None:
                 validate_force_tracking_configuration(profile, task=task, object_material=material)
 
 
-def _validate_ablation(config: ForceTrackingAblationConfig) -> None:
+def _validate_ablation(config: ForceTrackingAblationConfig, base_profile: GripperProfile) -> None:
     """逐组件和科学维度预检 PID 消融方案。"""
-    base_profile = load_profile(config.profile)
     task = ForceTrackingTask.load(config.task)
     seed = config.seeds.values()[0]
     for controller in config.controllers:
@@ -238,9 +266,9 @@ def _validate_ablation(config: ForceTrackingAblationConfig) -> None:
 
 def _validate_stiffness_estimator_comparison(
     config: ForceTrackingStiffnessEstimatorComparisonConfig,
+    base_profile: GripperProfile,
 ) -> None:
     """逐估计器、任务和材料预检刚度估计器对比方案。"""
-    base_profile = load_profile(config.profile)
     tasks = {path: ForceTrackingTask.load(path) for path in config.tasks}
     seed = config.seeds.values()[0]
     for estimator in config.estimators:
@@ -255,9 +283,10 @@ def _validate_stiffness_estimator_comparison(
                 validate_force_tracking_configuration(profile, task=task, object_material=material)
 
 
-def _validate_diagnosis(config: DiagnosisConfig) -> None:
+def _validate_diagnosis(config: DiagnosisConfig, profile: GripperProfile) -> None:
     """预检诊断方案的 profile、任务与碰撞几何模型文件。"""
-    load_profile(config.profile)
+    if profile.normal_force is None:
+        raise ValueError("力跟踪诊断需要 control.force。")
     ForceTrackingTask.load(config.task)
     for condition in config.collision_geometry_models:
         if not condition.model.is_file():
@@ -267,9 +296,9 @@ def _validate_diagnosis(config: DiagnosisConfig) -> None:
 def _validate_torque_tuning(
     config: ForceTrackingTorqueAdrcTuningConfig,
     plan: StudyPlan,
+    base_profile: GripperProfile,
 ) -> None:
     """按实际计划中的候选、任务和材料预检 Torque ADRC 场景。"""
-    base_profile = load_profile(config.profile)
     tasks = {path: ForceTrackingTask.load(path) for path in config.tasks}
     validated: set[tuple[str, Path, str]] = set()
     for condition in plan.conditions:
@@ -296,16 +325,20 @@ def _validate_torque_tuning(
         validated.add(key)
 
 
-def _validate_local_slip(config: FrictionEstimationLocalSlipStudyConfig) -> None:
+def _validate_local_slip(
+    config: FrictionEstimationLocalSlipStudyConfig, profile: GripperProfile
+) -> None:
     """逐场景预检局部起滑方案的 profile 与任务文件。"""
-    load_profile(config.profile)
+    if profile.normal_force is None:
+        raise ValueError("局部起滑研究需要 control.force。")
     for scenario in config.scenarios:
         FrictionEstimationTask.load(scenario.task)
 
 
-def _validate_dm_admittance_tuning(config: DMAdmittanceTuningConfig) -> None:
+def _validate_dm_admittance_tuning(
+    config: DMAdmittanceTuningConfig, profile: GripperProfile
+) -> None:
     """预检导纳调参 profile 的导纳控制段和 Ramp 任务线性插值。"""
-    profile = load_profile(config.profile)
     if profile.normal_force is None or profile.normal_force.admittance is None:
         raise ValueError("导纳调参 profile 必须包含 control.force.admittance。")
     task = ForceTrackingTask.load(config.task)
@@ -313,9 +346,12 @@ def _validate_dm_admittance_tuning(config: DMAdmittanceTuningConfig) -> None:
         raise ValueError("导纳调参仅接受线性 Ramp 力跟踪任务。")
 
 
-def _validate_robotiq_discrete_force(config: RobotiqDiscreteForceStudyConfig) -> None:
+def _validate_robotiq_discrete_force(
+    config: RobotiqDiscreteForceStudyConfig, profile: GripperProfile
+) -> None:
     """预检 Robotiq 离散力方案的 profile、任务文件与材料枚举。"""
-    load_profile(config.profile)
+    if profile.control_mode != "position":
+        raise ValueError("Robotiq 离散力研究需要 Robotiq profile。")
     RobotiqDiscreteForceTask.load(config.task)
     valid_materials = get_args(RobotiqObjectMaterial)
     for material in config.materials:
@@ -330,7 +366,7 @@ def _resolved_selection(
 ) -> ResearchStudyConfig:
     """把入口、输出和可选恢复路径统一解析为绝对路径。"""
     study = selection.study.model_dump(mode="python")
-    study["config"] = _repository_path(selection.study.config, repository_root=repository_root)
+    study["source"] = _repository_path(selection.study.source, repository_root=repository_root)
     if selection.study.coarse_study_dir is not None:
         study["coarse_study_dir"] = _repository_path(
             selection.study.coarse_study_dir,
@@ -355,6 +391,101 @@ def _resolved_selection(
     )
 
 
+def _resolved_domain_config(
+    selection: StudySelection,
+    *,
+    repository_root: Path,
+) -> StudyDomainConfig:
+    """从同一 research 组中的领域定义构造并解析全部路径。"""
+
+    def path(value: Path) -> Path:
+        return _repository_path(value, repository_root=repository_root)
+
+    kind = selection.kind
+    definition = selection.definition
+    if kind == "force_tracking_controller_comparison":
+        config = ForceTrackingComparisonConfig.model_validate(definition)
+        return config.model_copy(
+            update={
+                "profile": path(config.profile),
+                "tasks": tuple(path(task) for task in config.tasks),
+                "output_root": path(config.output_root),
+            }
+        )
+    if kind == "force_tracking_ablation":
+        config = ForceTrackingAblationConfig.model_validate(definition)
+        return config.model_copy(
+            update={
+                "profile": path(config.profile),
+                "task": path(config.task),
+                "output_root": path(config.output_root),
+            }
+        )
+    if kind == "force_tracking_torque_adrc_tuning":
+        config = ForceTrackingTorqueAdrcTuningConfig.model_validate(definition)
+        return config.model_copy(
+            update={
+                "profile": path(config.profile),
+                "tasks": tuple(path(task) for task in config.tasks),
+                "output_root": path(config.output_root),
+            }
+        )
+    if kind == "friction_estimation_local_slip":
+        config = FrictionEstimationLocalSlipStudyConfig.model_validate(definition)
+        scenarios = tuple(
+            scenario.model_copy(update={"task": path(scenario.task)})
+            for scenario in config.scenarios
+        )
+        return config.model_copy(
+            update={
+                "profile": path(config.profile),
+                "scenarios": scenarios,
+                "output_root": path(config.output_root),
+            }
+        )
+    if kind == "force_tracking_stiffness_estimator_comparison":
+        config = ForceTrackingStiffnessEstimatorComparisonConfig.model_validate(definition)
+        return config.model_copy(
+            update={
+                "profile": path(config.profile),
+                "tasks": tuple(path(task) for task in config.tasks),
+                "output_root": path(config.output_root),
+            }
+        )
+    if kind == "dm_admittance_tuning":
+        config = DMAdmittanceTuningConfig.model_validate(definition)
+        return config.model_copy(
+            update={
+                "task": path(config.task),
+                "output_root": path(config.output_root),
+            }
+        )
+    if kind == "robotiq_discrete_force":
+        config = RobotiqDiscreteForceStudyConfig.model_validate(definition)
+        return config.model_copy(
+            update={
+                "profile": path(config.profile),
+                "task": path(config.task),
+                "output_root": path(config.output_root),
+            }
+        )
+    if kind == "force_tracking_diagnosis":
+        config = DiagnosisConfig.model_validate(definition)
+        models = tuple(
+            condition.model_copy(update={"model": path(condition.model)})
+            for condition in config.collision_geometry_models
+        )
+        return config.model_copy(
+            update={
+                "profile": path(config.profile),
+                "task": path(config.task),
+                "output_root": path(config.output_root),
+                "collision_geometry_models": models,
+            }
+        )
+    raise ValueError(f"unsupported study kind: {kind}")
+
+
 def resolve_research_study(
     raw: dict[str, object],
     *,
@@ -367,50 +498,44 @@ def resolve_research_study(
             ResearchStudyConfig.model_validate(raw),
             repository_root=root,
         )
-        source = selection.study.config
-        if selection.study.kind == "force_tracking_controller_comparison":
-            domain_config: StudyDomainConfig = load_comparison_config(source)
-        elif selection.study.kind == "force_tracking_ablation":
-            domain_config = load_study_config(source)
-        elif selection.study.kind == "force_tracking_torque_adrc_tuning":
-            domain_config = load_torque_adrc_tuning_config(source)
-        elif selection.study.kind == "friction_estimation_local_slip":
-            domain_config = load_local_slip_study_config(source)
-        elif selection.study.kind == "force_tracking_stiffness_estimator_comparison":
-            domain_config = load_stiffness_estimator_comparison_config(source)
-        elif selection.study.kind == "dm_admittance_tuning":
-            domain_config = load_dm_admittance_tuning_config(source)
-        elif selection.study.kind == "robotiq_discrete_force":
-            domain_config = load_robotiq_discrete_force_study_config(source)
-        elif selection.study.kind == "force_tracking_diagnosis":
-            domain_config = load_diagnosis_config(source)
-        else:  # pragma: no cover - Literal 与 Pydantic 已阻止未知研究类型。
-            raise ValueError(f"unsupported study kind: {selection.study.kind}")
+        source = selection.study.source
+        domain_config = _resolved_domain_config(selection.study, repository_root=root)
+        composed = compose_research_run(
+            experiment=selection.study.profile.experiment,
+            overrides=selection.study.profile.overrides,
+        )
+        profile = composed.profile
+        legacy_profile_source = getattr(domain_config, "profile", None)
+        if isinstance(legacy_profile_source, Path):
+            _validate_profile_source_equivalence(profile, legacy_profile_source)
     except (OSError, ValidationError, ValueError) as error:
         raise ResearchStudySetupError(str(error), stage="configuration") from error
 
     try:
         if isinstance(domain_config, ForceTrackingComparisonConfig):
-            _validate_comparison(domain_config)
+            _validate_comparison(domain_config, profile)
             plan = comparison_protocol.build_plan(domain_config)
         elif isinstance(domain_config, ForceTrackingAblationConfig):
-            _validate_ablation(domain_config)
+            _validate_ablation(domain_config, profile)
             plan = ablation_protocol.build_plan(domain_config)
         elif isinstance(domain_config, FrictionEstimationLocalSlipStudyConfig):
-            _validate_local_slip(domain_config)
+            _validate_local_slip(domain_config, profile)
             plan = friction_local_slip_protocol.build_plan(domain_config)
         elif isinstance(domain_config, ForceTrackingStiffnessEstimatorComparisonConfig):
-            _validate_stiffness_estimator_comparison(domain_config)
+            _validate_stiffness_estimator_comparison(domain_config, profile)
             plan = stiffness_comparison_protocol.build_plan(domain_config)
         elif isinstance(domain_config, DMAdmittanceTuningConfig):
-            _validate_dm_admittance_tuning(domain_config)
-            plan = dm_admittance_tuning_protocol.build_plan(domain_config)
+            _validate_dm_admittance_tuning(domain_config, profile)
+            plan = dm_admittance_tuning_protocol.build_plan(
+                domain_config,
+                resolved_profile=profile,
+            )
         elif isinstance(domain_config, RobotiqDiscreteForceStudyConfig):
-            _validate_robotiq_discrete_force(domain_config)
+            _validate_robotiq_discrete_force(domain_config, profile)
             plan = robotiq_discrete_force_protocol.build_plan(domain_config)
         elif isinstance(domain_config, DiagnosisConfig):
             assert selection.study.phase is not None
-            _validate_diagnosis(domain_config)
+            _validate_diagnosis(domain_config, profile)
             plan = diagnosis_protocol.build_plan(domain_config, phase=selection.study.phase)
         else:
             assert selection.study.stage is not None
@@ -419,7 +544,7 @@ def resolve_research_study(
                 stage=selection.study.stage,
                 coarse_study_dir=selection.study.coarse_study_dir,
             )
-            _validate_torque_tuning(domain_config, plan)
+            _validate_torque_tuning(domain_config, plan, profile)
         plan = plan.model_copy(
             update={
                 "preflight": {
@@ -430,7 +555,7 @@ def resolve_research_study(
         )
     except (OSError, ValidationError, ValueError) as error:
         raise ResearchStudySetupError(str(error), stage="preflight") from error
-    return ResolvedResearchStudy(selection, source, domain_config, plan)
+    return ResolvedResearchStudy(selection, source, profile, domain_config, plan)
 
 
 def _write_json(path: Path, value: object) -> Path:
@@ -516,17 +641,41 @@ def execute_research_study(
         "lifecycle_manifest_fields": lifecycle_fields,
     }
     if isinstance(resolved.domain_config, ForceTrackingComparisonConfig):
-        return comparison_protocol.run_study(resolved.domain_config, **common_arguments)
+        return comparison_protocol.run_study(
+            resolved.domain_config,
+            resolved_profile=resolved.profile,
+            **common_arguments,
+        )
     if isinstance(resolved.domain_config, ForceTrackingAblationConfig):
-        return ablation_protocol.run_study(resolved.domain_config, **common_arguments)
+        return ablation_protocol.run_study(
+            resolved.domain_config,
+            resolved_profile=resolved.profile,
+            **common_arguments,
+        )
     if isinstance(resolved.domain_config, FrictionEstimationLocalSlipStudyConfig):
-        return friction_local_slip_protocol.run_study(resolved.domain_config, **common_arguments)
+        return friction_local_slip_protocol.run_study(
+            resolved.domain_config,
+            resolved_profile=resolved.profile,
+            **common_arguments,
+        )
     if isinstance(resolved.domain_config, ForceTrackingStiffnessEstimatorComparisonConfig):
-        return stiffness_comparison_protocol.run_study(resolved.domain_config, **common_arguments)
+        return stiffness_comparison_protocol.run_study(
+            resolved.domain_config,
+            resolved_profile=resolved.profile,
+            **common_arguments,
+        )
     if isinstance(resolved.domain_config, DMAdmittanceTuningConfig):
-        return dm_admittance_tuning_protocol.run_study(resolved.domain_config, **common_arguments)
+        return dm_admittance_tuning_protocol.run_study(
+            resolved.domain_config,
+            resolved_profile=resolved.profile,
+            **common_arguments,
+        )
     if isinstance(resolved.domain_config, RobotiqDiscreteForceStudyConfig):
-        return robotiq_discrete_force_protocol.run_study(resolved.domain_config, **common_arguments)
+        return robotiq_discrete_force_protocol.run_study(
+            resolved.domain_config,
+            resolved_profile=resolved.profile,
+            **common_arguments,
+        )
     if isinstance(resolved.domain_config, DiagnosisConfig):
         assert resolved.selection.study.phase is not None
         return diagnosis_protocol.run_study(
@@ -539,6 +688,7 @@ def execute_research_study(
         resolved.domain_config,
         stage=resolved.selection.study.stage,
         coarse_study_dir=resolved.selection.study.coarse_study_dir,
+        resolved_profile=resolved.profile,
         **common_arguments,
     )
 
@@ -548,6 +698,7 @@ __all__ = [
     "ResearchStudySetupError",
     "ResolvedResearchStudy",
     "StudyExecution",
+    "StudyProfileSelection",
     "StudySelection",
     "execute_research_study",
     "resolve_research_study",

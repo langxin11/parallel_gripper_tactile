@@ -19,7 +19,7 @@ from parallel_gripper_tactile.research.hydra_support import (
 register_resolvers()
 
 
-@hydra.main(version_base="1.3", config_path="../../configs/research", config_name="dm_force_track")
+@hydra.main(version_base="1.3", config_path="../../configs", config_name="run")
 def main(config: DictConfig) -> None:
     """完成组合与领域校验后执行计划预览或单次实验。"""
     resolved = resolve_research_run(resolved_mapping(config))

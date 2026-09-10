@@ -1,0 +1,14 @@
+# @package _global_
+defaults:
+  - override /platform: robotiq_2f85/simulation
+  - override /model: robotiq_2f85/sphere_force_sensor
+  - override /controller: robotiq_2f85/dynamic_step
+  - override /estimator: none
+  - override /task: discrete_force/robotiq_delta_f_tick
+  - override /material: medium
+  - override /execution: run
+  - _self_
+
+experiment:
+  name: robotiq_discrete_force
+  kind: discrete_force

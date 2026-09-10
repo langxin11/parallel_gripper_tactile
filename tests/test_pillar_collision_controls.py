@@ -96,7 +96,9 @@ def test_diagnosis_protocol_contains_baselines_and_three_causal_controls() -> No
     )
 
     diagnosis = _diagnosis_module()
-    config = load_diagnosis_config(ROOT / "configs" / "studies" / "force_tracking_diagnosis.yaml")
+    config = load_diagnosis_config(
+        ROOT / "configs" / "research" / "archive" / "model_bug_diagnosis" / "study.yaml"
+    )
     conditions = diagnosis._conditions(config, "collision-geometry")
 
     assert [condition[0] for condition in conditions] == [

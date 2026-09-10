@@ -1,4 +1,0 @@
-# @package task
-# DM 导纳研究专用任务入口（共享导纳链路的阶段语义与控制目标）。
-family: force_tracking
-path: configs/force_tracking/dm_admittance.yaml

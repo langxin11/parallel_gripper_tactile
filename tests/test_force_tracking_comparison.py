@@ -48,9 +48,7 @@ output_root: results
 
 def test_default_comparison_uses_shifted_contact_presets() -> None:
     """默认正式矩阵排除旧 soft 和位置式 adrc，并锁定割线估计器。"""
-    config = load_comparison_config(
-        ROOT / "configs/studies/force_tracking_controller_comparison.yaml"
-    )
+    config = load_comparison_config(ROOT / "configs/research/force_controller_selection/study.yaml")
 
     assert config.materials == ("medium", "hard", "stiff")
     assert config.stiffness_estimator_method == "secant_ewma"

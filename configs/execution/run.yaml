@@ -1,0 +1,9 @@
+# @package execution
+mode: run
+output_root: ${pgt_repo:}/outputs/research
+viewer: false
+render_fps: 30.0
+realtime_factor: 1.0
+multiccd_enabled: true
+trace_sample_period_s: null
+trace_event_window_s: 0.2

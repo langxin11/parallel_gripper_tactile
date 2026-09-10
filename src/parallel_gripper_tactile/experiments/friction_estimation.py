@@ -30,7 +30,7 @@ from ..perception.taxels import (
     TaxelFrictionObserver,
 )
 
-from ..config.profiles import load_profile
+from ..config.profiles import GripperProfile, load_profile, validate_resolved_profile
 from ..scenes.custom import (
     CUBE_PREFIX,
     DEFAULT_PROFILE,
@@ -239,6 +239,8 @@ class FrictionEstimationTask(_TaskModel):
             raise FrictionEstimationConfigError(
                 f"friction estimation task root must be a mapping: {task_path}"
             )
+        if isinstance(raw.get("definition"), dict):
+            raw = raw["definition"]
         try:
             return cls.model_validate(raw)
         except ValidationError as error:
@@ -379,7 +381,7 @@ def _taxel_slip_trace_fields(
 
 
 def run_friction_estimation(
-    profile_path: Path = DEFAULT_PROFILE,
+    profile_path: Path | GripperProfile = DEFAULT_PROFILE,
     *,
     task: FrictionEstimationTask,
     output_csv: Path | None = None,
@@ -396,7 +398,11 @@ def run_friction_estimation(
     """
     if on_frame is not None and render_fps <= 0:
         raise ValueError("render_fps must be positive when on_frame is enabled")
-    profile = load_profile(profile_path)
+    profile = (
+        validate_resolved_profile(profile_path)
+        if isinstance(profile_path, GripperProfile)
+        else load_profile(profile_path)
+    )
     if profile.normal_force is None:
         raise ValueError("friction estimation requires profile control.force")
     if sensor_noise_seed is not None:

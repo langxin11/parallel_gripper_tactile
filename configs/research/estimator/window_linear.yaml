@@ -1,3 +1,0 @@
-# @package estimator
-# 线性窗口估计器片段名，用于滑动窗口平滑估计。
-name: window_linear

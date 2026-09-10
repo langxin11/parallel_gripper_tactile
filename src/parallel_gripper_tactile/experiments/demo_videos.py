@@ -28,6 +28,7 @@ import math
 from pathlib import Path
 import shutil
 import tempfile
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -35,11 +36,16 @@ from ..visualization import FULL_WIDTH_FONT_SCALE, PAPER_FONT_STACK, science_pyp
 from ..scenes.custom import CUBE_PREFIX, GRIPPER_PREFIX
 from ..video import add_arrow_to_scene, encode_video, save_pixels
 
+if TYPE_CHECKING:
+    from ..config.profiles import GripperProfile
+    from .force_tracking import ForceTrackingTask
+    from .friction_estimation import FrictionEstimationTask
+
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_PROFILE = REPOSITORY_ROOT / "configs" / "dm_gripper.yaml"
-DEFAULT_RAMP_TASK = REPOSITORY_ROOT / "configs" / "force_tracking" / "ramp.yaml"
+DEFAULT_RAMP_TASK = REPOSITORY_ROOT / "configs" / "task" / "force_tracking" / "ramp.yaml"
 DEFAULT_FRICTION_TASK = (
-    REPOSITORY_ROOT / "configs" / "friction_estimation" / "nominal_friction.yaml"
+    REPOSITORY_ROOT / "configs" / "task" / "friction_estimation" / "nominal_friction.yaml"
 )
 DEFAULT_DEMOS_DIR = REPOSITORY_ROOT / "outputs" / "demos"
 
@@ -1021,8 +1027,9 @@ class _DemoRecorder:
 
 def record_force_tracking_ramp_video(
     *,
-    profile_path: Path = DEFAULT_PROFILE,
+    profile_path: Path | GripperProfile = DEFAULT_PROFILE,
     task_path: Path = DEFAULT_RAMP_TASK,
+    resolved_task: ForceTrackingTask | None = None,
     output: Path = DEFAULT_DEMOS_DIR / "force_tracking_ramp.mp4",
     width: int = DEFAULT_VIDEO_WIDTH_PX,
     height: int = DEFAULT_VIDEO_HEIGHT_PX,
@@ -1035,8 +1042,9 @@ def record_force_tracking_ramp_video(
     """录制一次 Ramp 目标力跟踪并输出带实时曲线的 MP4。
 
     Args:
-        profile_path: DM_Gripper profile 路径。
+        profile_path: DM_Gripper profile 路径或已解析的冻结 profile。
         task_path: Ramp 力跟踪任务 YAML 路径。
+        resolved_task: 已解析的冻结任务；传入时优先于 ``task_path``。
         output: 输出 MP4 路径。
         width: 画面总宽；右侧曲线面板占 ``panel_width``，其余为场景。
         height: 画面高。
@@ -1054,7 +1062,11 @@ def record_force_tracking_ramp_video(
     """
     from .force_tracking import ForceTrackingTask, run_force_tracking
 
-    task = ForceTrackingTask.load(task_path)
+    task = (
+        resolved_task
+        if isinstance(resolved_task, ForceTrackingTask)
+        else ForceTrackingTask.load(task_path)
+    )
     recorder = _DemoRecorder(
         kind="ramp",
         output=output,
@@ -1081,8 +1093,9 @@ def record_force_tracking_ramp_video(
 
 def record_friction_demo_video(
     *,
-    profile_path: Path = DEFAULT_PROFILE,
+    profile_path: Path | GripperProfile = DEFAULT_PROFILE,
     task_path: Path = DEFAULT_FRICTION_TASK,
+    resolved_task: FrictionEstimationTask | None = None,
     output: Path = DEFAULT_DEMOS_DIR / "friction_estimation_with_curves.mp4",
     width: int = DEFAULT_VIDEO_WIDTH_PX,
     height: int = DEFAULT_VIDEO_HEIGHT_PX,
@@ -1094,8 +1107,9 @@ def record_friction_demo_video(
     """录制一次摩擦估计演示并输出带实时曲线的 MP4。
 
     Args:
-        profile_path: DM_Gripper profile 路径。
+        profile_path: DM_Gripper profile 路径或已解析的冻结 profile。
         task_path: 摩擦估计任务 YAML 路径。
+        resolved_task: 已解析的冻结任务；传入时优先于 ``task_path``。
         output: 输出 MP4 路径。
         width: 画面总宽；右侧曲线面板占 ``panel_width``，其余为场景。
         height: 画面高。
@@ -1112,7 +1126,11 @@ def record_friction_demo_video(
     """
     from .friction_estimation import FrictionEstimationTask, run_friction_estimation
 
-    task = FrictionEstimationTask.load(task_path)
+    task = (
+        resolved_task
+        if isinstance(resolved_task, FrictionEstimationTask)
+        else FrictionEstimationTask.load(task_path)
+    )
     recorder = _DemoRecorder(
         kind="friction",
         output=output,

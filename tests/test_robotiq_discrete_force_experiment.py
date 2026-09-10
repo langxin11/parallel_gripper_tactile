@@ -89,7 +89,9 @@ def test_trace_sampling_keeps_record_ticks_and_key_events(
 
 def test_recommended_task_maps_to_integer_controller_config() -> None:
     """推荐 YAML 完整映射方案中的整数命令和自适应参数。"""
-    task = RobotiqDiscreteForceTask.load(ROOT / "configs/discrete_force/robotiq_delta_f_tick.yaml")
+    task = RobotiqDiscreteForceTask.load(
+        ROOT / "configs/task/discrete_force/robotiq_delta_f_tick.yaml"
+    )
     control = task.controller_config()
 
     assert (control.command_min, control.command_max) == (0, 255)

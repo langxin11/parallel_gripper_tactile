@@ -146,7 +146,7 @@ def configure_force_controller(
         )
         return validate_resolved_profile(configured)
     if force.admittance is not None:
-        raise ValueError("control.force.admittance requires --controller-variant admittance")
+        raise ValueError("control.force.admittance requires the admittance controller variant")
     stiffness = force.stiffness
     if stiffness is None and variant not in {"pid-only", "full"}:
         raise ValueError("controller ablation requires control.force.stiffness")
@@ -337,6 +337,8 @@ class ForceTrackingTask(_TaskModel):
             raise ForceTrackingConfigError(
                 f"force tracking task root must be a mapping: {task_path}"
             )
+        if isinstance(raw.get("definition"), dict):
+            raw = raw["definition"]
         try:
             return cls.model_validate(raw)
         except ValidationError as error:

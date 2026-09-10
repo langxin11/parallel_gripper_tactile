@@ -22,7 +22,7 @@ from ..visualization import (
     science_pyplot,
 )
 
-from ..config.profiles import load_profile
+from ..config.profiles import GripperProfile, load_profile, validate_resolved_profile
 from ..scenes.custom import (
     CUBE_PREFIX,
     DEFAULT_PROFILE,
@@ -178,6 +178,8 @@ class ForceSchedulingTask(_TaskModel):
             raise ForceSchedulingConfigError(
                 f"force scheduling task root must be a mapping: {task_path}"
             )
+        if isinstance(raw.get("definition"), dict):
+            raw = raw["definition"]
         try:
             return cls.model_validate(raw)
         except ValidationError as error:
@@ -264,14 +266,18 @@ def _plot_force_scheduling(
 
 
 def run_force_scheduling(
-    profile_path: Path = DEFAULT_PROFILE,
+    profile_path: Path | GripperProfile = DEFAULT_PROFILE,
     *,
     task: ForceSchedulingTask,
     output_csv: Path | None = None,
     output_plot: Path | None = None,
 ) -> ForceSchedulingResult:
     """运行已知摩擦系数的目标力调度抓取实验。"""
-    profile = load_profile(profile_path)
+    profile = (
+        validate_resolved_profile(profile_path)
+        if isinstance(profile_path, GripperProfile)
+        else load_profile(profile_path)
+    )
     if profile.normal_force is None:
         raise ValueError("force scheduling requires profile control.force")
     model = build_custom_grasp_model(

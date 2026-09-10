@@ -13,7 +13,7 @@ from uuid import uuid4
 
 import yaml
 
-from parallel_gripper_tactile.config.profiles import GripperProfile, load_profile
+from parallel_gripper_tactile.config.profiles import GripperProfile, validate_resolved_profile
 from parallel_gripper_tactile.experiments.force_tracking import ForceTrackingTask
 from parallel_gripper_tactile.runners import execute_force_tracking
 from parallel_gripper_tactile.studies.aggregation import (
@@ -174,17 +174,15 @@ def _trace_diagnostics(run_directory: Path, *, ignore_initial_s: float) -> dict[
     }
 
 
-def _write_candidate_profile(
+def _candidate_profile(
     profile: GripperProfile,
     candidate: DMAdmittanceCandidate,
-    directory: Path,
-) -> Path:
-    """为当前条件写入自包含的候选临时 profile。"""
+) -> GripperProfile:
+    """从组合后的冻结 profile 派生当前候选，不生成第二份输入文件。"""
     candidate_profile = profile.model_dump(mode="json")
     force = candidate_profile["control"].get("force")
     if not isinstance(force, dict) or not isinstance(force.get("admittance"), dict):
         raise ValueError("导纳调参 profile 缺少 control.force.admittance。")
-    directory.mkdir(parents=True, exist_ok=True)
     admittance = candidate_profile["control"]["force"]["admittance"]
     admittance.update(
         {
@@ -199,22 +197,7 @@ def _write_candidate_profile(
     )
     candidate_profile["control"]["force"]["filter_cutoff_hz"] = candidate.filter_cutoff_hz
     admittance["velocity_limit_rad_s"] = candidate.velocity_limit_rad_s
-    path = directory / f"{candidate.identifier}.yaml"
-    path.write_text(
-        yaml.safe_dump(candidate_profile, allow_unicode=True, sort_keys=False),
-        encoding="utf-8",
-    )
-    return path
-
-
-def _cleanup_candidate_profile(path: Path, directory: Path) -> None:
-    """清理仅供当前条件使用的候选 profile，不影响各子运行快照。"""
-    path.unlink(missing_ok=True)
-    try:
-        directory.rmdir()
-    except OSError:
-        # 保留目录中的非预期文件，避免掩盖文件系统问题。
-        pass
+    return validate_resolved_profile(GripperProfile.model_validate(candidate_profile))
 
 
 def _create_study_directory(config: DMAdmittanceTuningConfig) -> Path:
@@ -225,7 +208,11 @@ def _create_study_directory(config: DMAdmittanceTuningConfig) -> Path:
     return directory
 
 
-def build_plan(config: DMAdmittanceTuningConfig) -> StudyPlan:
+def build_plan(
+    config: DMAdmittanceTuningConfig,
+    *,
+    resolved_profile: GripperProfile,
+) -> StudyPlan:
     """从权威 domain config 生成导纳调参的唯一有序计划。"""
     conditions = tuple(
         StudyCondition(
@@ -246,7 +233,10 @@ def build_plan(config: DMAdmittanceTuningConfig) -> StudyPlan:
         "protocol_revision": "dm_admittance_tuning.v1",
         "study": config.model_dump(mode="python", exclude={"output_root"}),
         "resources": {
-            "profile_sha256": file_sha256(config.profile),
+            "profile_sha256": scientific_configuration_hash(
+                resolved_profile.model_dump(mode="python"),
+                repository_root=_REPOSITORY_ROOT,
+            ),
             "task_sha256": file_sha256(config.task),
         },
         # 旧脚本逐条件执行 kwargs 的关键隔离项：控制器固定为二阶导纳变体。
@@ -279,6 +269,7 @@ def build_plan(config: DMAdmittanceTuningConfig) -> StudyPlan:
 def run_study(
     config: DMAdmittanceTuningConfig,
     *,
+    resolved_profile: GripperProfile,
     config_source: Path | None = None,
     study_directory: Path | None = None,
     study_plan: StudyPlan | None = None,
@@ -286,7 +277,7 @@ def run_study(
     lifecycle_manifest_fields: Mapping[str, object] | None = None,
 ) -> Path:
     """通过公共生命周期串行执行导纳 Ramp 调参，并返回 study 父目录。"""
-    profile = load_profile(config.profile)
+    profile = validate_resolved_profile(resolved_profile)
     task = ForceTrackingTask.load(config.task)
     study_dir = (
         _create_study_directory(config) if study_directory is None else study_directory.resolve()
@@ -299,7 +290,7 @@ def run_study(
             yaml.safe_dump(config.model_dump(mode="json"), sort_keys=False), encoding="utf-8"
         )
     resolved_config = write_resolved_config(study_dir / "study.resolved.json", config)
-    expected_plan = build_plan(config)
+    expected_plan = build_plan(config, resolved_profile=profile)
     plan = (
         expected_plan
         if study_plan is None
@@ -311,20 +302,18 @@ def run_study(
         candidate = DMAdmittanceCandidate.model_validate(parameters["candidate"])
         material = str(parameters["object_material"])
         seed = int(parameters["sensor_noise_seed"])
-        candidate_profiles = study_dir / ".candidate_profiles"
-        candidate_profile = _write_candidate_profile(profile, candidate, candidate_profiles)
-        try:
-            run, result = execute_force_tracking(
-                profile=candidate_profile,
-                task_path=config.task,
-                output_root=study_dir / "runs" / candidate.identifier,
-                run_prefix=(f"{candidate.identifier}-{config.task.stem}-{material}-seed{seed:03d}"),
-                object_material=material,  # type: ignore[arg-type]
-                controller_variant="admittance",
-                sensor_noise_seed=seed,
-            )
-        finally:
-            _cleanup_candidate_profile(candidate_profile, candidate_profiles)
+        candidate_profile = _candidate_profile(profile, candidate)
+        run, result = execute_force_tracking(
+            profile="composed_profile",
+            resolved_profile=candidate_profile,
+            task_path=config.task,
+            tracking_task=task,
+            output_root=study_dir / "runs" / candidate.identifier,
+            run_prefix=(f"{candidate.identifier}-{config.task.stem}-{material}-seed{seed:03d}"),
+            object_material=material,  # type: ignore[arg-type]
+            controller_variant="admittance",
+            sensor_noise_seed=seed,
+        )
         row = {
             "candidate_id": candidate.identifier,
             "mass_kg": candidate.mass_kg,

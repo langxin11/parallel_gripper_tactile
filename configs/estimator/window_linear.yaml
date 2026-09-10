@@ -1,0 +1,11 @@
+# @package estimator
+name: window_linear
+stiffness:
+  initial_n_per_m: 3000.0
+  min_n_per_m: 250.0
+  max_n_per_m: 25000.0
+  filter_alpha: 0.15
+  min_delta_closure_m: 0.00005
+  min_delta_force_n: 0.025
+  window_size: 25
+  min_samples: 8

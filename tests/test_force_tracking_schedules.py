@@ -15,14 +15,14 @@ ROOT = Path(__file__).resolve().parents[1]
     [
         ("step.yaml", "step_force_tracking", "hold", 4.0),
         ("ramp.yaml", "ramp_force_tracking", "linear", 8.0),
-        ("mixed_waypoints.yaml", "mixed_waypoint_force_tracking", "smoothstep", 7.5),
+        ("mixed.yaml", "mixed_waypoint_force_tracking", "smoothstep", 7.5),
     ],
 )
 def test_standard_force_tracking_schedules(
     filename: str, name: str, interpolation: str, duration: float
 ) -> None:
     """三套标准曲线遵循统一 schema，并保留各自的插值语义。"""
-    task = ForceTrackingTask.load(ROOT / "configs/force_tracking" / filename)
+    task = ForceTrackingTask.load(ROOT / "configs/task/force_tracking" / filename)
 
     assert task.name == name
     assert task.reference.interpolation == interpolation
@@ -32,7 +32,7 @@ def test_standard_force_tracking_schedules(
 
 def test_step_schedule_has_hold_platform_and_steps() -> None:
     """阶跃曲线在平台保持目标，并在阶跃边界切换。"""
-    reference = ForceTrackingTask.load(ROOT / "configs/force_tracking/step.yaml").reference
+    reference = ForceTrackingTask.load(ROOT / "configs/task/force_tracking/step.yaml").reference
 
     assert reference.target_at(0.5) == pytest.approx(1.0)
     assert reference.target_at(2.0) == pytest.approx(6.0)
@@ -41,7 +41,7 @@ def test_step_schedule_has_hold_platform_and_steps() -> None:
 
 def test_ramp_schedule_is_linear_with_terminal_hold() -> None:
     """斜坡曲线中点目标按线性插值计算，并在末尾保持终端目标。"""
-    reference = ForceTrackingTask.load(ROOT / "configs/force_tracking/ramp.yaml").reference
+    reference = ForceTrackingTask.load(ROOT / "configs/task/force_tracking/ramp.yaml").reference
 
     assert reference.target_at(1.0) == pytest.approx(2.0)
     assert reference.target_at(3.0) == pytest.approx(4.5)
@@ -53,9 +53,7 @@ def test_ramp_schedule_is_linear_with_terminal_hold() -> None:
 
 def test_mixed_schedule_has_platform_ramp_and_unload() -> None:
     """综合曲线覆盖平台、平滑加载和卸载。"""
-    reference = ForceTrackingTask.load(
-        ROOT / "configs/force_tracking/mixed_waypoints.yaml"
-    ).reference
+    reference = ForceTrackingTask.load(ROOT / "configs/task/force_tracking/mixed.yaml").reference
 
     assert reference.target_at(1.0) == pytest.approx(1.0)
     assert reference.target_at(2.25) == pytest.approx(3.5)

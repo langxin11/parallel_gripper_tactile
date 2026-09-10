@@ -17,7 +17,7 @@ FULL_SUITE_FILES = {
 }
 NON_CODE_PREFIXES = ("docs/", "reports/", "CHANGELOG.md", "AGENTS.md", "CONTRIBUTING.md")
 RELATED_PREFIXES = {
-    "configs/research/": (
+    "configs/": (
         "tests/test_research_configuration.py",
         "tests/test_research_execution.py",
         "tests/test_research_study.py",
@@ -49,35 +49,6 @@ RELATED_PREFIXES = {
         "tests/test_force_tracking_ablation.py",
         "tests/test_force_tracking_controller_comparison_script.py",
         "tests/test_force_tracking_torque_adrc_tuning.py",
-    ),
-    "configs/studies/force_tracking_stiffness_estimator_comparison.yaml": (
-        "tests/test_force_tracking_stiffness_estimator_comparison.py",
-        "tests/test_research_study.py",
-    ),
-    "configs/studies/force_tracking_diagnosis.yaml": (
-        "tests/test_force_tracking_diagnosis.py",
-        "tests/test_pillar_collision_controls.py",
-        "tests/test_research_study.py",
-    ),
-    "configs/studies/friction_estimation_local_slip.yaml": (
-        "tests/test_friction_estimation_local_slip_study.py",
-        "tests/test_research_study.py",
-    ),
-    "configs/studies/force_tracking_torque_adrc_tuning.yaml": (
-        "tests/test_force_tracking_torque_adrc_tuning.py",
-        "tests/test_research_study.py",
-    ),
-    "configs/studies/smoke/force_tracking_torque_adrc_tuning.yaml": (
-        "tests/test_force_tracking_torque_adrc_tuning.py",
-        "tests/test_research_study.py",
-    ),
-    "configs/studies/dm_admittance_tuning.yaml": (
-        "tests/test_dm_admittance_tuning.py",
-        "tests/test_research_study.py",
-    ),
-    "configs/studies/robotiq_discrete_force.yaml": (
-        "tests/test_robotiq_discrete_force_study.py",
-        "tests/test_research_study.py",
     ),
     "src/parallel_gripper_tactile/control/": (
         "tests/test_control.py",

@@ -4,21 +4,29 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from ..config.profiles import (
     GripperProfile,
+    MITTorqueControl,
     StiffnessEstimatorMethod,
     TorqueAdrcControl,
     load_profile,
+    validate_resolved_profile,
 )
 from ..experiments.force_tracking import (
     ControllerVariant,
     ForceTrackingTask,
     configure_force_controller,
     validate_force_tracking_configuration,
+)
+from ..experiments.force_scheduling import ForceSchedulingTask
+from ..experiments.friction_estimation import FrictionEstimationTask
+from ..experiments.robotiq_discrete_force import (
+    ControllerVariant as RobotiqControllerVariant,
+    RobotiqDiscreteForceTask,
 )
 from ..scenes.custom import ObjectMaterial
 from ..validation import validate_profile
@@ -37,20 +45,77 @@ class _ResearchModel(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
 
 
-class PlatformSelection(_ResearchModel):
-    """设备家族与运行后端选择。"""
+class DMPlatformSelection(_ResearchModel):
+    """设备家族、运行后端及不可调机构参数。"""
 
     family: Literal["dm"]
     backend: Literal["simulation"]
-    profile: Path
+    profile_name: str = Field(min_length=1)
+    actuator: str = Field(min_length=1)
+    open: float
+    closed: float
+    mit_limits: dict[str, object]
+    mount: dict[str, object]
+    geometry: dict[str, object]
+    admittance_limits: dict[str, object]
 
 
-class ControllerSelection(_ResearchModel):
-    """控制器组件选择及其专属参数。"""
+class RobotiqPlatformSelection(_ResearchModel):
+    """Robotiq 仿真机构与安装参数。"""
+
+    family: Literal["robotiq"]
+    backend: Literal["simulation"]
+    profile_name: str = Field(min_length=1)
+    actuator: str = Field(min_length=1)
+    open: float
+    mount: dict[str, object]
+
+
+PlatformSelection: TypeAlias = Annotated[
+    DMPlatformSelection | RobotiqPlatformSelection,
+    Field(discriminator="family"),
+]
+
+
+class DMModelSelection(_ResearchModel):
+    """MJCF 资源、触觉布局与测量噪声模型。"""
+
+    family: Literal["dm"]
+    name: str = Field(min_length=1)
+    profile_name: str | None = Field(default=None, min_length=1)
+    path: Path
+    tactile: dict[str, object]
+    sensor_taxel_normal_noise_std_n: tuple[float, float]
+    sensor_taxel_shear_noise_std_n: tuple[float, float]
+
+
+class RobotiqModelSelection(_ResearchModel):
+    """Robotiq MJCF、模型相容命令上限与触觉布局。"""
+
+    family: Literal["robotiq"]
+    name: str = Field(min_length=1)
+    profile_name: str | None = Field(default=None, min_length=1)
+    path: Path
+    closed: float
+    tactile: dict[str, object]
+
+
+ModelSelection: TypeAlias = Annotated[
+    DMModelSelection | RobotiqModelSelection,
+    Field(discriminator="family"),
+]
+
+
+class DMControllerSelection(_ResearchModel):
+    """控制器变体及其可调控制参数。"""
 
     family: Literal["dm"]
     name: ControllerVariant
+    mit_gains: dict[str, object]
+    force: dict[str, object]
+    stiffness_control: dict[str, object]
     torque_adrc: TorqueAdrcControl | None = None
+    admittance: dict[str, object] | None = None
 
     @model_validator(mode="after")
     def validate_specific_parameters(self) -> "ControllerSelection":
@@ -60,20 +125,42 @@ class ControllerSelection(_ResearchModel):
             raise ValueError(
                 "torque_adrc parameters must be present exactly for torque ADRC controllers"
             )
+        if (self.name == "admittance") != (self.admittance is not None):
+            raise ValueError("admittance parameters must be present exactly for admittance")
         return self
 
 
+class RobotiqControllerSelection(_ResearchModel):
+    """Robotiq 离散命令控制器选择。"""
+
+    family: Literal["robotiq"]
+    name: RobotiqControllerVariant
+
+
+ControllerSelection: TypeAlias = Annotated[
+    DMControllerSelection | RobotiqControllerSelection,
+    Field(discriminator="family"),
+]
+
+
 class EstimatorSelection(_ResearchModel):
-    """在线接触刚度估计器选择。"""
+    """在线接触刚度估计器选择及其估计参数。"""
 
     name: StiffnessEstimatorMethod | Literal["none"]
+    stiffness: dict[str, object]
 
 
 class TaskSelection(_ResearchModel):
-    """任务家族与领域配置文件选择。"""
+    """任务家族、来源配置和可直接构造的任务片段。"""
 
-    family: Literal["force_tracking"]
+    family: Literal[
+        "force_tracking",
+        "force_scheduling",
+        "friction_estimation",
+        "discrete_force",
+    ]
     path: Path
+    definition: dict[str, object]
 
 
 class MaterialSelection(_ResearchModel):
@@ -95,12 +182,26 @@ class ExecutionConfig(_ResearchModel):
     trace_event_window_s: float = Field(default=0.2, ge=0)
 
 
+class ExperimentSelection(_ResearchModel):
+    """常用组合的名称；其组默认值只选择其他片段。"""
+
+    name: str = Field(min_length=1)
+    kind: Literal[
+        "force_tracking",
+        "force_scheduling",
+        "friction_estimation",
+        "discrete_force",
+    ] = "force_tracking"
+    profile_name: str | None = Field(default=None, min_length=1)
+
+
 class ResearchRunConfig(_ResearchModel):
     """Hydra 完成组合和插值后进入领域层的单次运行 schema。"""
 
     schema_version: Literal[1]
-    experiment: Literal["force_tracking"]
+    experiment: ExperimentSelection
     platform: PlatformSelection
+    model: ModelSelection
     controller: ControllerSelection
     estimator: EstimatorSelection
     task: TaskSelection
@@ -111,14 +212,27 @@ class ResearchRunConfig(_ResearchModel):
     @model_validator(mode="after")
     def validate_component_compatibility(self) -> "ResearchRunConfig":
         """在读取模型前拒绝不支持的组件组合。"""
-        if self.platform.family != self.controller.family:
-            raise ValueError("platform and controller families must match")
-        if self.controller.name == "admittance":
-            if self.estimator.name != "none":
-                raise ValueError("admittance requires estimator=none")
-        elif self.estimator.name == "none" and self.controller.name != "pid-only":
-            raise ValueError("estimator=none is supported only by pid-only or admittance")
+        if len({self.platform.family, self.model.family, self.controller.family}) != 1:
+            raise ValueError("platform, model and controller families must match")
+        expected_family = "robotiq" if self.experiment.kind == "discrete_force" else "dm"
+        if self.platform.family != expected_family:
+            raise ValueError("experiment kind is incompatible with the selected platform")
+        if self.task.family != self.experiment.kind:
+            raise ValueError("experiment kind and task family must match")
+        if isinstance(self.controller, DMControllerSelection):
+            if self.controller.name == "admittance":
+                if self.estimator.name != "none":
+                    raise ValueError("admittance requires estimator=none")
+            elif self.estimator.name == "none" and self.controller.name != "pid-only":
+                raise ValueError("estimator=none is supported only by pid-only or admittance")
+        elif self.estimator.name != "none":
+            raise ValueError("Robotiq discrete control requires estimator=none")
         return self
+
+
+RunTask: TypeAlias = (
+    ForceTrackingTask | ForceSchedulingTask | FrictionEstimationTask | RobotiqDiscreteForceTask
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,7 +243,7 @@ class ResolvedResearchRun:
     profile_source: Path
     task_source: Path
     profile: GripperProfile
-    task: ForceTrackingTask
+    task: RunTask
 
     def effective_parameters(self) -> dict[str, object]:
         """返回可追溯且可 JSON 序列化的最终有效参数。"""
@@ -139,7 +253,8 @@ class ResolvedResearchRun:
             "profile": self.profile.model_dump(mode="json"),
             "task": self.task.model_dump(mode="json"),
             "runtime": {
-                "profile_path": str(self.profile_source),
+                "profile_path": "composed_profile",
+                "profile_composition_source": str(self.profile_source),
                 "task_path": str(self.task_source),
                 "object_material": self.selection.material.name,
                 "controller_variant": self.selection.controller.name,
@@ -164,6 +279,192 @@ def _repository_path(path: Path, *, repository_root: Path) -> Path:
     return path.resolve() if path.is_absolute() else (repository_root / path).resolve()
 
 
+def _profile_from_fragments(
+    selection: ResearchRunConfig, *, repository_root: Path
+) -> GripperProfile:
+    """从人工输入片段构造并校验完整 profile，绝不读取旧完整 profile。"""
+    platform = selection.platform
+    model = selection.model
+    controller = selection.controller
+    estimator = selection.estimator
+    if isinstance(platform, RobotiqPlatformSelection):
+        if not isinstance(model, RobotiqModelSelection) or not isinstance(
+            controller, RobotiqControllerSelection
+        ):
+            raise ValueError("Robotiq platform requires Robotiq model and controller")
+        profile = GripperProfile.model_validate(
+            {
+                "schema_version": 1,
+                "name": (
+                    selection.experiment.profile_name or model.profile_name or platform.profile_name
+                ),
+                "model": {"path": _repository_path(model.path, repository_root=repository_root)},
+                "control": {
+                    "mode": "position",
+                    "actuator": platform.actuator,
+                    "open": platform.open,
+                    "closed": model.closed,
+                },
+                "mount": platform.mount,
+                "tactile": model.tactile,
+            }
+        )
+        return validate_resolved_profile(profile)
+    if not isinstance(model, DMModelSelection) or not isinstance(controller, DMControllerSelection):
+        raise ValueError("DM platform requires DM model and controller")
+    stiffness = {**estimator.stiffness, **controller.stiffness_control}
+    if estimator.name == "none":
+        stiffness["enabled"] = False
+    else:
+        stiffness["enabled"] = True
+        stiffness["method"] = estimator.name
+    force: dict[str, object] = {
+        **controller.force,
+        "geometry": platform.geometry,
+        "sensor_taxel_normal_noise_std_n": model.sensor_taxel_normal_noise_std_n,
+        "sensor_taxel_shear_noise_std_n": model.sensor_taxel_shear_noise_std_n,
+        "sensor_noise_seed": selection.seed,
+        "stiffness": stiffness,
+    }
+    if controller.admittance is not None:
+        admittance = {**controller.admittance, **platform.admittance_limits}
+        if admittance.get("mit_torque_limit_nm") != platform.mit_limits.get("t_max"):
+            raise ValueError("admittance MIT torque limit must equal platform mit.t_max")
+        force["admittance"] = admittance
+    profile = GripperProfile.model_validate(
+        {
+            "schema_version": 1,
+            "name": (
+                selection.experiment.profile_name or model.profile_name or platform.profile_name
+            ),
+            "model": {"path": _repository_path(model.path, repository_root=repository_root)},
+            "control": {
+                "mode": "mit_torque",
+                "actuator": platform.actuator,
+                "open": platform.open,
+                "closed": platform.closed,
+                "mit": {**platform.mit_limits, **controller.mit_gains},
+                "force": force,
+            },
+            "mount": platform.mount,
+            "tactile": model.tactile,
+        }
+    )
+    return validate_resolved_profile(profile)
+
+
+def _legacy_to_fragment_mapping(
+    raw: dict[str, object], *, repository_root: Path
+) -> dict[str, object]:
+    """将迭代 1 旧入口临时适配为片段映射，供迁移期兼容入口使用。"""
+    platform_raw = raw.get("platform")
+    controller_raw = raw.get("controller")
+    estimator_raw = raw.get("estimator")
+    task_raw = raw.get("task")
+    if not all(
+        isinstance(value, dict) for value in (platform_raw, controller_raw, estimator_raw, task_raw)
+    ):
+        raise ValueError("legacy research configuration has incomplete components")
+    profile_path = _repository_path(Path(platform_raw["profile"]), repository_root=repository_root)
+    profile = load_profile(profile_path)
+    if not isinstance(profile.control, MITTorqueControl) or profile.normal_force is None:
+        raise ValueError("legacy force tracking requires MIT torque control with control.force")
+    force = profile.normal_force
+    if force.stiffness is None:
+        raise ValueError("legacy force tracking requires control.force.stiffness")
+    task_path = _repository_path(Path(task_raw["path"]), repository_root=repository_root)
+    task = ForceTrackingTask.load(task_path)
+    force_mapping = force.model_dump(mode="python")
+    stiffness_mapping = force_mapping.pop("stiffness")
+    geometry = force_mapping.pop("geometry")
+    normal_noise = force_mapping.pop("sensor_taxel_normal_noise_std_n")
+    shear_noise = force_mapping.pop("sensor_taxel_shear_noise_std_n")
+    force_mapping.pop("sensor_noise_seed")
+    admittance = force_mapping.pop("admittance")
+    force_mapping.pop("adrc")
+    force_mapping.pop("torque_adrc")
+    force_mapping.pop("torque_feedback_gain")
+    stiffness_control = {
+        key: stiffness_mapping.pop(key)
+        for key in (
+            "position_feedforward_gain",
+            "torque_feedforward_gain",
+            "position_limit_enabled",
+            "position_limit_force_rate_n_s",
+            "position_limit_stiffness_safety_factor",
+        )
+    }
+    return {
+        "schema_version": raw["schema_version"],
+        "experiment": {"name": raw["experiment"], "profile_name": profile.name},
+        "platform": {
+            "family": platform_raw["family"],
+            "backend": platform_raw["backend"],
+            "profile_name": profile.name,
+            "actuator": profile.control.actuator,
+            "open": profile.control.open,
+            "closed": profile.control.closed,
+            "mit_limits": {
+                key: value
+                for key, value in profile.control.mit.model_dump(mode="python").items()
+                if key not in {"kp", "kd"}
+            },
+            "mount": profile.mount.model_dump(mode="python"),
+            "geometry": geometry,
+            "admittance_limits": (
+                {
+                    key: admittance[key]
+                    for key in (
+                        "position_min_rad",
+                        "position_max_rad",
+                        "closing_direction",
+                        "feedforward_torque_limit_nm",
+                        "mit_torque_limit_nm",
+                    )
+                }
+                if admittance is not None
+                else {
+                    "position_min_rad": 0.0,
+                    "position_max_rad": 1.5707963267948966,
+                    "closing_direction": 1,
+                    "feedforward_torque_limit_nm": profile.control.mit.t_max,
+                    "mit_torque_limit_nm": profile.control.mit.t_max,
+                }
+            ),
+        },
+        "model": {
+            "family": platform_raw["family"],
+            "name": "legacy",
+            "profile_name": profile.name,
+            "path": profile.model_path,
+            "tactile": profile.tactile.model_dump(mode="python"),
+            "sensor_taxel_normal_noise_std_n": normal_noise,
+            "sensor_taxel_shear_noise_std_n": shear_noise,
+        },
+        "controller": {
+            "family": controller_raw["family"],
+            "name": controller_raw["name"],
+            "mit_gains": {
+                "kp": profile.control.mit.kp,
+                "kd": profile.control.mit.kd,
+            },
+            "force": force_mapping,
+            "stiffness_control": stiffness_control,
+            "torque_adrc": controller_raw.get("torque_adrc"),
+            "admittance": admittance,
+        },
+        "estimator": {"name": estimator_raw["name"], "stiffness": stiffness_mapping},
+        "task": {
+            "family": task_raw["family"],
+            "path": task_path,
+            "definition": task.model_dump(mode="python"),
+        },
+        "material": raw["material"],
+        "seed": raw["seed"],
+        "execution": raw["execution"],
+    }
+
+
 def resolve_research_run(
     raw: dict[str, object],
     *,
@@ -183,18 +484,27 @@ def resolve_research_run(
     """
     root = repository_root.resolve()
     try:
+        if "model" not in raw:
+            raw = _legacy_to_fragment_mapping(raw, repository_root=root)
         selection = ResearchRunConfig.model_validate(raw)
-        profile_source = _repository_path(selection.platform.profile, repository_root=root)
         task_source = _repository_path(selection.task.path, repository_root=root)
-        task = ForceTrackingTask.load(task_source)
-        estimator = None if selection.estimator.name == "none" else selection.estimator.name
-        profile = configure_force_controller(
-            load_profile(profile_source),
-            variant=selection.controller.name,
-            stiffness_estimator_method=estimator,
-            sensor_noise_seed=selection.seed,
-            torque_adrc_override=selection.controller.torque_adrc,
-        )
+        task_model: dict[str, type[BaseModel]] = {
+            "force_tracking": ForceTrackingTask,
+            "force_scheduling": ForceSchedulingTask,
+            "friction_estimation": FrictionEstimationTask,
+            "discrete_force": RobotiqDiscreteForceTask,
+        }
+        task = task_model[selection.task.family].model_validate(selection.task.definition)
+        profile = _profile_from_fragments(selection, repository_root=root)
+        if isinstance(selection.controller, DMControllerSelection):
+            estimator = None if selection.estimator.name == "none" else selection.estimator.name
+            profile = configure_force_controller(
+                profile,
+                variant=selection.controller.name,
+                stiffness_estimator_method=estimator,
+                sensor_noise_seed=selection.seed,
+                torque_adrc_override=selection.controller.torque_adrc,
+            )
         validate_profile(profile)
         trace_sample_period_s = selection.execution.trace_sample_period_s
         if trace_sample_period_s is None:
@@ -211,25 +521,26 @@ def resolve_research_run(
                 "trace_sample_period_s": trace_sample_period_s,
             }
         )
-        validate_force_tracking_configuration(
-            profile,
-            task=task,
-            object_material=selection.material.name,
-            multiccd_enabled=selection.execution.multiccd_enabled,
-            trace_sample_period_s=resolved_execution.trace_sample_period_s,
-            trace_event_window_s=resolved_execution.trace_event_window_s,
-            viewer=resolved_execution.viewer,
-            render_fps=resolved_execution.render_fps,
-            realtime_factor=resolved_execution.realtime_factor,
-        )
+        if isinstance(task, ForceTrackingTask):
+            validate_force_tracking_configuration(
+                profile,
+                task=task,
+                object_material=selection.material.name,
+                multiccd_enabled=selection.execution.multiccd_enabled,
+                trace_sample_period_s=resolved_execution.trace_sample_period_s,
+                trace_event_window_s=resolved_execution.trace_event_window_s,
+                viewer=selection.execution.viewer,
+                render_fps=resolved_execution.render_fps,
+                realtime_factor=resolved_execution.realtime_factor,
+            )
     except (OSError, ValidationError, ValueError) as error:
         raise ResearchConfigurationError(str(error)) from error
     resolved_selection = ResearchRunConfig.model_validate(
         {
             **selection.model_dump(mode="python"),
-            "platform": {
-                **selection.platform.model_dump(mode="python"),
-                "profile": profile_source,
+            "model": {
+                **selection.model.model_dump(mode="python"),
+                "path": _repository_path(selection.model.path, repository_root=root),
             },
             "task": {
                 **selection.task.model_dump(mode="python"),
@@ -245,7 +556,13 @@ def resolve_research_run(
     )
     return ResolvedResearchRun(
         selection=resolved_selection,
-        profile_source=profile_source,
+        profile_source=(
+            root
+            / "configs"
+            / "platform"
+            / ("dm_gripper" if selection.platform.family == "dm" else "robotiq_2f85")
+            / "simulation.yaml"
+        ),
         task_source=task_source,
         profile=profile,
         task=task,
@@ -254,10 +571,18 @@ def resolve_research_run(
 
 __all__ = [
     "ControllerSelection",
+    "DMControllerSelection",
+    "DMModelSelection",
+    "DMPlatformSelection",
     "EstimatorSelection",
     "ExecutionConfig",
+    "ExperimentSelection",
     "MaterialSelection",
+    "ModelSelection",
     "PlatformSelection",
+    "RobotiqControllerSelection",
+    "RobotiqModelSelection",
+    "RobotiqPlatformSelection",
     "REPOSITORY_ROOT",
     "ResearchConfigurationError",
     "ResearchRunConfig",

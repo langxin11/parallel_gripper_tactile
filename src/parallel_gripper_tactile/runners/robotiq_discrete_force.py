@@ -7,20 +7,23 @@ import json
 from pathlib import Path
 import sys
 
+import yaml
+
 from ..experiments.robotiq_discrete_force import (
     ControllerVariant,
     RobotiqDiscreteForceResult,
     RobotiqDiscreteForceTask,
     run_robotiq_discrete_force,
 )
-from ..config.profiles import load_profile
+from ..config.profiles import GripperProfile, load_profile, validate_resolved_profile
 from ..artifacts import RunDirectory
 from ..scenes.robotiq import RobotiqObjectMaterial
 
 
 def execute_robotiq_discrete_force(
     *,
-    profile: Path,
+    profile: Path | str,
+    resolved_profile: GripperProfile | None = None,
     task_path: Path,
     discrete_task: RobotiqDiscreteForceTask | None = None,
     output_root: Path = Path("outputs"),
@@ -34,7 +37,11 @@ def execute_robotiq_discrete_force(
 ) -> tuple[RunDirectory, RobotiqDiscreteForceResult]:
     """运行一次离散力控制并保存输入快照、轨迹、图像和指标。"""
     task = discrete_task or RobotiqDiscreteForceTask.load(task_path)
-    configured = load_profile(profile)
+    configured = (
+        validate_resolved_profile(resolved_profile)
+        if resolved_profile is not None
+        else load_profile(profile)
+    )
     effective_variant = controller_variant or task.controller_variant
     effective_material = object_material or task.object_material
     effective_noise = task.force_noise_std_n if force_noise_std_n is None else force_noise_std_n
@@ -43,7 +50,11 @@ def execute_robotiq_discrete_force(
         output_root,
         profile_name=configured.name,
         experiment="discrete-force",
-        profile_source=profile,
+        profile_source=(
+            yaml.safe_dump(configured.model_dump(mode="json"), allow_unicode=True, sort_keys=True)
+            if resolved_profile is not None
+            else profile
+        ),
         command=tuple(sys.argv),
         parameters={
             "task": str(task_path),
@@ -59,7 +70,13 @@ def execute_robotiq_discrete_force(
         run_suffix=run_suffix,
     )
     task_snapshot = run.artifact_path("task.yaml")
-    task_snapshot.write_bytes(task_path.read_bytes())
+    if discrete_task is None:
+        task_snapshot.write_bytes(task_path.read_bytes())
+    else:
+        task_snapshot.write_text(
+            yaml.safe_dump(task.model_dump(mode="json"), allow_unicode=True, sort_keys=True),
+            encoding="utf-8",
+        )
     run.register_artifact(task_snapshot)
     effective_parameters = run.artifact_path("effective_parameters.json")
     effective_parameters.write_text(
@@ -69,7 +86,13 @@ def execute_robotiq_discrete_force(
                 "profile": configured.model_dump(mode="json"),
                 "task": task.model_dump(mode="json"),
                 "runtime": {
-                    "profile_path": str(profile.resolve()),
+                    "profile_path": (
+                        "composed_profile"
+                        if resolved_profile is not None
+                        else str(profile.resolve())
+                        if isinstance(profile, Path)
+                        else "serialized_profile"
+                    ),
                     "task_path": str(task_path.resolve()),
                     "controller_variant": effective_variant,
                     "object_material": effective_material,
@@ -88,7 +111,7 @@ def execute_robotiq_discrete_force(
     trace_path = run.artifact_path("trace.csv.gz")
     plot_path = run.artifact_path("plot.png")
     result = run_robotiq_discrete_force(
-        profile,
+        configured,
         task=task,
         controller_variant=controller_variant,
         object_material=object_material,

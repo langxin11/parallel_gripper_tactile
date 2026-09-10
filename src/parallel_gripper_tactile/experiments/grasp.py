@@ -35,7 +35,7 @@ from ..visualization import (
     science_pyplot,
 )
 
-from ..config.profiles import load_profile
+from ..config.profiles import GripperProfile, load_profile, validate_resolved_profile
 from ..protocols import DisturbanceProtocol
 from ..timing import SimulationTimer
 
@@ -399,8 +399,9 @@ def plot_trace(path: Path, rows: list[dict[str, float | str]]) -> None:
 
 
 def run_acceptance(
-    profile_path: Path = DEFAULT_PROFILE,
+    profile_path: Path | str = DEFAULT_PROFILE,
     *,
+    resolved_profile: GripperProfile | None = None,
     protocol: DisturbanceProtocol = DisturbanceProtocol(),
     hold_threshold_m: float = 0.002,
     slip_threshold_m: float = 0.002,
@@ -417,7 +418,8 @@ def run_acceptance(
     """无 viewer 运行固定基座保持与扰动检查。
 
     Args:
-        profile_path: 夹爪 profile 路径。
+        profile_path: 兼容旧入口的夹爪 profile 路径。
+        resolved_profile: 组合服务已经校验的最终 profile；提供时不再读取路径。
         protocol: 实验时序与扰动波形。
         hold_threshold_m: 无支撑保持阶段允许的最大 YZ 切向位移。
         slip_threshold_m: 扰动阶段判定滑移的最大 YZ 切向位移。
@@ -443,7 +445,11 @@ def run_acceptance(
         raise ValueError("位移与法向力 RMSE 阈值必须为正数。")
     if target_force_n is not None and target_force_n <= 0:
         raise ValueError("target_force_n 必须为正数。")
-    profile = load_profile(profile_path)
+    profile = (
+        load_profile(profile_path)
+        if resolved_profile is None
+        else validate_resolved_profile(resolved_profile)
+    )
     if target_force_n is not None:
         if profile.normal_force is None:
             raise ValueError("profile 未配置 control.force。")

@@ -116,10 +116,18 @@ def load_diagnosis_config(path: str | Path) -> DiagnosisConfig:
     config_path = Path(path).resolve()
     try:
         raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
+        if isinstance(raw, dict):
+            study = raw.get("study")
+            if isinstance(study, dict) and isinstance(study.get("definition"), dict):
+                raw = study["definition"]
         config = DiagnosisConfig.model_validate(raw)
     except (OSError, ValidationError, yaml.YAMLError) as error:
         raise DiagnosisConfigError(f"诊断配置无效：{config_path}") from error
-    base = config_path.parent
+    base = (
+        Path(__file__).resolve().parents[3]
+        if isinstance(study, dict) and isinstance(study.get("definition"), dict)
+        else config_path.parent
+    )
     return config.model_copy(
         update={
             "profile": (base / config.profile).resolve(),

@@ -1,0 +1,9 @@
+# @package platform
+family: robotiq
+backend: simulation
+profile_name: robotiq_2f85
+actuator: fingers_actuator
+open: 0.0
+mount:
+  pos: [0.0, 0.0, 0.08]
+  quat: [0.70710678, 0.70710678, 0.0, 0.0]

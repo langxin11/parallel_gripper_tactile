@@ -1,0 +1,47 @@
+# @package _global_
+# 目的导向研究定义；本文件同时拥有研究元数据与唯一条件矩阵。
+study:
+  kind: robotiq_discrete_force
+  source: configs/research/robotiq_discrete_force_validation/study.yaml
+  profile:
+    experiment: robotiq_2f85/discrete_force
+    overrides: [model=robotiq_2f85/sphere_force_sensor, execution=plan]
+  rationale:
+    question: 哪种整数命令控制策略在材料与噪声变化下兼顾误差和动作数？
+    decision: 选择 Robotiq 离散力默认控制器。
+    inclusion_criteria: [共享平台曲线, 五种离散策略, 四材料三噪声]
+    task_rationale: 多平台升降曲线覆盖 HOLD、反向和再激活行为。
+    primary_metrics: [稳态 MAE, 动作数, 反向数, 振荡数, HOLD 占比]
+    stop_conditions: [完成六十条条件, 科学失败与执行异常分开登记]
+    exclusions: {连续 PI: 不属于整数命令矩阵，按同曲线独立复现。}
+  definition:
+    # Robotiq 离散力控制 study：控制器 × 材料 × 噪声的消融矩阵，共 5×4×3=60 个条件。
+    name: robotiq_discrete_force
+    # 夹爪 profile 与主任务配置；相对路径按本文件所在目录解析。
+    profile: configs/robotiq_2f85.yaml
+    task: configs/task/discrete_force/robotiq_delta_f_tick.yaml
+    
+    # 参与消融的整数命令控制器；连续 PI 对照不在矩阵内，需按同曲线单独运行。
+    controllers:
+      - quantized-pi
+      - fixed-step
+      - adaptive-deadband
+      - predictive
+      - dynamic-step
+    
+    # 四档接触刚度，用于观察局部 tick 增益随压缩程度的变化；不对应真实材料杨氏模量。
+    materials:
+      - soft
+      - medium
+      - hard
+      - stiff
+    
+    # 力测量高斯噪声标准差档位；0.0 为无噪声基线。
+    noise_std_n: [0.0, 0.05, 0.10]
+    # 随机种子起点与重复次数；提高 count 会自动扩展矩阵并纳入聚合，用于统计重复。
+    seeds:
+      start: 0
+      count: 1
+    
+    # study 产物（runs、CSV/Parquet、summary.json、比较图、manifest）的输出根目录。
+    output_root: outputs/studies

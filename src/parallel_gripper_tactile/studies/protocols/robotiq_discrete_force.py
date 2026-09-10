@@ -14,6 +14,7 @@ from uuid import uuid4
 import numpy as np
 import yaml
 
+from parallel_gripper_tactile.config.profiles import GripperProfile
 from parallel_gripper_tactile.experiments.robotiq_discrete_force import (
     RobotiqDiscreteForceTask,
 )
@@ -399,6 +400,7 @@ def build_plan(config: RobotiqDiscreteForceStudyConfig) -> StudyPlan:
 def run_study(
     config: RobotiqDiscreteForceStudyConfig,
     *,
+    resolved_profile: GripperProfile | None = None,
     config_source: Path | None = None,
     study_directory: Path | None = None,
     study_plan: StudyPlan | None = None,
@@ -451,6 +453,7 @@ def run_study(
         task = RobotiqDiscreteForceTask.load(config.task)
         run, result = execute_robotiq_discrete_force(
             profile=config.profile,
+            resolved_profile=resolved_profile,
             task_path=config.task,
             discrete_task=task,
             output_root=study_dir / "runs",

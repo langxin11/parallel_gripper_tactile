@@ -68,7 +68,6 @@ class DMAdmittanceTuningConfig(_TuningStudyModel):
     """固定 Ramp 任务下的 DMgripper 导纳参数调优协议。"""
 
     name: str = Field(default="dm_admittance_tuning", min_length=1)
-    profile: Path
     task: Path
     materials: tuple[ObjectMaterial, ...]
     seeds: SeedSweep = SeedSweep()
@@ -114,14 +113,17 @@ def load_dm_admittance_tuning_config(path: str | Path) -> DMAdmittanceTuningConf
         raise StudyConfigError(f"导纳调参 YAML 无效：{config_path}") from error
     if not isinstance(raw, dict):
         raise StudyConfigError(f"导纳调参配置根节点必须为映射：{config_path}")
+    base = config_path.parent
+    study = raw.get("study")
+    if isinstance(study, dict) and isinstance(study.get("definition"), dict):
+        raw = study["definition"]
+        base = Path(__file__).resolve().parents[3]
     try:
         config = DMAdmittanceTuningConfig.model_validate(raw)
     except ValidationError as error:
         raise StudyConfigError(str(error)) from error
-    base = config_path.parent
     return config.model_copy(
         update={
-            "profile": _resolve(config.profile, base),
             "task": _resolve(config.task, base),
             "output_root": _resolve(config.output_root, base),
         }

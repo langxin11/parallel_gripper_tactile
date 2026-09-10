@@ -1,4 +1,0 @@
-# @package study
-# 刚度估计器对比研究的 Hydra 选择器：条件矩阵权威文件仍由 configs/studies/ 提供。
-kind: force_tracking_stiffness_estimator_comparison
-config: configs/studies/force_tracking_stiffness_estimator_comparison.yaml
