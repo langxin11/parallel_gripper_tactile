@@ -94,7 +94,7 @@ def test_aggregate_rows_groups_estimator_task_and_material() -> None:
     assert aggregate["mean_estimated_stiffness_n_per_m_mean"] is None
 
 
-def test_estimator_summary_plots_are_generated(tmp_path: Path) -> None:
+def test_estimator_summary_plots_are_generated(tmp_path: Path, fast_plot_render: None) -> None:
     """指标和相对割线的增量图均生成非空 PNG 与 PDF。"""
     protocol = _protocol_module()
     estimators = ("secant_ewma", "window_linear", "window_quadratic")

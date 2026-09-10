@@ -4,6 +4,7 @@
 使用简体中文；技术名称、代码标识符、命令行参数与物理量符号保留英文。**
 
 完整约定见 [代码与注释规范](docs/coding-conventions.md)。
+测试分层、并行运行与增量映射见 [测试策略](docs/testing.md)。
 
 ## 提交前检查
 
@@ -28,6 +29,16 @@ uv run ruff check .            # 环境缓存异常时：uv run ruff check --no-
 uv run ruff format --check .
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest
 ```
+
+开发阶段可按当前改动运行相关测试，或在 24 逻辑核开发机执行已实测的并行全量命令：
+
+```bash
+uv run python scripts/test_changed.py
+uv run pytest -n 24
+```
+
+`uv run pytest --lf` 仅用于重跑上次失败，不是提交门禁。CI 与 pre-commit 仍执行裸
+`uv run pytest`，增量或并行运行不能替代提交前的权威全量结果。
 
 ## 语言与风格要点
 

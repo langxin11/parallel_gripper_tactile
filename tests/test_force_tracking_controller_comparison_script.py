@@ -99,7 +99,7 @@ def test_describe_conditions_is_stable_and_complete(tmp_path: Path) -> None:
     assert "008 controller=full task=step.yaml material=hard seed=4" in description
 
 
-def test_summary_plots_are_generated(tmp_path: Path) -> None:
+def test_summary_plots_are_generated(tmp_path: Path, fast_plot_render: None) -> None:
     """聚合指标、饱和比例和消融增量均生成非空图片。"""
     protocol = _protocol_module()
     controllers = ("pid-only", "pid-torque-ff", "pid-stiffness-ff", "full")
@@ -161,7 +161,7 @@ def _write_trace(path: Path, *, offset: float) -> None:
         )
 
 
-def test_tracking_overlay_uses_common_seed(tmp_path: Path) -> None:
+def test_tracking_overlay_uses_common_seed(tmp_path: Path, fast_plot_render: None) -> None:
     """轨迹对比选择所有控制器共有的最小 seed。"""
     protocol = _protocol_module()
     figures = tmp_path / "figures"

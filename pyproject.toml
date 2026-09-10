@@ -36,6 +36,7 @@ pgt = "parallel_gripper_tactile.cli:main"
 dev = [
     "pre-commit>=4.6.2",
     "pytest>=7.0",
+    "pytest-xdist>=3.8.0",
     "ruff>=0.15",
     "zensical>=0.0.56",
 ]
@@ -82,6 +83,7 @@ convention = "google"
 [tool.ruff.lint.per-file-ignores]
 # 仅豁免与英文语法/ASCII 标点绑定的规则：中文 docstring 的祈使语气、首词大写
 # 与全角句号会触发 D401/D403/D404/D400/D415 误报；其余格式类 D 规则仍生效。
+"conftest.py" = ["D400", "D401", "D403", "D404", "D415"]
 "tests/**" = ["D400", "D401", "D403", "D404", "D415"]
 # 研究脚本同样使用中文 docstring，并遵循与包代码一致的语言规则。
 "scripts/**" = ["D400", "D401", "D403", "D404", "D415"]

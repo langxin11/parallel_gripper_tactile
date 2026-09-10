@@ -164,7 +164,9 @@ def test_disabling_noslip_invalidates_the_identification_task() -> None:
     assert not result.hold_slip_passed
 
 
-def test_execute_friction_estimation_writes_blind_estimator_artifacts(tmp_path: Path) -> None:
+def test_execute_friction_estimation_writes_blind_estimator_artifacts(
+    tmp_path: Path, fast_png_render: None
+) -> None:
     """执行器保存输入、轨迹、图表、指标及不含 oracle 输入的运行声明。"""
     task_path = TASK_ROOT / "low_friction.yaml"
     task = FrictionEstimationTask.load(task_path)

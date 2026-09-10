@@ -78,8 +78,8 @@ def _plot_rows() -> list[dict[str, float | str]]:
         ("smoothstep", "waypoint_error"),
     ],
 )
-def test_force_tracking_plot_is_task_aware_and_writes_high_resolution_pair(
-    tmp_path: Path, interpolation: str, expected_layout: str
+def test_force_tracking_plot_is_task_aware_and_writes_format_pair(
+    tmp_path: Path, interpolation: str, expected_layout: str, fast_plot_render: None
 ) -> None:
     """三类任务分别选择瞬态、滞后和 waypoint 误差诊断，并输出 PNG/PDF。"""
     task = ForceTrackingTask(
@@ -101,6 +101,27 @@ def test_force_tracking_plot_is_task_aware_and_writes_high_resolution_pair(
 
     assert output.is_file()
     assert output.with_suffix(".pdf").is_file()
+    assert output.stat().st_size > 0
+    assert output.with_suffix(".pdf").stat().st_size > 0
+
+
+def test_force_tracking_publication_plot_preserves_high_resolution(tmp_path: Path) -> None:
+    """代表性 Step 图应保留跨栏宽度和 600 DPI 出版契约。"""
+    task = ForceTrackingTask(
+        schema_version=1,
+        name="publication_plot",
+        reference=ForceReference(
+            interpolation="hold",
+            waypoints=(
+                ForceWaypoint(t_s=0.0, force_n=2.0),
+                ForceWaypoint(t_s=0.5, force_n=4.0),
+            ),
+        ),
+    )
+    output = tmp_path / "publication.png"
+
+    _plot_force_tracking(output, _plot_rows(), task=task)
+
     with Image.open(output) as image:
         assert image.size[0] >= 4_000
         assert image.info["dpi"][0] == pytest.approx(600.0, abs=0.1)
@@ -348,7 +369,7 @@ def test_stiffness_estimator_method_is_a_runtime_profile_override() -> None:
 
 
 def test_force_tracking_run_writes_dynamic_reference_trace(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, fast_png_render: None
 ) -> None:
     """短版动态力跟踪实验写出 trace，并计算非空跟踪指标。"""
     task = ForceTrackingTask(

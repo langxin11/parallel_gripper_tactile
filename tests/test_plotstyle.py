@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import matplotlib.pyplot as plt
+import pytest
 
 import parallel_gripper_tactile.friction_plots as legacy_friction_plots
 import parallel_gripper_tactile.plotstyle as legacy_plotstyle
@@ -115,6 +116,7 @@ def test_publication_export_preserves_width_and_requested_format(tmp_path) -> No
         assert (tmp_path / "figure.svg").is_file()
         with Image.open(tmp_path / "figure.png") as preview:
             assert preview.size == (2100, 1200)
+            assert preview.info["dpi"][0] == pytest.approx(600.0, abs=0.1)
         bounds = re.search(rb"/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)", pdf.read_bytes())
         assert bounds is not None
         assert float(bounds[1]) == 252

@@ -13,6 +13,7 @@ MuJoCo 平行夹爪触觉仿真与力控实验库。核心链路：YAML profile 
 - `docs/architecture.md`：模块职责、仿真循环所有权、依赖规则。
 - `docs/workflows.md`：`pgt` 单次运行与 `scripts/experiments` 研究脚本的用法。
 - `docs/coding-conventions.md`：注释、docstring 与文档书写规范。
+- `docs/testing.md`：串行门禁、并行全量、增量映射与绘图测试分工。
 - `docs/force-tracking.md`、`docs/control-comparison-ablation.md`：力跟踪控制器与对比研究的方法和结论。
 - `CONTRIBUTING.md`：提交门禁与 PR 验收清单。
 
@@ -53,6 +54,9 @@ uv run ruff format --check .
 uv run pytest                  # CI 与 pre-commit 均为裸 pytest；
                                # 本地全局 pytest 插件干扰时，可加 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 隔离
 ```
+
+24 逻辑核开发机可用 `uv run pytest -n 24` 加速全量反馈；按改动模块开发时使用
+`uv run python scripts/test_changed.py`。`--lf` 仅用于失败重跑，不能替代上述裸 pytest 门禁。
 
 pre-commit 会在每次 `git commit` 自动执行以上三项（含全量 pytest）。改完代码先自查再提交，
 避免提交中途被 hook 拦下。

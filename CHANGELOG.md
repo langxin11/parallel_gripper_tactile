@@ -9,6 +9,11 @@
 
 ### 变更
 
+- 测试开发依赖新增 `pytest-xdist`，并隔离每个 worker 的 Matplotlib 字体缓存、默认限制
+  OpenMP／BLAS 内部线程；保留裸 pytest 提交门禁，同时提供按变更模块选择相关测试的透明增量入口。
+- 重复科研绘图测试改用小型合成数据的轻量渲染，真实 600 DPI、PDF 页面尺寸、字体和代表性复杂图
+  集中由渲染契约测试验证；完整摩擦估计端到端与全部标准摩擦场景、科研验收结论保持不变。
+
 - PapillArray 与 DM USB2CAN 的纯 Python 探针分别默认使用 `/dev/papillarray`
   和 `/dev/dmj4310_can`，同时保留 `--port` 显式覆盖；仓库新增当前实验台的 udev
   规则与安装说明。

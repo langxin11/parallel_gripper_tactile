@@ -110,7 +110,9 @@ def test_noslip_solver_does_not_hide_insufficient_grip() -> None:
     assert result.minimum_friction_margin_n < 0
 
 
-def test_execute_force_scheduling_writes_reproducible_artifacts(tmp_path: Path) -> None:
+def test_execute_force_scheduling_writes_reproducible_artifacts(
+    tmp_path: Path, fast_png_render: None
+) -> None:
     """执行器保存任务快照、有效参数、轨迹、图表和指标。"""
     task = ForceSchedulingTask.load(GRAVITY_TASK)
 

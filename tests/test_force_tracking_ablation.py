@@ -118,7 +118,9 @@ def test_single_sample_aggregate_has_no_sample_standard_deviation() -> None:
     assert aggregate["rmse_n_std"] is None
 
 
-def test_ablation_figures_render_paired_factorial_effects(tmp_path: Path) -> None:
+def test_ablation_figures_render_paired_factorial_effects(
+    tmp_path: Path, fast_plot_render: None
+) -> None:
     """小型合成数据可生成材料总览和按相同 seed 配对的 PID 效应图。"""
     protocol = _protocol_module()
     rows = []

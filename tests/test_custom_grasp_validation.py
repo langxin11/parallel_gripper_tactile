@@ -122,7 +122,7 @@ def test_custom_grasp_rejects_cube_mass_below_fifty_grams() -> None:
         scene.build_custom_grasp_model(profile, cube_mass=0.049)
 
 
-def test_custom_grasp_trace_plot_is_written(tmp_path: Path) -> None:
+def test_custom_grasp_trace_plot_is_written(tmp_path: Path, fast_png_render: None) -> None:
     """验收脚本实际写出 CSV 与绘图文件。"""
     output_csv = tmp_path / "custom_grasp.csv"
     output_plot = tmp_path / "custom_grasp.png"

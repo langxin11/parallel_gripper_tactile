@@ -120,7 +120,9 @@ def test_rank_candidates_prefers_lower_step_overshoot_with_continuous_constraint
     )
 
 
-def test_tuning_figures_render_with_missing_step_metrics(tmp_path: Path) -> None:
+def test_tuning_figures_render_with_missing_step_metrics(
+    tmp_path: Path, fast_plot_render: None
+) -> None:
     """coarse 或 confirm 缺少部分瞬态指标时，调参图仍保留可用性能点。"""
     protocol = _protocol_module()
     baseline = TorqueAdrcCandidate(40.0, 60.0, 3.0)

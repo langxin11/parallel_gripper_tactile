@@ -99,7 +99,9 @@ def _write_trace(path: Path, *, parquet: bool) -> None:
         writer.writerows(rows)
 
 
-def test_render_phase_figures_uses_numeric_x_and_skips_missing_traces(tmp_path: Path) -> None:
+def test_render_phase_figures_uses_numeric_x_and_skips_missing_traces(
+    tmp_path: Path, fast_plot_render: None
+) -> None:
     """数值扫描输出双格式图表，缺失 trace 的失败运行不会中止绘图。"""
     protocol = _protocol_module()
     _write_trace(tmp_path / "runs" / "parquet" / "trace.csv", parquet=True)
@@ -132,7 +134,7 @@ def test_historical_summary_infers_passed_from_stability_and_finite_rmse() -> No
 
 
 def test_run_phase_registers_figures_and_keeps_failed_run_without_trace(
-    tmp_path: Path, monkeypatch
+    tmp_path: Path, monkeypatch, fast_plot_render: None
 ) -> None:
     """phase 收尾登记 PNG/PDF，并让没有跟踪段的失败 run 留在 manifest。"""
     protocol = _protocol_module()
