@@ -13,7 +13,7 @@ from parallel_gripper_tactile.scenes.custom import build_custom_grasp_model
 
 
 ROOT = Path(__file__).resolve().parents[1]
-SOURCE = ROOT / "assets" / "grippers" / "custom_parallel_gripper" / "parallel_gripper_prepared.xml"
+SOURCE = ROOT / "assets" / "grippers" / "dm_gripper" / "parallel_gripper_prepared.xml"
 
 
 def _generator_module():
@@ -78,7 +78,7 @@ def test_collision_variants_change_one_geometry_factor_at_a_time(tmp_path: Path)
 
 def test_custom_scene_can_disable_multiccd_without_changing_the_model() -> None:
     """关闭 multiccd 只设置求解选项，不替换 Pillar mesh。"""
-    default_profile = load_profile(ROOT / "configs" / "custom_parallel_gripper.yaml")
+    default_profile = load_profile(ROOT / "configs" / "dm_gripper.yaml")
     profile = default_profile.model_copy(
         update={"model": default_profile.model.model_copy(update={"path": SOURCE})}
     )

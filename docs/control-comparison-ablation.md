@@ -310,7 +310,7 @@ configs/
 
 <pre><code class="language-bash">
 uv run pgt run force-track \
-  --profile configs/custom_parallel_gripper.yaml \
+  --profile configs/dm_gripper.yaml \
   --task configs/force_tracking/default_waypoints.yaml \
   --viewer
 </code></pre>

@@ -36,7 +36,7 @@ from ..scenes.custom import CUBE_PREFIX, GRIPPER_PREFIX
 from ..video import add_arrow_to_scene, encode_video, save_pixels
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_PROFILE = REPOSITORY_ROOT / "configs" / "custom_parallel_gripper.yaml"
+DEFAULT_PROFILE = REPOSITORY_ROOT / "configs" / "dm_gripper.yaml"
 DEFAULT_RAMP_TASK = REPOSITORY_ROOT / "configs" / "force_tracking" / "ramp.yaml"
 DEFAULT_FRICTION_TASK = (
     REPOSITORY_ROOT / "configs" / "friction_estimation" / "nominal_friction.yaml"
@@ -1035,7 +1035,7 @@ def record_force_tracking_ramp_video(
     """录制一次 Ramp 目标力跟踪并输出带实时曲线的 MP4。
 
     Args:
-        profile_path: 自研夹爪 profile 路径。
+        profile_path: DM_Gripper profile 路径。
         task_path: Ramp 力跟踪任务 YAML 路径。
         output: 输出 MP4 路径。
         width: 画面总宽；右侧曲线面板占 ``panel_width``，其余为场景。
@@ -1094,7 +1094,7 @@ def record_friction_demo_video(
     """录制一次摩擦估计演示并输出带实时曲线的 MP4。
 
     Args:
-        profile_path: 自研夹爪 profile 路径。
+        profile_path: DM_Gripper profile 路径。
         task_path: 摩擦估计任务 YAML 路径。
         output: 输出 MP4 路径。
         width: 画面总宽；右侧曲线面板占 ``panel_width``，其余为场景。

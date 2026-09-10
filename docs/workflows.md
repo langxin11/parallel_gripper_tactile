@@ -14,23 +14,23 @@ uv run pgt run demo --profile configs/robotiq_2f85_touch_grid.yaml
 uv run pgt compare tactile \
   --left-profile configs/robotiq_2f85_box.yaml \
   --right-profile configs/robotiq_2f85_touch_grid.yaml
-uv run pgt run grasp --profile configs/custom_parallel_gripper.yaml --video
+uv run pgt run grasp --profile configs/dm_gripper.yaml --video
 uv run pgt run force-track \
-  --profile configs/custom_parallel_gripper.yaml \
+  --profile configs/dm_gripper.yaml \
   --task configs/force_tracking/default_waypoints.yaml
 uv run pgt run force-schedule \
-  --profile configs/custom_parallel_gripper.yaml \
+  --profile configs/dm_gripper.yaml \
   --task configs/force_scheduling/gravity_hold.yaml
 uv run pgt run force-schedule \
-  --profile configs/custom_parallel_gripper.yaml \
+  --profile configs/dm_gripper.yaml \
   --task configs/force_scheduling/dynamic_filling.yaml
 uv run pgt run friction-estimate \
-  --profile configs/custom_parallel_gripper.yaml \
+  --profile configs/dm_gripper.yaml \
   --task configs/friction_estimation/nominal_friction.yaml
 uv run pgt run discrete-force \
   --profile configs/robotiq_2f85.yaml \
   --task configs/discrete_force/robotiq_delta_f_tick.yaml
-uv run pgt compare contact --profile configs/custom_parallel_gripper.yaml
+uv run pgt compare contact --profile configs/dm_gripper.yaml
 </code></pre>
 
 `--disable-multiccd` 是保留原碰撞模型、仅限制 convex geom pair 接触数的诊断开关；默认 profile 已使用

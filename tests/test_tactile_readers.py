@@ -99,7 +99,7 @@ def test_factory_selects_each_supported_reader_and_resolves_namespaces() -> None
     assert isinstance(create_tactile_reader(force_model, force_layout), ForceSensorTactileReader)
 
     contact_model = mujoco.MjModel.from_xml_path(
-        str(ROOT / "assets/grippers/custom_parallel_gripper/parallel_gripper_prepared.xml")
+        str(ROOT / "assets/grippers/dm_gripper/parallel_gripper_prepared.xml")
     )
     contact_layout = _Layout("contact_geom", 3, 3, "left_taxel_geom_", "right_taxel_geom_")
     reader = create_tactile_reader(contact_model, contact_layout)

@@ -1,11 +1,11 @@
 # 🎯 动态目标力跟踪任务
 
-`force-track` 用于测试自研夹爪对时变法向力目标的跟踪能力。它把一次实验拆成接触接近和目标力跟踪两个阶段：
+`force-track` 用于测试 DM_Gripper 对时变法向力目标的跟踪能力。它把一次实验拆成接触接近和目标力跟踪两个阶段：
 先以低速闭合建立双侧接触，再按照 waypoint 定义的时间曲线跟踪目标力。
 
 <pre><code class="language-bash">
 uv run pgt run force-track \
-  --profile configs/custom_parallel_gripper.yaml \
+  --profile configs/dm_gripper.yaml \
   --task configs/force_tracking/default_waypoints.yaml
 </code></pre>
 
@@ -13,7 +13,7 @@ uv run pgt run force-track \
 
 <pre><code class="language-bash">
 uv run pgt run force-track \
-  --profile configs/custom_parallel_gripper.yaml \
+  --profile configs/dm_gripper.yaml \
   --task configs/force_tracking/default_waypoints.yaml \
   --viewer
 </code></pre>

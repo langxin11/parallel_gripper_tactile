@@ -1,8 +1,8 @@
 # DM 导纳迁移验证配置；显式使用 --controller-variant admittance。
 schema_version: 1
-name: custom_parallel_gripper_admittance
+name: dm_gripper_admittance
 model:
-  path: ../assets/grippers/custom_parallel_gripper/parallel_gripper_height_sphere_collision.xml
+  path: ../assets/grippers/dm_gripper/parallel_gripper_height_sphere_collision.xml
 control:
   mode: mit_torque
   actuator: gripper_drive

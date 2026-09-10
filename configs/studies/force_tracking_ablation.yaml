@@ -1,5 +1,5 @@
 name: force_tracking_ablation
-profile: ../custom_parallel_gripper.yaml
+profile: ../dm_gripper.yaml
 task: ../force_tracking/default_waypoints.yaml
 # PID 模块消融研究的官方矩阵定义：单任务下对不同控制器、材料和 seed 做完整交叉。
 controllers:

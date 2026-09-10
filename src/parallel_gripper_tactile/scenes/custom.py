@@ -1,4 +1,4 @@
-"""构建自研夹爪的水平固定基座抓取场景。"""
+"""构建 DM_Gripper 的水平固定基座抓取场景。"""
 
 from __future__ import annotations
 
@@ -14,7 +14,7 @@ from ..config.profiles import GripperProfile
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_PROFILE = REPOSITORY_ROOT / "configs" / "custom_parallel_gripper.yaml"
+DEFAULT_PROFILE = REPOSITORY_ROOT / "configs" / "dm_gripper.yaml"
 GRASP_WORLD_XML = REPOSITORY_ROOT / "assets" / "scenes" / "grasp_world.xml"
 TARGET_CUBE_XML = REPOSITORY_ROOT / "assets" / "objects" / "target_cube.xml"
 GRIPPER_PREFIX = "gripper/"
@@ -210,7 +210,7 @@ def build_custom_grasp_spec(
     friction_coefficient: float = 0.8,
     multiccd_enabled: bool = True,
 ):
-    """附加固定自研基座、自由方块与临时支撑。
+    """附加固定 DM_Gripper 基座、自由方块与临时支撑。
 
     profile 把滑轨和夹爪本体都映射到地面平面。物理指尖面遵循模型的 YZ
     接触平面约定，因此测试块在 X 方向厚 6 mm，YZ 接触面为 25×25 mm。
@@ -261,7 +261,7 @@ def build_custom_grasp_spec(
     )
     if _validate_object_contact_model(object_contact_model) == "explicit":
         _add_tactile_object_pairs(scene, profile, object_material, friction_coefficient)
-    # 自研执行器是纯力矩源。位置预设应放在 qpos/控制器状态里，
+    # DM_Gripper 执行器是纯力矩源。位置预设应放在 qpos/控制器状态里，
     # 而零力矩是唯一安全的通用 keyframe 命令。
     scene.add_key(name="custom_open", ctrl=[0.0])
     scene.add_key(name="custom_closed", ctrl=[0.0])
@@ -279,7 +279,7 @@ def build_custom_grasp_model(
     friction_coefficient: float = 0.8,
     multiccd_enabled: bool = True,
 ):
-    """编译水平安装的自研夹爪抓取场景。"""
+    """编译水平安装的 DM_Gripper 抓取场景。"""
     return build_custom_grasp_spec(
         profile,
         cube_half_thickness=cube_half_thickness,

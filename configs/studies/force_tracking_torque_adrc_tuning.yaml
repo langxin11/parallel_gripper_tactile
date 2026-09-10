@@ -1,5 +1,5 @@
 name: force_tracking_torque_adrc_tuning
-profile: ../custom_parallel_gripper.yaml
+profile: ../dm_gripper.yaml
 tasks:
   - ../force_tracking/step.yaml
   - ../force_tracking/ramp.yaml

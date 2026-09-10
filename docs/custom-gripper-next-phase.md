@@ -1,12 +1,12 @@
-# 📌 自研夹爪配置基线与状态
+# 📌 DM_Gripper 配置基线与状态
 
-自研夹爪完全由 `configs/custom_parallel_gripper.yaml` 配置：MJCF 来源、法兰安装、MIT 限幅、
+DM_Gripper 完全由 `configs/dm_gripper.yaml` 配置：MJCF 来源、法兰安装、MIT 限幅、
 法向力控制器，以及 3×3 接触几何触觉布局。
 
 <pre><code class="language-bash">
-uv run pgt validate configs/custom_parallel_gripper.yaml
-uv run pgt run grasp --profile configs/custom_parallel_gripper.yaml
-uv run pgt view grasp --profile configs/custom_parallel_gripper.yaml
+uv run pgt validate configs/dm_gripper.yaml
+uv run pgt run grasp --profile configs/dm_gripper.yaml
+uv run pgt view grasp --profile configs/dm_gripper.yaml
 </code></pre>
 
 Pillars 使用等效接触参数 `solref="-1200 -10"` 与

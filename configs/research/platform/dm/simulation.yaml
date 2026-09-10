@@ -2,4 +2,4 @@
 # DM 仿真主链路：使用接触模型与 profile 作为力跟踪研究标准平台。
 family: dm
 backend: simulation
-profile: configs/custom_parallel_gripper.yaml
+profile: configs/dm_gripper.yaml

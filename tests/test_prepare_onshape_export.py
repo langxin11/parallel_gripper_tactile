@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_prepare_onshape_export_assigns_stable_taxel_names(tmp_path: Path) -> None:
     """后处理脚本为 Pillars geom 分配稳定的 taxel 命名。"""
-    source = ROOT / "assets/grippers/custom_parallel_gripper/parallel_gripper.xml"
+    source = ROOT / "assets/grippers/dm_gripper/parallel_gripper.xml"
     output = tmp_path / "prepared.xml"
     asset_tools.label_taxel_geoms(source, output)
 

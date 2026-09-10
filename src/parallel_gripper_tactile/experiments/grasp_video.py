@@ -1,4 +1,4 @@
-"""录制自研夹爪法向力抓取验收实验。"""
+"""录制 DM_Gripper 法向力抓取验收实验。"""
 
 from __future__ import annotations
 
@@ -114,7 +114,7 @@ def record_custom_grasp_video(
     control_period_s: float = 0.002,
     keep_frames: bool = False,
 ) -> bool:
-    """录制水平自研夹爪抓取视频，并返回仿真稳定性。"""
+    """录制水平 DM_Gripper 抓取视频，并返回仿真稳定性。"""
     if width <= 0 or height <= 0 or fps <= 0 or control_period_s <= 0:
         raise ValueError("width, height, fps, and control_period_s must be positive")
     profile = load_profile(profile_path)

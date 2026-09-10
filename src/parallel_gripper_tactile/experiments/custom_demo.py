@@ -1,4 +1,4 @@
-"""构建一个聚焦的自研夹爪触觉接触演示场景。"""
+"""构建一个聚焦的 DM_Gripper 触觉接触演示场景。"""
 
 from __future__ import annotations
 
@@ -10,7 +10,7 @@ import numpy as np
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_PROFILE = REPOSITORY_ROOT / "configs" / "custom_parallel_gripper.yaml"
+DEFAULT_PROFILE = REPOSITORY_ROOT / "configs" / "dm_gripper.yaml"
 CUBE_FREEJOINT = "cube_shear_freejoint"
 CUBE_MOCAP = "cube_shear_mocap"
 # 经典地面与背景复用 ``assets/scenes/grasp_world.xml`` 里的棋盘地面、skybox 渐变

@@ -6,8 +6,8 @@
 #let fmt-percent(v) = str(calc.round(v * 100, digits: 1)) + "%"
 #let fmt-n(v) = str(calc.round(v, digits: 3))
 
-#let friction-run = "/outputs/custom_parallel_gripper/friction-estimate/20260905T112622Z-60d6d822"
-#let schedule-run = "/outputs/custom_parallel_gripper/force-schedule/20260905T112627Z-cd1f662d"
+#let friction-run = "/outputs/dm_gripper/friction-estimate/20260905T112622Z-60d6d822"
+#let schedule-run = "/outputs/dm_gripper/force-schedule/20260905T112627Z-cd1f662d"
 #let fm = json(friction-run + "/metrics.json")
 #let sm = json(schedule-run + "/metrics.json")
 
@@ -60,7 +60,7 @@
 
 = 实验
 
-仿真基于自研平行夹爪（曲柄滑块传动，触觉阵列 5×5×2 taxel），控制周期 2 ms，NoSlip 迭代 5 次，真值摩擦系数 0.8。估计运行的产物目录与 git 提交如下（数值由编译时程序化读取）：
+仿真基于 DM_Gripper（曲柄滑块传动，触觉阵列 5×5×2 taxel），控制周期 2 ms，NoSlip 迭代 5 次，真值摩擦系数 0.8。估计运行的产物目录与 git 提交如下（数值由编译时程序化读取）：
 
 #run-header(friction-run, [friction-estimate])
 

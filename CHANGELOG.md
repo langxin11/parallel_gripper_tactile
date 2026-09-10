@@ -36,6 +36,8 @@
 
 ### 变更
 
+- 主仿真 profile 及其导纳、平面球碰撞派生 profile 分别更名为 `configs/dm_gripper*.yaml`；对应
+  profile 名和新实验产物目录改为 `dm_gripper*`。
 - pre-commit 的完整 pytest 门禁改用 `pytest-xdist` 自动确定 worker 数并行执行；CI 继续执行串行
   完整测试，测试选择与验收口径不变。
 - force-track runner 可直接接收同一份已校验冻结 profile，避免配置解析后再次读取原始文件；控制器切换
@@ -288,7 +290,7 @@
   力—刚度对比图
 - 新增 `stiff=(-2500,-15)` 显式接触 preset；默认批量研究改用 `medium/hard/stiff`，原
   `soft=(-250,-5)` 仅保留用于兼容和专项标定
-- `docs/custom-gripper-next-phase.md`：自研平行夹爪下一阶段实施路线图（Pillars 触觉反馈实验）
+- `docs/custom-gripper-next-phase.md`：DM_Gripper 下一阶段实施路线图（Pillars 触觉反馈实验）
 - `parallel_gripper_tactile.protocols`：统一的实验时序协议
   `DisturbanceProtocol`（含支撑释放、无支撑保持、切向扰动状态设置）
 - `parallel_gripper_tactile.video`：渲染级力箭头、像素保存与 MP4 编码共享工具
@@ -340,7 +342,7 @@
 
 - 触觉仿真泛化为多平行夹爪：类型化 profile（`configs/*.toml`）统一模型路径、执行器、
   控制范围、安装位姿与触觉阵列命名
-- 自研曲柄滑块平行夹爪（`custom_parallel_gripper`）接入，左右各 3×3 Pillars 触觉接触 geom
+- DM_Gripper（`custom_parallel_gripper`）接入，左右各 3×3 Pillars 触觉接触 geom
 - `pgt-check` 验证 CLI 与 Onshape 导出准备脚本（`prepare_onshape_export.py`）
 - 可比触觉传感器模型（taxel 力 / touch-grid / Pillars 接触）与切向扰动基准
 - Rerun 触觉仪表盘与对应工作流文档

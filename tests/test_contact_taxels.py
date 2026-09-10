@@ -27,7 +27,7 @@ def test_contact_force_sign_depends_on_contact_geom_order() -> None:
 
 def test_custom_gripper_reader_resolves_all_taxels_and_reports_zero_without_contact() -> None:
     """全部 taxel 命名可解析且无接触时输出全零网格。"""
-    profile = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    profile = load_profile(ROOT / "configs/dm_gripper.yaml")
     model = mujoco.MjModel.from_xml_path(str(profile.model_path))
     data = mujoco.MjData(model)
     mujoco.mj_forward(model, data)
@@ -42,7 +42,7 @@ def test_custom_gripper_reader_resolves_all_taxels_and_reports_zero_without_cont
 
 def test_prescribed_world_shear_maps_to_expected_local_components() -> None:
     """预设世界系剪切正确映射为左右指尖局部 Fx/Fy。"""
-    profile = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    profile = load_profile(ROOT / "configs/dm_gripper.yaml")
 
     def read_after_shear(axis: str):
         model = demo.build_demo_model(profile, ("left", 1, 1), 0.003, shear_axis=axis)

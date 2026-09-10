@@ -18,7 +18,7 @@ from parallel_gripper_tactile.config.profiles import DMAdmittanceControl, load_p
 from parallel_gripper_tactile.scenes.custom import GRIPPER_PREFIX, build_custom_grasp_model
 
 ROOT = Path(__file__).resolve().parents[1]
-PROFILE = ROOT / "configs/custom_parallel_gripper_admittance.yaml"
+PROFILE = ROOT / "configs/dm_gripper_admittance.yaml"
 
 
 def _controller():
@@ -258,7 +258,7 @@ def test_explicit_variant_injects_config_without_old_feedback_or_default_matrix(
     """显式变体注入可复现参数并关闭旧反馈，历史默认矩阵不增加条件。"""
     from parallel_gripper_tactile.experiments.force_tracking import CONTROLLER_VARIANTS
 
-    baseline = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    baseline = load_profile(ROOT / "configs/dm_gripper.yaml")
     configured = configure_force_controller(baseline, variant="admittance")
     assert configured.normal_force.admittance is not None
     assert configured.normal_force.kp == configured.normal_force.ki == 0.0

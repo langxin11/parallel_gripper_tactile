@@ -17,7 +17,7 @@ from parallel_gripper_tactile.runners import execute_friction_estimation
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PROFILE = ROOT / "configs/custom_parallel_gripper.yaml"
+PROFILE = ROOT / "configs/dm_gripper.yaml"
 TASK_ROOT = ROOT / "configs/friction_estimation"
 STANDARD_TASKS = tuple(
     TASK_ROOT / name

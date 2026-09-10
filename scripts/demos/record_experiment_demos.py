@@ -31,8 +31,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument(
         "--profile",
         type=Path,
-        default="configs/custom_parallel_gripper.yaml",
-        help="自研夹爪 profile 路径（默认 configs/custom_parallel_gripper.yaml）。",
+        default="configs/dm_gripper.yaml",
+        help="DM_Gripper profile 路径（默认 configs/dm_gripper.yaml）。",
     )
     parser.add_argument(
         "--ramp-task",

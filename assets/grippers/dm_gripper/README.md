@@ -26,37 +26,37 @@ base -> drive crank -> right link -> right finger -> base
 
 ```bash
 uv run -m mujoco.viewer \
-  --mjcf assets/grippers/custom_parallel_gripper/scene.xml
+  --mjcf assets/grippers/dm_gripper/scene.xml
 ```
 
 运行本模型的基础验证：
 
 ```bash
-uv run pgt validate configs/custom_parallel_gripper.yaml
+uv run pgt validate configs/dm_gripper.yaml
 ```
 
 运行项目级模型检查：
 
 ```bash
-uv run pgt validate configs/custom_parallel_gripper.yaml
+uv run pgt validate configs/dm_gripper.yaml
 ```
 
 以静态方块压住某个 Pillar，并在 Viewer 中查看 taxel site 坐标轴、接触点和三维接触力：
 
 ```bash
-uv run pgt view grasp --profile configs/custom_parallel_gripper.yaml
+uv run pgt view grasp --profile configs/dm_gripper.yaml
 ```
 
 无界面验证右侧对应单元的正压缩力：
 
 ```bash
-uv run pgt run grasp --profile configs/custom_parallel_gripper.yaml
+uv run pgt run grasp --profile configs/dm_gripper.yaml
 ```
 
 以受控世界系切向位移验证剪切通道（`y` 对应局部 `Fy`，`z` 对应局部 `Fx`）：
 
 ```bash
-uv run pgt compare contact --profile configs/custom_parallel_gripper.yaml
+uv run pgt compare contact --profile configs/dm_gripper.yaml
 ```
 
 切向测试使用“自由方块 + mocap weld”夹具提供规定运动；它用于确认剪切方向与通道映射，
@@ -198,8 +198,8 @@ Assembly 中的 `frame_left_taxel_00...22`、`frame_right_taxel_00...22` Mate Co
 `config.json` 中的 URL 必须指向正确的 Onshape workspace 和 Assembly 标签页。安装好 `onshape-to-robot[mujoco]` 并配置 Onshape 凭据后，在独立导出环境中执行：
 
 ```bash
-uv run onshape-to-robot assets/grippers/custom_parallel_gripper
-uv run onshape-to-robot-mujoco assets/grippers/custom_parallel_gripper
+uv run onshape-to-robot assets/grippers/dm_gripper
+uv run onshape-to-robot-mujoco assets/grippers/dm_gripper
 ```
 
 导出配置中的 `joint_properties` 使用移除 `dof_` 后的关节名。除 `gripper_drive` 外，四个被动关节都必须设置为 `"actuated": false`。

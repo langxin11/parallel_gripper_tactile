@@ -1,6 +1,6 @@
 # DMgripper 二阶导纳的最小可复现 Ramp 参数调优；不进入默认控制器比较矩阵。
 name: dm_admittance_tuning
-profile: ../custom_parallel_gripper_admittance.yaml
+profile: ../dm_gripper_admittance.yaml
 task: ../force_tracking/dm_admittance_ramp.yaml
 materials: [hard]
 seeds: {start: 0, count: 2}

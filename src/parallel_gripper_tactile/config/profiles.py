@@ -86,7 +86,7 @@ class MITControl(_FrozenModel):
 
 
 class CrankSliderGeometry(_FrozenModel):
-    """自研曲柄滑块夹爪的开度几何参数。"""
+    """DM_Gripper 的曲柄滑块开度几何参数。"""
 
     theta0_rad: FiniteFloat
     crank_radius_m: Annotated[FiniteFloat, Field(gt=0)]

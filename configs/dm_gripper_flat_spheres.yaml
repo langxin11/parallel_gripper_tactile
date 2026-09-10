@@ -1,9 +1,9 @@
 schema_version: 1
-name: custom_parallel_gripper_flat_spheres
+name: dm_gripper_flat_spheres
 
 model:
   # A/B 模型：可视 Pillar mesh 保持原样；碰撞体改为同一接触平面的 3×3 球阵列。
-  path: ../assets/grippers/custom_parallel_gripper/parallel_gripper_flat_sphere_collision.xml
+  path: ../assets/grippers/dm_gripper/parallel_gripper_flat_sphere_collision.xml
 
 control:
   mode: mit_torque

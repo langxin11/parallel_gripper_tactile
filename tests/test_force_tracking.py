@@ -198,7 +198,7 @@ def test_controller_variants_apply_reproducible_ablation_settings(
     position_limit_enabled: bool,
 ) -> None:
     """各控制器档位只修改对应的刚度估计与前馈开关。"""
-    source = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    source = load_profile(ROOT / "configs/dm_gripper.yaml")
     configured = configure_force_controller(  # type: ignore[arg-type]
         source, variant=variant, sensor_noise_seed=17
     )
@@ -218,7 +218,7 @@ def test_controller_variants_apply_reproducible_ablation_settings(
 
 def test_direct_torque_variant_keeps_mit_gains_for_approach_servo() -> None:
     """direct-torque 不在 profile 层清零 MIT kp/kd，接近阶段保持位置伺服。"""
-    source = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    source = load_profile(ROOT / "configs/dm_gripper.yaml")
     configured = configure_force_controller(source, variant="direct-torque")
 
     assert source.mit is not None
@@ -231,7 +231,7 @@ def test_direct_torque_variant_keeps_mit_gains_for_approach_servo() -> None:
 
 def test_adrc_variant_enables_ladrc_outer_loop_with_default_parameters() -> None:
     """adrc 变体注入默认 LADRC 参数，位置前馈置 0，力矩前馈与 MIT 增益不动。"""
-    source = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    source = load_profile(ROOT / "configs/dm_gripper.yaml")
     configured = configure_force_controller(source, variant="adrc")
 
     assert configured.normal_force is not None
@@ -260,7 +260,7 @@ def test_adrc_variant_enables_ladrc_outer_loop_with_default_parameters() -> None
 
 def test_adrc_torque_variant_enables_model_scheduled_direct_torque_loop() -> None:
     """adrc-torque 注入二阶 LADRC 参数，并保留显式名义模型前馈。"""
-    source = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    source = load_profile(ROOT / "configs/dm_gripper.yaml")
     configured = configure_force_controller(source, variant="adrc-torque")
 
     assert configured.normal_force is not None
@@ -278,7 +278,7 @@ def test_adrc_torque_variant_enables_model_scheduled_direct_torque_loop() -> Non
 
 def test_adrc_torque_variant_accepts_explicit_tuning_override() -> None:
     """调参 study 可注入二阶直接力矩 ADRC 参数，而不修改源 profile。"""
-    source = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    source = load_profile(ROOT / "configs/dm_gripper.yaml")
     override = TorqueAdrcControl(
         measurement_filter_cutoff_hz=60.0,
         controller_bandwidth_rad_s=40.0,
@@ -299,7 +299,7 @@ def test_adrc_torque_variant_accepts_explicit_tuning_override() -> None:
 
 def test_adrc_torque_td_variant_only_adds_reference_shaping() -> None:
     """TD 工程变体与论文式直接力矩 ADRC 仅参考整形配置不同。"""
-    source = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    source = load_profile(ROOT / "configs/dm_gripper.yaml")
     plain = configure_force_controller(source, variant="adrc-torque")
     shaped = configure_force_controller(source, variant="adrc-torque-td")
 
@@ -336,7 +336,7 @@ def test_force_reference_samples_derivatives_for_linear_and_smoothstep() -> None
 
 def test_controller_variant_rejects_unknown_name_and_negative_seed() -> None:
     """运行时消融覆盖必须通过名称和随机种子校验。"""
-    profile = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    profile = load_profile(ROOT / "configs/dm_gripper.yaml")
 
     with pytest.raises(ValueError, match="controller_variant"):
         configure_force_controller(profile, variant="unknown")  # type: ignore[arg-type]
@@ -351,7 +351,7 @@ def test_controller_variant_rejects_unknown_name_and_negative_seed() -> None:
 
 def test_stiffness_estimator_method_is_a_runtime_profile_override() -> None:
     """估计器对比可覆盖方法而不修改源 profile。"""
-    source = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    source = load_profile(ROOT / "configs/dm_gripper.yaml")
 
     configured = configure_force_controller(
         source,
@@ -401,7 +401,7 @@ def test_force_tracking_run_writes_dynamic_reference_trace(
     monkeypatch.setattr(force_tracking_module, "_plot_force_tracking", capture_plot)
 
     result = run_force_tracking(
-        ROOT / "configs/custom_parallel_gripper.yaml",
+        ROOT / "configs/dm_gripper.yaml",
         task=task,
         output_csv=output_csv,
         output_parquet=output_parquet,
@@ -441,9 +441,7 @@ def test_force_tracking_run_writes_dynamic_reference_trace(
     assert any(math.isnan(row["torque_adrc_measurement_n"]) for row in parquet_rows)
     assert all(row["stiffness_position_limited"] is False for row in parquet_rows)
     assert len(parquet_rows) == len(rows) < len(plotted_rows)
-    configured = configure_force_controller(
-        load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
-    )
+    configured = configure_force_controller(load_profile(ROOT / "configs/dm_gripper.yaml"))
     assert configured.mit is not None
     expected_metrics = _evaluate_tracking(
         plotted_rows,
@@ -475,7 +473,7 @@ def test_force_tracking_direct_torque_run_tracks_reference(tmp_path: Path) -> No
     output_csv = tmp_path / "direct_torque.csv"
 
     result = run_force_tracking(
-        ROOT / "configs/custom_parallel_gripper.yaml",
+        ROOT / "configs/dm_gripper.yaml",
         task=task,
         controller_variant="direct-torque",
         output_csv=output_csv,
@@ -517,7 +515,7 @@ def test_force_tracking_adrc_torque_run_writes_observer_diagnostics(
     output_csv = tmp_path / f"{controller_variant}.csv"
 
     result = run_force_tracking(
-        ROOT / "configs/custom_parallel_gripper.yaml",
+        ROOT / "configs/dm_gripper.yaml",
         task=task,
         controller_variant=controller_variant,  # type: ignore[arg-type]
         output_csv=output_csv,
@@ -555,7 +553,7 @@ def test_force_tracking_on_frame_receives_monotonic_snapshots() -> None:
             ),
         ),
     )
-    profile = ROOT / "configs/custom_parallel_gripper.yaml"
+    profile = ROOT / "configs/dm_gripper.yaml"
     baseline = run_force_tracking(profile, task=task)
     times: list[float] = []
     phases: list[str] = []

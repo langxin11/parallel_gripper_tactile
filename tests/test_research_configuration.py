@@ -100,7 +100,7 @@ def test_runtime_field_overrides_take_priority_and_reach_the_final_profile() -> 
 
 def test_controller_reconfiguration_clears_stale_algorithm_fields() -> None:
     """从 ADRC 切回 PID 时不会残留算法专用字段。"""
-    base = load_profile(REPOSITORY_ROOT / "configs/custom_parallel_gripper.yaml")
+    base = load_profile(REPOSITORY_ROOT / "configs/dm_gripper.yaml")
     adrc = configure_force_controller(base, variant="adrc-torque")
     pid = configure_force_controller(adrc, variant="pid-only")
 
@@ -122,7 +122,7 @@ def test_hydra_and_legacy_resolution_produce_the_same_effective_inputs() -> None
     ]
     resolved = resolve_research_run(resolved_mapping(_compose(overrides=overrides)))
     legacy_profile = configure_force_controller(
-        load_profile(REPOSITORY_ROOT / "configs/custom_parallel_gripper.yaml"),
+        load_profile(REPOSITORY_ROOT / "configs/dm_gripper.yaml"),
         variant="full",
         stiffness_estimator_method="window_linear",
         sensor_noise_seed=0,

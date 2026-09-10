@@ -24,7 +24,7 @@ PID、刚度估计及 ADRC 暂时保留在历史仿真实现中，没有全部�
 ```bash
 uv sync --all-groups
 uv run pgt run force-track \
-  --profile configs/custom_parallel_gripper_admittance.yaml \
+  --profile configs/dm_gripper_admittance.yaml \
   --task configs/force_tracking/dm_admittance.yaml \
   --controller-variant admittance
 ```

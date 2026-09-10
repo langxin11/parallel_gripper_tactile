@@ -115,7 +115,7 @@ def run_grasp(
         Literal["soft", "medium", "hard", "stiff"], typer.Option("--object-material")
     ] = "hard",
 ) -> None:
-    """运行自研夹爪抓取验收实验。"""
+    """运行 DM_Gripper 抓取验收实验。"""
     try:
         run = _run_directory(
             profile,
@@ -587,7 +587,7 @@ def view_grasp(
         Literal["soft", "medium", "hard", "stiff"], typer.Option("--object-material")
     ] = "hard",
 ) -> None:
-    """打开一个可交互的自研夹爪抓取场景。"""
+    """打开一个可交互的 DM_Gripper 抓取场景。"""
     try:
         model = build_custom_grasp_model(load_profile(profile), object_material=object_material)
         data = mujoco.MjData(model)

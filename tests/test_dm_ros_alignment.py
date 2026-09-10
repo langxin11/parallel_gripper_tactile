@@ -109,7 +109,7 @@ def test_ros_and_simulation_emit_equal_tracking_requests(periods, monkeypatch) -
     """两个真实适配路径对相同观测与复位产生一致的五字段 MIT 请求和积分状态。"""
     ros_config = Path(ros_module.__file__).resolve().parents[1] / "config/dm_force_tracking.yaml"
     parameters = yaml.safe_load(ros_config.read_text())["dm_force_tracking"]["ros__parameters"]
-    profile = load_profile(ROOT / "configs/custom_parallel_gripper_admittance.yaml")
+    profile = load_profile(ROOT / "configs/dm_gripper_admittance.yaml")
     simulator = DMAdmittanceController(_ReplayMotor(), profile.normal_force, profile.mit)
     node = _ROSReplay(parameters)
     assert simulator.command_config == node._command_config()

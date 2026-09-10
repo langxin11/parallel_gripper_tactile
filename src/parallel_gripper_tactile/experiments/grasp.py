@@ -1,7 +1,7 @@
 """验证无支撑保持与切向扰动抵抗能力。
 
 实验与 ``compare_tactile_models.py`` 使用相同的时序和默认 5 N、2 Hz 世界 Y 向
-扰动。自研夹爪的 ``base`` 在其 profile 的 mount 位姿处固定，代表未来的转接
+扰动。DM_Gripper 的 ``base`` 在其 profile 的 mount 位姿处固定，代表未来的转接
 法兰，而不修改 CAD 基础本体。
 """
 

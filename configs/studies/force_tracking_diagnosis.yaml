@@ -1,5 +1,5 @@
 name: force_tracking_diagnosis
-profile: ../custom_parallel_gripper.yaml
+profile: ../dm_gripper.yaml
 task: ../force_tracking/default_waypoints.yaml
 output_root: ../../outputs/studies
 
@@ -27,19 +27,19 @@ contact_models: [explicit, legacy]
 # original A/B endpoints; the middle three are the added causal controls.
 collision_geometry_models:
   - label: original-mesh-multiccd
-    model: ../../assets/grippers/custom_parallel_gripper/parallel_gripper_prepared.xml
+    model: ../../assets/grippers/dm_gripper/parallel_gripper_prepared.xml
     multiccd_enabled: true
   - label: height-spheres-multiccd
-    model: ../../assets/grippers/custom_parallel_gripper/parallel_gripper_height_sphere_collision.xml
+    model: ../../assets/grippers/dm_gripper/parallel_gripper_height_sphere_collision.xml
     multiccd_enabled: true
   - label: coplanar-mesh-multiccd
-    model: ../../assets/grippers/custom_parallel_gripper/parallel_gripper_coplanar_mesh_collision.xml
+    model: ../../assets/grippers/dm_gripper/parallel_gripper_coplanar_mesh_collision.xml
     multiccd_enabled: true
   - label: original-mesh-single-contact
-    model: ../../assets/grippers/custom_parallel_gripper/parallel_gripper_prepared.xml
+    model: ../../assets/grippers/dm_gripper/parallel_gripper_prepared.xml
     multiccd_enabled: false
   - label: coplanar-spheres-multiccd
-    model: ../../assets/grippers/custom_parallel_gripper/parallel_gripper_flat_sphere_collision.xml
+    model: ../../assets/grippers/dm_gripper/parallel_gripper_flat_sphere_collision.xml
     multiccd_enabled: true
 
 # Sequential high-load stability sweeps. Each phase changes only one value; once

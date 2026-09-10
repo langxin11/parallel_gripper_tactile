@@ -8,18 +8,18 @@ MuJoCo 二指平行夹爪触觉仿真：使用通过 schema 校验的 YAML profi
 ```bash
 uv sync --all-packages --locked
 uv run pgt validate configs/robotiq_2f85.yaml
-uv run pgt validate configs/custom_parallel_gripper.yaml
+uv run pgt validate configs/dm_gripper.yaml
 uv run pgt run demo --profile configs/robotiq_2f85.yaml
-uv run pgt run grasp --profile configs/custom_parallel_gripper.yaml
-uv run pgt run force-track --profile configs/custom_parallel_gripper.yaml --task configs/force_tracking/default_waypoints.yaml
-uv run pgt run force-schedule --profile configs/custom_parallel_gripper.yaml --task configs/force_scheduling/gravity_hold.yaml
-uv run pgt run force-schedule --profile configs/custom_parallel_gripper.yaml --task configs/force_scheduling/dynamic_filling.yaml
-uv run pgt run friction-estimate --profile configs/custom_parallel_gripper.yaml --task configs/friction_estimation/nominal_friction.yaml
+uv run pgt run grasp --profile configs/dm_gripper.yaml
+uv run pgt run force-track --profile configs/dm_gripper.yaml --task configs/force_tracking/default_waypoints.yaml
+uv run pgt run force-schedule --profile configs/dm_gripper.yaml --task configs/force_scheduling/gravity_hold.yaml
+uv run pgt run force-schedule --profile configs/dm_gripper.yaml --task configs/force_scheduling/dynamic_filling.yaml
+uv run pgt run friction-estimate --profile configs/dm_gripper.yaml --task configs/friction_estimation/nominal_friction.yaml
 uv run pgt run discrete-force --profile configs/robotiq_2f85.yaml --task configs/discrete_force/robotiq_delta_f_tick.yaml
-# 自研夹爪可选 soft / medium / hard / stiff 显式触觉接触 preset（默认 hard）
-uv run pgt run grasp --profile configs/custom_parallel_gripper.yaml --object-material soft
-uv run pgt run force-track --profile configs/custom_parallel_gripper.yaml --task configs/force_tracking/default_waypoints.yaml --object-material medium
-uv run pgt run force-track --profile configs/custom_parallel_gripper.yaml --task configs/force_tracking/default_waypoints.yaml --controller-variant full --object-material hard --sensor-noise-seed 0
+# DM_Gripper 可选 soft / medium / hard / stiff 显式触觉接触 preset（默认 hard）
+uv run pgt run grasp --profile configs/dm_gripper.yaml --object-material soft
+uv run pgt run force-track --profile configs/dm_gripper.yaml --task configs/force_tracking/default_waypoints.yaml --object-material medium
+uv run pgt run force-track --profile configs/dm_gripper.yaml --task configs/force_tracking/default_waypoints.yaml --controller-variant full --object-material hard --sensor-noise-seed 0
 ```
 
 Profile 仅使用 YAML。它们是不可变的 Pydantic v2 模型：未知字段、非法控制限幅、空/多文档输入、
@@ -138,9 +138,9 @@ Hydra 负责外层科研调用目录和组合溯源，现有 artifacts 继续管
 | `robotiq_2f85.yaml` | position | `force_sensor` |
 | `robotiq_2f85_box.yaml` | position | box 的 `force_sensor` |
 | `robotiq_2f85_touch_grid.yaml` | position | `touch_grid` |
-| `custom_parallel_gripper.yaml` | MIT 力矩 + 法向力外环 | `contact_geom` |
+| `dm_gripper.yaml` | MIT 力矩 + 法向力外环 | `contact_geom` |
 
-自研夹爪的 Pillars 有意使用等效软接触，而非独立的可变形硅胶体：
+DM_Gripper 的 Pillars 有意使用等效软接触，而非独立的可变形硅胶体：
 `solref="-1200 -10"`、`solimp="0.75 0.95 0.0025 0.5 2"`。当前仿真接触响应约为
 `1200 N/m`；产品量程换算只能作为设计背景，不能替代仓库模型参数。
 

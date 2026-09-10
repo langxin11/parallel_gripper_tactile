@@ -174,7 +174,7 @@ def test_second_order_torque_ladrc_observes_actual_limited_residual_input() -> N
 
 def test_mit_controller_clamps_position_velocity_and_torque() -> None:
     """MIT 控制器按 profile 限制 P/V/T 命令并向 motor 写入力矩。"""
-    profile = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    profile = load_profile(ROOT / "configs/dm_gripper.yaml")
     model = mujoco.MjModel.from_xml_path(str(profile.model_path))
     data = mujoco.MjData(model)
     controller = MITTorqueController.from_profile(model, profile)
@@ -200,7 +200,7 @@ def test_mit_controller_clamps_position_velocity_and_torque() -> None:
 
 def test_mit_controller_roundtrips_damiao_protocol_quantization() -> None:
     """MIT 控制器先模拟达妙 CAN 帧量化，再计算输出轴力矩。"""
-    profile = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    profile = load_profile(ROOT / "configs/dm_gripper.yaml")
     model = mujoco.MjModel.from_xml_path(str(profile.model_path))
     data = mujoco.MjData(model)
     controller = MITTorqueController.from_profile(model, profile)
@@ -229,7 +229,7 @@ def test_mit_controller_roundtrips_damiao_protocol_quantization() -> None:
 
 def test_crank_slider_kinematics_matches_gripper_aperture_formula() -> None:
     """曲柄滑块模型复现夹爪开度公式和闭合雅可比。"""
-    profile = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    profile = load_profile(ROOT / "configs/dm_gripper.yaml")
 
     assert profile.normal_force is not None
     assert profile.normal_force.geometry is not None
@@ -242,7 +242,7 @@ def test_crank_slider_kinematics_matches_gripper_aperture_formula() -> None:
 
 def test_contact_stiffness_estimator_tracks_force_over_closure() -> None:
     """接触刚度估计器用总闭合行程上的 dF/dc 样本更新。"""
-    profile = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    profile = load_profile(ROOT / "configs/dm_gripper.yaml")
 
     assert profile.normal_force is not None
     assert profile.normal_force.geometry is not None
@@ -267,7 +267,7 @@ def test_contact_stiffness_estimator_tracks_force_over_closure() -> None:
 
 def test_contact_stiffness_estimator_window_linear_uses_all_samples() -> None:
     """滑动窗口一次拟合用多个样本恢复线性接触刚度。"""
-    profile = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    profile = load_profile(ROOT / "configs/dm_gripper.yaml")
 
     assert profile.normal_force is not None
     assert profile.normal_force.geometry is not None
@@ -293,7 +293,7 @@ def test_contact_stiffness_estimator_window_linear_uses_all_samples() -> None:
 
 def test_contact_stiffness_estimator_window_quadratic_returns_current_slope() -> None:
     """滑动窗口二次拟合返回当前闭合量处的局部导数。"""
-    profile = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    profile = load_profile(ROOT / "configs/dm_gripper.yaml")
 
     assert profile.normal_force is not None
     assert profile.normal_force.geometry is not None
@@ -324,7 +324,7 @@ def test_contact_stiffness_estimator_window_quadratic_returns_current_slope() ->
 
 def test_contact_stiffness_estimator_window_keeps_last_estimate_for_invalid_fit() -> None:
     """样本不足或闭合/力跨度不足时，窗口估计保持上次结果。"""
-    profile = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    profile = load_profile(ROOT / "configs/dm_gripper.yaml")
 
     assert profile.normal_force is not None
     assert profile.normal_force.geometry is not None
@@ -345,7 +345,7 @@ def test_contact_stiffness_estimator_window_keeps_last_estimate_for_invalid_fit(
 
 def test_normal_force_controller_switches_after_bilateral_contact() -> None:
     """双侧接触确认后 simple-pid 外环接管，并在完全脱离后恢复接近。"""
-    profile = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    profile = load_profile(ROOT / "configs/dm_gripper.yaml")
     model = mujoco.MjModel.from_xml_path(str(profile.model_path))
     data = mujoco.MjData(model)
     controller = NormalForceController.from_profile(model, profile)
@@ -400,7 +400,7 @@ def test_normal_force_controller_switches_after_bilateral_contact() -> None:
 
 def test_total_force_semantics_preserves_legacy_measurement_and_feedforward() -> None:
     """旧总力语义使用双侧和，并以 ``F_sum / 2`` 映射总闭合雅可比。"""
-    profile = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    profile = load_profile(ROOT / "configs/dm_gripper.yaml")
     model = mujoco.MjModel.from_xml_path(str(profile.model_path))
     data = mujoco.MjData(model)
     controller = NormalForceController.from_profile(model, profile, force_semantics="total")
@@ -425,7 +425,7 @@ def test_total_force_semantics_preserves_legacy_measurement_and_feedforward() ->
 
 def test_normal_force_controller_exposes_force_tracking_interface() -> None:
     """统一 step 接口可供 force tracking 任务替换不同控制器实现。"""
-    profile = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    profile = load_profile(ROOT / "configs/dm_gripper.yaml")
     model = mujoco.MjModel.from_xml_path(str(profile.model_path))
     data = mujoco.MjData(model)
     controller = NormalForceController.from_profile(model, profile)
@@ -462,7 +462,7 @@ def test_damiao_gain_quantization_roundtrips_exact_zero() -> None:
 
 def test_mit_controller_gain_overrides_act_for_one_command_only() -> None:
     """单周期 kp/kd 覆盖参与达妙量化，之后的命令仍沿用 profile 增益。"""
-    profile = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    profile = load_profile(ROOT / "configs/dm_gripper.yaml")
     model = mujoco.MjModel.from_xml_path(str(profile.model_path))
     data = mujoco.MjData(model)
     controller = MITTorqueController.from_profile(model, profile)
@@ -509,7 +509,7 @@ def _profile_with_torque_feedback_gain(profile: GripperProfile, value: float) ->
 
 def test_normal_force_controller_direct_torque_branch_assembles_feedforward() -> None:
     """torque_feedback_gain>0 时跟踪阶段走直接力矩路径，位置修正与 MIT kp/kd 置零。"""
-    profile = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    profile = load_profile(ROOT / "configs/dm_gripper.yaml")
     direct_profile = _profile_with_torque_feedback_gain(profile, 1.0)
     model = mujoco.MjModel.from_xml_path(str(profile.model_path))
     data = mujoco.MjData(model)
@@ -548,7 +548,7 @@ def test_normal_force_controller_direct_torque_branch_assembles_feedforward() ->
 
 def test_default_torque_feedback_gain_keeps_positional_tracking_path() -> None:
     """torque_feedback_gain 默认 0；显式 0.0 与未设置的输出完全一致。"""
-    source = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    source = load_profile(ROOT / "configs/dm_gripper.yaml")
     zeroed_profile = _profile_with_torque_feedback_gain(source, 0.0)
     model = mujoco.MjModel.from_xml_path(str(source.model_path))
     default_controller = NormalForceController.from_profile(model, source)
@@ -587,7 +587,7 @@ def test_default_torque_feedback_gain_keeps_positional_tracking_path() -> None:
 
 def test_stiffness_position_limit_bounds_pid_increment_without_position_feedforward() -> None:
     """刚度感知变体限制 PID 周期增量，并保留机构力矩前馈。"""
-    source = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    source = load_profile(ROOT / "configs/dm_gripper.yaml")
     profile = configure_force_controller(source, variant="pid-stiffness-limit")
     model = mujoco.MjModel.from_xml_path(str(source.model_path))
     data = mujoco.MjData(model)
@@ -660,7 +660,7 @@ _ADRC_TEST_CONFIG = AdrcControl(
 
 def test_normal_force_controller_torque_adrc_bypasses_mit_impedance() -> None:
     """二阶直接力矩 ADRC 在跟踪阶段旁路 MIT kp/kd 并输出完整诊断量。"""
-    source = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    source = load_profile(ROOT / "configs/dm_gripper.yaml")
     torque_adrc_profile = _profile_with_torque_adrc(source, TorqueAdrcControl())
     model = mujoco.MjModel.from_xml_path(str(source.model_path))
     data = mujoco.MjData(model)
@@ -696,7 +696,7 @@ def test_normal_force_controller_torque_adrc_bypasses_mit_impedance() -> None:
 
 def test_torque_adrc_measurement_uses_independent_light_filter() -> None:
     """ADRC 测量通道应抑制原始尖峰，但比公共 20 Hz 通道保留更多带宽。"""
-    source = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    source = load_profile(ROOT / "configs/dm_gripper.yaml")
     torque_adrc_profile = _profile_with_torque_adrc(source, TorqueAdrcControl())
     model = mujoco.MjModel.from_xml_path(str(source.model_path))
     data = mujoco.MjData(model)
@@ -726,7 +726,7 @@ def test_torque_adrc_measurement_uses_independent_light_filter() -> None:
 
 def test_normal_force_controller_adrc_branch_integrates_velocity_into_adjustment() -> None:
     """adrc 分支：LESO 闭合速度裁剪后积分进位置修正，MIT kp/kd 不被覆盖。"""
-    source = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    source = load_profile(ROOT / "configs/dm_gripper.yaml")
     adrc_profile = _profile_with_adrc(source, _ADRC_TEST_CONFIG)
     model = mujoco.MjModel.from_xml_path(str(source.model_path))
     data = mujoco.MjData(model)
@@ -797,7 +797,7 @@ def test_normal_force_controller_adrc_branch_integrates_velocity_into_adjustment
 
 def test_normal_force_controller_resets_adrc_state_on_release_and_recontact() -> None:
     """释放退出跟踪与重新确认接触都会把 LADRC 状态复位回跟踪起点。"""
-    source = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    source = load_profile(ROOT / "configs/dm_gripper.yaml")
     adrc_profile = _profile_with_adrc(source, _ADRC_TEST_CONFIG)
     model = mujoco.MjModel.from_xml_path(str(source.model_path))
     data = mujoco.MjData(model)
@@ -851,7 +851,7 @@ def test_normal_force_controller_resets_adrc_state_on_release_and_recontact() ->
 
 def test_adrc_none_keeps_pid_tracking_path() -> None:
     """adrc=None（默认与显式置空）时跟踪输出仍走原 PID 路径且完全一致。"""
-    source = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    source = load_profile(ROOT / "configs/dm_gripper.yaml")
     assert source.normal_force is not None
     assert source.normal_force.adrc is None
     explicit_none_profile = _profile_with_adrc(source, None)
@@ -892,7 +892,7 @@ def test_adrc_none_keeps_pid_tracking_path() -> None:
 
 def test_adrc_and_direct_torque_are_mutually_exclusive() -> None:
     """adrc 与 torque_feedback_gain>0 同时启用时，控制器构造直接拒绝。"""
-    source = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    source = load_profile(ROOT / "configs/dm_gripper.yaml")
     assert source.normal_force is not None
     force = source.normal_force.model_copy(
         update={"adrc": _ADRC_TEST_CONFIG, "torque_feedback_gain": 1.0}
@@ -908,7 +908,7 @@ def test_adrc_and_direct_torque_are_mutually_exclusive() -> None:
 
 def test_torque_adrc_rejects_other_outer_loops_and_missing_stiffness() -> None:
     """二阶直接力矩 ADRC 要求独占外环，并依赖启用的刚度估计。"""
-    source = load_profile(ROOT / "configs/custom_parallel_gripper.yaml")
+    source = load_profile(ROOT / "configs/dm_gripper.yaml")
     assert source.normal_force is not None
     assert source.normal_force.stiffness is not None
     model = mujoco.MjModel.from_xml_path(str(source.model_path))

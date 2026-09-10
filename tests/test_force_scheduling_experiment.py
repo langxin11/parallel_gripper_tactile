@@ -19,7 +19,7 @@ from parallel_gripper_tactile.runners import execute_force_scheduling
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PROFILE = ROOT / "configs/custom_parallel_gripper.yaml"
+PROFILE = ROOT / "configs/dm_gripper.yaml"
 GRAVITY_TASK = ROOT / "configs/force_scheduling/gravity_hold.yaml"
 FILLING_TASK = ROOT / "configs/force_scheduling/dynamic_filling.yaml"
 

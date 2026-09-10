@@ -25,11 +25,11 @@ Onshape to Robot 可将 `dof_gripper_drive` 导出为 position actuator；项目
 uv run pgt assets prepare-onshape RAW.xml PREPARED.xml
 </code></pre>
 
-把 `configs/custom_parallel_gripper.yaml` 指向整理后的资产，然后执行：
+把 `configs/dm_gripper.yaml` 指向整理后的资产，然后执行：
 
 <pre><code class="language-bash">
-uv run pgt validate configs/custom_parallel_gripper.yaml
-uv run pgt view grasp --profile configs/custom_parallel_gripper.yaml
+uv run pgt validate configs/dm_gripper.yaml
+uv run pgt view grasp --profile configs/dm_gripper.yaml
 </code></pre>
 
 该整理命令保留模型几何，只赋予接触几何触觉读取器所需的稳定

@@ -15,7 +15,7 @@
 
 <pre><code class="language-bash">
 uv run pgt run force-schedule \
-  --profile configs/custom_parallel_gripper.yaml \
+  --profile configs/dm_gripper.yaml \
   --task configs/force_scheduling/gravity_hold.yaml
 </code></pre>
 
@@ -23,7 +23,7 @@ uv run pgt run force-schedule \
 
 <pre><code class="language-bash">
 uv run pgt run force-schedule \
-  --profile configs/custom_parallel_gripper.yaml \
+  --profile configs/dm_gripper.yaml \
   --task configs/force_scheduling/dynamic_filling.yaml
 </code></pre>
 
@@ -77,7 +77,7 @@ solver:
 每次运行写入独占目录：
 
 ```text
-outputs/custom_parallel_gripper/force-schedule/<UTC timestamp>-<id>/
+outputs/dm_gripper/force-schedule/<UTC timestamp>-<id>/
 ├── manifest.json
 ├── profile.yaml
 ├── task.yaml
@@ -101,7 +101,7 @@ outputs/custom_parallel_gripper/force-schedule/<UTC timestamp>-<id>/
 
 ## 当前验证结果
 
-在默认自研夹爪 profile、50 g 方块、`hard` 接触和 `μ=0.8` 下，当前标准任务结果为：
+在默认 DM_Gripper profile、50 g 方块、`hard` 接触和 `μ=0.8` 下，当前标准任务结果为：
 
 | 任务 | 力跟踪 RMSE | 最大切向位移 | 最终目标力 |
 | --- | ---: | ---: | ---: |

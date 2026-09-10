@@ -49,11 +49,11 @@ run 的路径后重新编译即可。插图不直接引用 `outputs/`：把所�
 资产固定、不随 `pgt runs clean` 丢失。若产物不存在，先重跑对应实验：
 
 ```bash
-uv run pgt run friction-estimate --profile configs/custom_parallel_gripper.yaml --task configs/friction_estimation/nominal_friction.yaml
-uv run pgt run force-schedule --profile configs/custom_parallel_gripper.yaml --task configs/force_scheduling/dynamic_filling.yaml
+uv run pgt run friction-estimate --profile configs/dm_gripper.yaml --task configs/friction_estimation/nominal_friction.yaml
+uv run pgt run force-schedule --profile configs/dm_gripper.yaml --task configs/force_scheduling/dynamic_filling.yaml
 
-cp outputs/custom_parallel_gripper/friction-estimate/<run>/plot.pdf reports/figures/friction_estimate.pdf
-cp outputs/custom_parallel_gripper/force-schedule/<run>/plot.pdf reports/figures/force_schedule.pdf
+cp outputs/dm_gripper/friction-estimate/<run>/plot.pdf reports/figures/friction_estimate.pdf
+cp outputs/dm_gripper/force-schedule/<run>/plot.pdf reports/figures/force_schedule.pdf
 ```
 
 ## 模板能力速览

@@ -54,7 +54,7 @@
 
 ```bash
 uv run pgt run friction-estimate \
-  --profile configs/custom_parallel_gripper.yaml \
+  --profile configs/dm_gripper.yaml \
   --task configs/friction_estimation/hardware_scale_nominal.yaml
 ```
 

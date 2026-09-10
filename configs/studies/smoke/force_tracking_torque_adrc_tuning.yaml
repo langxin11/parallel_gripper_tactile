@@ -1,6 +1,6 @@
 # 仅用于新旧入口、产物链路和两阶段谱系验证；不替代正式候选矩阵。
 name: force_tracking_torque_adrc_tuning_smoke
-profile: ../../custom_parallel_gripper.yaml
+profile: ../../dm_gripper.yaml
 tasks:
   - ../../force_tracking/step.yaml
   - ../../force_tracking/ramp.yaml

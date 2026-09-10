@@ -14,7 +14,7 @@ nav = [
     { "8. 控制算法对比与消融" = "control-comparison-ablation.md" },
   ] },
   { "工程基线" = [
-    { "自研夹爪配置基线与状态" = "custom-gripper-next-phase.md" },
+    { "DM_Gripper 配置基线与状态" = "custom-gripper-next-phase.md" },
     { "项目架构" = "architecture.md" },
     { "纯 Python 真机联调计划" = "python-hardware-roadmap.md" },
     { "常用工作流" = "workflows.md" },

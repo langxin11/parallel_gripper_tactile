@@ -44,7 +44,7 @@ def test_execute_force_tracking_writes_complete_run_artifacts(tmp_path: Path, mo
         return result
 
     monkeypatch.setattr(force_tracking, "run_force_tracking", fake_run)
-    profile = ROOT / "configs" / "custom_parallel_gripper.yaml"
+    profile = ROOT / "configs" / "dm_gripper.yaml"
     task = ROOT / "configs" / "force_tracking" / "default_waypoints.yaml"
     run, returned = force_tracking.execute_force_tracking(
         profile=profile,
