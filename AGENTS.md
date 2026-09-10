@@ -54,11 +54,12 @@ MuJoCo 平行夹爪触觉仿真与力控实验库。核心链路：YAML profile 
 ```bash
 uv run ruff check .            # 环境缓存异常时：uv run ruff check --no-cache .
 uv run ruff format --check .
-uv run pytest                  # CI 与 pre-commit 均为裸 pytest；
-                               # 本地全局 pytest 插件干扰时，可加 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 隔离
+uv run pytest                  # CI 使用裸 pytest；本地全局 pytest 插件干扰时，
+                               # 可加 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 隔离
 ```
 
-24 逻辑核开发机可用 `uv run pytest -n 24` 加速全量反馈；按改动模块开发时使用
+pre-commit 使用 `uv run pytest -n auto` 执行并行完整测试。24 逻辑核开发机可用
+`uv run pytest -n 24` 加速全量反馈；按改动模块开发时使用
 `uv run python scripts/test_changed.py`。`--lf` 仅用于失败重跑，不能替代上述裸 pytest 门禁。
 
 pre-commit 会在每次 `git commit` 自动执行以上三项（含全量 pytest）。改完代码先自查再提交，

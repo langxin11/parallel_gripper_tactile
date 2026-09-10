@@ -1,18 +1,21 @@
 # 测试策略
 
-本仓库把提交门禁和开发反馈分开：CI 与 pre-commit 始终执行裸 `uv run pytest`，开发者可按
-机器资源选择并行全量或增量测试。任何快速入口都不减少最终提交门禁的物理场景、摩擦标准场景和
-科研结论断言。
+本仓库把提交门禁和开发反馈分开：CI 执行裸 `uv run pytest`，pre-commit 执行
+`uv run pytest -n auto`，开发者也可按改动范围选择增量测试。串行与并行门禁都运行完整测试集，
+不减少物理场景、摩擦标准场景和科研结论断言。
 
 ## 全量测试
 
-提交前的权威命令为：
+CI 的串行权威命令为：
 
 ```bash
 uv run ruff check .
 uv run ruff format --check .
 uv run pytest
 ```
+
+pre-commit 使用 `uv run pytest -n auto` 运行同一完整测试集，由 `pytest-xdist` 根据当前机器自动
+确定 worker 数，避免把开发机的逻辑核数写死到共享配置。
 
 在本仓库当前 24 逻辑核开发机上，实测推荐的并行全量命令为：
 
@@ -71,7 +74,7 @@ uv run python scripts/test_changed.py packages/dm_grasp_core/src/dm_grasp_core/c
 映射规则位于 `scripts/test_changed.py` 顶部：测试文件映射到自身，workspace 包映射到本包测试目录，
 主包和研究脚本先按同名测试前缀选择，并为控制、感知、场景、仿真和可视化补充显式跨模块映射。
 测试基础设施、CI 配置、未映射代码、配置或资产改动会保守回退全量测试；纯文档改动不运行 pytest。
-这套入口只缩短开发反馈，不替代裸 pytest 提交门禁。
+这套入口只缩短开发反馈，不替代 pre-commit 的并行完整测试或 CI 的串行完整测试。
 
 常用的直接模块命令如下：
 

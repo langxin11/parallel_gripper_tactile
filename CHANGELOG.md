@@ -21,6 +21,8 @@
 
 ### 变更
 
+- pre-commit 的完整 pytest 门禁改用 `pytest-xdist` 自动确定 worker 数并行执行；CI 继续执行串行
+  完整测试，测试选择与验收口径不变。
 - force-track runner 可直接接收同一份已校验冻结 profile，避免配置解析后再次读取原始文件；控制器切换
   会清除其他算法专用字段并重新执行完整 profile 与资源校验。控制器对比、消融和 Torque ADRC 调参
   实现迁入包内 protocol，原脚本保留兼容包装。

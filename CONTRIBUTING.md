@@ -15,8 +15,8 @@ uv sync --all-packages --all-groups --locked
 uv run pre-commit install
 ```
 
-安装后，每次 `git commit` 会自动执行 Ruff 检查、Ruff 格式检查和完整 pytest。需要手动对全部文件
-运行同一组门禁时执行：
+安装后，每次 `git commit` 会自动执行 Ruff 检查、Ruff 格式检查和并行完整 pytest。pytest worker
+数量由 `pytest-xdist` 按当前机器自动确定。需要手动对全部文件运行同一组门禁时执行：
 
 ```bash
 uv run pre-commit run --all-files
@@ -37,8 +37,9 @@ uv run python scripts/test_changed.py
 uv run pytest -n 24
 ```
 
-`uv run pytest --lf` 仅用于重跑上次失败，不是提交门禁。CI 与 pre-commit 仍执行裸
-`uv run pytest`，增量或并行运行不能替代提交前的权威全量结果。
+`uv run pytest --lf` 仅用于重跑上次失败，不是提交门禁。pre-commit 执行
+`uv run pytest -n auto`，CI 仍执行裸 `uv run pytest`；两者都运行完整测试集，增量运行不能替代
+提交前的权威全量结果。
 
 修改 `configs/research/`、`scripts/research/`、`research/` 编排层或 `studies/lifecycle.py` 时，至少额外
 验证配置组合、计划、生命周期状态／失败分类和 study 矩阵测试；`scripts/test_changed.py` 已包含对应
