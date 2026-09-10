@@ -1,0 +1,10 @@
+# @package execution
+# 仅做单次实验级别计划校验：输出 plan 与有效配置快照，不推进仿真。
+mode: plan
+output_root: ${pgt_repo:}/outputs/research
+viewer: false
+render_fps: 30.0
+realtime_factor: 1.0
+multiccd_enabled: true
+trace_sample_period_s: null
+trace_event_window_s: 0.2

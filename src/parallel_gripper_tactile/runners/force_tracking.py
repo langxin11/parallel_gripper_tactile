@@ -15,7 +15,13 @@ from ..experiments.force_tracking import (
     run_force_tracking,
 )
 from ..control import ForceSemantics
-from ..config.profiles import StiffnessEstimatorMethod, TorqueAdrcControl, load_profile
+from ..config.profiles import (
+    GripperProfile,
+    StiffnessEstimatorMethod,
+    TorqueAdrcControl,
+    load_profile,
+    validate_resolved_profile,
+)
 from ..artifacts import RunDirectory
 from ..scenes.custom import ObjectContactModel, ObjectMaterial
 
@@ -23,6 +29,7 @@ from ..scenes.custom import ObjectContactModel, ObjectMaterial
 def execute_force_tracking(
     *,
     profile: Path,
+    resolved_profile: GripperProfile | None = None,
     task_path: Path,
     tracking_task: ForceTrackingTask | None = None,
     output_root: Path = Path("outputs"),
@@ -45,12 +52,16 @@ def execute_force_tracking(
 ) -> tuple[RunDirectory, ForceTrackingResult]:
     """运行一次完整力跟踪，并返回其目录与结构化结果。"""
     task = tracking_task or ForceTrackingTask.load(task_path)
-    configured = configure_force_controller(
-        load_profile(profile),
-        variant=controller_variant,
-        stiffness_estimator_method=stiffness_estimator_method,
-        sensor_noise_seed=sensor_noise_seed,
-        torque_adrc_override=torque_adrc_override,
+    configured = (
+        validate_resolved_profile(resolved_profile)
+        if resolved_profile is not None
+        else configure_force_controller(
+            load_profile(profile),
+            variant=controller_variant,
+            stiffness_estimator_method=stiffness_estimator_method,
+            sensor_noise_seed=sensor_noise_seed,
+            torque_adrc_override=torque_adrc_override,
+        )
     )
     core_metadata = {}
     if controller_variant == "admittance":
@@ -153,7 +164,7 @@ def execute_force_tracking(
         plot_path = run.artifact_path("plot.png")
         plot_pdf_path = plot_path.with_suffix(".pdf")
         result = run_force_tracking(
-            profile,
+            configured,
             task=task,
             output_parquet=parquet_path,
             output_plot=plot_path,

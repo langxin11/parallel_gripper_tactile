@@ -17,6 +17,47 @@ FULL_SUITE_FILES = {
 }
 NON_CODE_PREFIXES = ("docs/", "reports/", "CHANGELOG.md", "AGENTS.md", "CONTRIBUTING.md")
 RELATED_PREFIXES = {
+    "configs/research/": (
+        "tests/test_research_configuration.py",
+        "tests/test_research_execution.py",
+        "tests/test_research_study.py",
+        "tests/test_study_lifecycle.py",
+    ),
+    "scripts/research/": (
+        "tests/test_research_configuration.py",
+        "tests/test_research_execution.py",
+        "tests/test_research_study.py",
+        "tests/test_study_lifecycle.py",
+    ),
+    "src/parallel_gripper_tactile/research/": (
+        "tests/test_research_configuration.py",
+        "tests/test_research_execution.py",
+        "tests/test_research_study.py",
+        "tests/test_study_lifecycle.py",
+    ),
+    "src/parallel_gripper_tactile/studies/lifecycle.py": (
+        "tests/test_study_lifecycle.py",
+        "tests/test_research_study.py",
+        "tests/test_force_tracking_ablation.py",
+        "tests/test_force_tracking_controller_comparison_script.py",
+        "tests/test_force_tracking_torque_adrc_tuning.py",
+    ),
+    "src/parallel_gripper_tactile/studies/protocols/": (
+        "tests/test_study_lifecycle.py",
+        "tests/test_research_study.py",
+        "tests/test_study_aggregation.py",
+        "tests/test_force_tracking_ablation.py",
+        "tests/test_force_tracking_controller_comparison_script.py",
+        "tests/test_force_tracking_torque_adrc_tuning.py",
+    ),
+    "configs/studies/force_tracking_torque_adrc_tuning.yaml": (
+        "tests/test_force_tracking_torque_adrc_tuning.py",
+        "tests/test_research_study.py",
+    ),
+    "configs/studies/smoke/force_tracking_torque_adrc_tuning.yaml": (
+        "tests/test_force_tracking_torque_adrc_tuning.py",
+        "tests/test_research_study.py",
+    ),
     "src/parallel_gripper_tactile/control/": (
         "tests/test_control.py",
         "tests/test_force_tracking.py",
@@ -108,7 +149,7 @@ def select_tests(paths: list[str]) -> tuple[str, ...] | None:
             if path.startswith(prefix):
                 selected.update(tests)
                 matched = True
-        if path.startswith(("src/", "scripts/")) and path.endswith(".py"):
+        if not matched and path.startswith(("src/", "scripts/")) and path.endswith(".py"):
             same_name_tests = _matching_root_tests(Path(path).stem)
             selected.update(same_name_tests)
             matched = matched or bool(same_name_tests)

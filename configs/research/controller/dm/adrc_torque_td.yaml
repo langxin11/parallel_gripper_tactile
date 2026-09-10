@@ -1,0 +1,14 @@
+# @package controller
+# 二阶直接力矩 ADRC（带 tracking differentiator），用于 TD 分支对比。
+family: dm
+name: adrc-torque-td
+torque_adrc:
+  equivalent_inertia_kg_m2: 0.0021617741125
+  input_gain_scale: 2.0
+  controller_bandwidth_rad_s: 60.0
+  observer_bandwidth_rad_s: 240.0
+  measurement_filter_cutoff_hz: 40.0
+  tracking_differentiator_bandwidth_rad_s: 180.0
+  min_input_gain_n_per_n_m_s2: 5000.0
+  max_input_gain_n_per_n_m_s2: 200000.0
+  max_torque_rate_n_m_s: 50.0

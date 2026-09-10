@@ -1,0 +1,22 @@
+# Hydra 单次研究入口，默认执行 DM 共享导纳链路（admittance）与 no-estimator 组合。
+defaults:
+  - platform: dm/admittance_simulation
+  - controller: dm/admittance
+  - estimator: none
+  - task: dm_admittance
+  - material: hard
+  - execution: run
+  - _self_
+
+schema_version: 1
+experiment: force_tracking
+seed: 0
+
+hydra:
+  job:
+    chdir: false
+  run:
+    dir: ${execution.output_root}/run/${now:%Y%m%dT%H%M%S%f}
+  sweep:
+    dir: ${execution.output_root}/multirun/${now:%Y%m%dT%H%M%S%f}
+    subdir: ${hydra.job.num}

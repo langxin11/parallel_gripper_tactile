@@ -40,6 +40,22 @@ uv run pytest -n 24
 `uv run pytest --lf` 仅用于重跑上次失败，不是提交门禁。CI 与 pre-commit 仍执行裸
 `uv run pytest`，增量或并行运行不能替代提交前的权威全量结果。
 
+修改 `configs/research/`、`scripts/research/`、`research/` 编排层或 `studies/lifecycle.py` 时，至少额外
+验证配置组合、计划、生命周期状态／失败分类和 study 矩阵测试；`scripts/test_changed.py` 已包含对应
+映射。需要手工冒烟时使用计划模式，避免把 Hydra
+的 `--cfg job --resolve` 误当作领域校验：
+
+```bash
+uv run python scripts/research/run.py execution=plan
+uv run python scripts/research/study.py --config-name force_tracking_ablation
+uv run python scripts/research/study.py --config-name force_tracking_torque_adrc_tuning_coarse
+```
+
+Hydra/OmegaConf 位于 `research` 依赖组，完整开发安装已包含该组。不要将 Hydra 引入共享控制核或
+硬件包，也不要用外层 Multirun 执行正式 study。新增或修改正式 study 时，领域 protocol 必须独占条件
+生成，计划和执行传递同一个 `StudyPlan`；不得把科学失败与 Python 异常混为同一失败字段，也不得绕过
+产物摘要或 coarse／confirm 谱系校验。
+
 ## 语言与风格要点
 
 - 中文说明文字用全角标点（`，。：；`）；行内代码、标识符、命令行与物理量用半角。

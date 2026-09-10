@@ -1,7 +1,8 @@
 # 🚀 常用工作流
 
-单次运行使用 `pgt`；需要固定条件矩阵、重复试验和聚合统计时使用 `scripts/experiments`。
-两类入口共享 Python runner 与产物格式。人工编写的 profile、task 与 study 配置均为 YAML，并在模型编译前完成校验。
+演示、查看和设备检查使用 `pgt`；科研组合、探索运行与已迁移的正式研究使用 `scripts/research`。
+尚未迁移的专项 study 继续使用 `scripts/experiments`。所有入口共享 Python runner 与产物格式，
+不会通过子进程调用 `pgt`。
 
 ## 单次运行与交互检查
 
@@ -82,7 +83,61 @@ uv run python scripts/experiments/robotiq_discrete_force.py \
 算法、trace 字段、验收口径和当前四档可达力见
 [Robotiq 2F-85 离散力控制](discrete-force-control.md)。
 
-## 多条件研究
+## Hydra 科研运行
+
+科研依赖随完整开发环境安装：
+
+<pre><code class="language-bash">
+uv sync --all-packages --all-groups --locked
+</code></pre>
+
+组合并执行一个确定的 DM 力跟踪实验：
+
+<pre><code class="language-bash">
+uv run python scripts/research/run.py \
+  --config-name dm_force_track \
+  controller=dm/adrc_torque \
+  estimator=window_linear \
+  task=ramp \
+  material=hard \
+  seed=0
+</code></pre>
+
+将 `execution=plan` 加入同一命令会执行完整领域校验、scene 编译并保存计划，但不推进仿真。
+DM 共享导纳使用 `--config-name dm_admittance`。探索性组合可使用原生 Multirun：
+
+<pre><code class="language-bash">
+uv run python scripts/research/run.py -m \
+  --config-name dm_force_track \
+  material=medium,hard,stiff \
+  seed=0,1,2
+</code></pre>
+
+正式控制器对比、PID 模块消融与 Torque ADRC 两阶段调参由 study 自身展开权威 YAML 中的矩阵；默认只生成计划，显式选择
+`study_execution=run` 才会执行：
+
+<pre><code class="language-bash">
+uv run python scripts/research/study.py \
+  --config-name force_tracking_controller_comparison
+uv run python scripts/research/study.py \
+  --config-name force_tracking_controller_comparison \
+  study_execution=run
+uv run python scripts/research/study.py \
+  --config-name force_tracking_ablation
+uv run python scripts/research/study.py \
+  --config-name force_tracking_ablation \
+  study_execution=run
+uv run python scripts/research/study.py \
+  --config-name force_tracking_torque_adrc_tuning_coarse
+uv run python scripts/research/study.py \
+  --config-name force_tracking_torque_adrc_tuning_confirm \
+  study.coarse_study_dir=/absolute/path/to/coarse-study
+</code></pre>
+
+study 入口拒绝外层 `-m`，从而保证计划、配对统计与实际执行只展开一次。配置组、覆盖优先级、列表
+替换、非法组合、路径与产物语义见 [Hydra 科研配置与实验编排](research-configuration.md)。
+
+## 多条件研究兼容入口
 
 控制器 × 材料 × 噪声种子的消融 protocol：
 
@@ -102,7 +157,8 @@ uv run python scripts/experiments/force_tracking_controller_comparison.py \
 </code></pre>
 
 默认矩阵为 6 个控制器变体 × 3 个任务 × 3 个正式接触 preset × 3 个 seed，共 162 个条件；其中包含
-四个 PID 系变体、`direct-torque` 与二阶直接力矩 `adrc-torque`。一阶位置式 `adrc` 因控制导向模型
+四个 PID 2×2 变体、`pid-stiffness-limit` 与二阶直接力矩 `adrc-torque`。`direct-torque` 和一阶位置式
+`adrc` 均保留为独立/历史复现入口，不参加当前默认正式对比；后者因控制导向模型
 阶次不匹配而保留为历史复现入口，不再参加默认正式对比。三个 preset 为
 `medium=(-650,-8)`、`hard=(-1200,-10)` 与 `stiff=(-2500,-15)`。原
 `soft=(-250,-5)` 不进入默认矩阵。study 完成后会同时输出 `summary.csv`、`summary.parquet`，以及适用时的
@@ -113,8 +169,9 @@ uv run python scripts/experiments/force_tracking_controller_comparison.py \
 刚度估计器对比展示相对 secant 的增量和力/刚度轨迹；因果诊断展示扫描变量—诊断指标曲线与有效轨迹叠加。
 所有 study 图同时输出 600 DPI PNG 和矢量 PDF。
 
-二阶直接力矩 ADRC 的测量轻滤波和控制/观测器带宽采用两阶段调参：粗扫先固定 `medium` 与一个 seed，
-确认阶段再在三种 preset 与三个 seed 上复验。确认阶段读取粗扫目录中的可行候选排名：
+二阶直接力矩 ADRC 的测量轻滤波和控制／观测器带宽采用两阶段调参：粗扫先固定 `medium` 与一个 seed，
+确认阶段再在三种 preset 与三个 seed 上复验。Hydra 正式入口见上节；以下旧脚本仅作为薄兼容包装，
+与正式入口调用同一包内 protocol：
 
 <pre><code class="language-bash">
 uv run python scripts/experiments/force_tracking_torque_adrc_tuning.py \
@@ -139,12 +196,16 @@ uv run python scripts/experiments/force_tracking_diagnosis.py \
 </code></pre>
 
 研究脚本直接调用 `parallel_gripper_tactile.runners.execute_force_tracking`，不会启动 CLI 子进程。
+控制器对比、PID 消融与 Torque ADRC 调参的旧脚本都是兼容包装；其权威 protocol 已迁入包内并由
+Hydra study 入口复用。
 每个条件生成独立 run。study 父目录同时保存人工输入 `study.yaml` 和路径、默认值均已解析的
 `study.resolved.json`。force-track run 同时保留 YAML 输入快照，并写入包含完整解析 profile、task 和实际
 运行时覆盖的 `effective_parameters.json`。时序数据默认以 Zstd 压缩的 `trace.parquet` 保存：普通控制器
 常规区段为 100 Hz，直接力矩 ADRC 为 250 Hz；阶段/控制状态/限幅状态变化以及 waypoint 前后 0.2 s
 保留完整控制频率。指标和图像使用未降采样数据。旧 CSV API 与历史 CSV 产物仍兼容读取。study 父目录另存 `study.yaml` 和逐次 summary；
-消融和控制器对比研究还生成 CSV 与 Parquet 两种聚合统计，控制器对比图统一登记到 `study_manifest.json`。
+消融、控制器对比和 Torque ADRC 研究生成相应 CSV／Parquet 聚合与研究专属图，并统一登记到
+`study_manifest.json`。manifest 还记录 `planned/running/partial/completed/failed` 状态、三类条件结果、
+科学配置哈希和产物摘要；`execution.recovery_source` 只生成可恢复性报告，本阶段不会自动续跑。
 
 动态目标力跟踪任务的配置、两阶段流程和指标解读见[动态目标力跟踪](force-tracking.md)。
 [Oracle 抓取目标力调度](force-scheduling.md)说明已知摩擦系数下的目标力调度基线。

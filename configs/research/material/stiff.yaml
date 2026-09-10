@@ -1,0 +1,3 @@
+# @package material
+# 中高刚度材料预设，用于测试对高刚度边界下的跟踪稳定性。
+name: stiff

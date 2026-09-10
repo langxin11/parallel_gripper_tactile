@@ -7,7 +7,23 @@
 
 ## [Unreleased]
 
+### 新增
+
+- 新增 Hydra 原生科研单次与正式 study 入口，以及按平台、控制器、估计器、任务、材料和研究方案组织的
+  可复用配置组；计划模式执行完整领域与资源校验但不推进仿真，单次入口支持原生串行 Multirun。
+- 新增科研调用的有效配置、组合选择/覆盖/来源、Git 状态和失败条件溯源；正式控制器对比与 PID 消融
+  复用各自唯一权威矩阵，并在调度前拒绝外层 Multirun。
+- 新增类型化 `StudyPlan`、条件结果和公共生命周期 manifest，区分
+  `planned/running/partial/completed/failed` 状态、科学验收失败、执行异常及聚合／绘图失败；登记产物
+  SHA-256，并提供不自动续跑的既有条件与可恢复性报告。
+- Torque ADRC coarse／confirm 两阶段调参迁入 Hydra 正式 study：保留 102 条 coarse 权威矩阵及动态
+  confirm 选择规则，confirm 严格验证 coarse 类型、阶段、科学配置哈希和排名摘要；旧实验脚本保留薄兼容入口。
+
 ### 变更
+
+- force-track runner 可直接接收同一份已校验冻结 profile，避免配置解析后再次读取原始文件；控制器切换
+  会清除其他算法专用字段并重新执行完整 profile 与资源校验。控制器对比、消融和 Torque ADRC 调参
+  实现迁入包内 protocol，原脚本保留兼容包装。
 
 - 7 个研究脚本的 `aggregate_rows` 手写聚合统一收敛到 `studies/aggregation.py` 的声明式
   polars 聚合层（列规格加 `aggregate_records` 解释器），三份逐字节相同的 `_transient_stats`

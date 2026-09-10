@@ -434,6 +434,38 @@ def _resolve_touch_grid_shape(profile: GripperProfile) -> GripperProfile:
     return profile.model_copy(update={"tactile": resolved_tactile})
 
 
+def validate_resolved_profile(profile: GripperProfile) -> GripperProfile:
+    """重新执行完整 schema 与资源校验，返回不可变的最终 profile。
+
+    该函数供组合配置和运行时控制器选择在应用覆盖后调用。它不会信任
+    ``model_copy(update=...)`` 的中间结果，而是重新走 Pydantic 校验，并再次检查
+    MJCF 文件与 ``touch_grid`` 布局。
+
+    Args:
+        profile: 已完成路径解析、可能包含运行时覆盖的 profile。
+
+    Returns:
+        经过完整领域与资源校验的最终 profile。
+
+    Raises:
+        FileNotFoundError: MJCF 文件不存在时抛出。
+        ValidationError: profile 字段或跨字段约束无效时抛出。
+        ProfileLoadError: ``touch_grid`` 资源不满足布局约束时抛出。
+    """
+    validated = GripperProfile.model_validate(profile.model_dump(mode="python"))
+    model_path = validated.model_path.resolve()
+    if not model_path.is_file():
+        raise FileNotFoundError(f"gripper MJCF does not exist: {model_path}")
+    if model_path != validated.model_path:
+        validated = GripperProfile.model_validate(
+            {
+                **validated.model_dump(mode="python"),
+                "model": {"path": model_path},
+            }
+        )
+    return _resolve_touch_grid_shape(validated)
+
+
 def load_profile(path: str | Path, *, repository_root: str | Path | None = None) -> GripperProfile:
     """加载、校验并解析路径的单个 YAML 夹爪 profile。
 
@@ -454,8 +486,13 @@ def load_profile(path: str | Path, *, repository_root: str | Path | None = None)
     resolved_model_path = resolved_model_path.resolve()
     if not resolved_model_path.is_file():
         raise FileNotFoundError(f"gripper MJCF does not exist: {resolved_model_path}")
-    resolved_model = profile.model.model_copy(update={"path": resolved_model_path})
-    return _resolve_touch_grid_shape(profile.model_copy(update={"model": resolved_model}))
+    resolved_profile = GripperProfile.model_validate(
+        {
+            **profile.model_dump(mode="python"),
+            "model": {"path": resolved_model_path},
+        }
+    )
+    return validate_resolved_profile(resolved_profile)
 
 
 __all__ = [
@@ -480,4 +517,5 @@ __all__ = [
     "TorqueAdrcControl",
     "ValidationError",
     "load_profile",
+    "validate_resolved_profile",
 ]

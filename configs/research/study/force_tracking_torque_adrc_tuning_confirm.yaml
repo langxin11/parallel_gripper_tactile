@@ -1,0 +1,7 @@
+# @package study
+# 两阶段调参第二阶段定义：confirm 阶段必须绑定粗扫产物目录以复验候选。
+kind: force_tracking_torque_adrc_tuning
+config: configs/studies/force_tracking_torque_adrc_tuning.yaml
+stage: confirm
+# 由命令行覆盖为已完成且通过谱系校验的 coarse 输出目录。
+coarse_study_dir: null

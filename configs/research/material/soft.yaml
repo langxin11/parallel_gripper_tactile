@@ -1,0 +1,3 @@
+# @package material
+# 低刚度材料预设，更多体现柔性接触过渡误差。
+name: soft

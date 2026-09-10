@@ -77,8 +77,8 @@ uv run pgt run force-track \
 默认为位置式力控：PID 位置修正与刚度位置前馈修正目标位置，模型力矩前馈进入 MIT `t_ff`。
 `--controller-variant pid-stiffness-limit` 保留 PID 和机构力矩前馈，但关闭刚度位置前馈；在线刚度只把
 `position_limit_force_rate_n_s·dt` 的允许预测力变化换算成每周期位置目标增量上限，并通过动态 PID
-输出边界抑制积分 windup。刚度安全系数由 `position_limit_stiffness_safety_factor` 配置。该变体是新增的
-独立实验入口，不替换历史 `pid-stiffness-ff`、`full` 或默认正式比较矩阵。
+输出边界抑制积分 windup。刚度安全系数由 `position_limit_stiffness_safety_factor` 配置。该变体已进入
+当前默认正式比较矩阵，与历史 `pid-stiffness-ff`、`full` 同时保留。
 若把 profile 字段 `control.force.torque_feedback_gain` 设为大于 0（`direct-torque` 控制器变体
 即取 1.0，可用 `--controller-variant direct-torque` 运行），跟踪阶段切换为直接力矩式对照：
 力误差直接进入 MIT 前馈力矩，PID 与刚度位置修正置零，MIT 位置环 kp/kd 逐周期覆盖为 0；
@@ -142,6 +142,21 @@ MIT 阻抗的位置环之外，控制导向模型与实际闭环阶次不匹配�
 study 扫描 `measurement_filter_cutoff_hz`、`ωc` 和 `ωo/ωc`，并拒绝滤波截止频率低于
 `ωo/(2π)` 的候选。粗扫后的候选必须在 Ramp、Mixed 的 RMSE 不超过当前基线 110%、力矩饱和不超过
 1% 的前提下，按 Step 超调、Step RMSE、Mixed RMSE 排序；随后在三种材料、三个 seed 上确认。
+
+正式计划与执行使用 Hydra study 入口；默认先生成计划，加入 `study_execution=run` 才推进仿真：
+
+```bash
+uv run python scripts/research/study.py \
+  --config-name force_tracking_torque_adrc_tuning_coarse
+uv run python scripts/research/study.py \
+  --config-name force_tracking_torque_adrc_tuning_confirm \
+  study.coarse_study_dir=/absolute/path/to/coarse-study
+```
+
+coarse 固定生成 102 条有序条件。confirm 会校验 coarse 的研究类型、阶段、科学配置哈希、完成状态、
+执行异常计数以及排名文件的 schema 与 SHA-256 摘要，再按可行排名选择候选；不能把其他配置或未完成
+coarse 的排名混入确认统计。旧 `scripts/experiments/force_tracking_torque_adrc_tuning.py` 仅保留为兼容
+入口，与 Hydra 调用同一个包内 protocol。
 
 若需要测试撤掉支撑后的真实夹持能力，可以把 `release_support_on_tracking` 设为 `true`。
 若只想先评估力控曲线本身，保持默认支撑更利于排除掉落和姿态变化的干扰。

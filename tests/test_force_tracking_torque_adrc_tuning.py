@@ -12,6 +12,9 @@ from parallel_gripper_tactile.studies.force_tracking_torque_adrc_tuning import (
     load_torque_adrc_tuning_config,
 )
 from parallel_gripper_tactile.studies.force_tracking_ablation import StudyConfigError
+from parallel_gripper_tactile.studies.protocols import (
+    force_tracking_torque_adrc_tuning as package_protocol,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -68,6 +71,15 @@ def test_tuning_config_rejects_unknown_fields(tmp_path: Path) -> None:
 
     with pytest.raises(StudyConfigError):
         load_torque_adrc_tuning_config(config_path)
+
+
+def test_legacy_script_is_a_thin_alias_of_package_protocol() -> None:
+    """旧入口直接暴露包内实现，不保留第二份矩阵或执行逻辑。"""
+    legacy = _protocol_module()
+
+    assert legacy.run_study is package_protocol.run_study  # type: ignore[attr-defined]
+    assert legacy.rank_candidates is package_protocol.rank_candidates  # type: ignore[attr-defined]
+    assert legacy._aggregate is package_protocol._aggregate  # type: ignore[attr-defined]
 
 
 def test_rank_candidates_prefers_lower_step_overshoot_with_continuous_constraints() -> None:

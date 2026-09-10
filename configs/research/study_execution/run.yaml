@@ -1,0 +1,5 @@
+# @package execution
+# 正式执行模式：逐条件跑完再回填 study manifest、汇总与绘图。
+mode: run
+output_root: ${pgt_repo:}/outputs/research/studies
+recovery_source: null

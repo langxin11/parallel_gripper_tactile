@@ -6,10 +6,11 @@
 2. [Onshape to Robot：曲柄滑块夹爪 MJCF 导出](onshape-export-upgrade.md)：确认 CAD 命名、闭环与导出验收；
 3. [曲柄滑块力控模型](crank-slider-force-control.md)：了解 `f_n`、`k_pair`、雅可比和限幅；
 4. [动态目标力跟踪](force-tracking.md)：运行两阶段基准并理解接触状态；
-5. [Oracle 抓取目标力调度](force-scheduling.md)：根据已知摩擦系数和切向载荷生成目标力；
-6. [微滑移探测与保守摩擦估计](friction-estimation.md)：盲估计摩擦下界并驱动目标力调度；
-7. [Robotiq 2F-85 离散力控制](discrete-force-control.md)：用 `ΔF_tick` 实现少动作、低振荡的整数控制；
-8. [控制算法对比与消融](control-comparison-ablation.md)：在一致任务下比较结果。
+5. [Hydra 科研配置与实验编排](research-configuration.md)：组合配置、审阅计划并执行正式研究；
+6. [Oracle 抓取目标力调度](force-scheduling.md)：根据已知摩擦系数和切向载荷生成目标力；
+7. [微滑移探测与保守摩擦估计](friction-estimation.md)：盲估计摩擦下界并驱动目标力调度；
+8. [Robotiq 2F-85 离散力控制](discrete-force-control.md)：用 `ΔF_tick` 实现少动作、低振荡的整数控制；
+9. [控制算法对比与消融](control-comparison-ablation.md)：在一致任务下比较结果。
 
 工程状态与电机/执行器基线见[自研夹爪配置基线与状态](custom-gripper-next-phase.md)。
 
@@ -27,6 +28,7 @@ uv run pgt run discrete-force --profile configs/robotiq_2f85.yaml --task configs
 </code></pre>
 
 参见[常用工作流](workflows.md)、[动态目标力跟踪](force-tracking.md)、
+[Hydra 科研配置与实验编排](research-configuration.md)、
 [Oracle 抓取目标力调度](force-scheduling.md)、
 [微滑移探测与保守摩擦估计](friction-estimation.md)、
 [Robotiq 2F-85 离散力控制](discrete-force-control.md)、

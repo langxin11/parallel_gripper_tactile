@@ -1,0 +1,3 @@
+# @package estimator
+# 二次拟合窗口估计器片段，用于刚度估计器消融对比。
+name: window_quadratic

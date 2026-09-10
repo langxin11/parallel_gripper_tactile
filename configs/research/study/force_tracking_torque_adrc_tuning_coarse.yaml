@@ -1,0 +1,6 @@
+# @package study
+# 两阶段调参第一阶段定义：coarse 阶段仅记录可行候选，用于后续确认阶段读取谱系。
+kind: force_tracking_torque_adrc_tuning
+config: configs/studies/force_tracking_torque_adrc_tuning.yaml
+stage: coarse
+coarse_study_dir: null

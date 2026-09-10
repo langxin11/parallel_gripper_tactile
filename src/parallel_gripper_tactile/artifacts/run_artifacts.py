@@ -140,6 +140,8 @@ def collect_dependency_versions(
         "PyYAML",
         "typer",
         "rich",
+        "hydra-core",
+        "omegaconf",
     ),
 ) -> dict[str, str]:
     """返回项目直接运行时依赖的已安装版本。"""
@@ -231,6 +233,9 @@ class RunDirectory:
             snapshot = run_path / _PROFILE_SNAPSHOT_NAME
             snapshot.write_bytes(profile_bytes)
             profile_hash = sha256(profile_bytes).hexdigest()
+            git_directory = (
+                Path(profile_source).resolve().parent if isinstance(profile_source, Path) else root
+            )
             manifest = RunManifest(
                 created_at=(now or datetime.now(UTC)).astimezone(UTC),
                 profile_name=profile_component,
@@ -238,7 +243,7 @@ class RunDirectory:
                 command=tuple(str(part) for part in command),
                 parameters=dict(parameters or {}),
                 source_profile_sha256=profile_hash,
-                git=collect_git_state(root),
+                git=collect_git_state(git_directory),
                 dependency_versions=collect_dependency_versions(),
                 artifacts=(_PROFILE_SNAPSHOT_NAME,),
             )

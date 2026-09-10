@@ -32,6 +32,7 @@ from ..config.profiles import (
     StiffnessEstimatorMethod,
     TorqueAdrcControl,
     load_profile,
+    validate_resolved_profile,
 )
 from ..scenes.custom import (
     CUBE_PREFIX,
@@ -136,13 +137,14 @@ def configure_force_controller(
             updates["stiffness"] = force.stiffness.model_copy(update={"enabled": False})
         if sensor_noise_seed is not None:
             updates["sensor_noise_seed"] = sensor_noise_seed
-        return profile.model_copy(
+        configured = profile.model_copy(
             update={
                 "control": profile.control.model_copy(
                     update={"force": force.model_copy(update=updates)}
                 )
             }
         )
+        return validate_resolved_profile(configured)
     if force.admittance is not None:
         raise ValueError("control.force.admittance requires --controller-variant admittance")
     stiffness = force.stiffness
@@ -214,9 +216,18 @@ def configure_force_controller(
         force_updates["torque_feedback_gain"] = 0.0
     if sensor_noise_seed is not None:
         force_updates["sensor_noise_seed"] = sensor_noise_seed
+    # 所有变体都显式清除不属于所选算法的专用参数，避免配置组切换后
+    # 残留旧 ADRC、导纳或直接力矩反馈设置。
+    if variant not in {"adrc-torque", "adrc-torque-td"}:
+        force_updates["torque_adrc"] = None
+    if variant != "adrc":
+        force_updates["adrc"] = None
+    if variant != "direct-torque":
+        force_updates["torque_feedback_gain"] = 0.0
+    force_updates["admittance"] = None
     configured_force = force.model_copy(update=force_updates)
     configured_control = profile.control.model_copy(update={"force": configured_force})
-    return profile.model_copy(update={"control": configured_control})
+    return validate_resolved_profile(profile.model_copy(update={"control": configured_control}))
 
 
 class ForceTrackingConfigError(ValueError):
@@ -569,6 +580,48 @@ def _validate_trace_sampling(
         raise ValueError("trace_sample_period_s must be an integer multiple of control_period_s")
 
 
+def validate_force_tracking_configuration(
+    profile: GripperProfile,
+    *,
+    task: ForceTrackingTask,
+    object_material: ObjectMaterial = "hard",
+    object_contact_model: ObjectContactModel = "explicit",
+    multiccd_enabled: bool = True,
+    trace_sample_period_s: float | None = None,
+    trace_event_window_s: float = 0.2,
+    viewer: bool = False,
+    render_fps: float = 30.0,
+    realtime_factor: float = 1.0,
+) -> mujoco.MjModel:
+    """在推进仿真前校验最终 profile、任务、资源和运行时选项。
+
+    返回已编译模型，使实际执行可以复用同一套校验；计划模式只调用本函数，
+    不创建 ``MjData``、不推进物理时钟，也不触发设备 I/O。
+    """
+    validated_profile = validate_resolved_profile(profile)
+    if validated_profile.normal_force is None or validated_profile.mit is None:
+        raise ValueError("force tracking requires MIT torque control with control.force")
+    if viewer and (render_fps <= 0 or realtime_factor <= 0):
+        raise ValueError("render_fps and realtime_factor must be positive when viewer is enabled")
+    model = build_custom_grasp_model(
+        validated_profile,
+        cube_half_thickness=DEFAULT_CUBE_HALF_THICKNESS,
+        cube_half_contact_side=DEFAULT_CUBE_HALF_CONTACT_SIDE,
+        cube_mass=DEFAULT_CUBE_MASS,
+        object_material=object_material,
+        object_contact_model=object_contact_model,
+        multiccd_enabled=multiccd_enabled,
+    )
+    if task.control_period_s + 1e-12 < float(model.opt.timestep):
+        raise ValueError("control_period_s must not be smaller than the physics timestep")
+    _validate_trace_sampling(
+        task,
+        trace_sample_period_s=trace_sample_period_s,
+        trace_event_window_s=trace_event_window_s,
+    )
+    return model
+
+
 def _downsample_force_tracking_rows(
     rows: list[dict[str, float | str]],
     *,
@@ -787,7 +840,7 @@ def _evaluate_step_transients(
 
 
 def run_force_tracking(
-    profile_path: Path = DEFAULT_PROFILE,
+    profile_path: Path | GripperProfile = DEFAULT_PROFILE,
     *,
     task: ForceTrackingTask,
     cube_half_thickness: float = DEFAULT_CUBE_HALF_THICKNESS,
@@ -816,12 +869,16 @@ def run_force_tracking(
     当传入 ``on_frame`` 时，仿真在每 ``1/render_fps`` 秒仿真时间回调一次
     最新采样行与模型/数据快照，供离屏录制脚本叠加实时曲线，不改变物理与产物。
     """
-    profile = configure_force_controller(
-        load_profile(profile_path),
-        variant=controller_variant,
-        stiffness_estimator_method=stiffness_estimator_method,
-        sensor_noise_seed=sensor_noise_seed,
-        torque_adrc_override=torque_adrc_override,
+    profile = (
+        validate_resolved_profile(profile_path)
+        if isinstance(profile_path, GripperProfile)
+        else configure_force_controller(
+            load_profile(profile_path),
+            variant=controller_variant,
+            stiffness_estimator_method=stiffness_estimator_method,
+            sensor_noise_seed=sensor_noise_seed,
+            torque_adrc_override=torque_adrc_override,
+        )
     )
     if profile.normal_force is None or profile.mit is None:
         raise ValueError("force tracking requires MIT torque control with control.force")

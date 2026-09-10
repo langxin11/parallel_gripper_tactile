@@ -50,6 +50,32 @@ def test_test_infrastructure_change_falls_back_to_full_suite() -> None:
     assert module.select_tests(["conftest.py"]) is None
 
 
+def test_research_entry_and_config_map_to_complete_research_tests() -> None:
+    """科研入口与组合配置改动应覆盖配置、执行和 study 三层测试。"""
+    module = _module()
+    expected = (
+        "tests/test_research_configuration.py",
+        "tests/test_research_execution.py",
+        "tests/test_research_study.py",
+        "tests/test_study_lifecycle.py",
+    )
+
+    assert module.select_tests(["scripts/research/run.py"]) == expected
+    assert module.select_tests(["configs/research/controller/dm/full.yaml"]) == expected
+
+
+def test_study_lifecycle_maps_to_all_migrated_protocol_tests() -> None:
+    """公共生命周期改动必须覆盖三类协议及生命周期专属测试。"""
+    module = _module()
+    selected = module.select_tests(["src/parallel_gripper_tactile/studies/lifecycle.py"])
+
+    assert selected is not None
+    assert "tests/test_study_lifecycle.py" in selected
+    assert "tests/test_force_tracking_ablation.py" in selected
+    assert "tests/test_force_tracking_controller_comparison_script.py" in selected
+    assert "tests/test_force_tracking_torque_adrc_tuning.py" in selected
+
+
 def test_documentation_only_change_needs_no_pytest() -> None:
     """纯文档改动不选择 pytest。"""
     module = _module()

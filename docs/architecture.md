@@ -1,17 +1,21 @@
 # 🏗️ 项目架构
 
-项目把“单次可复现实验”和“多条件科研 protocol”分开：`pgt` 面向交互式单次运行，
-`scripts/experiments` 面向批量研究；二者通过 Python runner 复用同一套实验实现和运行产物约定。
+项目把演示/检查、科研组合和正式研究分开：`pgt` 面向交互运行，`scripts/research/run.py` 面向
+Hydra 单次与探索性 Multirun，`scripts/research/study.py` 面向固定矩阵的正式研究；它们通过 Python
+runner 复用同一套实验实现和运行产物约定。尚未迁移的专项研究继续使用 `scripts/experiments`。
 
 ```mermaid
 flowchart TB
   subgraph Entry[入口层]
     CLI["pgt CLI<br/>单次运行与交互检查"]
-    Scripts["scripts/experiments<br/>批量研究 protocol"]
+    Research["scripts/research<br/>Hydra 科研入口"]
+    Scripts["scripts/experiments<br/>兼容与专项 protocol"]
   end
 
   subgraph Orchestration[编排层]
+    Resolve["research<br/>组合解析、计划与溯源"]
     Study["studies<br/>study schema 与条件矩阵"]
+    Lifecycle["studies/lifecycle<br/>状态、失败与产物账本"]
     Runner["runners<br/>一次运行的生命周期"]
     Artifacts["artifacts<br/>快照、manifest 与目录"]
   end
@@ -26,6 +30,11 @@ flowchart TB
   end
 
   CLI --> Runner
+  Research --> Resolve
+  Resolve --> Runner
+  Resolve --> Study
+  Study --> Lifecycle
+  Lifecycle --> Runner
   Scripts --> Study
   Scripts --> Runner
   Runner --> Artifacts
@@ -61,8 +70,10 @@ manifest。
 | `control.py` | 接触状态、力语义、MIT 命令与法向力外环 | 创建输出目录或解析 CLI |
 | `experiments/` | 定义阶段机、仿真循环、trace 字段和指标 | 组织跨条件批量研究 |
 | `runners/` | 管理一次运行的输入快照、experiment 调用、产物登记和失败保留 | 展示 Rich 表格或展开 study 矩阵 |
-| `studies/` | 定义可校验的研究配置与条件矩阵 | 通过子进程调用 CLI |
-| `scripts/experiments/` | 执行 study、聚合多次结果 | 复制单次实验物理逻辑 |
+| `research/` | 把 Hydra 组合解析为冻结领域配置，执行计划/运行并记录组合溯源 | 维护控制算法或设备 I/O |
+| `studies/` | 定义可校验的研究配置、唯一条件矩阵、公共生命周期与可复用 protocol | 通过子进程调用 CLI，或统一任务／控制器／统计公式 |
+| `scripts/research/` | 提供轻薄的 Hydra 原生科研入口 | 复制 runner、矩阵或实验物理逻辑 |
+| `scripts/experiments/` | 提供未迁移专项研究和旧入口兼容包装 | 复制单次实验物理逻辑 |
 | `cli/` | 参数适配、面向人的诊断和结果展示 | 作为包内模块的反向依赖 |
 
 ## 仿真循环所有权
@@ -85,12 +96,15 @@ Pillar 碰撞几何属于 asset/profile，`scenes.custom` 负责把它装配进�
 
 ```mermaid
 sequenceDiagram
-  participant E as CLI 或 study script
+  participant E as pgt 或 Hydra 科研入口
+  participant C as 组合解析与领域校验
   participant R as execute_force_tracking
   participant A as RunDirectory
   participant X as force_tracking experiment
 
-  E->>R: profile、task 与实验参数
+  E->>C: 配置组、preset 与运行时覆盖
+  C->>C: 插值、Pydantic、资源与兼容性校验
+  C->>R: 同一份冻结 profile、task 与运行参数
   R->>A: 创建独占目录并快照 profile
   R->>A: 快照 task
   R->>A: 写入解析后的有效参数与运行时覆盖
@@ -125,7 +139,8 @@ outputs/<profile>/<experiment>/<UTC timestamp>-<id>/
 `metrics.json` 与 `manifest.json` 继续使用 JSON。`manifest.json` 只列出实际生成并登记的文件，同时记录
 profile 哈希、Git 状态、依赖版本、参数和创建时间。失败的运行目录会保留输入快照，便于复现诊断。
 
-study 在单次运行之上增加一层父目录；每个条件仍使用相同 runner：
+Hydra 拥有科研调用的外层目录和组合溯源，`RunDirectory` 拥有内部实验产物。study 在单次运行之上
+增加一层父目录；每个条件仍使用相同 runner：
 
 ```text
 outputs/studies/<study>/<UTC timestamp>-<id>/
@@ -153,9 +168,17 @@ outputs/studies/<study>/<UTC timestamp>-<id>/
 study 的 `summary` 与（适用时的）`aggregate` 同时输出 CSV 和 Parquet；diagnosis study 只输出 summary，
 不生成 aggregate。单次 run 的 `plot.png` / `plot.pdf` 由 experiment 从本次完整频率 trace 生成，并根据
 Step、Ramp、Mixed/Smoothstep 任务分别突出瞬态、滞后和 waypoint 误差；跨 run 的统计图由
-`scripts/experiments` 在所有条件结束后从 `summary`、`aggregate` 和子 run trace 生成 600 DPI PNG 与
-矢量 PDF，并登记到 `study_manifest.json`。未建立 `track_reference` 的条件会在 summary 与 manifest 的 `failed_runs` 中保留，
+包内 study protocol 在所有条件结束后从 `summary`、`aggregate` 和子 run trace 生成 600 DPI PNG 与
+矢量 PDF，并登记到 `study_manifest.json`。公共生命周期持有同一个有序 `StudyPlan`，在执行前写入
+`running` 状态并在每个条件后更新账本；最终状态为 `partial`、`completed` 或 `failed`。正常完成但
+`passed=false` 的条件记录为 `scientific_failure`，形成不了 run 的 Python 异常记录为
+`execution_error`；聚合和绘图异常独立登记。未建立 `track_reference` 的正常条件会在 summary 与
+manifest 的 `failed_runs` 中保留，
 但不会参与同 seed 轨迹叠加。绘图层不推进 MuJoCo，也不重新计算控制命令。
+
+`StudyPlan` 的科学哈希覆盖领域配置、有序条件、控制器完整默认值、输入资源内容、材料／seed 及
+统计和阶段规则，同时排除时间、cwd 和输出目录。Torque ADRC confirm 额外把 coarse 科学哈希与排名
+产物摘要纳入谱系。恢复接口只读分析兼容 manifest 和可重试条件，当前不自动跳过 run 或跨配置聚合。
 
 ## 依赖规则
 
@@ -175,6 +198,11 @@ USB2CAN 协议、传输、状态刷新和当前夹爪部署边界；`packages/ro
 位置命令边界与 `pyrobotiqgripper==3.3.12` 薄适配。两包互不依赖，也不依赖仿真主包。
 `packages/papillarray_hardware` 是独立的商业触觉设备包，只负责 PTS v2.0 解析、同步串口读取和
 显式设备命令；实验运行时把它与所选夹爪后端组合，不让共享采集代码变成共享控制逻辑。
+纯 Python 真机实验由夹爪专属的组合包承载：`dmgripper_experiments` 可依赖
+`dmgripper_hardware`、`papillarray_hardware` 和 DM 控制核，但不得依赖 Robotiq 硬件或控制核。
+它只负责试验流程、设备调度、时间对齐与记录，不定义新的 MIT 或触觉控制公式。
+后续 `robotiq_experiments` 以相同层次单独组合 Robotiq 链路；两者不共享命令类型、
+控制状态机或调度周期。
 所有设备对象均要求显式打开或调用才发生 I/O，当前不会自动连接、激活或驱动执行器。
 `papillarray-probe` 只配置采样率并输出有限个触觉包；`dmgripper-state-probe` 只发送状态查询帧。
 两者用于分别核对数据链路，均不是闭环运行时、安全互锁或急停实现。
@@ -187,6 +215,12 @@ DM 核心命令经显式适配后才进入协议量化；Robotiq 硬件单步只
 3. scene 不读取控制目标，controller 不选择碰撞 asset；
 4. experiment 返回结构化结果，入口层决定如何展示；
 5. 任何新增结果文件必须先写入独占 run 目录，再登记到 manifest。
+6. 正式 study 的条件只由领域 protocol 展开；计划与执行必须共享同一个 `StudyPlan`，Hydra 外层不得再次展开。
+
+Hydra 与 OmegaConf 仅属于主包的 `research` 依赖组和科研编排层。共享 DM/Robotiq 控制核、硬件基础包
+和夹爪专属真机组合包均不依赖 Hydra 或仿真主包。科研配置解析可以读取、校验和编译模型，但不会创建
+设备连接或发送命令。完整的配置组、路径和目录所有权见
+[Hydra 科研配置与实验编排](research-configuration.md)。
 
 上述规则中可表达为 import 依赖的部分（分层方向、规则 1／3／4 的包边界、共享包独立性）由
 import-linter 契约机器检查：配置位于 `pyproject.toml` 的 `[tool.importlinter]`，可用

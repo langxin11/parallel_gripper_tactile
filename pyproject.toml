@@ -36,12 +36,17 @@ pgt = "parallel_gripper_tactile.cli:main"
 
 [dependency-groups]
 dev = [
+    { include-group = "research" },
     "import-linter>=2.15",
     "pre-commit>=4.6.2",
     "pytest>=7.0",
     "pytest-xdist>=3.8.0",
     "ruff>=0.15",
     "zensical>=0.0.56",
+]
+research = [
+    "hydra-core==1.3.6",
+    "omegaconf==2.3.1",
 ]
 
 [tool.pytest.ini_options]
@@ -64,6 +69,7 @@ root_packages = [
     "dm_grasp_core",
     "robotiq_grasp_core",
     "dmgripper_hardware",
+    "dmgripper_experiments",
     "robotiq_hardware",
     "papillarray_hardware",
 ]
@@ -72,7 +78,7 @@ root_packages = [
 name = "主包分层：入口 → study → runner → 实验 → 领域 → 共享"
 type = "layers"
 layers = [
-    "parallel_gripper_tactile.cli",
+    "parallel_gripper_tactile.cli : parallel_gripper_tactile.research",
     "parallel_gripper_tactile.studies",
     "parallel_gripper_tactile.runners",
     "parallel_gripper_tactile.experiments",
@@ -153,6 +159,16 @@ source_modules = ["papillarray_hardware"]
 forbidden_modules = [
     "parallel_gripper_tactile",
     "dmgripper_hardware",
+    "robotiq_hardware",
+]
+
+[[tool.importlinter.contracts]]
+name = "DM 真机实验组合包不依赖仿真主包与 Robotiq 链路"
+type = "forbidden"
+source_modules = ["dmgripper_experiments"]
+forbidden_modules = [
+    "parallel_gripper_tactile",
+    "robotiq_grasp_core",
     "robotiq_hardware",
 ]
 

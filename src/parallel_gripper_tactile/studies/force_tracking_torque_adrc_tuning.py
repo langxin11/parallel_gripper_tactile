@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from itertools import product
 import math
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 import yaml
@@ -13,6 +14,9 @@ import yaml
 from ..config.profiles import StiffnessEstimatorMethod
 from ..scenes.custom import ObjectMaterial
 from .force_tracking_ablation import SeedSweep, StudyConfigError
+
+
+TorqueAdrcTuningStageName = Literal["coarse", "confirm"]
 
 
 class _TuningStudyModel(BaseModel):
@@ -120,11 +124,38 @@ class ForceTrackingTorqueAdrcTuningConfig(_TuningStudyModel):
             raise ValueError("tasks must not contain duplicates")
         return value
 
-    def stage_candidates(self, stage: str) -> tuple[TorqueAdrcCandidate, ...]:
+    def stage_config(self, stage: TorqueAdrcTuningStageName) -> TorqueAdrcTuningStage:
+        """返回阶段配置，并显式拒绝未知阶段。"""
+        if stage == "coarse":
+            return self.coarse
+        if stage == "confirm":
+            return self.confirm
+        raise ValueError(f"unsupported torque ADRC tuning stage: {stage}")
+
+    def stage_candidates(self, stage: TorqueAdrcTuningStageName) -> tuple[TorqueAdrcCandidate, ...]:
         """返回指定阶段的候选，并确保基线始终参与。"""
-        source = self.coarse if stage == "coarse" else self.confirm
+        source = self.stage_config(stage)
         candidates = source.candidates()
         return candidates if self.baseline in candidates else (self.baseline, *candidates)
+
+    def conditions(
+        self,
+        stage: TorqueAdrcTuningStageName,
+        *,
+        candidates: tuple[TorqueAdrcCandidate, ...] | None = None,
+    ) -> tuple[tuple[TorqueAdrcCandidate, Path, ObjectMaterial, int], ...]:
+        """按候选→任务→材料→seed 展开阶段唯一有序条件。"""
+        stage_config = self.stage_config(stage)
+        selected = self.stage_candidates(stage) if candidates is None else candidates
+        return tuple(
+            (candidate, task, material, seed)
+            for candidate, task, material, seed in product(
+                selected,
+                self.tasks,
+                stage_config.materials,
+                stage_config.seeds.values(),
+            )
+        )
 
 
 def _resolve(path: Path, base: Path) -> Path:
@@ -160,6 +191,7 @@ def load_torque_adrc_tuning_config(path: str | Path) -> ForceTrackingTorqueAdrcT
 __all__ = [
     "ForceTrackingTorqueAdrcTuningConfig",
     "TorqueAdrcCandidate",
+    "TorqueAdrcTuningStageName",
     "TorqueAdrcTuningConstraints",
     "TorqueAdrcTuningStage",
     "load_torque_adrc_tuning_config",

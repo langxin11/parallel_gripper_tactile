@@ -11,7 +11,8 @@ MuJoCo 平行夹爪触觉仿真与力控实验库。核心链路：YAML profile 
 ## 必读文档
 
 - `docs/architecture.md`：模块职责、仿真循环所有权、依赖规则。
-- `docs/workflows.md`：`pgt` 单次运行与 `scripts/experiments` 研究脚本的用法。
+- `docs/workflows.md`：`pgt` 演示/检查、Hydra 科研入口与兼容研究脚本的用法。
+- `docs/research-configuration.md`：Hydra 科研入口、配置组、计划/执行、路径与迁移边界。
 - `docs/coding-conventions.md`：注释、docstring 与文档书写规范。
 - `docs/testing.md`：串行门禁、并行全量、增量映射与绘图测试分工。
 - `docs/force-tracking.md`、`docs/control-comparison-ablation.md`：力跟踪控制器与对比研究的方法和结论。
@@ -27,6 +28,8 @@ MuJoCo 平行夹爪触觉仿真与力控实验库。核心链路：YAML profile 
   `CHANGELOG.md` 的 Unreleased 小节，按 Keep a Changelog 分类。
 - **边界**：不得随意更改 profile schema、CLI 行为、数据格式与既有实验结论；确需变更时
   同步更新对应文档、测试与 CHANGELOG。
+- **正式研究**：条件矩阵由领域 protocol 唯一生成，计划与执行共享同一 `StudyPlan`；公共生命周期只管
+  状态、失败、聚合／绘图钩子和产物登记，不得把科学失败、执行异常或阶段谱系合并简化。
 
 ## 科研绘图偏好
 

@@ -1,0 +1,4 @@
+# @package task
+# default-waypoint 曲线入口，常用于消融类单任务对照。
+family: force_tracking
+path: configs/force_tracking/default_waypoints.yaml

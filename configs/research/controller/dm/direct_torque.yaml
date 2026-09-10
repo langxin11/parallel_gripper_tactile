@@ -1,0 +1,5 @@
+# @package controller
+# 历史直接力矩 PID 入口，保持兼容但默认不参与正式控制器矩阵。
+family: dm
+name: direct-torque
+torque_adrc: null

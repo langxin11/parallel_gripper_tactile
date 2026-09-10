@@ -83,37 +83,53 @@ pgt runs clean (--older-than-days N | --all | --cache) [--apply]
 
 ## 🧪 Research studies
 
-`pgt` 提供确定参数下的单次实验；`scripts/experiments` 保存 controller、材料和重复次数组成的
-多次科研 protocol。运行力跟踪消融研究：
+`pgt` 保留用于演示、模型查看、设备检查和简单预设运行；科研组合使用独立的 Hydra 原生入口。
+先以计划模式完成领域校验而不推进仿真：
 
 ```bash
-uv run python scripts/experiments/force_tracking_ablation.py \
-    --config configs/studies/force_tracking_ablation.yaml
+uv run python scripts/research/run.py \
+  --config-name dm_force_track \
+  execution=plan controller=dm/full task=step material=medium seed=0
 ```
 
-该 study 直接调用 Python runner，而非通过子进程调用 CLI。它会在 `outputs/studies` 创建独立父目录，
-保存 study 配置、逐次结果、聚合统计和每个子 run 的可复现工件。
-
-跨 `step`、`ramp`、`mixed_waypoints` 三类任务的规范化控制器对比先用 `--dry-run` 审阅 162 个条件，
-确认后再执行完整 study：
+单次科研运行、DM 共享导纳和探索性 Multirun：
 
 ```bash
-uv run python scripts/experiments/force_tracking_controller_comparison.py \
-    --config configs/studies/force_tracking_controller_comparison.yaml \
-    --dry-run
-uv run python scripts/experiments/force_tracking_controller_comparison.py \
-    --config configs/studies/force_tracking_controller_comparison.yaml
+uv run python scripts/research/run.py \
+  --config-name dm_force_track \
+  controller=dm/adrc_torque estimator=window_linear task=ramp material=hard seed=0
+uv run python scripts/research/run.py --config-name dm_admittance
+uv run python scripts/research/run.py -m \
+  --config-name dm_force_track material=medium,hard,stiff seed=0,1,2
 ```
 
-该 protocol 额外生成按控制器分组的误差、饱和比例、相对 Full 的消融增量和同 seed 轨迹对比图。
-每张图同时保存为 600 DPI PNG 和嵌入 TrueType 字体的矢量 PDF。已完成的 study 可不重新仿真，直接重绘：
+正式控制器对比、PID 模块消融和 Torque ADRC 两阶段调参由 study 入口内部展开唯一矩阵。默认是计划模式，确认后用
+`study_execution=run` 执行：
 
 ```bash
-uv run python scripts/experiments/force_tracking_controller_comparison.py \
-    --render-study-dir outputs/studies/force_tracking_controller_comparison/<study-id>
+uv run python scripts/research/study.py \
+  --config-name force_tracking_controller_comparison
+uv run python scripts/research/study.py \
+  --config-name force_tracking_controller_comparison study_execution=run
+uv run python scripts/research/study.py --config-name force_tracking_ablation
+uv run python scripts/research/study.py \
+  --config-name force_tracking_torque_adrc_tuning_coarse
+uv run python scripts/research/study.py \
+  --config-name force_tracking_torque_adrc_tuning_confirm \
+  study.coarse_study_dir=/absolute/path/to/coarse-study
 ```
-默认正式矩阵使用 `medium=(-650,-8)`、`hard=(-1200,-10)` 和新增的
-`stiff=(-2500,-15)`；`soft=(-250,-5)` 仅保留用于兼容和专项接触标定，不进入默认批量研究。
+
+控制器对比矩阵为 `pid-only`、`pid-torque-ff`、`pid-stiffness-ff`、`full`、
+`pid-stiffness-limit`、`adrc-torque` × 3 个任务 × 3 个正式材料 × 3 个 seed，共 162 条；
+消融矩阵为四个 PID 2×2 变体 × 3 个材料 × 3 个 seed，共 36 条。正式 study 明确拒绝 Hydra
+外层 Multirun，避免重复展开。Torque coarse 为 102 条；confirm 严格校验 coarse manifest、科学配置
+哈希和排名摘要后，按“可行前五＋缺席时追加基线”的规则生成确认矩阵。
+
+Hydra 负责外层科研调用目录和组合溯源，现有 artifacts 继续管理每个实验的 manifest、trace、metrics
+与图。公共 study manifest 区分计划、运行中、部分完成、完成与失败状态，也区分科学验收失败、执行异常
+和聚合／绘图异常；稳定科学哈希不包含 cwd、时间或输出目录。恢复功能本阶段只生成兼容性报告，不会
+自动续跑。计划/执行、配置组所有权、覆盖规则、输出结构、兼容入口及尚未迁移的研究详见
+[Hydra 科研配置与实验编排](docs/research-configuration.md)。
 
 ## 🧩 Profiles
 
@@ -168,16 +184,18 @@ profile、task 以及本次实际生效的运行时覆盖，作为 force-track r
 
 ```mermaid
 flowchart LR
-  CLI["pgt CLI"] --> Runner["Python runner"]
-  Scripts["研究脚本"] --> Study["study schema"]
-  Scripts --> Runner
+  CLI["pgt 演示/检查"] --> Runner["Python runner"]
+  Hydra["Hydra 科研入口"] --> Resolve["组合、领域校验"]
+  Resolve --> Runner
+  Resolve --> Study["正式 study 矩阵"]
+  Study --> Runner
   Runner --> Experiment["实验内核"]
   Runner --> Artifacts["可复现产物"]
   Experiment --> Domain["profiles / scenes / tactile / control"]
 ```
 
-`pgt` 与 `scripts/experiments` 是两个入口：前者执行单次实验，后者编排多条件 protocol；二者直接复用
-Python runner，不通过 CLI 子进程互相调用。一次实验内只有一个步进循环拥有对应的 `MjData`。所有触觉
+`pgt` 与 Hydra 科研入口直接复用 Python runner，不通过 CLI 子进程互相调用。一次实验内只有一个步进
+循环拥有对应的 `MjData`。所有触觉
 读取器在不可变坐标系中返回局部 `(3, rows, cols)` 力数组，压缩以正的 `Fz` 表示。完整边界、运行产物
 数据流和依赖规则见[项目架构](docs/architecture.md)。
 

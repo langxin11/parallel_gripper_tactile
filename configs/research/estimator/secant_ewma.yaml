@@ -1,0 +1,3 @@
+# @package estimator
+# secant + EWMA 混合估计器片段，用于估计器对照实验。
+name: secant_ewma

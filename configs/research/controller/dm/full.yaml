@@ -1,0 +1,5 @@
+# @package controller
+# 正式研究默认“Full”控制器变体（含阻抗和姿态补偿）入口。
+family: dm
+name: full
+torque_adrc: null
