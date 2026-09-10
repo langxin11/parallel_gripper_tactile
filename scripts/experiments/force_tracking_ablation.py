@@ -11,7 +11,6 @@ from pathlib import Path
 from statistics import fmean, stdev
 from typing import Iterable
 from uuid import uuid4
-import warnings
 
 import numpy as np
 import yaml
@@ -23,6 +22,16 @@ from parallel_gripper_tactile.visualization import (
     science_pyplot,
 )
 from parallel_gripper_tactile.runners import execute_force_tracking
+from parallel_gripper_tactile.studies.aggregation import (
+    aggregate_records,
+    bool_sum,
+    count,
+    finite_mean,
+    finite_std,
+    key,
+    nan_mean,
+    nan_std,
+)
 from parallel_gripper_tactile.studies.force_tracking_ablation import (
     ForceTrackingAblationConfig,
     load_study_config,
@@ -57,45 +66,27 @@ _PLOTTED_METRICS = (
 )
 
 
-def _transient_stats(group: list[dict[str, object]], metric: str) -> tuple[float, float]:
-    """对可能缺失的阶跃瞬态指标做 NaN 感知的均值与样本标准差。"""
-    values = np.asarray(
-        [math.nan if row.get(metric) is None else float(row[metric]) for row in group],
-        dtype=np.float64,
-    )
-    with warnings.catch_warnings():
-        # 全 NaN 切片或单样本 ddof=1 时 numpy 会发 RuntimeWarning，结果按 NaN 输出即可。
-        warnings.simplefilter("ignore", RuntimeWarning)
-        mean = float(np.nanmean(values))
-        std = float(np.nanstd(values, ddof=1))
-    return mean, std
-
-
 def aggregate_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
     """按控制器和材料计算有限指标的均值与样本标准差。."""
-    groups: dict[tuple[str, str], list[dict[str, object]]] = {}
-    for row in rows:
-        key = (str(row["controller_variant"]), str(row["object_material"]))
-        groups.setdefault(key, []).append(row)
-    aggregates: list[dict[str, object]] = []
-    for (controller, material), group in groups.items():
-        aggregate: dict[str, object] = {
-            "controller_variant": controller,
-            "object_material": material,
-            "runs": len(group),
-            "passed_runs": sum(bool(row["passed"]) for row in group),
-        }
-        for metric in _METRICS:
-            if metric in _TRANSIENT_METRICS:
-                mean, std = _transient_stats(group, metric)
-                aggregate[f"{metric}_mean"] = mean
-                aggregate[f"{metric}_std"] = std
-                continue
-            finite = [float(row[metric]) for row in group if math.isfinite(float(row[metric]))]
-            aggregate[f"{metric}_mean"] = fmean(finite) if finite else None
-            aggregate[f"{metric}_std"] = stdev(finite) if len(finite) >= 2 else None
-        aggregates.append(aggregate)
-    return aggregates
+    return aggregate_records(
+        rows,
+        keys=("controller_variant", "object_material"),
+        columns=(
+            key("controller_variant"),
+            key("object_material"),
+            count("runs"),
+            bool_sum("passed", "passed_runs"),
+            *(
+                stat
+                for metric in _METRICS
+                for stat in (
+                    (nan_mean(metric), nan_std(metric))
+                    if metric in _TRANSIENT_METRICS
+                    else (finite_mean(metric), finite_std(metric))
+                )
+            ),
+        ),
+    )
 
 
 def json_compatible(value: object) -> object:

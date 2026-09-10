@@ -22,6 +22,15 @@ from parallel_gripper_tactile.visualization import (
 )
 from parallel_gripper_tactile.config.profiles import TorqueAdrcControl, load_profile
 from parallel_gripper_tactile.runners import execute_force_tracking
+from parallel_gripper_tactile.studies.aggregation import (
+    aggregate_records,
+    bool_sum,
+    count,
+    finite_mean,
+    finite_std,
+    first,
+    key,
+)
 from parallel_gripper_tactile.studies.force_tracking_torque_adrc_tuning import (
     ForceTrackingTorqueAdrcTuningConfig,
     TorqueAdrcCandidate,
@@ -82,34 +91,22 @@ def _stage_candidates(
 
 def _aggregate(rows: list[dict[str, object]]) -> list[dict[str, object]]:
     """按候选、任务和材料聚合重复运行指标。"""
-    groups: dict[tuple[str, str, str], list[dict[str, object]]] = {}
-    for row in rows:
-        key = (str(row["candidate_id"]), str(row["task_name"]), str(row["object_material"]))
-        groups.setdefault(key, []).append(row)
-    aggregates: list[dict[str, object]] = []
-    for (_, task_name, material), group in groups.items():
-        first = group[0]
-        aggregate: dict[str, object] = {
-            "candidate_id": first["candidate_id"],
-            "measurement_filter_cutoff_hz": first["measurement_filter_cutoff_hz"],
-            "controller_bandwidth_rad_s": first["controller_bandwidth_rad_s"],
-            "observer_bandwidth_ratio": first["observer_bandwidth_ratio"],
-            "observer_bandwidth_rad_s": first["observer_bandwidth_rad_s"],
-            "task_name": task_name,
-            "object_material": material,
-            "runs": len(group),
-            "passed_runs": sum(bool(row["passed"]) for row in group),
-        }
-        for metric in METRICS:
-            values = [
-                float(row[metric])
-                for row in group
-                if row[metric] is not None and math.isfinite(float(row[metric]))
-            ]
-            aggregate[f"{metric}_mean"] = fmean(values) if values else None
-            aggregate[f"{metric}_std"] = stdev(values) if len(values) >= 2 else None
-        aggregates.append(aggregate)
-    return aggregates
+    return aggregate_records(
+        rows,
+        keys=("candidate_id", "task_name", "object_material"),
+        columns=(
+            first("candidate_id"),
+            first("measurement_filter_cutoff_hz"),
+            first("controller_bandwidth_rad_s"),
+            first("observer_bandwidth_ratio"),
+            first("observer_bandwidth_rad_s"),
+            key("task_name"),
+            key("object_material"),
+            count("runs"),
+            bool_sum("passed", "passed_runs"),
+            *(stat for metric in METRICS for stat in (finite_mean(metric), finite_std(metric))),
+        ),
+    )
 
 
 def _mean_metric(

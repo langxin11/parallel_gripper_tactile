@@ -24,6 +24,14 @@ from parallel_gripper_tactile.visualization import (
     science_pyplot,
 )
 from parallel_gripper_tactile.runners import execute_robotiq_discrete_force
+from parallel_gripper_tactile.studies.aggregation import (
+    aggregate_records,
+    bool_sum,
+    count,
+    key,
+    optional_mean,
+    plain_mean,
+)
 from parallel_gripper_tactile.studies.robotiq_discrete_force import (
     RobotiqDiscreteForceStudyConfig,
     load_robotiq_discrete_force_study_config,
@@ -64,47 +72,29 @@ def _resolve_worker_count(
 
 def aggregate_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
     """按控制器汇总安全性、动作、振荡、时间和误差指标。"""
-    groups: dict[str, list[dict[str, object]]] = {}
-    for row in rows:
-        groups.setdefault(str(row["controller_variant"]), []).append(row)
-    output: list[dict[str, object]] = []
-    for controller, group in groups.items():
-        settling = [
-            float(row["settling_time_s"]) for row in group if row["settling_time_s"] is not None
-        ]
-        prediction = [
-            float(row["prediction_mae_n"]) for row in group if row["prediction_mae_n"] is not None
-        ]
-        output.append(
-            {
-                "controller_variant": controller,
-                "runs": len(group),
-                "passed_runs": sum(bool(row["passed"]) for row in group),
-                "safety_violations": sum(bool(row["safety_violated"]) for row in group),
-                "safety_violation_duration_s_mean": fmean(
-                    float(row["safety_violation_duration_s"]) for row in group
-                ),
-                "release_count_mean": fmean(float(row["release_count"]) for row in group),
-                "action_count_mean": fmean(float(row["action_count"]) for row in group),
-                "average_nonzero_action_step_mean": fmean(
-                    float(row["average_nonzero_action_step"]) for row in group
-                ),
-                "command_movement_mean": fmean(
-                    float(row["total_command_movement"]) for row in group
-                ),
-                "reverse_count_mean": fmean(float(row["reverse_count"]) for row in group),
-                "oscillation_count_mean": fmean(float(row["oscillation_count"]) for row in group),
-                "settling_time_s_mean": fmean(settling) if settling else None,
-                "hold_ratio_mean": fmean(float(row["hold_ratio"]) for row in group),
-                "steady_force_error_n_mean": fmean(
-                    float(row["steady_force_error_n"]) for row in group
-                ),
-                "rmse_n_mean": fmean(float(row["rmse_n"]) for row in group),
-                "peak_overshoot_n_mean": fmean(float(row["peak_overshoot_n"]) for row in group),
-                "prediction_mae_n_mean": fmean(prediction) if prediction else None,
-            }
-        )
-    return output
+    return aggregate_records(
+        rows,
+        keys=("controller_variant",),
+        columns=(
+            key("controller_variant"),
+            count("runs"),
+            bool_sum("passed", "passed_runs"),
+            bool_sum("safety_violated", "safety_violations"),
+            plain_mean("safety_violation_duration_s"),
+            plain_mean("release_count"),
+            plain_mean("action_count"),
+            plain_mean("average_nonzero_action_step"),
+            plain_mean("total_command_movement", "command_movement_mean"),
+            plain_mean("reverse_count"),
+            plain_mean("oscillation_count"),
+            optional_mean("settling_time_s"),
+            plain_mean("hold_ratio"),
+            plain_mean("steady_force_error_n"),
+            plain_mean("rmse_n"),
+            plain_mean("peak_overshoot_n"),
+            optional_mean("prediction_mae_n"),
+        ),
+    )
 
 
 # 总览图中的控制器展示顺序：量化 PI 为连续对照，其余按消融链排序。

@@ -8,7 +8,6 @@ from datetime import UTC, datetime
 import json
 import math
 from pathlib import Path
-from statistics import fmean, stdev
 from uuid import uuid4
 
 import numpy as np
@@ -21,6 +20,16 @@ from parallel_gripper_tactile.visualization import (
     science_pyplot,
 )
 from parallel_gripper_tactile.runners import execute_friction_estimation
+from parallel_gripper_tactile.studies.aggregation import (
+    aggregate_records,
+    bool_rate,
+    bool_sum,
+    count,
+    first_bool,
+    key,
+    optional_mean,
+    optional_std,
+)
 from parallel_gripper_tactile.studies.friction_estimation_local_slip import (
     FrictionEstimationLocalSlipStudyConfig,
     load_local_slip_study_config,
@@ -33,40 +42,28 @@ from parallel_gripper_tactile.studies.tabular import (
 
 def aggregate_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
     """按场景汇总检测率、误报率、提前量和局部候选下界。"""
-    groups: dict[str, list[dict[str, object]]] = {}
-    for row in rows:
-        groups.setdefault(str(row["scenario"]), []).append(row)
-    aggregates: list[dict[str, object]] = []
-    for scenario, group in groups.items():
-        expected = bool(group[0]["expect_local_slip"])
-        detected = [bool(row["local_slip_detected"]) for row in group]
-        leads = [
-            float(row["detection_lead_s"]) for row in group if row["detection_lead_s"] is not None
-        ]
-        ratios = [
-            float(row["local_estimate_ratio"])
-            for row in group
-            if row["local_estimate_ratio"] is not None
-        ]
-        aggregates.append(
-            {
-                "scenario": scenario,
-                "expect_local_slip": expected,
-                "runs": len(group),
-                "local_detections": sum(detected),
-                "detection_rate": sum(detected) / len(group),
-                "false_positive_rate": sum(detected) / len(group) if not expected else 0.0,
-                "detection_lead_s_mean": fmean(leads) if leads else None,
-                "detection_lead_s_std": stdev(leads) if len(leads) >= 2 else None,
-                "local_estimate_ratio_mean": fmean(ratios) if ratios else None,
-                "local_estimate_ratio_std": stdev(ratios) if len(ratios) >= 2 else None,
-                "passed_runs": sum(bool(row["validation_passed"]) for row in group),
-                "control_qualified_runs": sum(
-                    bool(row["control_candidate_qualified"]) for row in group
-                ),
-            }
-        )
-    return aggregates
+    return aggregate_records(
+        rows,
+        keys=("scenario",),
+        columns=(
+            key("scenario"),
+            first_bool("expect_local_slip"),
+            count("runs"),
+            bool_sum("local_slip_detected", "local_detections"),
+            bool_rate("local_slip_detected", "detection_rate"),
+            bool_rate(
+                "local_slip_detected",
+                "false_positive_rate",
+                zero_when=("expect_local_slip", True),
+            ),
+            optional_mean("detection_lead_s"),
+            optional_std("detection_lead_s"),
+            optional_mean("local_estimate_ratio"),
+            optional_std("local_estimate_ratio"),
+            bool_sum("validation_passed", "passed_runs"),
+            bool_sum("control_candidate_qualified", "control_qualified_runs"),
+        ),
+    )
 
 
 def _json_compatible(value: object) -> object:

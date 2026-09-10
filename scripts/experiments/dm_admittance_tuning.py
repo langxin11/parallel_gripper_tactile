@@ -14,6 +14,17 @@ from uuid import uuid4
 from parallel_gripper_tactile.experiments.force_tracking import ForceTrackingTask
 from parallel_gripper_tactile.config.profiles import GripperProfile, load_profile
 from parallel_gripper_tactile.runners import execute_force_tracking
+from parallel_gripper_tactile.studies.aggregation import (
+    aggregate_records,
+    bool_sum,
+    count,
+    finite_mean,
+    first,
+    key,
+    minimum,
+    plain_mean,
+    threshold_count,
+)
 from parallel_gripper_tactile.studies.dm_admittance_tuning import (
     DMAdmittanceCandidate,
     DMAdmittanceTuningConfig,
@@ -246,40 +257,30 @@ def aggregate_rows(
     rows: list[dict[str, object]], *, minimum_ratio: float
 ) -> list[dict[str, object]]:
     """按候选聚合稳定性、跟踪完整度和误差指标。"""
-    groups: dict[str, list[dict[str, object]]] = {}
-    for row in rows:
-        groups.setdefault(str(row["candidate_id"]), []).append(row)
-    aggregates: list[dict[str, object]] = []
-    for candidate_id, group in groups.items():
-        first = group[0]
-        aggregate: dict[str, object] = {
-            "candidate_id": candidate_id,
-            "mass_kg": first["mass_kg"],
-            "damping_ns_m": first["damping_ns_m"],
-            "stiffness_n_m": first["stiffness_n_m"],
-            "filter_cutoff_hz": first["filter_cutoff_hz"],
-            "velocity_limit_rad_s": first["velocity_limit_rad_s"],
-            "approach_velocity_rad_s": first["approach_velocity_rad_s"],
-            "contact_stable_time_s": first["contact_stable_time_s"],
-            "contact_transition_time_s": first["contact_transition_time_s"],
-            "approach_feedforward_force_n": first["approach_feedforward_force_n"],
-            "runs": len(group),
-            "stable_runs": sum(bool(row["passed"]) for row in group),
-            "complete_force_tracking_runs": sum(
-                float(row["force_tracking_ratio"]) >= minimum_ratio for row in group
+    return aggregate_records(
+        rows,
+        keys=("candidate_id",),
+        columns=(
+            key("candidate_id"),
+            first("mass_kg"),
+            first("damping_ns_m"),
+            first("stiffness_n_m"),
+            first("filter_cutoff_hz"),
+            first("velocity_limit_rad_s"),
+            first("approach_velocity_rad_s"),
+            first("contact_stable_time_s"),
+            first("contact_transition_time_s"),
+            first("approach_feedforward_force_n"),
+            count("runs"),
+            bool_sum("passed", "stable_runs"),
+            threshold_count(
+                "force_tracking_ratio", "complete_force_tracking_runs", at_least=minimum_ratio
             ),
-            "force_tracking_ratio_mean": fmean(float(row["force_tracking_ratio"]) for row in group),
-            "force_tracking_ratio_min": min(float(row["force_tracking_ratio"]) for row in group),
-        }
-        for metric in METRICS:
-            values = [
-                float(row[metric])
-                for row in group
-                if row[metric] is not None and math.isfinite(float(row[metric]))
-            ]
-            aggregate[f"{metric}_mean"] = fmean(values) if values else None
-        aggregates.append(aggregate)
-    return aggregates
+            plain_mean("force_tracking_ratio"),
+            minimum("force_tracking_ratio", "force_tracking_ratio_min"),
+            *(finite_mean(metric) for metric in METRICS),
+        ),
+    )
 
 
 def rank_candidates(aggregates: list[dict[str, object]]) -> list[dict[str, object]]:
