@@ -38,7 +38,7 @@
 
 应优先完成：
 
-1. 固定一组 `configs/force_tracking/*.yaml` 目标力曲线；
+1. 固定一组 `configs/task/force_tracking/*.yaml` 目标力曲线；
 2. 固定每组实验的 profile 或 controller 配置快照；
 3. 保留 `trace.parquet`、`plot.png`、`plot.pdf`、`metrics.json` 和 `manifest.json`，并为每个 force-track run 保存 `effective_parameters.json`；
 4. 支持 `--viewer` 观察接触过程，默认仍 headless 批量运行；
@@ -62,10 +62,10 @@ MIT 前馈力矩、测量力、滤波力和诊断量。
 
 这一层接口稳定后，PID、ADRC、自适应刚度控制器就可以在同一个仿真任务里互换。
 
-当前第一阶段已经落地：`step.yaml`、`ramp.yaml`、`mixed_waypoints.yaml` 三类标准任务，以及
-`controller × task × material × seed` 的显式 comparison schema、`--dry-run` 条件审阅、结构化聚合和
+当前第一阶段已经落地：`step.yaml`、`ramp.yaml`、`mixed.yaml` 三类标准任务，以及
+`controller × task × material × seed` 的显式 comparison schema、计划模式条件审阅、结构化聚合和
 study 级对比图。2026-09-02 起 `direct-torque` 与 `adrc` 变体均已实现（入口分别为
-`--controller-variant direct-torque` 与 `--controller-variant adrc`，profile 字段
+`--set controller=dm_gripper/direct_torque` 与 `--set controller=dm_gripper/adrc`，profile 字段
 `control.force.torque_feedback_gain` 与 `control.force.adrc`）。2026-09-03 新增二阶直接力矩
 `adrc-torque`（profile 字段 `control.force.torque_adrc`）。一阶位置式 `adrc` 保留为历史复现入口，
 但因外包在 MIT 阻抗位置环外造成模型阶次不匹配，不再进入默认正式矩阵；当前默认矩阵由四个 PID 2×2
@@ -138,7 +138,7 @@ controller command -> 达妙电机 CAN/串口命令
 | --- | --- |
 | `step.yaml` | 测试阶跃响应、超调、稳定时间和稳态误差 |
 | `ramp.yaml` | 测试平滑加载/卸载能力和迟滞 |
-| `mixed_waypoints.yaml` | 综合测试平台段、斜坡段和卸载段 |
+| `mixed.yaml` | 综合测试平台段、斜坡段和卸载段 |
 
 设计原则：
 
@@ -289,19 +289,19 @@ RMSE、MAE、最终误差与力矩/位置饱和率；同时从 trace 检查刚�
 
 ```text
 configs/
-├── force_tracking/
+├── task/force_tracking/
 │   ├── default_waypoints.yaml
 │   ├── step.yaml
 │   ├── ramp.yaml
-│   └── mixed_waypoints.yaml
-└── studies/
-    ├── force_tracking_ablation.yaml
-    ├── force_tracking_controller_comparison.yaml
-    └── force_tracking_stiffness_estimator_comparison.yaml
+│   └── mixed.yaml
+└── research/
+    ├── force_controller_ablation/study.yaml
+    ├── force_controller_selection/study.yaml
+    └── stiffness_estimator_validation/study.yaml
 ```
 
-控制器变体通过运行时的不可变 profile 副本实现，不复制完整 profile。study schema 只展开条件矩阵，
-`scripts/experiments` 直接调用 Python runner；控制器、仿真循环和单次运行产物仍分别由 `control.py`、
+控制器变体通过运行时的不可变 profile 副本实现，不复制完整 profile。正式入口组合基础 profile，study
+protocol 唯一展开条件矩阵；控制器、仿真循环和单次运行产物仍分别由 `control.py`、
 `experiments/force_tracking.py` 与 `runners/force_tracking.py` 管理。
 
 ## 8. 推荐命令形式
@@ -310,24 +310,22 @@ configs/
 
 <pre><code class="language-bash">
 uv run pgt run force-track \
-  --profile configs/dm_gripper.yaml \
-  --task configs/force_tracking/default_waypoints.yaml \
-  --viewer
+  --set task=force_tracking/default_waypoints \
+  --set execution.viewer=true
 </code></pre>
 
-批量对比先执行 dry-run，校验 profile、三类 task 和完整条件矩阵，不创建输出目录：
+批量对比先生成计划，校验 profile、三类 task 和完整条件矩阵，不创建子 run：
 
 <pre><code class="language-bash">
-uv run python scripts/experiments/force_tracking_controller_comparison.py \
-  --config configs/studies/force_tracking_controller_comparison.yaml \
-  --dry-run
+uv run python scripts/research/study.py \
+  research=force_controller_selection/study
 </code></pre>
 
 确认矩阵后以 headless 方式执行完整 study：
 
 <pre><code class="language-bash">
-uv run python scripts/experiments/force_tracking_controller_comparison.py \
-  --config configs/studies/force_tracking_controller_comparison.yaml
+uv run python scripts/research/study.py \
+  research=force_controller_selection/study execution=study_run
 </code></pre>
 
 默认配置展开 6 个控制器变体（四个 PID 2×2 变体、`pid-stiffness-limit` 与二阶
@@ -355,10 +353,10 @@ YAML；每个 force-track run 的 `effective_parameters.json` 记录完整解析
 
 <pre><code class="language-bash">
 uv run python scripts/research/study.py \
-  --config-name force_tracking_stiffness_estimator_comparison
+  research=stiffness_estimator_validation/study
 uv run python scripts/research/study.py \
-  --config-name force_tracking_stiffness_estimator_comparison \
-  study_execution=run
+  research=stiffness_estimator_validation/study \
+  execution=study_run
 </code></pre>
 
 ## 9. 决策原则

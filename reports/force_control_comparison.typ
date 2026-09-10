@@ -121,4 +121,4 @@ DMgripper 的共享控制链路采用闭合位移域二阶导纳：
 
 = 复现实验入口
 
-单次轨迹由 `pgt run force-track` 生成，并通过 `--controller-variant` 选择控制器；正式结论应由研究脚本汇总多个随机种子后给出。完整实验口径、参数释义与默认研究矩阵见 `docs/force-tracking.md`、`docs/crank-slider-force-control.md` 和 `docs/control-comparison-ablation.md`。
+单次轨迹由 `pgt run force-track` 生成，并通过 `--experiment` 与 `--set controller=...` 选择控制器；正式结论应由研究脚本汇总多个随机种子后给出。完整实验口径、参数释义与默认研究矩阵见 `docs/force-tracking.md`、`docs/crank-slider-force-control.md` 和 `docs/control-comparison-ablation.md`。

@@ -13,6 +13,7 @@
 9. [控制算法对比与消融](control-comparison-ablation.md)：在一致任务下比较结果。
 
 工程状态与电机/执行器基线见[DM_Gripper 配置基线与状态](custom-gripper-next-phase.md)。
+配置目录与目的导向研究的设计、验收和迁移记录见[配置重构 Goal](configuration-refactor-goal.md)。
 
 下一阶段的目录整理、分夹爪控制核与真机接入见[纯 Python 真机联调计划](python-hardware-roadmap.md)。
 
@@ -20,11 +21,11 @@
 uv sync
 uv run pgt validate configs/robotiq_2f85.yaml
 uv run pgt validate configs/dm_gripper.yaml
-uv run pgt run demo --profile configs/robotiq_2f85.yaml
-uv run pgt run force-track --profile configs/dm_gripper.yaml --task configs/force_tracking/default_waypoints.yaml
-uv run pgt run force-schedule --profile configs/dm_gripper.yaml --task configs/force_scheduling/gravity_hold.yaml
-uv run pgt run friction-estimate --profile configs/dm_gripper.yaml --task configs/friction_estimation/nominal_friction.yaml
-uv run pgt run discrete-force --profile configs/robotiq_2f85.yaml --task configs/discrete_force/robotiq_delta_f_tick.yaml
+uv run pgt run demo
+uv run pgt run force-track --set task=force_tracking/default_waypoints
+uv run pgt run force-schedule --experiment dm_gripper/force_scheduling_gravity_hold
+uv run pgt run friction-estimate --experiment dm_gripper/friction_estimation_nominal
+uv run pgt run discrete-force --experiment robotiq_2f85/discrete_force
 </code></pre>
 
 参见[常用工作流](workflows.md)、[动态目标力跟踪](force-tracking.md)、

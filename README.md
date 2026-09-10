@@ -9,17 +9,13 @@ MuJoCo 二指平行夹爪触觉仿真：使用通过 schema 校验的 YAML profi
 uv sync --all-packages --locked
 uv run pgt validate configs/robotiq_2f85.yaml
 uv run pgt validate configs/dm_gripper.yaml
-uv run pgt run demo --profile configs/robotiq_2f85.yaml
-uv run pgt run grasp --profile configs/dm_gripper.yaml
-uv run pgt run force-track --profile configs/dm_gripper.yaml --task configs/force_tracking/default_waypoints.yaml
-uv run pgt run force-schedule --profile configs/dm_gripper.yaml --task configs/force_scheduling/gravity_hold.yaml
-uv run pgt run force-schedule --profile configs/dm_gripper.yaml --task configs/force_scheduling/dynamic_filling.yaml
-uv run pgt run friction-estimate --profile configs/dm_gripper.yaml --task configs/friction_estimation/nominal_friction.yaml
-uv run pgt run discrete-force --profile configs/robotiq_2f85.yaml --task configs/discrete_force/robotiq_delta_f_tick.yaml
-# DM_Gripper 可选 soft / medium / hard / stiff 显式触觉接触 preset（默认 hard）
-uv run pgt run grasp --profile configs/dm_gripper.yaml --object-material soft
-uv run pgt run force-track --profile configs/dm_gripper.yaml --task configs/force_tracking/default_waypoints.yaml --object-material medium
-uv run pgt run force-track --profile configs/dm_gripper.yaml --task configs/force_tracking/default_waypoints.yaml --controller-variant full --object-material hard --sensor-noise-seed 0
+uv run pgt run demo --set model=robotiq_2f85/touch_grid_3x3
+uv run pgt run grasp --video
+uv run pgt run force-track --set controller=dm_gripper/full --set task=force_tracking/default_waypoints
+uv run pgt run force-schedule --experiment dm_gripper/force_scheduling_gravity_hold
+uv run pgt run force-schedule --experiment dm_gripper/force_scheduling_dynamic_filling
+uv run pgt run friction-estimate --experiment dm_gripper/friction_estimation_nominal
+uv run pgt run discrete-force --experiment robotiq_2f85/discrete_force
 ```
 
 Profile 仅使用 YAML。它们是不可变的 Pydantic v2 模型：未知字段、非法控制限幅、空/多文档输入、
@@ -32,23 +28,21 @@ pgt validate PROFILE
 pgt assets generate-taxels [--shape sphere|box]
 pgt assets generate-touch-grid
 pgt assets prepare-onshape INPUT OUTPUT
-pgt run demo --profile PROFILE
-pgt run grasp --profile PROFILE [--video] [--object-material soft|medium|hard|stiff]
-pgt run force-schedule --profile PROFILE --task TASK.yaml
-pgt run friction-estimate --profile PROFILE --task TASK.yaml
-pgt run discrete-force --profile PROFILE --task TASK.yaml
-pgt run force-track --profile PROFILE --task TASK.yaml [--viewer] [--disable-multiccd]
-                    [--object-material soft|medium|hard|stiff]
-                    [--trace-period SECONDS] [--event-window SECONDS]
-pgt compare tactile --left-profile A --right-profile B
-pgt compare contact --profile PROFILE
-pgt view taxels --profile PROFILE
-pgt view grasp --profile PROFILE [--object-material soft|medium|hard|stiff]
+pgt run demo [--experiment NAME] [--set KEY=VALUE]
+pgt run grasp [--experiment NAME] [--set KEY=VALUE] [--video]
+pgt run force-schedule [--experiment NAME] [--set KEY=VALUE]
+pgt run friction-estimate [--experiment NAME] [--set KEY=VALUE]
+pgt run discrete-force [--experiment NAME] [--set KEY=VALUE]
+pgt run force-track [--experiment NAME] [--set KEY=VALUE]
+pgt compare tactile [--left-set KEY=VALUE] [--right-set KEY=VALUE]
+pgt compare contact [--experiment NAME] [--set KEY=VALUE]
+pgt view taxels [--experiment NAME] [--set KEY=VALUE]
+pgt view grasp [--experiment NAME] [--set KEY=VALUE]
 pgt runs list
 pgt runs clean (--older-than-days N | --all | --cache) [--apply]
 ```
 
-仿真默认无界面（headless）。`pgt run force-track --viewer` 会在运行 waypoint
+仿真默认无界面（headless）。`pgt run force-track --set execution.viewer=true` 会在运行 waypoint
 目标力跟踪任务时同步打开 MuJoCo GUI；`pgt view` 会打开静态交互检查场景。Typer 通过
 `pgt --install-completion` 提供 shell 补全。
 
@@ -88,34 +82,32 @@ pgt runs clean (--older-than-days N | --all | --cache) [--apply]
 
 ```bash
 uv run python scripts/research/run.py \
-  --config-name dm_force_track \
-  execution=plan controller=dm/full task=step material=medium seed=0
+  execution=plan controller=dm_gripper/full task=force_tracking/step material=medium seed=0
 ```
 
 单次科研运行、DM 共享导纳和探索性 Multirun：
 
 ```bash
 uv run python scripts/research/run.py \
-  --config-name dm_force_track \
-  controller=dm/adrc_torque estimator=window_linear task=ramp material=hard seed=0
-uv run python scripts/research/run.py --config-name dm_admittance
+  controller=dm_gripper/adrc_torque estimator=window_linear task=force_tracking/ramp material=hard seed=0
+uv run python scripts/research/run.py experiment=dm_gripper/force_tracking_admittance
 uv run python scripts/research/run.py -m \
-  --config-name dm_force_track material=medium,hard,stiff seed=0,1,2
+  material=medium,hard,stiff seed=0,1,2
 ```
 
 正式控制器对比、PID 模块消融和 Torque ADRC 两阶段调参由 study 入口内部展开唯一矩阵。默认是计划模式，确认后用
-`study_execution=run` 执行：
+`execution=study_run` 执行：
 
 ```bash
 uv run python scripts/research/study.py \
-  --config-name force_tracking_controller_comparison
+  research=force_controller_selection/study
 uv run python scripts/research/study.py \
-  --config-name force_tracking_controller_comparison study_execution=run
-uv run python scripts/research/study.py --config-name force_tracking_ablation
+  research=force_controller_selection/study execution=study_run
+uv run python scripts/research/study.py research=force_controller_ablation/study
 uv run python scripts/research/study.py \
-  --config-name force_tracking_torque_adrc_tuning_coarse
+  research=torque_adrc_tuning/study
 uv run python scripts/research/study.py \
-  --config-name force_tracking_torque_adrc_tuning_confirm \
+  research=torque_adrc_tuning/study study.stage=confirm \
   study.coarse_study_dir=/absolute/path/to/coarse-study
 ```
 
@@ -136,8 +128,8 @@ Hydra 负责外层科研调用目录和组合溯源，现有 artifacts 继续管
 | Profile | 控制 | 触觉后端 |
 | --- | --- | --- |
 | `robotiq_2f85.yaml` | position | `force_sensor` |
-| `robotiq_2f85_box.yaml` | position | box 的 `force_sensor` |
-| `robotiq_2f85_touch_grid.yaml` | position | `touch_grid` |
+| `model=robotiq_2f85/box_force_sensor` | position | box 的 `force_sensor` |
+| `model=robotiq_2f85/touch_grid_3x3` | position | `touch_grid` |
 | `dm_gripper.yaml` | MIT 力矩 + 法向力外环 | `contact_geom` |
 
 DM_Gripper 的 Pillars 有意使用等效软接触，而非独立的可变形硅胶体：

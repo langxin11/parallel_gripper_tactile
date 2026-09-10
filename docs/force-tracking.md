@@ -5,34 +5,32 @@
 
 <pre><code class="language-bash">
 uv run pgt run force-track \
-  --profile configs/dm_gripper.yaml \
-  --task configs/force_tracking/default_waypoints.yaml
+  --set task=force_tracking/default_waypoints
 </code></pre>
 
 需要实时观察 MuJoCo 场景时加 `--viewer`：
 
 <pre><code class="language-bash">
 uv run pgt run force-track \
-  --profile configs/dm_gripper.yaml \
-  --task configs/force_tracking/default_waypoints.yaml \
-  --viewer
+  --set task=force_tracking/default_waypoints \
+  --set execution.viewer=true
 </code></pre>
 
 默认 viewer 按 1 倍实时速度播放。若需要慢放或改变刷新率，可使用 `--realtime-factor`
 和 `--render-fps`。
 
-`--disable-multiccd` 只用于碰撞流形诊断：它保留 profile 指向的碰撞模型，但将 MuJoCo 的
+`--set execution.multiccd_enabled=false` 只用于碰撞流形诊断：它保留 model 组指向的碰撞模型，但将 MuJoCo 的
 `multiccd` 求解选项关闭。默认 profile 已采用共面球体碰撞近似，常规力跟踪不需要这个开关。
 
-默认任务配置位于 `configs/force_tracking/default_waypoints.yaml`。标准控制器比较还提供
-`step.yaml`、`ramp.yaml` 与 `mixed_waypoints.yaml`，分别使用 `hold`、`linear` 和 `smoothstep`
+默认任务配置位于 `configs/task/force_tracking/default_waypoints.yaml`。标准控制器比较还提供
+`step.yaml`、`ramp.yaml` 与 `mixed.yaml`，分别使用 `hold`、`linear` 和 `smoothstep`
 插值。任务配置只描述流程和目标力曲线；夹爪结构、执行器限幅、触觉传感器和控制器参数仍来自
-`--profile` 指定的 YAML。
+统一组合得到的 platform、model、controller 与 estimator 片段。
 
 ## 1. 两阶段流程
 
 另有独立的 [DMgripper 导纳基线](dm-shared-control.md)，通过
-`--controller-variant admittance` 选择。它包含接近、接触速度过渡和跟踪，
+`--experiment dm_gripper/force_tracking_admittance` 选择。它包含接近、接触速度过渡和跟踪，
 使用当前 ROS 2 的共享导纳核，不进入本页历史 PID/ADRC 默认比较矩阵。
 该变体的接近轨迹/前馈由 `control.force.admittance.approach_*` 配置，
 任务 `approach.timeout_s` 仍控制等待上限；旧任务的接近持续时间/前馈不会覆盖这些参数。
@@ -75,17 +73,17 @@ uv run pgt run force-track \
 结合触觉测得的平均单侧法向力 \(f_n=(F_L+F_R)/2\)、接触刚度估计、位置修正和力矩前馈生成执行器命令。
 
 默认为位置式力控：PID 位置修正与刚度位置前馈修正目标位置，模型力矩前馈进入 MIT `t_ff`。
-`--controller-variant pid-stiffness-limit` 保留 PID 和机构力矩前馈，但关闭刚度位置前馈；在线刚度只把
+`--set controller=dm_gripper/pid_stiffness_limit` 保留 PID 和机构力矩前馈，但关闭刚度位置前馈；在线刚度只把
 `position_limit_force_rate_n_s·dt` 的允许预测力变化换算成每周期位置目标增量上限，并通过动态 PID
 输出边界抑制积分 windup。刚度安全系数由 `position_limit_stiffness_safety_factor` 配置。该变体已进入
 当前默认正式比较矩阵，与历史 `pid-stiffness-ff`、`full` 同时保留。
 若把 profile 字段 `control.force.torque_feedback_gain` 设为大于 0（`direct-torque` 控制器变体
-即取 1.0，可用 `--controller-variant direct-torque` 运行），跟踪阶段切换为直接力矩式对照：
+即取 1.0，可用 `--set controller=dm_gripper/direct_torque` 运行），跟踪阶段切换为直接力矩式对照：
 力误差直接进入 MIT 前馈力矩，PID 与刚度位置修正置零，MIT 位置环 kp/kd 逐周期覆盖为 0；
 接近与释放阶段不受影响，仍走共享的位置伺服轨迹。
 
 若配置 `control.force.adrc` 段（`adrc` 控制器变体自动注入默认参数，可用
-`--controller-variant adrc` 运行），跟踪阶段切换为一阶线性自抗扰（LADRC）外环：
+`--set controller=dm_gripper/adrc` 运行），跟踪阶段切换为一阶线性自抗扰（LADRC）外环：
 扩张状态观测器（LESO）估计滤波力与总扰动，控制律输出闭合速度命令 `u`（m/s），经当前
 闭合雅可比换算为电机角速度后逐周期积分成持久的位置修正（裁剪到
 `max_position_adjustment`），以此替换 PID 位置修正与刚度位置前馈。
@@ -94,7 +92,7 @@ uv run pgt run force-track \
 刚度估计器照常运行以保持 trace 中刚度曲线可比。`adrc` 与 `torque_feedback_gain > 0`
 互斥，同时启用会在控制器构造时抛出 `ValueError`。
 
-`--controller-variant adrc-torque` 启用二阶直接力矩 MB-ADRC。接近阶段继续使用 profile 中的
+`--set controller=dm_gripper/adrc_torque` 启用二阶直接力矩 MB-ADRC。接近阶段继续使用组合 profile 中的
 MIT `kp/kd` 建立稳定接触；进入跟踪后仅逐周期旁路 MIT `kp/kd`，由三状态 current LESO 估计
 法向力、力变化率与残差总扰动，控制律自身以 `ω_c²` 和 `2ω_c` 提供名义 PD 动态并直接输出电机力矩。
 目标曲线的一、二阶导数分别作为速度和加速度前馈进入控制律。
@@ -129,7 +127,7 @@ profile 可选段 `control.force.torque_adrc` 提供 `equivalent_inertia_kg_m2`�
 可行参考点。它改善连续参考跟踪，但 Step 超调仍是需要单独权衡和继续调参的指标；不应把它描述为对所有
 任务都更优的通用参数组合。
 
-`--controller-variant adrc-torque-td` 是独立的工程增强对照：它在 `adrc-torque` 前增加带宽为
+`--set controller=dm_gripper/adrc_torque_td` 是独立的工程增强对照：它在 `adrc-torque` 前增加带宽为
 180 rad/s 的临界阻尼线性 TD，将参考力整形成连续的力、力变化率和力加速度；机构模型前馈同步使用
 整形后的参考，避免原始阶跃绕过 TD。论文式 `adrc-torque` 仍不启用 TD，二者除此之外使用完全相同
 的 LESO、模型前馈、刚度调度和限幅参数。TD 只处理参考信号，不改变“触觉力轻滤波后进入 ESO”的
@@ -143,20 +141,19 @@ study 扫描 `measurement_filter_cutoff_hz`、`ωc` 和 `ωo/ωc`，并拒绝滤
 `ωo/(2π)` 的候选。粗扫后的候选必须在 Ramp、Mixed 的 RMSE 不超过当前基线 110%、力矩饱和不超过
 1% 的前提下，按 Step 超调、Step RMSE、Mixed RMSE 排序；随后在三种材料、三个 seed 上确认。
 
-正式计划与执行使用 Hydra study 入口；默认先生成计划，加入 `study_execution=run` 才推进仿真：
+正式计划与执行使用 Hydra study 入口；默认先生成计划，加入 `execution=study_run` 才推进仿真：
 
 ```bash
 uv run python scripts/research/study.py \
-  --config-name force_tracking_torque_adrc_tuning_coarse
+  research=torque_adrc_tuning/study
 uv run python scripts/research/study.py \
-  --config-name force_tracking_torque_adrc_tuning_confirm \
+  research=torque_adrc_tuning/study study.stage=confirm \
   study.coarse_study_dir=/absolute/path/to/coarse-study
 ```
 
 coarse 固定生成 102 条有序条件。confirm 会校验 coarse 的研究类型、阶段、科学配置哈希、完成状态、
 执行异常计数以及排名文件的 schema 与 SHA-256 摘要，再按可行排名选择候选；不能把其他配置或未完成
-coarse 的排名混入确认统计。旧 `scripts/experiments/force_tracking_torque_adrc_tuning.py` 仅保留为兼容
-入口，与 Hydra 调用同一个包内 protocol。
+coarse 的排名混入确认统计。研究只通过 Hydra 正式入口执行，避免路径参数绕过统一 profile 组合。
 
 若需要测试撤掉支撑后的真实夹持能力，可以把 `release_support_on_tracking` 设为 `true`。
 若只想先评估力控曲线本身，保持默认支撑更利于排除掉落和姿态变化的干扰。
@@ -294,9 +291,9 @@ profile、task 等人工输入继续采用 YAML。`effective_parameters.json` �
 
 <pre><code class="language-bash">
 uv run python scripts/research/study.py \
-  --config-name force_tracking_diagnosis \
+  research=archive/model_bug_diagnosis/study \
   study.phase=collision-geometry \
-  study_execution=run
+  execution=study_run
 </code></pre>
 
 该阶段分别控制 Pillar 高度共面性、mesh/sphere 拓扑和 `multiccd`。当前证据表明，问题来自原始非共面

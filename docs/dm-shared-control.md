@@ -24,9 +24,7 @@ PID、刚度估计及 ADRC 暂时保留在历史仿真实现中，没有全部�
 ```bash
 uv sync --all-groups
 uv run pgt run force-track \
-  --profile configs/dm_gripper_admittance.yaml \
-  --task configs/force_tracking/dm_admittance.yaml \
-  --controller-variant admittance
+  --experiment dm_gripper/force_tracking_admittance
 ```
 
 需要查看动画时添加 `--viewer`。示例为 4 ms 外环、1 N 平均单侧目标和 1 N
@@ -51,10 +49,10 @@ uv run pgt run force-track \
 
 ```bash
 uv run python scripts/research/study.py \
-  --config-name dm_admittance_tuning
+  research=dm_admittance_tuning/study
 uv run python scripts/research/study.py \
-  --config-name dm_admittance_tuning \
-  study_execution=run
+  research=dm_admittance_tuning/study \
+  execution=study_run
 ```
 
 `control.force.admittance` 只由 `admittance` 入口使用，和 ADRC/直接力矩反馈互斥。

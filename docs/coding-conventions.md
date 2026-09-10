@@ -12,7 +12,7 @@
 | 模块/类/函数 docstring 的说明文字 | 中文 | `"""从 MuJoCo 数据中读取当前触觉力。"""` |
 | 行内 `#` 注释 | 中文 | `# 只在样本时钟到点时采样，避免重复记录。` |
 | 代码标识符、API、类/函数名 | 英文 | `SimulationSession`、`read()`、`sample_period_s` |
-| 命令行参数与子命令 | 英文 | `pgt run grasp`、`--profile`、`--video` |
+| 命令行参数与子命令 | 英文 | `pgt run grasp`、`--experiment`、`--video` |
 | 物理量符号、单位、`solref`/`solimp` 等求解器参数 | 英文 | `Fz`、`solref="-1200 -10"` |
 | MuJoCo/资产对象名 | 英文 | `left_taxel_geom_00`、`touch_grid` |
 

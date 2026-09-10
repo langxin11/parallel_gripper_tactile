@@ -54,16 +54,16 @@ mesh 与多接触点求解方式的交互。该结论描述当前 MuJoCo 模型�
 
 ```bash
 uv run python scripts/research/study.py \
-  --config-name force_tracking_diagnosis \
+  research=archive/model_bug_diagnosis/study \
   study.phase=collision-geometry \
-  study_execution=run
+  execution=study_run
 ```
 
 实物 Pillar 确认为“中心高、边中间次之、四角低”后，默认 profile 采用保留该高度差的球体碰撞
 代理 `parallel_gripper_height_sphere_collision.xml`，并保持 `multiccd` 开启。它保留分阶段接触的
 物理几何趋势，同时避免非共面 mesh 接触流形切换。
 
-原非共面 mesh 加 `--disable-multiccd` 保留为候选物理设置，供后续以实物面接触承载、摩擦和
+原非共面 mesh 加 `--set execution.multiccd_enabled=false` 保留为候选物理设置，供后续以实物面接触承载、摩擦和
 力—压入标定进行比较；在完成该标定前，不应把它替换为默认模型。
 
 该指尖按 Contactile PapillArray 类传感器处理。公开资料说明 PapillArray 是 soft silicone

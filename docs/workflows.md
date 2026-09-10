@@ -10,31 +10,21 @@
 uv run pgt validate configs/robotiq_2f85.yaml
 uv run pgt assets generate-taxels --shape box
 uv run pgt assets generate-touch-grid
-uv run pgt run demo --profile configs/robotiq_2f85_touch_grid.yaml
+uv run pgt run demo --set model=robotiq_2f85/touch_grid_3x3
 uv run pgt compare tactile \
-  --left-profile configs/robotiq_2f85_box.yaml \
-  --right-profile configs/robotiq_2f85_touch_grid.yaml
-uv run pgt run grasp --profile configs/dm_gripper.yaml --video
-uv run pgt run force-track \
-  --profile configs/dm_gripper.yaml \
-  --task configs/force_tracking/default_waypoints.yaml
-uv run pgt run force-schedule \
-  --profile configs/dm_gripper.yaml \
-  --task configs/force_scheduling/gravity_hold.yaml
-uv run pgt run force-schedule \
-  --profile configs/dm_gripper.yaml \
-  --task configs/force_scheduling/dynamic_filling.yaml
-uv run pgt run friction-estimate \
-  --profile configs/dm_gripper.yaml \
-  --task configs/friction_estimation/nominal_friction.yaml
-uv run pgt run discrete-force \
-  --profile configs/robotiq_2f85.yaml \
-  --task configs/discrete_force/robotiq_delta_f_tick.yaml
-uv run pgt compare contact --profile configs/dm_gripper.yaml
+  --left-set model=robotiq_2f85/box_force_sensor \
+  --right-set model=robotiq_2f85/touch_grid_3x3
+uv run pgt run grasp --video
+uv run pgt run force-track --set task=force_tracking/default_waypoints
+uv run pgt run force-schedule --experiment dm_gripper/force_scheduling_gravity_hold
+uv run pgt run force-schedule --experiment dm_gripper/force_scheduling_dynamic_filling
+uv run pgt run friction-estimate --experiment dm_gripper/friction_estimation_nominal
+uv run pgt run discrete-force --experiment robotiq_2f85/discrete_force
+uv run pgt compare contact
 </code></pre>
 
-`--disable-multiccd` 是保留原碰撞模型、仅限制 convex geom pair 接触数的诊断开关；默认 profile 已使用
-稳定的共面球体碰撞近似，常规实验无需添加该开关。
+`--set execution.multiccd_enabled=false` 是保留所选碰撞模型、仅限制 convex geom pair 接触数的诊断
+覆盖；默认 model 已使用稳定的高度球体碰撞近似，常规实验无需添加该覆盖。
 
 `force-schedule` 复用法向力控制器，根据切向载荷和 task 中已知的摩擦系数生成平均单侧目标力。
 `gravity_hold.yaml` 只验证撤去支撑后的重力保持；`dynamic_filling.yaml` 以沿重力方向的 0→2 N
@@ -52,14 +42,14 @@ uv run pgt compare contact --profile configs/dm_gripper.yaml
 `hardware_scale_nominal.yaml` 另以目标传感器单 taxel 的 `0.05 N` 标称分辨率为依据，采用
 `0.5 N/0.25 N` 接触滞回阈值和 `4 N/侧` 预载；原有 `0.05 N/0.025 N` 仅保留为低力仿真基线。
 
-纯力局部起滑的多种子正例与低探测载荷负例 study（默认先生成计划，`study_execution=run` 执行）：
+纯力局部起滑的多种子正例与低探测载荷负例 study（默认先生成计划，`execution=study_run` 执行）：
 
 <pre><code class="language-bash">
 uv run python scripts/research/study.py \
-  --config-name friction_estimation_local_slip
+  research=friction_local_slip_validation/study
 uv run python scripts/research/study.py \
-  --config-name friction_estimation_local_slip \
-  study_execution=run
+  research=friction_local_slip_validation/study \
+  execution=study_run
 </code></pre>
 
 study 输出逐次与聚合 CSV/Parquet、检测时刻与局部候选摩擦比图，以及每个条件的完整单次运行产物。
@@ -74,10 +64,10 @@ study 输出逐次与聚合 CSV/Parquet、检测时刻与局部候选摩擦比�
 
 <pre><code class="language-bash">
 uv run python scripts/research/study.py \
-  --config-name robotiq_discrete_force
+  research=robotiq_discrete_force_validation/study
 uv run python scripts/research/study.py \
-  --config-name robotiq_discrete_force \
-  study_execution=run
+  research=robotiq_discrete_force_validation/study \
+  execution=study_run
 </code></pre>
 
 正式 study 统一串行执行，不提供并行度参数。单次运行中的物理、控制和记录时钟分别配置；默认是
@@ -98,45 +88,43 @@ uv sync --all-packages --all-groups --locked
 
 <pre><code class="language-bash">
 uv run python scripts/research/run.py \
-  --config-name dm_force_track \
-  controller=dm/adrc_torque \
+  controller=dm_gripper/adrc_torque \
   estimator=window_linear \
-  task=ramp \
+  task=force_tracking/ramp \
   material=hard \
   seed=0
 </code></pre>
 
 将 `execution=plan` 加入同一命令会执行完整领域校验、scene 编译并保存计划，但不推进仿真。
-DM 共享导纳使用 `--config-name dm_admittance`。探索性组合可使用原生 Multirun：
+DM 共享导纳使用 `experiment=dm_gripper/force_tracking_admittance`。探索性组合可使用原生 Multirun：
 
 <pre><code class="language-bash">
 uv run python scripts/research/run.py -m \
-  --config-name dm_force_track \
   material=medium,hard,stiff \
   seed=0,1,2
 </code></pre>
 
 正式控制器对比、PID 模块消融、Torque ADRC 两阶段调参、局部起滑、刚度估计器对比、DM 导纳调参、
 Robotiq 离散力与因果诊断由 study 自身展开权威 YAML 中的矩阵；默认只生成计划，显式选择
-`study_execution=run` 才会执行。除下表 preset 外，`friction_estimation_local_slip`、
+`execution=study_run` 才会执行。除下表 preset 外，`friction_estimation_local_slip`、
 `force_tracking_stiffness_estimator_comparison`、`dm_admittance_tuning`、`robotiq_discrete_force`
 与 `force_tracking_diagnosis`（须再指定 `study.phase=<phase>`）用法相同：
 
 <pre><code class="language-bash">
 uv run python scripts/research/study.py \
-  --config-name force_tracking_controller_comparison
+  research=force_controller_selection/study
 uv run python scripts/research/study.py \
-  --config-name force_tracking_controller_comparison \
-  study_execution=run
+  research=force_controller_selection/study \
+  execution=study_run
 uv run python scripts/research/study.py \
-  --config-name force_tracking_ablation
+  research=force_controller_ablation/study
 uv run python scripts/research/study.py \
-  --config-name force_tracking_ablation \
-  study_execution=run
+  research=force_controller_ablation/study \
+  execution=study_run
 uv run python scripts/research/study.py \
-  --config-name force_tracking_torque_adrc_tuning_coarse
+  research=torque_adrc_tuning/study
 uv run python scripts/research/study.py \
-  --config-name force_tracking_torque_adrc_tuning_confirm \
+  research=torque_adrc_tuning/study study.stage=confirm \
   study.coarse_study_dir=/absolute/path/to/coarse-study
 </code></pre>
 
@@ -159,21 +147,16 @@ study 入口拒绝外层 `-m`，从而保证计划、配对统计与实际执行
 所有 study 图同时输出 600 DPI PNG 和矢量 PDF。
 
 二阶直接力矩 ADRC 的测量轻滤波和控制／观测器带宽采用两阶段调参：粗扫先固定 `medium` 与一个 seed，
-确认阶段再在三种 preset 与三个 seed 上复验。控制器对比、PID 消融与 Torque ADRC 调参的旧脚本仅
-作为薄兼容包装，与 Hydra 正式入口调用同一包内 protocol：
+确认阶段再在三种 preset 与三个 seed 上复验。计划、coarse 执行与 confirm 都使用 Hydra 正式入口：
 
 <pre><code class="language-bash">
-uv run python scripts/experiments/force_tracking_torque_adrc_tuning.py \
-  --config configs/studies/force_tracking_torque_adrc_tuning.yaml \
-  --stage coarse \
-  --dry-run
-uv run python scripts/experiments/force_tracking_torque_adrc_tuning.py \
-  --config configs/studies/force_tracking_torque_adrc_tuning.yaml \
-  --stage coarse
-uv run python scripts/experiments/force_tracking_torque_adrc_tuning.py \
-  --config configs/studies/force_tracking_torque_adrc_tuning.yaml \
-  --stage confirm \
-  --coarse-study-dir outputs/studies/force_tracking_torque_adrc_tuning/coarse/&lt;粗扫目录&gt;
+uv run python scripts/research/study.py \
+  research=torque_adrc_tuning/study
+uv run python scripts/research/study.py \
+  research=torque_adrc_tuning/study execution=study_run
+uv run python scripts/research/study.py \
+  research=torque_adrc_tuning/study study.stage=confirm \
+  study.coarse_study_dir=/absolute/path/to/coarse-study execution=study_run
 </code></pre>
 
 因果诊断按单 phase 一次调用执行，替代原 `--phase all` 循环；碰撞几何阶段包含原 mesh、两种球体、
@@ -181,17 +164,17 @@ uv run python scripts/experiments/force_tracking_torque_adrc_tuning.py \
 
 <pre><code class="language-bash">
 uv run python scripts/research/study.py \
-  --config-name force_tracking_diagnosis \
+  research=archive/model_bug_diagnosis/study \
   study.phase=collision-geometry
 uv run python scripts/research/study.py \
-  --config-name force_tracking_diagnosis \
+  research=archive/model_bug_diagnosis/study \
   study.phase=collision-geometry \
-  study_execution=run
+  execution=study_run
 for phase in reproducibility controllers materials force-scale contact-model \
             collision-geometry force-semantics position-limit integral-gain filter-cutoff; do
   uv run python scripts/research/study.py \
-    --config-name force_tracking_diagnosis \
-    "study.phase=${phase}" study_execution=run
+    research=archive/model_bug_diagnosis/study \
+    "study.phase=${phase}" execution=study_run
 done
 </code></pre>
 

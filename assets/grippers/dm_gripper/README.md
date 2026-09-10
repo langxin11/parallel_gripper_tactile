@@ -44,19 +44,19 @@ uv run pgt validate configs/dm_gripper.yaml
 以静态方块压住某个 Pillar，并在 Viewer 中查看 taxel site 坐标轴、接触点和三维接触力：
 
 ```bash
-uv run pgt view grasp --profile configs/dm_gripper.yaml
+uv run pgt view grasp
 ```
 
 无界面验证右侧对应单元的正压缩力：
 
 ```bash
-uv run pgt run grasp --profile configs/dm_gripper.yaml
+uv run pgt run grasp
 ```
 
 以受控世界系切向位移验证剪切通道（`y` 对应局部 `Fy`，`z` 对应局部 `Fx`）：
 
 ```bash
-uv run pgt compare contact --profile configs/dm_gripper.yaml
+uv run pgt compare contact
 ```
 
 切向测试使用“自由方块 + mocap weld”夹具提供规定运动；它用于确认剪切方向与通道映射，

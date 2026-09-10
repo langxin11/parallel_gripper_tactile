@@ -48,8 +48,8 @@ uv run pytest -n 24
 
 ```bash
 uv run python scripts/research/run.py execution=plan
-uv run python scripts/research/study.py --config-name force_tracking_ablation
-uv run python scripts/research/study.py --config-name force_tracking_torque_adrc_tuning_coarse
+uv run python scripts/research/study.py research=force_controller_ablation/study
+uv run python scripts/research/study.py research=torque_adrc_tuning/study
 ```
 
 Hydra/OmegaConf 位于 `research` 依赖组，完整开发安装已包含该组。不要将 Hydra 引入共享控制核或

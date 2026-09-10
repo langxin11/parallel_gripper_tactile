@@ -62,11 +62,11 @@ tick 数归一化，并用 EWMA 更新。正常 `ADJUST` 的夹紧与松开动�
 
 ```bash
 uv run pgt run discrete-force \
-  --profile configs/robotiq_2f85.yaml \
-  --task configs/discrete_force/robotiq_delta_f_tick.yaml
+  --experiment robotiq_2f85/discrete_force
 ```
 
-CLI 可覆盖 `--controller-variant`、`--object-material`、`--force-noise-std` 和 `--noise-seed`。
+CLI 使用可重复的 `--set` 选择控制器、材料、task 字段和 `seed`，例如
+`--set controller=robotiq_2f85/predictive --set material=hard --set seed=1`。
 接触前后均使用 30 Hz 控制时钟；在 500 Hz 物理步长上由仿真时间调度器交替落到相邻物理步，长期平均
 周期严格保持为 1/30 s。接近阶段另受 50 ms 动作间隔限制，因此接近动作频率不超过 20 Hz。
 主任务在接触稳定后启动 `2→4→6→8→6→4→2 N` 目标曲线，首个平台为在线辨识保留 2.5 s，
@@ -97,10 +97,10 @@ trace 除双侧力、原始/含噪/滤波力、状态、动作、稳定性、局
 
 ```bash
 uv run python scripts/research/study.py \
-  --config-name robotiq_discrete_force
+  research=robotiq_discrete_force_validation/study
 uv run python scripts/research/study.py \
-  --config-name robotiq_discrete_force \
-  study_execution=run
+  research=robotiq_discrete_force_validation/study \
+  execution=study_run
 ```
 
 正式 study 统一串行执行，不提供并行度参数。条件之间相互独立且种子固定，串行结果与历史

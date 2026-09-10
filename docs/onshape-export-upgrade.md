@@ -29,7 +29,7 @@ uv run pgt assets prepare-onshape RAW.xml PREPARED.xml
 
 <pre><code class="language-bash">
 uv run pgt validate configs/dm_gripper.yaml
-uv run pgt view grasp --profile configs/dm_gripper.yaml
+uv run pgt view grasp
 </code></pre>
 
 该整理命令保留模型几何，只赋予接触几何触觉读取器所需的稳定

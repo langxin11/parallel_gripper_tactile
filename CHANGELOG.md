@@ -9,6 +9,8 @@
 
 ### 新增
 
+- 新增配置重构迁移基线：冻结重构前全部 YAML、profile、task、模型资源摘要、单次组合和正式研究有序矩阵，
+  并记录字段所有权、新旧路径、研究准入／退出与诊断归档依据，供后续组合实现做独立等价比较。
 - 新增 Hydra 原生科研单次与正式 study 入口，以及按平台、控制器、估计器、任务、材料和研究方案组织的
   可复用配置组；计划模式执行完整领域与资源校验但不推进仿真，单次入口支持原生串行 Multirun。
 - 新增科研调用的有效配置、组合选择/覆盖/来源、Git 状态和失败条件溯源；正式控制器对比与 PID 消融
@@ -17,7 +19,7 @@
   `planned/running/partial/completed/failed` 状态、科学验收失败、执行异常及聚合／绘图失败；登记产物
   SHA-256，并提供不自动续跑的既有条件与可恢复性报告。
 - Torque ADRC coarse／confirm 两阶段调参迁入 Hydra 正式 study：保留 102 条 coarse 权威矩阵及动态
-  confirm 选择规则，confirm 严格验证 coarse 类型、阶段、科学配置哈希和排名摘要；旧实验脚本保留薄兼容入口。
+  confirm 选择规则，confirm 严格验证 coarse 类型、阶段、科学配置哈希和排名摘要。
 - 摩擦局部起滑（15 条）、刚度估计器对比（81 条）、DM 导纳调参（32 条）、Robotiq 离散力（60 条）与
   因果诊断（10 个 phase 共 39 条）迁入 Hydra 正式 study 入口：条件矩阵、统计口径、排名规则与产物
   文件名保持不变，manifest 升级为公共生命周期状态机并登记产物 SHA-256；新输出位于
@@ -27,22 +29,32 @@
 
 ### 移除
 
-- 删除 `scripts/experiments/` 下 5 个专项研究旧入口：`friction_estimation_local_slip.py`、
-  `force_tracking_stiffness_estimator_comparison.py`、`dm_admittance_tuning.py`、
-  `robotiq_discrete_force.py` 与 `force_tracking_diagnosis.py`；其实现迁入
-  `studies/protocols/` 包内并由 Hydra 入口复用。
+- 删除 `scripts/experiments/` 下全部 8 个专项研究旧入口；其实现迁入 `studies/protocols/` 包内并由
+  Hydra 正式入口复用，避免直接路径参数绕过统一组合解析。
 - 移除 `dm_admittance_tuning` 的 `max_workers` 字段与 `robotiq_discrete_force` 的 `--jobs`/
-  `--dry-run` 参数：正式 study 统一串行执行，计划审阅改用 `study_execution=plan` 默认模式。
+  `--dry-run` 参数：正式 study 统一串行执行，计划审阅改用默认的 `execution=study_plan`。
 
 ### 变更
 
-- 主仿真 profile 及其导纳、平面球碰撞派生 profile 分别更名为 `configs/dm_gripper*.yaml`；对应
-  profile 名和新实验产物目录改为 `dm_gripper*`。
+- 单次 DM 力跟踪迁至统一 `configs/run.yaml`：platform、四种碰撞 model、全部 PID／ADRC／导纳 controller、
+  四种 estimator、六个力跟踪 task、material、execution 与常用 experiment 直接组合为冻结领域对象；
+  `experiment=dm_gripper/force_tracking_admittance` 完整保留专用 MIT 增益、接触阈值、滤波和 estimator 关闭。
+- 力跟踪 runner 在收到已解析对象时直接保存该对象的 profile／task YAML，不再把组合片段误作完整快照；
+  运行算法和产物名称不变。
+- 力调度、摩擦估计、Robotiq 离散力及 `pgt` 的抓取、视频、查看和接触／触觉比较入口改为消费同一
+  experiment 组合服务；CLI 以 `--experiment` 和可重复 `--set` 替代旧 `--profile`、`--task` 及重复的
+  科学参数，输出位置统一由 `execution.output_root` 配置。
+- 正式研究迁至统一 `configs/study.yaml` 与目的导向的 `configs/research/<purpose>/study.yaml`；研究元数据、
+  准入／停止／排除依据和领域矩阵由同一文件提供。Torque ADRC coarse／confirm 共用一份定义，模型 bug
+  诊断移入 `research/archive/`，默认控制器选型明确排除已有 135-run 负面证据的 `direct-torque`。
+- 正式研究的 profile 也改由命名 experiment 与 Hydra 覆盖组合；删除 DM 导纳、DM 平面球和 Robotiq
+  box／touch-grid 的派生完整 profile，以及旧 task、研究 selector、兼容研究脚本和重复片段目录。迁移前
+  参数由冻结基线保留。
 - pre-commit 的完整 pytest 门禁改用 `pytest-xdist` 自动确定 worker 数并行执行；CI 继续执行串行
   完整测试，测试选择与验收口径不变。
 - force-track runner 可直接接收同一份已校验冻结 profile，避免配置解析后再次读取原始文件；控制器切换
   会清除其他算法专用字段并重新执行完整 profile 与资源校验。控制器对比、消融和 Torque ADRC 调参
-  实现迁入包内 protocol，原脚本保留兼容包装。
+  实现迁入包内 protocol。
 
 - 7 个研究脚本的 `aggregate_rows` 手写聚合统一收敛到 `studies/aggregation.py` 的声明式
   polars 聚合层（列规格加 `aggregate_records` 解释器），三份逐字节相同的 `_transient_stats`

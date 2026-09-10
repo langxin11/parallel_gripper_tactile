@@ -5,8 +5,8 @@ DM_Gripper 完全由 `configs/dm_gripper.yaml` 配置：MJCF 来源、法兰安�
 
 <pre><code class="language-bash">
 uv run pgt validate configs/dm_gripper.yaml
-uv run pgt run grasp --profile configs/dm_gripper.yaml
-uv run pgt view grasp --profile configs/dm_gripper.yaml
+uv run pgt run grasp
+uv run pgt view grasp
 </code></pre>
 
 Pillars 使用等效接触参数 `solref="-1200 -10"` 与

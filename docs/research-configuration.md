@@ -19,35 +19,34 @@ Hydra 与 OmegaConf 位于独立的 `research` 依赖组；`dev` 包含该组，
 
 ## 单次实验
 
-默认 DM 力跟踪 preset：
+默认 DM 力跟踪组合：
 
 ```bash
-uv run python scripts/research/run.py --config-name dm_force_track
+uv run python scripts/research/run.py
 ```
 
 显式选择控制器、估计器、任务、材料和 seed：
 
 ```bash
 uv run python scripts/research/run.py \
-  --config-name dm_force_track \
-  controller=dm/adrc_torque \
+  controller=dm_gripper/adrc_torque \
   estimator=window_linear \
-  task=ramp \
+  task=force_tracking/ramp \
   material=hard \
   seed=0
 ```
 
-DMgripper 共享导纳仿真链路使用独立 preset，避免与 PID/ADRC 专用字段混合：
+DMgripper 共享导纳仿真链路使用 experiment 组合，同时选择相容的控制器、估计器和任务：
 
 ```bash
-uv run python scripts/research/run.py --config-name dm_admittance
+uv run python scripts/research/run.py \
+  experiment=dm_gripper/force_tracking_admittance
 ```
 
 探索性参数组合使用 Hydra 原生 Multirun。每个组合拥有独立的 Hydra 外层目录和内部 run artifacts：
 
 ```bash
 uv run python scripts/research/run.py -m \
-  --config-name dm_force_track \
   material=medium,hard,stiff \
   seed=0,1,2
 ```
@@ -59,10 +58,9 @@ uv run python scripts/research/run.py -m \
 
 ```bash
 uv run python scripts/research/run.py \
-  --config-name dm_force_track \
   execution=plan \
-  controller=dm/full \
-  task=step \
+  controller=dm_gripper/full \
+  task=force_tracking/step \
   material=medium \
   seed=0
 ```
@@ -77,25 +75,25 @@ uv run python scripts/research/run.py \
 
 ```bash
 uv run python scripts/research/study.py \
-  --config-name force_tracking_controller_comparison
+  research=force_controller_selection/study
 ```
 
 确认计划后执行：
 
 ```bash
 uv run python scripts/research/study.py \
-  --config-name force_tracking_controller_comparison \
-  study_execution=run
+  research=force_controller_selection/study \
+  execution=study_run
 ```
 
 PID 模块消融计划为 4 个控制器 × 3 个材料 × 3 个 seed，共 36 个有序条件：
 
 ```bash
 uv run python scripts/research/study.py \
-  --config-name force_tracking_ablation
+  research=force_controller_ablation/study
 uv run python scripts/research/study.py \
-  --config-name force_tracking_ablation \
-  study_execution=run
+  research=force_controller_ablation/study \
+  execution=study_run
 ```
 
 局部起滑验证、刚度估计器对比、DM 导纳调参与 Robotiq 离散力 study 用法相同，矩阵分别为
@@ -104,14 +102,14 @@ uv run python scripts/research/study.py \
 
 ```bash
 uv run python scripts/research/study.py \
-  --config-name friction_estimation_local_slip
+  research=friction_local_slip_validation/study
 uv run python scripts/research/study.py \
-  --config-name force_tracking_stiffness_estimator_comparison
+  research=stiffness_estimator_validation/study
 uv run python scripts/research/study.py \
-  --config-name dm_admittance_tuning
+  research=dm_admittance_tuning/study
 uv run python scripts/research/study.py \
-  --config-name robotiq_discrete_force \
-  study_execution=run
+  research=robotiq_discrete_force_validation/study \
+  execution=study_run
 ```
 
 因果诊断研究一次调用执行一个 phase，`study.phase` 必选（10 个 phase 共 39 条条件）；原
@@ -119,9 +117,9 @@ uv run python scripts/research/study.py \
 
 ```bash
 uv run python scripts/research/study.py \
-  --config-name force_tracking_diagnosis \
+  research=archive/model_bug_diagnosis/study \
   study.phase=collision-geometry \
-  study_execution=run
+  execution=study_run
 ```
 
 Torque ADRC 调参也由同一正式入口承载。正式 coarse 为 34 个满足测量带宽约束的候选 × 3 个任务 ×
@@ -130,26 +128,30 @@ Torque ADRC 调参也由同一正式入口承载。正式 coarse 为 34 个满�
 
 ```bash
 uv run python scripts/research/study.py \
-  --config-name force_tracking_torque_adrc_tuning_coarse
+  research=torque_adrc_tuning/study
 uv run python scripts/research/study.py \
-  --config-name force_tracking_torque_adrc_tuning_coarse \
-  study_execution=run
+  research=torque_adrc_tuning/study \
+  execution=study_run
 uv run python scripts/research/study.py \
-  --config-name force_tracking_torque_adrc_tuning_confirm \
+  research=torque_adrc_tuning/study study.stage=confirm \
   study.coarse_study_dir=/absolute/path/to/coarse-study
 uv run python scripts/research/study.py \
-  --config-name force_tracking_torque_adrc_tuning_confirm \
+  research=torque_adrc_tuning/study study.stage=confirm \
   study.coarse_study_dir=/absolute/path/to/coarse-study \
-  study_execution=run
+  execution=study_run
 ```
 
 confirm 不只检查目录是否存在，还要求 coarse manifest 的生命周期 schema、研究类型、阶段、完成状态、
 研究定义哈希和无执行异常均匹配，并验证 `candidate_ranking.csv` 已登记、内容摘要一致、候选全集及排名
 schema 正确。任一项不一致都会在任何 confirm 子 run 前失败。
 
-正式 study 的 domain YAML 是条件矩阵的唯一权威来源，Hydra 只选择研究方案和执行模式。入口明确拒绝
+每个 `configs/research/<purpose>/study.yaml` 同时保存研究元数据与唯一条件矩阵；Hydra 只选择研究方案
+和执行模式，不再通过 selector 跳转到第二份 domain YAML。入口明确拒绝
 `-m`、`--multirun` 与 `hydra.mode=MULTIRUN`，并在任何子实验前失败，避免把同一矩阵重复展开。
 计划和执行持有同一个冻结 `StudyPlan`；每个条件带稳定 `condition_id`、科学参数、配对键和基线角色。
+每个研究还用 `study.profile.experiment` 与 `study.profile.overrides` 选择基础 profile，复用单次实验的组合
+服务；解析、预检、执行与有效配置快照持有同一冻结对象。归档模型诊断因需改写历史模型路径而保留原始
+profile 来源字段，但其基础对象仍会通过组合入口预检。
 
 ## 生命周期、状态与失败分类
 
@@ -177,14 +179,14 @@ schema 正确。任一项不一致都会在任何 confirm 子 run 前失败。
 | `task` | 任务家族及 task 文件 | profile 或材料 |
 | `material` | 接触材料 preset | 控制时序 |
 | `execution` | 计划/执行、输出、viewer、记录与只读恢复检测 | 科学条件 |
-| `study` | 正式研究种类、阶段、谱系及权威 domain YAML | 外层笛卡尔积 |
+| `research` | 研究问题、决策、准入／停止／排除依据、阶段谱系及唯一矩阵 | 外层笛卡尔积 |
 
 优先级从低到高依次为：配置组默认值、根 preset 的 `_self_` 值、命令行覆盖。Hydra 对列表采用整表
-替换，不进行元素级拼接；正式矩阵列表只在 domain YAML 中维护。配置模型使用 `extra="forbid"`，未知字段、
+替换，不进行元素级拼接；正式矩阵列表只在目的目录的 `study.yaml` 中维护。配置模型使用 `extra="forbid"`，未知字段、
 拼写错误和缺失值会在仿真前失败。控制器组整体替换；领域解析器还会清空其他算法的 `adrc`、
 `torque_adrc`、`admittance` 与直接力矩反馈字段，随后对完整 profile 重新执行 Pydantic 校验。
 
-当前只声明 DM 仿真组合。导纳必须配 `estimator=none`；非导纳控制器中仅 `pid-only` 允许显式关闭估计器；
+当前声明 DM 与 Robotiq 仿真组合。导纳必须配 `estimator=none`；非导纳控制器中仅 `pid-only` 允许显式关闭估计器；
 Torque ADRC 参数只能随 `adrc-torque` 或 `adrc-torque-td` 出现。选择 platform 不会打开串口、连接设备、
 使能电机或发送命令；尚未支持的硬件组合会被 schema 拒绝。
 
@@ -212,9 +214,8 @@ Hydra 拥有一次科研调用的外层目录，其中保存组合来源、选�
 
 本阶段已贯通 DM 单次力跟踪、DM 共享导纳、正式控制器对比、PID 模块消融、Torque ADRC 两阶段调参、
 摩擦局部起滑、刚度估计器对比、DM 导纳调参、Robotiq 离散力和因果诊断（单 phase 入口）。原
-`scripts/experiments/force_tracking_controller_comparison.py` 与
-`force_tracking_ablation.py`、`force_tracking_torque_adrc_tuning.py` 保留为兼容入口，但实现已迁入包内
-protocol；其余专项研究的旧脚本已删除，统一使用 Hydra 正式入口。
+`scripts/experiments/` 研究入口已删除，统一使用 Hydra 正式入口；可复用矩阵展开与聚合实现仍位于包内
+protocol。
 
 迁移中保留的语义边界：导纳调参的候选排名与 raw 物理力峰值口径、估计器对比的 secant 基线与公共
 seed 叠加、Robotiq 离散力的 HOLD/再激活时序与逐平台指标、诊断的单因素条件构造与数值/分类双横轴

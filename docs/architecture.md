@@ -2,15 +2,13 @@
 
 项目把演示/检查、科研组合和正式研究分开：`pgt` 面向交互运行，`scripts/research/run.py` 面向
 Hydra 单次与探索性 Multirun，`scripts/research/study.py` 面向固定矩阵的正式研究；它们通过 Python
-runner 复用同一套实验实现和运行产物约定。控制器对比、PID 消融与 Torque ADRC 调参的旧
-脚本保留为 `scripts/experiments` 下的薄兼容包装。
+runner 复用同一套实验实现和运行产物约定。旧研究脚本已移除，避免绕过统一组合解析。
 
 ```mermaid
 flowchart TB
   subgraph Entry[入口层]
     CLI["pgt CLI<br/>单次运行与交互检查"]
     Research["scripts/research<br/>Hydra 科研入口"]
-    Scripts["scripts/experiments<br/>旧入口兼容包装"]
   end
 
   subgraph Orchestration[编排层]
@@ -36,8 +34,6 @@ flowchart TB
   Resolve --> Study
   Study --> Lifecycle
   Lifecycle --> Runner
-  Scripts --> Study
-  Scripts --> Runner
   Runner --> Artifacts
   Runner --> Experiments
   Experiments --> Control
@@ -57,7 +53,8 @@ manifest。
 
 | 区域 | 主要职责 | 不应承担的职责 |
 | --- | --- | --- |
-| `config/profiles.py` | 用冻结的 Pydantic 模型校验 YAML，并以 YAML 所在目录解析相对路径 | 启动 MuJoCo 或写运行结果 |
+| `config/profiles.py` | 校验最终冻结的 Pydantic profile；兼容旧完整 YAML 的相对资源路径解析 | 选择配置组、启动 MuJoCo 或写运行结果 |
+| `research/configuration.py` | 将 platform、model、controller、estimator、task、material、execution 与 experiment 片段组合为冻结领域对象 | 推进仿真或让 runner 重读片段 |
 | `artifacts/` | 管理运行目录、输入快照、manifest 与安全清理 | 推进仿真或决定实验控制逻辑 |
 | `analysis/` | 读取触觉力轨迹并提供基础分析；原 `analysis` 导入路径由同名包兼容 | 设定论文样式或改变实验数据口径 |
 | `visualization/` | 提供论文绘图样式与摩擦检测图 | 读取控制状态或重新计算实验指标 |
@@ -74,7 +71,6 @@ manifest。
 | `research/` | 把 Hydra 组合解析为冻结领域配置，执行计划/运行并记录组合溯源 | 维护控制算法或设备 I/O |
 | `studies/` | 定义可校验的研究配置、唯一条件矩阵、公共生命周期与可复用 protocol | 通过子进程调用 CLI，或统一任务／控制器／统计公式 |
 | `scripts/research/` | 提供轻薄的 Hydra 原生科研入口 | 复制 runner、矩阵或实验物理逻辑 |
-| `scripts/experiments/` | 提供已迁移研究的旧入口兼容包装 | 复制单次实验物理逻辑 |
 | `cli/` | 参数适配、面向人的诊断和结果展示 | 作为包内模块的反向依赖 |
 
 ## 仿真循环所有权
@@ -138,7 +134,9 @@ outputs/<profile>/<experiment>/<UTC timestamp>-<id>/
 完整频率 trace，因此存储优化不改变实验结论。旧 CSV API 与历史 `trace.csv` 仍可读取。
 
 `metrics.json` 与 `manifest.json` 继续使用 JSON。`manifest.json` 只列出实际生成并登记的文件，同时记录
-profile 哈希、Git 状态、依赖版本、参数和创建时间。失败的运行目录会保留输入快照，便于复现诊断。
+profile 哈希、Git 状态、依赖版本、参数和创建时间。组合入口的 `profile.yaml` 与 `task.yaml` 直接序列化
+实际执行使用的同一冻结对象，避免把 platform 或 task 组包装误作完整输入。失败的运行目录会保留输入快照，
+便于复现诊断。
 
 Hydra 拥有科研调用的外层目录和组合溯源，`RunDirectory` 拥有内部实验产物。study 在单次运行之上
 增加一层父目录；每个条件仍使用相同 runner：

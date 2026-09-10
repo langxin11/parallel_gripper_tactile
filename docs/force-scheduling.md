@@ -15,16 +15,14 @@
 
 <pre><code class="language-bash">
 uv run pgt run force-schedule \
-  --profile configs/dm_gripper.yaml \
-  --task configs/force_scheduling/gravity_hold.yaml
+  --experiment dm_gripper/force_scheduling_gravity_hold
 </code></pre>
 
 沿重力方向把附加载荷从 0 线性增加到 2 N，模拟容器逐渐注水：
 
 <pre><code class="language-bash">
 uv run pgt run force-schedule \
-  --profile configs/dm_gripper.yaml \
-  --task configs/force_scheduling/dynamic_filling.yaml
+  --experiment dm_gripper/force_scheduling_dynamic_filling
 </code></pre>
 
 两个任务都先低速闭合并确认双侧接触，稳定后撤去临时支撑，随后才开始目标力调度和滑移评价。

@@ -54,8 +54,8 @@
 
 ```bash
 uv run pgt run friction-estimate \
-  --profile configs/dm_gripper.yaml \
-  --task configs/friction_estimation/hardware_scale_nominal.yaml
+  --experiment dm_gripper/friction_estimation_nominal \
+  --set task=friction_estimation/hardware_scale_nominal
 ```
 
 保留 `trace.csv`、`metrics.json`、输入快照、有效参数、manifest，以及两组 PNG/PDF：
