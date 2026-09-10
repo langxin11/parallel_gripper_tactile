@@ -1,19 +1,20 @@
-"""验证 DMgripper 导纳 Ramp 调参入口的配置和确定性调度。"""
+"""验证 DMgripper 导纳 Ramp 调参研究的配置和串行确定性调度。"""
 
 from __future__ import annotations
 
-from concurrent.futures import Future
-import importlib.util
+import json
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
+from parallel_gripper_tactile.experiments.force_tracking import ForceTrackingResult
 from parallel_gripper_tactile.studies.dm_admittance_tuning import (
     DMAdmittanceCandidate,
-    DMAdmittanceTuningConfig,
     load_dm_admittance_tuning_config,
 )
-from parallel_gripper_tactile.studies.force_tracking_ablation import SeedSweep, StudyConfigError
+from parallel_gripper_tactile.studies.force_tracking_ablation import StudyConfigError
+from parallel_gripper_tactile.studies.protocols import dm_admittance_tuning as protocol
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -64,16 +65,6 @@ def _candidate_payload(**overrides: float) -> dict[str, float]:
     return payload
 
 
-def _protocol_module() -> object:
-    """加载仓库内的导纳调参入口脚本。"""
-    path = ROOT / "scripts/experiments/dm_admittance_tuning.py"
-    spec = importlib.util.spec_from_file_location("dm_admittance_tuning", path)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
 def _aggregate_row(
     candidate: DMAdmittanceCandidate,
     *,
@@ -117,7 +108,6 @@ def test_config_resolves_paths_and_expands_candidates(tmp_path: Path) -> None:
         "task: ramp.yaml\n"
         "materials: [medium, hard]\n"
         "seeds: {start: 3, count: 2}\n"
-        "max_workers: 2\n"
         "candidates:\n"
         "  - {mass_kg: 0.02, damping_ns_m: 0.2, stiffness_n_m: 1.0, "
         "filter_cutoff_hz: 5.0, velocity_limit_rad_s: 0.05, "
@@ -141,11 +131,10 @@ def test_config_resolves_paths_and_expands_candidates(tmp_path: Path) -> None:
     assert config.conditions()[-1][1:] == ("hard", 4)
 
 
-def test_repository_config_scans_contact_transition_in_parallel() -> None:
-    """仓库调参入口并行扫描接近和接触切换参数。"""
+def test_repository_config_scans_contact_transition_parameters() -> None:
+    """仓库调参入口扫描接近和接触切换参数。"""
     config = load_dm_admittance_tuning_config(ROOT / "configs/studies/dm_admittance_tuning.yaml")
 
-    assert config.max_workers == 4
     assert len(config.candidates) == 16
     assert (
         _candidate(
@@ -218,14 +207,13 @@ def test_config_rejects_invalid_admittance_parameters(
         load_dm_admittance_tuning_config(config_path)
 
 
-def test_config_rejects_duplicate_candidates_and_nonpositive_max_workers(tmp_path: Path) -> None:
-    """候选必须唯一，max_workers 必须为正整数。"""
+def test_config_rejects_duplicate_candidates(tmp_path: Path) -> None:
+    """候选必须唯一，重复候选直接拒绝。"""
     config_path = tmp_path / "invalid.yaml"
     config_path.write_text(
         "profile: profile.yaml\n"
         "task: ramp.yaml\n"
         "materials: [medium]\n"
-        "max_workers: 0\n"
         "candidates:\n"
         "  - {mass_kg: 0.02, damping_ns_m: 0.2, stiffness_n_m: 1.0, "
         "filter_cutoff_hz: 5.0, velocity_limit_rad_s: 0.05, "
@@ -241,7 +229,6 @@ def test_config_rejects_duplicate_candidates_and_nonpositive_max_workers(tmp_pat
     with pytest.raises(StudyConfigError) as error:
         load_dm_admittance_tuning_config(config_path)
 
-    assert "max_workers" in str(error.value)
     assert "重复" in str(error.value)
 
 
@@ -249,7 +236,6 @@ def test_trace_diagnostics_uses_physical_force_and_keeps_initial_peak(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     """峰值使用步进后触觉侧力，并且不受初始忽略窗口遮蔽。"""
-    protocol = _protocol_module()
     rows = [
         {
             "phase": "track_reference",
@@ -272,71 +258,68 @@ def test_trace_diagnostics_uses_physical_force_and_keeps_initial_peak(
     ]
     monkeypatch.setattr(protocol, "read_trace_rows", lambda _: rows)
 
-    diagnostics = protocol._trace_diagnostics(tmp_path, ignore_initial_s=0.2)  # type: ignore[attr-defined]
+    diagnostics = protocol._trace_diagnostics(tmp_path, ignore_initial_s=0.2)
 
     assert diagnostics["force_tracking_ratio"] == 1.0
     assert diagnostics["raw_rmse_n"] == pytest.approx(0.0)
     assert diagnostics["raw_peak_abs_error_n"] == pytest.approx(1.0)
 
 
-def test_parallel_dispatch_preserves_condition_order_and_ranking_is_deterministic(
-    tmp_path: Path,
+def test_serial_execution_preserves_condition_order_and_ranking_is_deterministic(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """并行完成顺序不会改变配置顺序或候选排名。"""
-    protocol = _protocol_module()
+    """串行执行按配置顺序产出逐 run 行，候选排名只由聚合指标决定。"""
+    config = load_dm_admittance_tuning_config(
+        ROOT / "configs/studies/dm_admittance_tuning.yaml"
+    ).model_copy(update={"output_root": tmp_path / "studies"})
+    trace_rows = [
+        {
+            "phase": "track_reference",
+            "tracking_time_s": 0.3,
+            "control_state": "force_tracking",
+            "target_normal_force_n": 1.0,
+            "left_taxel_normal_force_n": 1.0,
+            "right_taxel_normal_force_n": 1.0,
+        }
+    ]
+
+    def fake_execute(**kwargs: object):
+        run_path = Path(str(kwargs["output_root"])) / f"{kwargs['run_prefix']}-synthetic"
+        run_path.mkdir(parents=True)
+        result = ForceTrackingResult(
+            contact_time_s=0.1,
+            tracking_start_time_s=0.2,
+            tracking_duration_s=1.0,
+            rmse_n=0.1,
+            mae_n=0.1,
+            peak_abs_error_n=0.2,
+            mean_error_n=0.0,
+            final_error_n=0.0,
+            torque_saturation_ratio=0.0,
+            position_saturation_ratio=0.0,
+            mean_estimated_stiffness_n_per_m=1000.0,
+            rise_time_s=0.1,
+            overshoot_ratio=0.1,
+            settling_time_s=0.2,
+            simulation_stable=True,
+        )
+        return SimpleNamespace(path=run_path), result
+
+    monkeypatch.setattr(protocol, "execute_force_tracking", fake_execute)
+    monkeypatch.setattr(protocol, "read_trace_rows", lambda _: trace_rows)
+
+    study_dir = protocol.run_study(config, study_directory=tmp_path / "study")
+
+    summary = json.loads((study_dir / "summary.json").read_text(encoding="utf-8"))
+    assert [row["candidate_id"] for row in summary["runs"]] == [
+        candidate.identifier for candidate, _, _ in config.conditions()
+    ]
+    assert not (study_dir / ".candidate_profiles").exists()
+
     first = _candidate(0.02, 0.2, 1.0)
     second = _candidate(0.02, 1.2, 20.0)
     incomplete = _candidate(0.04, 1.6, 20.0)
-    config = DMAdmittanceTuningConfig(
-        profile=tmp_path / "profile.yaml",
-        task=tmp_path / "ramp.yaml",
-        materials=("medium",),
-        seeds=SeedSweep(start=0, count=1),
-        candidates=(first, second),
-        max_workers=2,
-    )
-    conditions = tuple(
-        protocol.RunCondition(  # type: ignore[attr-defined]
-            candidate=candidate,
-            profile_path=tmp_path / f"{candidate.identifier}.yaml",
-            task_path=config.task,
-            output_root=tmp_path / "runs" / candidate.identifier,
-            study_directory=tmp_path,
-            object_material=material,
-            sensor_noise_seed=seed,
-        )
-        for candidate, material, seed in config.conditions()
-    )
-    captured_workers: list[int] = []
-
-    class ImmediateExecutor:
-        """以可控 Future 模拟进程池，不运行 MuJoCo。"""
-
-        def __init__(self, *, max_workers: int) -> None:
-            captured_workers.append(max_workers)
-
-        def __enter__(self) -> "ImmediateExecutor":
-            return self
-
-        def __exit__(self, *_: object) -> None:
-            return None
-
-        def submit(self, worker: object, condition: object) -> Future[dict[str, object]]:
-            future: Future[dict[str, object]] = Future()
-            future.set_result(worker(condition))  # type: ignore[operator]
-            return future
-
-    def fake_worker(condition: object) -> dict[str, object]:
-        return {"candidate_id": condition.candidate.identifier}  # type: ignore[attr-defined]
-
-    rows = protocol.execute_conditions(  # type: ignore[attr-defined]
-        conditions,
-        max_workers=config.max_workers,
-        executor_factory=ImmediateExecutor,
-        worker=fake_worker,
-    )
-
-    ranking = protocol.rank_candidates(  # type: ignore[attr-defined]
+    ranking = protocol.rank_candidates(
         [
             _aggregate_row(first, stable_runs=2, complete_runs=2, peak=0.3, rmse=0.2),
             _aggregate_row(second, stable_runs=2, complete_runs=2, peak=0.2, rmse=0.3),
@@ -344,10 +327,9 @@ def test_parallel_dispatch_preserves_condition_order_and_ranking_is_deterministi
         ]
     )
 
-    assert captured_workers == [2]
-    assert [row["candidate_id"] for row in rows] == [first.identifier, second.identifier]
     assert [row["candidate_id"] for row in ranking] == [
         second.identifier,
         first.identifier,
         incomplete.identifier,
     ]
+    assert [row["rank"] for row in ranking] == [1, 2, 3]

@@ -221,6 +221,46 @@ def test_stiffness_comparison_plan_registers_expected_condition_count(tmp_path: 
     assert not (result / "runs").exists()
 
 
+def test_formal_dm_admittance_tuning_preserves_matrix() -> None:
+    """迁移后的 32 条导纳调参条件与旧 study 配置逐项一致且无基线角色。"""
+    from parallel_gripper_tactile.studies.dm_admittance_tuning import (
+        load_dm_admittance_tuning_config,
+    )
+
+    resolved = _resolved("dm_admittance_tuning")
+    legacy = load_dm_admittance_tuning_config(
+        REPOSITORY_ROOT / "configs/studies/dm_admittance_tuning.yaml"
+    )
+
+    actual = tuple(
+        (row["candidate_id"], row["object_material"], row["sensor_noise_seed"])
+        for row in resolved.conditions
+    )
+    expected = tuple(
+        (candidate.identifier, material, seed) for candidate, material, seed in legacy.conditions()
+    )
+    assert actual == expected
+    assert len({row["condition_id"] for row in resolved.conditions}) == 32
+    assert all(row["baseline_role"] is None for row in resolved.conditions)
+
+
+def test_dm_admittance_tuning_plan_registers_expected_condition_count(tmp_path: Path) -> None:
+    """导纳调参 plan 产物登记 32 条条件且不创建任何 run。"""
+    resolved = _resolved("dm_admittance_tuning")
+    result = execute_research_study(
+        resolved,
+        hydra_output_directory=tmp_path,
+        provenance={"choices": {}, "overrides": []},
+    )
+
+    plan = json.loads((result / "plan.json").read_text(encoding="utf-8"))
+    assert plan["study"] == "dm_admittance_tuning"
+    assert plan["condition_count"] == 32
+    manifest = json.loads((result / "study_manifest.json").read_text(encoding="utf-8"))
+    assert manifest["state"] == "planned"
+    assert not (result / "runs").exists()
+
+
 def test_local_slip_protocol_preserves_validation_semantics(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

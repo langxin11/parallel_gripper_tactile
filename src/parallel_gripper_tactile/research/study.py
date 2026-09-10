@@ -16,6 +16,10 @@ from ..experiments.force_tracking import (
     validate_force_tracking_configuration,
 )
 from ..experiments.friction_estimation import FrictionEstimationTask
+from ..studies.dm_admittance_tuning import (
+    DMAdmittanceTuningConfig,
+    load_dm_admittance_tuning_config,
+)
 from ..studies.friction_estimation_local_slip import (
     FrictionEstimationLocalSlipStudyConfig,
     load_local_slip_study_config,
@@ -46,6 +50,7 @@ from ..studies.protocols import (
 from ..studies.protocols import (
     force_tracking_torque_adrc_tuning as torque_tuning_protocol,
 )
+from ..studies.protocols import dm_admittance_tuning as dm_admittance_tuning_protocol
 from .configuration import REPOSITORY_ROOT, ResearchConfigurationError
 
 
@@ -55,6 +60,7 @@ StudyKind = Literal[
     "force_tracking_torque_adrc_tuning",
     "friction_estimation_local_slip",
     "force_tracking_stiffness_estimator_comparison",
+    "dm_admittance_tuning",
 ]
 SetupFailureStage = Literal["configuration", "preflight"]
 
@@ -120,6 +126,7 @@ StudyDomainConfig = (
     | ForceTrackingTorqueAdrcTuningConfig
     | FrictionEstimationLocalSlipStudyConfig
     | ForceTrackingStiffnessEstimatorComparisonConfig
+    | DMAdmittanceTuningConfig
 )
 
 
@@ -260,6 +267,16 @@ def _validate_local_slip(config: FrictionEstimationLocalSlipStudyConfig) -> None
         FrictionEstimationTask.load(scenario.task)
 
 
+def _validate_dm_admittance_tuning(config: DMAdmittanceTuningConfig) -> None:
+    """预检导纳调参 profile 的导纳控制段和 Ramp 任务线性插值。"""
+    profile = load_profile(config.profile)
+    if profile.normal_force is None or profile.normal_force.admittance is None:
+        raise ValueError("导纳调参 profile 必须包含 control.force.admittance。")
+    task = ForceTrackingTask.load(config.task)
+    if task.reference.interpolation != "linear":
+        raise ValueError("导纳调参仅接受线性 Ramp 力跟踪任务。")
+
+
 def _resolved_selection(
     selection: ResearchStudyConfig,
     *,
@@ -315,6 +332,8 @@ def resolve_research_study(
             domain_config = load_local_slip_study_config(source)
         elif selection.study.kind == "force_tracking_stiffness_estimator_comparison":
             domain_config = load_stiffness_estimator_comparison_config(source)
+        elif selection.study.kind == "dm_admittance_tuning":
+            domain_config = load_dm_admittance_tuning_config(source)
         else:  # pragma: no cover - Literal 与 Pydantic 已阻止未知研究类型。
             raise ValueError(f"unsupported study kind: {selection.study.kind}")
     except (OSError, ValidationError, ValueError) as error:
@@ -333,6 +352,9 @@ def resolve_research_study(
         elif isinstance(domain_config, ForceTrackingStiffnessEstimatorComparisonConfig):
             _validate_stiffness_estimator_comparison(domain_config)
             plan = stiffness_comparison_protocol.build_plan(domain_config)
+        elif isinstance(domain_config, DMAdmittanceTuningConfig):
+            _validate_dm_admittance_tuning(domain_config)
+            plan = dm_admittance_tuning_protocol.build_plan(domain_config)
         else:
             assert selection.study.stage is not None
             plan = torque_tuning_protocol.build_plan(
@@ -444,6 +466,8 @@ def execute_research_study(
         return friction_local_slip_protocol.run_study(resolved.domain_config, **common_arguments)
     if isinstance(resolved.domain_config, ForceTrackingStiffnessEstimatorComparisonConfig):
         return stiffness_comparison_protocol.run_study(resolved.domain_config, **common_arguments)
+    if isinstance(resolved.domain_config, DMAdmittanceTuningConfig):
+        return dm_admittance_tuning_protocol.run_study(resolved.domain_config, **common_arguments)
     assert resolved.selection.study.stage is not None
     return torque_tuning_protocol.run_study(
         resolved.domain_config,

@@ -4,7 +4,6 @@ profile: ../custom_parallel_gripper_admittance.yaml
 task: ../force_tracking/dm_admittance_ramp.yaml
 materials: [hard]
 seeds: {start: 0, count: 2}
-max_workers: 4
 output_root: ../../outputs/studies
 
 # 固定第一轮选出的二阶导纳和 2 Hz 低通，集中扫描接近与接触切换参数。

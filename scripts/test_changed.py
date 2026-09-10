@@ -66,6 +66,10 @@ RELATED_PREFIXES = {
         "tests/test_force_tracking_torque_adrc_tuning.py",
         "tests/test_research_study.py",
     ),
+    "configs/studies/dm_admittance_tuning.yaml": (
+        "tests/test_dm_admittance_tuning.py",
+        "tests/test_research_study.py",
+    ),
     "src/parallel_gripper_tactile/control/": (
         "tests/test_control.py",
         "tests/test_force_tracking.py",

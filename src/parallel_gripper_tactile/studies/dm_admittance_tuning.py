@@ -73,7 +73,6 @@ class DMAdmittanceTuningConfig(_TuningStudyModel):
     materials: tuple[ObjectMaterial, ...]
     seeds: SeedSweep = SeedSweep()
     candidates: tuple[DMAdmittanceCandidate, ...]
-    max_workers: int = Field(default=4, gt=0)
     output_root: Path = Path("outputs/studies")
     minimum_force_tracking_ratio: float = Field(default=0.995, gt=0, le=1)
 

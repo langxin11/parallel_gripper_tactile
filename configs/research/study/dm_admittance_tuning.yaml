@@ -1,0 +1,4 @@
+# @package study
+# DM 导纳调参研究的 Hydra 选择器：条件矩阵权威文件仍由 configs/studies/ 提供。
+kind: dm_admittance_tuning
+config: configs/studies/dm_admittance_tuning.yaml
