@@ -53,6 +53,121 @@ testpaths = [
 ]
 addopts = "-q --import-mode=importlib"
 
+# 依赖规则契约：对应 docs/architecture.md 的分层与边界约定，
+# 由 tests/test_architecture_contracts.py 并入 pytest 门禁。
+[tool.importlinter]
+root_packages = [
+    "parallel_gripper_tactile",
+    "dm_grasp_core",
+    "robotiq_grasp_core",
+    "dmgripper_hardware",
+    "robotiq_hardware",
+    "papillarray_hardware",
+]
+
+[[tool.importlinter.contracts]]
+name = "主包分层：入口 → study → runner → 实验 → 领域 → 共享"
+type = "layers"
+layers = [
+    "parallel_gripper_tactile.cli",
+    "parallel_gripper_tactile.studies",
+    "parallel_gripper_tactile.runners",
+    "parallel_gripper_tactile.experiments",
+    "parallel_gripper_tactile.control : parallel_gripper_tactile.perception : parallel_gripper_tactile.scenes : parallel_gripper_tactile.tactile : parallel_gripper_tactile.contact_taxels : parallel_gripper_tactile.force_scheduling : parallel_gripper_tactile.dm_admittance : parallel_gripper_tactile.asset_tools : parallel_gripper_tactile.profiles : parallel_gripper_tactile.run_artifacts : parallel_gripper_tactile.plotstyle : parallel_gripper_tactile.friction_plots : parallel_gripper_tactile.taxel_friction : parallel_gripper_tactile.tactile_slip : parallel_gripper_tactile.friction_estimation : parallel_gripper_tactile.discrete_force_control",
+    "parallel_gripper_tactile.config : parallel_gripper_tactile.simulation : parallel_gripper_tactile.timing : parallel_gripper_tactile.analysis : parallel_gripper_tactile.visualization : parallel_gripper_tactile.artifacts : parallel_gripper_tactile.validation : parallel_gripper_tactile.protocols : parallel_gripper_tactile.recording : parallel_gripper_tactile.video",
+]
+
+[[tool.importlinter.contracts]]
+name = "场景装配不读取控制目标"
+type = "forbidden"
+source_modules = ["parallel_gripper_tactile.scenes"]
+forbidden_modules = [
+    "parallel_gripper_tactile.control",
+    "parallel_gripper_tactile.force_scheduling",
+    "parallel_gripper_tactile.dm_admittance",
+]
+
+[[tool.importlinter.contracts]]
+name = "控制器不装配场景"
+type = "forbidden"
+source_modules = [
+    "parallel_gripper_tactile.control",
+    "parallel_gripper_tactile.dm_admittance",
+    "parallel_gripper_tactile.force_scheduling",
+]
+forbidden_modules = ["parallel_gripper_tactile.scenes"]
+
+[[tool.importlinter.contracts]]
+name = "触觉读取不决定控制状态"
+type = "forbidden"
+source_modules = [
+    "parallel_gripper_tactile.tactile",
+    "parallel_gripper_tactile.contact_taxels",
+]
+forbidden_modules = [
+    "parallel_gripper_tactile.control",
+    "parallel_gripper_tactile.force_scheduling",
+    "parallel_gripper_tactile.dm_admittance",
+]
+
+[[tool.importlinter.contracts]]
+name = "主包内部不回引兼容层"
+type = "forbidden"
+source_modules = ["parallel_gripper_tactile"]
+forbidden_modules = [
+    "parallel_gripper_tactile.profiles",
+    "parallel_gripper_tactile.run_artifacts",
+    "parallel_gripper_tactile.plotstyle",
+    "parallel_gripper_tactile.friction_plots",
+    "parallel_gripper_tactile.taxel_friction",
+    "parallel_gripper_tactile.tactile_slip",
+    "parallel_gripper_tactile.friction_estimation",
+    "parallel_gripper_tactile.discrete_force_control",
+]
+
+[[tool.importlinter.contracts]]
+name = "Robotiq 共享核不依赖仿真主包与 DM 核"
+type = "forbidden"
+source_modules = ["robotiq_grasp_core"]
+forbidden_modules = ["parallel_gripper_tactile", "dm_grasp_core"]
+
+[[tool.importlinter.contracts]]
+name = "DM 共享核不依赖仿真主包与 Robotiq 核"
+type = "forbidden"
+source_modules = ["dm_grasp_core"]
+forbidden_modules = ["parallel_gripper_tactile", "robotiq_grasp_core"]
+
+[[tool.importlinter.contracts]]
+name = "DM 硬件包不依赖仿真主包与其他设备包"
+type = "forbidden"
+source_modules = ["dmgripper_hardware"]
+forbidden_modules = [
+    "parallel_gripper_tactile",
+    "robotiq_grasp_core",
+    "robotiq_hardware",
+    "papillarray_hardware",
+]
+
+[[tool.importlinter.contracts]]
+name = "Robotiq 硬件包不依赖仿真主包与其他设备包"
+type = "forbidden"
+source_modules = ["robotiq_hardware"]
+forbidden_modules = [
+    "parallel_gripper_tactile",
+    "dmgripper_hardware",
+    "papillarray_hardware",
+]
+
+[[tool.importlinter.contracts]]
+name = "PapillArray 设备包不依赖仿真主包与其他设备包"
+type = "forbidden"
+source_modules = ["papillarray_hardware"]
+forbidden_modules = [
+    "parallel_gripper_tactile",
+    "dmgripper_hardware",
+    "robotiq_hardware",
+]
+
 [tool.uv.workspace]
 members = [
     "packages/dm_grasp_core",
