@@ -8,16 +8,27 @@ from datetime import UTC, datetime
 import json
 import math
 from pathlib import Path
-from typing import Annotated, Literal
 from uuid import uuid4
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 import yaml
 
 from parallel_gripper_tactile.control import ForceSemantics
-from parallel_gripper_tactile.experiments.force_tracking import (
-    CONTROLLER_VARIANTS,
-    ControllerVariant,
+from parallel_gripper_tactile.experiments.force_tracking import ControllerVariant
+from parallel_gripper_tactile.runners import execute_force_tracking
+from parallel_gripper_tactile.scenes.custom import ObjectContactModel, ObjectMaterial
+from parallel_gripper_tactile.studies.force_tracking_diagnosis import ALL_PHASES, Phase
+from parallel_gripper_tactile.studies.force_tracking_diagnosis import (
+    CollisionGeometryCondition,  # noqa: F401 - 既有测试经脚本模块属性引用
+    DiagnosisConfig,
+    DiagnosisConfigError,
+)
+from parallel_gripper_tactile.studies.force_tracking_diagnosis import (
+    load_diagnosis_config as load_config,
+)
+from parallel_gripper_tactile.studies.tabular import (
+    read_trace_rows,
+    write_resolved_config,
+    write_rows_csv_and_parquet,
 )
 from parallel_gripper_tactile.visualization import (
     FULL_WIDTH_FONT_SCALE,
@@ -25,39 +36,8 @@ from parallel_gripper_tactile.visualization import (
     save_publication_figure,
     science_pyplot,
 )
-from parallel_gripper_tactile.runners import execute_force_tracking
-from parallel_gripper_tactile.scenes.custom import ObjectContactModel, ObjectMaterial
-from parallel_gripper_tactile.studies.tabular import (
-    read_trace_rows,
-    write_resolved_config,
-    write_rows_csv_and_parquet,
-)
 
 
-Phase = Literal[
-    "reproducibility",
-    "controllers",
-    "materials",
-    "force-scale",
-    "contact-model",
-    "collision-geometry",
-    "force-semantics",
-    "position-limit",
-    "integral-gain",
-    "filter-cutoff",
-]
-ALL_PHASES: tuple[Phase, ...] = (
-    "reproducibility",
-    "controllers",
-    "materials",
-    "force-scale",
-    "contact-model",
-    "collision-geometry",
-    "force-semantics",
-    "position-limit",
-    "integral-gain",
-    "filter-cutoff",
-)
 _NUMERIC_SCAN_FIELDS: dict[Phase, tuple[str, str]] = {
     "force-scale": ("force_scale", "Target force scale"),
     "position-limit": ("max_position_adjustment_rad", "Max. position adjustment (rad)"),
@@ -84,109 +64,6 @@ _EMPTY_CONTACT_DIAGNOSTICS: dict[str, object] = {
     "force_feedforward_torque_peak_to_peak_nm": None,
     "motor_torque_peak_to_peak_nm": None,
 }
-
-
-class DiagnosisConfigError(ValueError):
-    """诊断 study 配置无效时抛出。"""
-
-
-class CollisionGeometryCondition(BaseModel):
-    """一项碰撞几何模型及其多接触设置。"""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    label: str = Field(min_length=1)
-    model: Path
-    multiccd_enabled: bool = True
-
-
-class DiagnosisConfig(BaseModel):
-    """一个力跟踪诊断 protocol 的精简显式配置。"""
-
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
-    name: str = Field(default="force_tracking_diagnosis", min_length=1)
-    profile: Path
-    task: Path
-    output_root: Path = Path("outputs/studies")
-    sensor_noise_seed: int = Field(default=20260814, ge=0)
-    reproducibility_repeats: int = Field(default=2, ge=2)
-    controllers: tuple[ControllerVariant, ...] = CONTROLLER_VARIANTS
-    materials: tuple[ObjectMaterial, ...] = ("soft", "medium", "hard")
-    force_scales: tuple[Annotated[float, Field(gt=0)], ...] = (0.5, 1.0)
-    contact_models: tuple[ObjectContactModel, ...] = ("explicit", "legacy")
-    collision_geometry_models: tuple[CollisionGeometryCondition, ...]
-    stability_controller: ControllerVariant = "pid-torque-ff"
-    position_adjustment_limits_rad: tuple[Annotated[float, Field(gt=0)], ...] = (
-        0.15,
-        0.10,
-        0.075,
-        0.05,
-        0.03,
-    )
-    integral_gains: tuple[Annotated[float, Field(ge=0)], ...] = (0.2, 0.1, 0.05, 0.025, 0.0)
-    filter_cutoffs_hz: tuple[Annotated[float, Field(gt=0)], ...] = (20.0, 30.0, 40.0, 60.0)
-
-    @field_validator(
-        "controllers",
-        "materials",
-        "force_scales",
-        "contact_models",
-        "position_adjustment_limits_rad",
-        "integral_gains",
-        "filter_cutoffs_hz",
-    )
-    @classmethod
-    def require_nonempty(cls, value: tuple[object, ...]) -> tuple[object, ...]:
-        """拒绝空的或重复的诊断维度。"""
-        if not value:
-            raise ValueError("至少需要包含一个值。")
-        if len(set(value)) != len(value):
-            raise ValueError("不能包含重复值。")
-        return value
-
-    @field_validator("collision_geometry_models")
-    @classmethod
-    def require_unique_collision_labels(
-        cls, value: tuple[CollisionGeometryCondition, ...]
-    ) -> tuple[CollisionGeometryCondition, ...]:
-        """拒绝空的几何研究或重复的条件标签。"""
-        if not value:
-            raise ValueError("至少需要包含一个碰撞几何。")
-        labels = [condition.label for condition in value]
-        if len(set(labels)) != len(labels):
-            raise ValueError("碰撞几何标签必须唯一。")
-        return value
-
-
-def load_config(path: Path) -> DiagnosisConfig:
-    """加载 YAML，并相对 YAML 目录解析所有路径。"""
-    config_path = path.resolve()
-    try:
-        raw = yaml.safe_load(config_path.read_text(encoding="utf-8"))
-        config = DiagnosisConfig.model_validate(raw)
-    except (OSError, ValidationError, yaml.YAMLError) as error:
-        raise DiagnosisConfigError(f"诊断配置无效：{config_path}") from error
-    base = config_path.parent
-    return config.model_copy(
-        update={
-            "profile": (base / config.profile).resolve(),
-            "task": (base / config.task).resolve(),
-            "output_root": (base / config.output_root).resolve(),
-            "collision_geometry_models": tuple(
-                condition.model_copy(
-                    update={
-                        "model": (
-                            condition.model
-                            if condition.model.is_absolute()
-                            else (base / condition.model).resolve()
-                        )
-                    }
-                )
-                for condition in config.collision_geometry_models
-            ),
-        }
-    )
 
 
 def _study_directory(config: DiagnosisConfig, phase: Phase) -> Path:
