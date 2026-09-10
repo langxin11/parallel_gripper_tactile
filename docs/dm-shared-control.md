@@ -1,14 +1,20 @@
-# DMgripper 共享导纳控制核
+# DMgripper 共享控制核
 
-`packages/dm_grasp_core` 是独立构建的 `dm-grasp-core==0.1.0`，只有 Python 标准库依赖。
+`packages/dm_grasp_core` 是独立构建的 `dm-grasp-core==0.1.0`，运行依赖仅限 numpy 与
+simple-pid 两个纯计算库，不包含 ROS、MuJoCo、串口或模型路径。
 仿真通过 uv workspace 使用它，ROS 2 的 `dm_gripper_control` 安装同版本 wheel。
 算法修复只改此包；两端的输入适配、调度和设备生命周期分别维护。
+仿真侧 `parallel_gripper_tactile.control` 是该核的适配层：负责 MIT 执行器绑定、
+profile 配置转换与公共名称再导出，不重复实现控制律。
 
 ## 已共享的内容
 
 - 曲柄滑块正/反解与雅可比、五次接近轨迹、接触确认和速度过渡。
 - 二阶导纳：`M*c_ddot + B*c_dot + K*c = F_target - (F_left+F_right)/2`。
 - 导纳内部状态限幅、目标构型速度逆映射、实测构型力矩前馈和 MIT 合成力矩约束。
+- 达妙 MIT 协议量化与力矩命令计算（`MITTorqueModel`）、三种方法的在线接触刚度估计、
+  二阶直接力矩 LADRC，以及法向力外环状态机与 PID、一阶 LADRC、直接力矩、
+  二阶 LADRC 四条跟踪路径（电机访问经 `MITTorqueInner` 协议注入）。
 - 显式 `MITCommandConfig`、五字段 `MITCommand`、`build_mit_command` 与
   `step_admittance`。算法只接收数值，不读取时钟、设备、ROS 消息或 MuJoCo 数据。
 

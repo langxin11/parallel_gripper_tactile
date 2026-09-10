@@ -9,6 +9,10 @@
 
 ### 新增
 
+- `dm-grasp-core` 新增 DM 力控纯算法模块：达妙 MIT 协议量化与力矩命令（`MITTorqueModel`）、
+  三种方法的在线接触刚度估计、二阶直接力矩 LADRC，以及法向力外环状态机与 PID、一阶 LADRC、
+  直接力矩、二阶 LADRC 四条跟踪路径（电机访问经 `MITTorqueInner` 协议注入，配置为显式
+  frozen dataclass）；新增对应核心单元测试。
 - 新增配置重构迁移基线：冻结重构前全部 YAML、profile、task、模型资源摘要、单次组合和正式研究有序矩阵，
   并记录字段所有权、新旧路径、研究准入／退出与诊断归档依据，供后续组合实现做独立等价比较。
 - 新增 Hydra 原生科研单次与正式 study 入口，以及按平台、控制器、估计器、任务、材料和研究方案组织的
@@ -36,6 +40,10 @@
 
 ### 变更
 
+- DM 力控算法迁移至 `dm_grasp_core`：仿真侧 `parallel_gripper_tactile.control` 收敛为适配层
+  （MIT 执行器绑定、profile 配置转换与公共名称再导出），导入路径、类签名与数值行为不变；
+  曲柄滑块运动学公式收敛到核心唯一维护（核心版闭合雅可比增加工作区间正值校验）；
+  `dm-grasp-core` 运行依赖新增 numpy 与 simple-pid。
 - 单次 DM 力跟踪迁至统一 `configs/run.yaml`：platform、四种碰撞 model、全部 PID／ADRC／导纳 controller、
   四种 estimator、六个力跟踪 task、material、execution 与常用 experiment 直接组合为冻结领域对象；
   `experiment=dm_gripper/force_tracking_admittance` 完整保留专用 MIT 增益、接触阈值、滤波和 estimator 关闭。
