@@ -11,7 +11,7 @@ from parallel_gripper_tactile.experiments.robotiq_discrete_force import (
     _should_keep_trace_row,
     RobotiqDiscreteForceTask,
 )
-from parallel_gripper_tactile.profiles import load_profile
+from parallel_gripper_tactile.config.profiles import load_profile
 from parallel_gripper_tactile.scenes.robotiq import load_grasp_model
 
 

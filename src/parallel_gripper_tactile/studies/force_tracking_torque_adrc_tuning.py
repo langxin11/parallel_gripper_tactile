@@ -10,7 +10,7 @@ from pathlib import Path
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
 import yaml
 
-from ..profiles import StiffnessEstimatorMethod
+from ..config.profiles import StiffnessEstimatorMethod
 from ..scenes.custom import ObjectMaterial
 from .force_tracking_ablation import SeedSweep, StudyConfigError
 

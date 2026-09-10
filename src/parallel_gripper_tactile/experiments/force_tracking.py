@@ -23,7 +23,7 @@ from ..control import (
     NormalForceController,
 )
 from ..visualization import paper_figsize, save_publication_figure, science_pyplot
-from ..profiles import (
+from ..config.profiles import (
     STIFFNESS_ESTIMATOR_METHODS,
     AdrcControl,
     DMAdmittanceControl,

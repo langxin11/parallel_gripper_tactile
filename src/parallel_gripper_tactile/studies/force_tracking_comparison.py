@@ -9,7 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 import yaml
 
 from ..experiments.force_tracking import ControllerVariant
-from ..profiles import StiffnessEstimatorMethod
+from ..config.profiles import StiffnessEstimatorMethod
 from ..scenes.custom import ObjectMaterial
 from .force_tracking_ablation import SeedSweep, StudyConfigError
 

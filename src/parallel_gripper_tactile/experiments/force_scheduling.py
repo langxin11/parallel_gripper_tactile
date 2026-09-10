@@ -22,7 +22,7 @@ from ..visualization import (
     science_pyplot,
 )
 
-from ..profiles import load_profile
+from ..config.profiles import load_profile
 from ..scenes.custom import (
     CUBE_PREFIX,
     DEFAULT_PROFILE,

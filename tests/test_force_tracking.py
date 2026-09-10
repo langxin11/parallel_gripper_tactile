@@ -20,7 +20,7 @@ from parallel_gripper_tactile.experiments.force_tracking import (
     configure_force_controller,
     run_force_tracking,
 )
-from parallel_gripper_tactile.profiles import AdrcControl, TorqueAdrcControl, load_profile
+from parallel_gripper_tactile.config.profiles import AdrcControl, TorqueAdrcControl, load_profile
 
 
 ROOT = Path(__file__).resolve().parents[1]

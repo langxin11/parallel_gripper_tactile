@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from .profiles import GripperProfile
+from .config.profiles import GripperProfile
 
 
 @dataclass(frozen=True, slots=True)

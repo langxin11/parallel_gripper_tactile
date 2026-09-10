@@ -13,7 +13,7 @@ from ..experiments.robotiq_discrete_force import (
     RobotiqDiscreteForceTask,
     run_robotiq_discrete_force,
 )
-from ..profiles import load_profile
+from ..config.profiles import load_profile
 from ..artifacts import RunDirectory
 from ..scenes.robotiq import RobotiqObjectMaterial
 

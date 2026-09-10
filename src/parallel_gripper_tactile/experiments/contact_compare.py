@@ -20,7 +20,7 @@ from ..visualization import (
     science_pyplot,
 )
 
-from ..profiles import load_profile
+from ..config.profiles import load_profile
 from ..video import encode_video, save_pixels
 from .custom_demo import build_demo_model
 

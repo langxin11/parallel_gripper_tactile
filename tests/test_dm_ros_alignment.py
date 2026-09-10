@@ -25,7 +25,7 @@ from parallel_gripper_tactile.control import (
     MITControlCommand,
 )
 from parallel_gripper_tactile.dm_admittance import DMAdmittanceController
-from parallel_gripper_tactile.profiles import load_profile
+from parallel_gripper_tactile.config.profiles import load_profile
 
 ROOT = Path(__file__).resolve().parents[1]
 

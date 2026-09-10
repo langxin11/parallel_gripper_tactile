@@ -22,7 +22,7 @@ from parallel_gripper_tactile.visualization import (
     save_publication_figure,
     science_pyplot,
 )
-from parallel_gripper_tactile.profiles import load_profile
+from parallel_gripper_tactile.config.profiles import load_profile
 from parallel_gripper_tactile.runners import execute_force_tracking
 from parallel_gripper_tactile.studies.force_tracking_comparison import (
     ForceTrackingComparisonConfig,

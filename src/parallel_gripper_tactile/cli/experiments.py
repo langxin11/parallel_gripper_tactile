@@ -21,7 +21,7 @@ from ..experiments.friction_estimation import FrictionEstimationTask
 from ..experiments.grasp import run_acceptance
 from ..experiments.grasp_video import record_custom_grasp_video
 from ..experiments.robotiq_discrete_force import RobotiqDiscreteForceTask
-from ..profiles import load_profile
+from ..config.profiles import load_profile
 from ..protocols import DisturbanceProtocol
 from ..artifacts import RunDirectory
 from ..runners import (

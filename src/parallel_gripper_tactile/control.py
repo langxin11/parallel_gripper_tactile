@@ -10,7 +10,7 @@ from typing import Literal, Protocol
 import numpy as np
 from simple_pid import PID
 
-from .profiles import (
+from .config.profiles import (
     ContactStiffnessControl,
     CrankSliderGeometry,
     GripperProfile,

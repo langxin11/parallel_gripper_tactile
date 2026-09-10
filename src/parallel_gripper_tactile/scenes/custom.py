@@ -10,7 +10,7 @@ import xml.etree.ElementTree as ET
 
 import numpy as np
 
-from ..profiles import GripperProfile
+from ..config.profiles import GripperProfile
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]

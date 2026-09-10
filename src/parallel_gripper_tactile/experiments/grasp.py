@@ -35,7 +35,7 @@ from ..visualization import (
     science_pyplot,
 )
 
-from ..profiles import load_profile
+from ..config.profiles import load_profile
 from ..protocols import DisturbanceProtocol
 from ..timing import SimulationTimer
 

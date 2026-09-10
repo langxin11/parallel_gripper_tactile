@@ -26,7 +26,7 @@ from .control import (
     MITTorqueController,
     NormalForceControlCommand,
 )
-from .profiles import GripperProfile, MITControl, NormalForceControl
+from .config.profiles import GripperProfile, MITControl, NormalForceControl
 
 
 class DMAdmittanceController:

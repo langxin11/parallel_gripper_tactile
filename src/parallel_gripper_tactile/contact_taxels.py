@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import mujoco
 import numpy as np
 
-from .profiles import GripperProfile, TactileLayout
+from .config.profiles import GripperProfile, TactileLayout
 
 
 @dataclass(frozen=True, slots=True)

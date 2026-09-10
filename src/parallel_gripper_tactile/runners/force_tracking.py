@@ -15,7 +15,7 @@ from ..experiments.force_tracking import (
     run_force_tracking,
 )
 from ..control import ForceSemantics
-from ..profiles import StiffnessEstimatorMethod, TorqueAdrcControl, load_profile
+from ..config.profiles import StiffnessEstimatorMethod, TorqueAdrcControl, load_profile
 from ..artifacts import RunDirectory
 from ..scenes.custom import ObjectContactModel, ObjectMaterial
 

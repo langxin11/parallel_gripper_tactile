@@ -20,13 +20,13 @@ from .force_scheduling import (
     TargetForceCommand,
     TargetForceSchedulerConfig,
 )
-from .friction_estimation import (
+from .perception.friction import (
     ConservativeFrictionEstimator,
     FrictionEstimate,
     FrictionEstimatorConfig,
     FrictionProbeObservation,
 )
-from .profiles import (
+from .config.profiles import (
     AdrcControl,
     ContactStiffnessControl,
     CrankSliderGeometry,

@@ -14,7 +14,7 @@ from parallel_gripper_tactile.config import (
     TouchGridTactileLayout as ConfigTouchGridTactileLayout,
 )
 from parallel_gripper_tactile.config import load_profile as load_config_profile
-from parallel_gripper_tactile.profiles import (
+from parallel_gripper_tactile.config.profiles import (
     DMAdmittanceControl,
     ProfileLoadError,
     STIFFNESS_ESTIMATOR_METHODS,

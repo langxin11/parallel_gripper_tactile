@@ -15,9 +15,12 @@ import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, model_validator
 import yaml
 
-from ..discrete_force_control import DiscreteForceControlConfig, DiscreteForceController
+from robotiq_grasp_core.discrete_force_control import (
+    DiscreteForceControlConfig,
+    DiscreteForceController,
+)
 from ..visualization import paper_figsize, save_publication_figure, science_pyplot
-from ..profiles import load_profile
+from ..config.profiles import load_profile
 from ..scenes.robotiq import RobotiqObjectMaterial, load_grasp_model
 from ..tactile import create_tactile_reader
 from ..timing import SimulationTimer

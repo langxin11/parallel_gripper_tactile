@@ -12,7 +12,7 @@ from ..experiments.friction_estimation import (
     FrictionEstimationTask,
     run_friction_estimation,
 )
-from ..profiles import load_profile
+from ..config.profiles import load_profile
 from ..artifacts import RunDirectory
 
 

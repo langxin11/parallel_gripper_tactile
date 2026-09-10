@@ -14,7 +14,7 @@ from parallel_gripper_tactile.experiments.force_tracking import (
     configure_force_controller,
     run_force_tracking,
 )
-from parallel_gripper_tactile.profiles import DMAdmittanceControl, load_profile
+from parallel_gripper_tactile.config.profiles import DMAdmittanceControl, load_profile
 from parallel_gripper_tactile.scenes.custom import GRIPPER_PREFIX, build_custom_grasp_model
 
 ROOT = Path(__file__).resolve().parents[1]

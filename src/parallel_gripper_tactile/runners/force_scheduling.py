@@ -12,7 +12,7 @@ from ..experiments.force_scheduling import (
     ForceSchedulingTask,
     run_force_scheduling,
 )
-from ..profiles import load_profile
+from ..config.profiles import load_profile
 from ..artifacts import RunDirectory
 
 

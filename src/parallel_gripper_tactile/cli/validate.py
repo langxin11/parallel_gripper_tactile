@@ -8,7 +8,7 @@ from typing import Annotated
 from rich.table import Table
 import typer
 
-from ..profiles import load_profile
+from ..config.profiles import load_profile
 from ..validation import validate_profile
 from .common import fail, state
 

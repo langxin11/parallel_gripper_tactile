@@ -9,7 +9,7 @@ import xml.etree.ElementTree as ET
 
 import mujoco
 
-from parallel_gripper_tactile.profiles import load_profile
+from parallel_gripper_tactile.config.profiles import load_profile
 from parallel_gripper_tactile.scenes.custom import build_custom_grasp_model
 
 

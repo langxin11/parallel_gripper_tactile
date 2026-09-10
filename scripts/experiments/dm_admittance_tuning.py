@@ -12,7 +12,7 @@ from typing import Any, Callable, Iterable
 from uuid import uuid4
 
 from parallel_gripper_tactile.experiments.force_tracking import ForceTrackingTask
-from parallel_gripper_tactile.profiles import GripperProfile, load_profile
+from parallel_gripper_tactile.config.profiles import GripperProfile, load_profile
 from parallel_gripper_tactile.runners import execute_force_tracking
 from parallel_gripper_tactile.studies.dm_admittance_tuning import (
     DMAdmittanceCandidate,

@@ -22,7 +22,7 @@ from ..scenes.custom import (
     build_custom_grasp_model,
 )
 from ..control import NormalForceController
-from ..profiles import load_profile
+from ..config.profiles import load_profile
 from ..protocols import DisturbanceProtocol
 from ..timing import SimulationTimer
 from ..video import add_arrow_to_scene, encode_video, save_pixels

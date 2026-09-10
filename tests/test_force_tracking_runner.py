@@ -8,7 +8,7 @@ from pathlib import Path
 import pyarrow as pa
 import pyarrow.parquet as pq
 from parallel_gripper_tactile.experiments.force_tracking import ForceTrackingResult
-from parallel_gripper_tactile.profiles import TorqueAdrcControl
+from parallel_gripper_tactile.config.profiles import TorqueAdrcControl
 from parallel_gripper_tactile.runners import force_tracking
 
 
