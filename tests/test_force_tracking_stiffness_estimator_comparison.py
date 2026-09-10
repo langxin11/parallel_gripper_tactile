@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import importlib.util
 import math
 from pathlib import Path
 
@@ -12,21 +11,9 @@ from parallel_gripper_tactile.studies.force_tracking_ablation import SeedSweep
 from parallel_gripper_tactile.studies.force_tracking_stiffness_estimator_comparison import (
     ForceTrackingStiffnessEstimatorComparisonConfig,
 )
-
-
-ROOT = Path(__file__).resolve().parents[1]
-
-
-def _protocol_module() -> object:
-    """加载仓库内的估计器对比入口脚本。"""
-    path = ROOT / "scripts/experiments/force_tracking_stiffness_estimator_comparison.py"
-    spec = importlib.util.spec_from_file_location(
-        "force_tracking_stiffness_estimator_comparison", path
-    )
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+from parallel_gripper_tactile.studies.protocols import (
+    force_tracking_stiffness_estimator_comparison as protocol,
+)
 
 
 def _result_row(estimator: str, *, seed: int, rmse: float) -> dict[str, object]:
@@ -55,9 +42,10 @@ def _result_row(estimator: str, *, seed: int, rmse: float) -> dict[str, object]:
     }
 
 
-def test_estimator_conditions_are_stable_and_fixed_to_position_feedforward(tmp_path: Path) -> None:
+def test_estimator_conditions_are_stable_and_fixed_to_position_feedforward(
+    tmp_path: Path,
+) -> None:
     """矩阵只展开估计器、任务、材料和 seed，不引入控制器混杂变量。"""
-    protocol = _protocol_module()
     config = ForceTrackingStiffnessEstimatorComparisonConfig(
         profile=tmp_path / "profile.yaml",
         tasks=(tmp_path / "step.yaml",),
@@ -67,23 +55,22 @@ def test_estimator_conditions_are_stable_and_fixed_to_position_feedforward(tmp_p
         output_root=tmp_path / "outputs",
     )
 
-    description = protocol.describe_conditions(config)  # type: ignore[attr-defined]
+    conditions = config.conditions()
 
-    assert len(config.conditions()) == 12
-    assert "Controller: pid-stiffness-ff" in description
-    assert "001 estimator=secant_ewma task=step.yaml material=medium seed=3" in description
-    assert "012 estimator=window_quadratic task=step.yaml material=hard seed=4" in description
+    assert len(conditions) == 12
+    assert conditions[0] == ("secant_ewma", tmp_path / "step.yaml", "medium", 3)
+    assert conditions[-1] == ("window_quadratic", tmp_path / "step.yaml", "hard", 4)
+    assert protocol.BASELINE_ESTIMATOR == "secant_ewma"
 
 
 def test_aggregate_rows_groups_estimator_task_and_material() -> None:
     """聚合键包含估计器、任务和材料，并忽略非有限指标。"""
-    protocol = _protocol_module()
     rows = [
         _result_row("window_linear", seed=0, rmse=0.2),
         _result_row("window_linear", seed=1, rmse=0.4),
     ]
 
-    aggregate = protocol.aggregate_rows(rows)[0]  # type: ignore[attr-defined]
+    aggregate = protocol.aggregate_rows(rows)[0]
 
     assert aggregate["stiffness_estimator_method"] == "window_linear"
     assert aggregate["task_name"] == "step_force_tracking"
@@ -96,9 +83,8 @@ def test_aggregate_rows_groups_estimator_task_and_material() -> None:
 
 def test_estimator_summary_plots_are_generated(tmp_path: Path, fast_plot_render: None) -> None:
     """指标和相对割线的增量图均生成非空 PNG 与 PDF。"""
-    protocol = _protocol_module()
     estimators = ("secant_ewma", "window_linear", "window_quadratic")
-    aggregates = protocol.aggregate_rows(  # type: ignore[attr-defined]
+    aggregates = protocol.aggregate_rows(
         [
             _result_row(estimator, seed=0, rmse=0.2 + 0.05 * index)
             for index, estimator in enumerate(estimators)
@@ -106,12 +92,8 @@ def test_estimator_summary_plots_are_generated(tmp_path: Path, fast_plot_render:
     )
     outputs = (tmp_path / "metrics.png", tmp_path / "delta.png")
 
-    protocol.plot_metric_summary(  # type: ignore[attr-defined]
-        aggregates, outputs[0], estimator_order=estimators
-    )
-    protocol.plot_delta_vs_secant(  # type: ignore[attr-defined]
-        aggregates, outputs[1], estimator_order=estimators
-    )
+    protocol.plot_metric_summary(aggregates, outputs[0], estimator_order=estimators)
+    protocol.plot_delta_vs_secant(aggregates, outputs[1], estimator_order=estimators)
 
     artifacts = (*outputs, *(path.with_suffix(".pdf") for path in outputs))
     assert all(path.is_file() and path.stat().st_size > 0 for path in artifacts)

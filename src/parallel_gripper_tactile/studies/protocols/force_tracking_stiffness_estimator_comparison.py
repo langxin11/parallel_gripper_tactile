@@ -1,8 +1,8 @@
-"""运行可复现的刚度估计器对比研究并生成 study 级图表。"""
+"""运行固定刚度前馈控制器下的刚度估计器对比研究并生成 study 级图表。"""
 
 from __future__ import annotations
 
-import argparse
+from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 from datetime import UTC, datetime
 import json
@@ -12,6 +12,7 @@ from typing import Iterable
 from uuid import uuid4
 
 import numpy as np
+import yaml
 
 from parallel_gripper_tactile.experiments.force_tracking import ForceTrackingTask
 from parallel_gripper_tactile.visualization import (
@@ -20,7 +21,6 @@ from parallel_gripper_tactile.visualization import (
     save_publication_figure,
     science_pyplot,
 )
-from parallel_gripper_tactile.config.profiles import load_profile
 from parallel_gripper_tactile.runners import execute_force_tracking
 from parallel_gripper_tactile.studies.aggregation import (
     aggregate_records,
@@ -34,7 +34,18 @@ from parallel_gripper_tactile.studies.aggregation import (
 )
 from parallel_gripper_tactile.studies.force_tracking_stiffness_estimator_comparison import (
     ForceTrackingStiffnessEstimatorComparisonConfig,
-    load_stiffness_estimator_comparison_config,
+)
+from parallel_gripper_tactile.studies.lifecycle import (
+    ConditionExecution,
+    ConditionOutcome,
+    StudyCondition,
+    StudyPlan,
+    StudyPostprocessResult,
+    execute_study_lifecycle,
+    execution_failure_rows,
+    file_sha256,
+    require_matching_study_plan,
+    scientific_configuration_hash,
 )
 from parallel_gripper_tactile.studies.tabular import (
     read_trace_rows,
@@ -66,16 +77,17 @@ PLOTTED_METRICS = (
     ("final_error_n", "Final error (N)"),
 )
 BASELINE_ESTIMATOR = "secant_ewma"
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 
 
-def _json_compatible(value: object) -> object:
+def json_compatible(value: object) -> object:
     """把非有限浮点数转换为标准 JSON 的 ``null``。"""
     if isinstance(value, float) and not math.isfinite(value):
         return None
     if isinstance(value, dict):
-        return {str(key): _json_compatible(item) for key, item in value.items()}
+        return {str(key): json_compatible(item) for key, item in value.items()}
     if isinstance(value, (list, tuple)):
-        return [_json_compatible(item) for item in value]
+        return [json_compatible(item) for item in value]
     return value
 
 
@@ -372,116 +384,176 @@ def _create_study_directory(config: ForceTrackingStiffnessEstimatorComparisonCon
     return directory
 
 
-def validate_inputs(
-    config: ForceTrackingStiffnessEstimatorComparisonConfig,
-) -> dict[Path, ForceTrackingTask]:
-    """加载 profile 和所有任务，确保 dry-run 也完成输入校验。"""
-    load_profile(config.profile)
-    return {task_path: ForceTrackingTask.load(task_path) for task_path in config.tasks}
-
-
-def describe_conditions(config: ForceTrackingStiffnessEstimatorComparisonConfig) -> str:
-    """返回稳定、可审阅的条件矩阵文本。"""
-    lines = [
-        f"Study: {config.name}",
-        f"Profile: {config.profile}",
-        "Controller: pid-stiffness-ff",
-        f"Conditions: {len(config.conditions())}",
-    ]
-    for index, (estimator, task_path, material, seed) in enumerate(config.conditions(), start=1):
-        lines.append(
-            f"{index:03d} estimator={estimator} task={task_path.name} "
-            f"material={material} seed={seed}"
+def build_plan(config: ForceTrackingStiffnessEstimatorComparisonConfig) -> StudyPlan:
+    """从权威 domain config 生成刚度估计器对比的唯一有序计划。"""
+    conditions = tuple(
+        StudyCondition(
+            condition_id=f"{estimator}-{task.stem}-{material}-seed{seed:03d}",
+            parameters={
+                "stiffness_estimator_method": estimator,
+                "task_path": str(task),
+                "object_material": material,
+                "sensor_noise_seed": seed,
+            },
+            pair_key=f"{task.stem}:{material}:seed{seed:03d}",
+            baseline_role="secant_ewma" if estimator == BASELINE_ESTIMATOR else None,
         )
-    return "\n".join(lines)
+        for estimator, task, material, seed in config.conditions()
+    )
+    definition = {
+        "hash_schema_version": 1,
+        "protocol_revision": "force_tracking_stiffness_estimator_comparison.v1",
+        "study": config.model_dump(mode="python", exclude={"output_root"}),
+        "resources": {
+            "profile_sha256": file_sha256(config.profile),
+            "task_sha256": {str(task): file_sha256(task) for task in config.tasks},
+        },
+        # 控制器固定为刚度前馈 PID 是本研究的隔离语义，必须进入科学配置哈希。
+        "fixed_controller": "pid-stiffness-ff",
+        "aggregation": "stiffness_estimator_method,task_name,object_material; finite/nan-aware v1",
+    }
+    definition_hash = scientific_configuration_hash(definition, repository_root=_REPOSITORY_ROOT)
+    plan_hash = scientific_configuration_hash(
+        {
+            "study_definition_sha256": definition_hash,
+            "stage": None,
+            "conditions": [condition.model_dump(mode="python") for condition in conditions],
+        },
+        repository_root=_REPOSITORY_ROOT,
+    )
+    return StudyPlan(
+        study_kind="force_tracking_stiffness_estimator_comparison",
+        study_definition_sha256=definition_hash,
+        scientific_configuration_sha256=plan_hash,
+        conditions=conditions,
+        seeds=tuple(config.seeds.values()),
+        preflight={"status": "pending", "checks": ["profile", "tasks", "fixed_controller"]},
+    )
 
 
 def run_study(
     config: ForceTrackingStiffnessEstimatorComparisonConfig,
     *,
     config_source: Path | None = None,
+    study_directory: Path | None = None,
+    study_plan: StudyPlan | None = None,
+    additional_artifacts: Sequence[Path] = (),
+    lifecycle_manifest_fields: Mapping[str, object] | None = None,
 ) -> Path:
-    """执行完整估计器 comparison protocol 并返回 study 目录。"""
-    tasks = validate_inputs(config)
-    study_dir = _create_study_directory(config)
+    """通过公共生命周期执行整个 protocol，并返回 study 父目录。"""
+    tasks = {task_path: ForceTrackingTask.load(task_path) for task_path in config.tasks}
+    study_dir = (
+        _create_study_directory(config) if study_directory is None else study_directory.resolve()
+    )
+    study_dir.mkdir(parents=True, exist_ok=True)
     if config_source is not None:
         (study_dir / "study.yaml").write_bytes(config_source.read_bytes())
     else:
-        raise ValueError("config_source is required for a reproducible stiffness estimator study")
+        (study_dir / "study.yaml").write_text(
+            yaml.safe_dump(config.model_dump(mode="json"), sort_keys=False), encoding="utf-8"
+        )
     resolved_config = write_resolved_config(study_dir / "study.resolved.json", config)
+    expected_plan = build_plan(config)
+    plan = (
+        expected_plan
+        if study_plan is None
+        else require_matching_study_plan(expected_plan, study_plan)
+    )
 
-    rows: list[dict[str, object]] = []
-    for estimator, task_path, material, seed in config.conditions():
+    def execute(condition: StudyCondition) -> ConditionExecution:
+        parameters = condition.parameters
+        estimator = str(parameters["stiffness_estimator_method"])
+        task_path = Path(str(parameters["task_path"]))
+        material = str(parameters["object_material"])
+        seed = int(parameters["sensor_noise_seed"])
         task = tasks[task_path]
-        condition = f"pid-stiffness-ff-{estimator}-{task_path.stem}-{material}-seed{seed:03d}"
         run, result = execute_force_tracking(
             profile=config.profile,
             task_path=task_path,
             tracking_task=task,
             output_root=study_dir / "runs",
-            run_prefix=condition,
+            run_prefix=condition.condition_id,
             object_material=material,
             controller_variant="pid-stiffness-ff",
             stiffness_estimator_method=estimator,
             sensor_noise_seed=seed,
         )
-        rows.append(
-            {
-                "controller_variant": "pid-stiffness-ff",
-                "stiffness_estimator_method": estimator,
-                "task_name": task.name,
-                "task_path": str(task_path),
-                "object_material": material,
-                "sensor_noise_seed": seed,
-                "passed": result.passed,
-                "run_directory": str(run.path.relative_to(study_dir)),
-                **asdict(result),
-            }
+        row = {
+            "controller_variant": "pid-stiffness-ff",
+            "stiffness_estimator_method": estimator,
+            "task_name": task.name,
+            "task_path": str(task_path),
+            "object_material": material,
+            "sensor_noise_seed": seed,
+            "passed": result.passed,
+            "run_directory": str(run.path.relative_to(study_dir)),
+            **asdict(result),
+        }
+        return ConditionExecution(
+            row=row,
+            run_directory=str(row["run_directory"]),
+            passed=result.passed,
         )
 
-    aggregates = aggregate_rows(rows)
-    summary_csv = study_dir / "summary.csv"
-    aggregate_csv = study_dir / "aggregate.csv"
-    summary_json = study_dir / "summary.json"
-    _, summary_parquet = write_rows_csv_and_parquet(summary_csv, rows)
-    _, aggregate_parquet = write_rows_csv_and_parquet(aggregate_csv, aggregates)
-    summary_json.write_text(
-        json.dumps(
-            _json_compatible({"runs": rows, "aggregates": aggregates}), indent=2, sort_keys=True
+    def aggregate_and_persist(
+        rows: list[dict[str, object]],
+        outcomes: tuple[ConditionOutcome, ...],
+        directory: Path,
+    ) -> StudyPostprocessResult:
+        aggregates = aggregate_rows(rows) if rows else []
+        artifacts: list[Path] = []
+        if rows:
+            artifacts.extend(write_rows_csv_and_parquet(directory / "summary.csv", rows))
+        if aggregates:
+            artifacts.extend(write_rows_csv_and_parquet(directory / "aggregate.csv", aggregates))
+        summary_json = directory / "summary.json"
+        summary_json.write_text(
+            json.dumps(
+                json_compatible(
+                    {
+                        "runs": rows,
+                        "aggregates": aggregates,
+                        "failures": execution_failure_rows(outcomes),
+                    }
+                ),
+                indent=2,
+                sort_keys=True,
+            )
+            + "\n",
+            encoding="utf-8",
         )
-        + "\n",
-        encoding="utf-8",
-    )
-    figure_artifacts = render_study_figures(
-        rows, aggregates, study_dir, estimator_order=config.estimators
-    )
-    artifacts = [
-        summary_csv,
-        summary_parquet,
-        aggregate_csv,
-        aggregate_parquet,
-        summary_json,
-        resolved_config,
-        *figure_artifacts,
-    ]
-    (study_dir / "study_manifest.json").write_text(
-        json.dumps(
-            {
-                "schema_version": 1,
-                "name": config.name,
-                "config": "study.yaml",
-                "resolved_config": str(resolved_config.relative_to(study_dir)),
-                "runs": [row["run_directory"] for row in rows],
-                "failed_runs": [row["run_directory"] for row in rows if not bool(row["passed"])],
-                "artifacts": [str(path.relative_to(study_dir)) for path in artifacts],
-            },
-            indent=2,
-            sort_keys=True,
+        artifacts.append(summary_json)
+        return StudyPostprocessResult(tuple(artifacts), {}, aggregates)
+
+    def render(rows: list[dict[str, object]], payload: object, directory: Path) -> tuple[Path, ...]:
+        if not rows:
+            return ()
+        aggregates = list(payload) if isinstance(payload, list) else []
+        return tuple(
+            render_study_figures(
+                rows,
+                aggregates,
+                directory,
+                estimator_order=config.estimators,
+            )
         )
-        + "\n",
-        encoding="utf-8",
+
+    manifest_fields: dict[str, object] = {
+        "schema_version": 1,
+        "name": config.name,
+        "config": "study.yaml",
+        "resolved_config": str(resolved_config.relative_to(study_dir)),
+    }
+    manifest_fields.update(lifecycle_manifest_fields or {})
+    return execute_study_lifecycle(
+        plan,
+        study_directory=study_dir,
+        execute_condition=execute,
+        aggregate_and_persist=aggregate_and_persist,
+        render=render,
+        initial_artifacts=(study_dir / "study.yaml", resolved_config, *additional_artifacts),
+        legacy_manifest_fields=manifest_fields,
     )
-    return study_dir
 
 
 def render_existing_study(study_dir: Path) -> list[Path]:
@@ -527,40 +599,3 @@ def render_existing_study(study_dir: Path) -> list[Path]:
         json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8"
     )
     return figure_artifacts
-
-
-def main() -> None:
-    """解析 study 配置，打印矩阵或执行完整研究。"""
-    parser = argparse.ArgumentParser(description=__doc__)
-    input_group = parser.add_mutually_exclusive_group(required=True)
-    input_group.add_argument("--config", type=Path, help="Study YAML path")
-    input_group.add_argument(
-        "--render-study-dir",
-        type=Path,
-        help="Regenerate publication figures from an existing study directory",
-    )
-    parser.add_argument(
-        "--dry-run",
-        action="store_true",
-        help="Validate inputs and print the condition matrix without running MuJoCo",
-    )
-    arguments = parser.parse_args()
-    if arguments.render_study_dir is not None:
-        if arguments.dry_run:
-            parser.error("--dry-run requires --config")
-        artifacts = render_existing_study(arguments.render_study_dir.resolve())
-        print(f"Publication figures: {len(artifacts)} files")
-        return
-    assert arguments.config is not None
-    config_path = arguments.config.resolve()
-    config = load_stiffness_estimator_comparison_config(config_path)
-    validate_inputs(config)
-    if arguments.dry_run:
-        print(describe_conditions(config))
-        return
-    result = run_study(config, config_source=config_path)
-    print(f"Study: {result}")
-
-
-if __name__ == "__main__":
-    main()

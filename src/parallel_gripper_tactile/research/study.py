@@ -25,6 +25,10 @@ from ..studies.force_tracking_comparison import (
     ForceTrackingComparisonConfig,
     load_comparison_config,
 )
+from ..studies.force_tracking_stiffness_estimator_comparison import (
+    ForceTrackingStiffnessEstimatorComparisonConfig,
+    load_stiffness_estimator_comparison_config,
+)
 from ..studies.force_tracking_torque_adrc_tuning import (
     ForceTrackingTorqueAdrcTuningConfig,
     TorqueAdrcTuningStageName,
@@ -37,6 +41,9 @@ from ..studies.protocols import (
     force_tracking_controller_comparison as comparison_protocol,
 )
 from ..studies.protocols import (
+    force_tracking_stiffness_estimator_comparison as stiffness_comparison_protocol,
+)
+from ..studies.protocols import (
     force_tracking_torque_adrc_tuning as torque_tuning_protocol,
 )
 from .configuration import REPOSITORY_ROOT, ResearchConfigurationError
@@ -47,6 +54,7 @@ StudyKind = Literal[
     "force_tracking_ablation",
     "force_tracking_torque_adrc_tuning",
     "friction_estimation_local_slip",
+    "force_tracking_stiffness_estimator_comparison",
 ]
 SetupFailureStage = Literal["configuration", "preflight"]
 
@@ -111,6 +119,7 @@ StudyDomainConfig = (
     | ForceTrackingAblationConfig
     | ForceTrackingTorqueAdrcTuningConfig
     | FrictionEstimationLocalSlipStudyConfig
+    | ForceTrackingStiffnessEstimatorComparisonConfig
 )
 
 
@@ -191,6 +200,25 @@ def _validate_ablation(config: ForceTrackingAblationConfig) -> None:
         )
         for material in config.materials:
             validate_force_tracking_configuration(profile, task=task, object_material=material)
+
+
+def _validate_stiffness_estimator_comparison(
+    config: ForceTrackingStiffnessEstimatorComparisonConfig,
+) -> None:
+    """逐估计器、任务和材料预检刚度估计器对比方案。"""
+    base_profile = load_profile(config.profile)
+    tasks = {path: ForceTrackingTask.load(path) for path in config.tasks}
+    seed = config.seeds.values()[0]
+    for estimator in config.estimators:
+        profile = configure_force_controller(
+            base_profile,
+            variant="pid-stiffness-ff",
+            stiffness_estimator_method=estimator,
+            sensor_noise_seed=seed,
+        )
+        for task in tasks.values():
+            for material in config.materials:
+                validate_force_tracking_configuration(profile, task=task, object_material=material)
 
 
 def _validate_torque_tuning(
@@ -285,6 +313,8 @@ def resolve_research_study(
             domain_config = load_torque_adrc_tuning_config(source)
         elif selection.study.kind == "friction_estimation_local_slip":
             domain_config = load_local_slip_study_config(source)
+        elif selection.study.kind == "force_tracking_stiffness_estimator_comparison":
+            domain_config = load_stiffness_estimator_comparison_config(source)
         else:  # pragma: no cover - Literal 与 Pydantic 已阻止未知研究类型。
             raise ValueError(f"unsupported study kind: {selection.study.kind}")
     except (OSError, ValidationError, ValueError) as error:
@@ -300,6 +330,9 @@ def resolve_research_study(
         elif isinstance(domain_config, FrictionEstimationLocalSlipStudyConfig):
             _validate_local_slip(domain_config)
             plan = friction_local_slip_protocol.build_plan(domain_config)
+        elif isinstance(domain_config, ForceTrackingStiffnessEstimatorComparisonConfig):
+            _validate_stiffness_estimator_comparison(domain_config)
+            plan = stiffness_comparison_protocol.build_plan(domain_config)
         else:
             assert selection.study.stage is not None
             plan = torque_tuning_protocol.build_plan(
@@ -409,6 +442,8 @@ def execute_research_study(
         return ablation_protocol.run_study(resolved.domain_config, **common_arguments)
     if isinstance(resolved.domain_config, FrictionEstimationLocalSlipStudyConfig):
         return friction_local_slip_protocol.run_study(resolved.domain_config, **common_arguments)
+    if isinstance(resolved.domain_config, ForceTrackingStiffnessEstimatorComparisonConfig):
+        return stiffness_comparison_protocol.run_study(resolved.domain_config, **common_arguments)
     assert resolved.selection.study.stage is not None
     return torque_tuning_protocol.run_study(
         resolved.domain_config,
