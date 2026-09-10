@@ -189,6 +189,17 @@ DM 核心命令经显式适配后才进入协议量化；Robotiq 硬件单步只
 4. experiment 返回结构化结果，入口层决定如何展示；
 5. 任何新增结果文件必须先写入独占 run 目录，再登记到 manifest。
 
+上述规则中可表达为 import 依赖的部分（分层方向、规则 1／3／4 的包边界、共享包独立性）由
+import-linter 契约机器检查：配置位于 `pyproject.toml` 的 `[tool.importlinter]`，可用
+`uv run lint-imports` 单独执行，并由 `tests/test_architecture_contracts.py` 并入裸 pytest 门禁。
+规则 2 与规则 5 涉及运行行为与产物登记时序，仍由评审与 runner 实现保证。
+
+根路径兼容导出层（`profiles.py`、`run_artifacts.py`、`plotstyle.py`、`friction_plots.py`、
+`taxel_friction.py`、`tactile_slip.py`、`friction_estimation.py`、`discrete_force_control.py`）
+已弃用：导入时发出指向规范路径的 `DeprecationWarning`，计划于 0.4.0 移除。仓库内部代码一律
+使用规范路径，“主包内部不回引兼容层”契约阻止新的内部引用；`tests/test_compat_deprecation.py`
+校验每个兼容层的警告与转发等价性。
+
 ## 科研绘图公共层
 
 `visualization/plotstyle.py` 只负责样式、物理尺寸与文件导出，不处理实验数据和统计。

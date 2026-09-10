@@ -68,6 +68,9 @@
 - 跨栏整宽时间序列图（摩擦估计、力调度、抓取等单列纵排面板）放大字号一档：
   绘图入口通过 `science_pyplot(font_scale=FULL_WIDTH_FONT_SCALE)` 选用整宽档，字号与线宽
   等比放大 1.2 倍，保持文字相对 7.16 in 宽面板的视觉密度与单栏图一致；单栏图与多列网格不变。
+- 主包、研究脚本与功能测试的内部导入全部从根路径兼容层迁至规范路径（`config.profiles`、
+  `artifacts.run_artifacts`、`visualization.*`、`perception.*` 与 `robotiq_grasp_core`）；
+  公共 API、实验行为与产物格式不变。
 
 ### 新增
 
@@ -158,6 +161,17 @@
   配套新增离屏演示录制 `scripts/demos/record_experiment_demos.py`，把 MuJoCo
   场景与实时曲线面板合成为 16:9 MP4（摩擦估计、Ramp 力跟踪两个演示，产物默认
   `outputs/demos/`，无界面环境需在导入 mujoco 前设置 `MUJOCO_GL=egl`）
+- 主包新增 `polars` 与 `scipy` 依赖，作为后续 study 跨条件聚合与显著性检验的基础
+- 新增 import-linter 架构契约（`uv run lint-imports` 可单独执行，并由
+  `tests/test_architecture_contracts.py` 并入 pytest 门禁）：机器检查主包
+  入口→study→runner→实验→领域→共享的分层、场景与控制的相互隔离、以及各共享包
+  与设备包的独立性；`tests/test_compat_deprecation.py` 同步校验兼容层警告与转发等价性
+
+### 弃用
+
+- 根路径兼容导出模块（`profiles`、`run_artifacts`、`plotstyle`、`friction_plots`、
+  `taxel_friction`、`tactile_slip`、`friction_estimation`、`discrete_force_control`）导入时
+  发出 `DeprecationWarning`，计划于 0.4.0 移除；请改用各自规范路径。
 
 ## [0.3.0] - 2026-09-04
 
