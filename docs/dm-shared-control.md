@@ -21,7 +21,8 @@ profile 配置转换与公共名称再导出，不重复实现控制律。
 `dm_gripper_control.control` 保留原导入路径，实际重导出共享实现。ROS 标定、使能、
 bias、输入有效性、新鲜度、HOLD/FAULT 和失能策略保留现有行为。仿真接触阶段使用
 相同算法原语，但不模拟 ROS 的设备生命周期；共同回放验证范围是跟踪阶段 MIT 请求。
-PID、刚度估计及 ADRC 暂时保留在历史仿真实现中，没有全部迁入新包。
+仿真侧全部 DM 力控外环（PID、刚度估计与两条 ADRC）已随上述模块迁入核心；
+`parallel_gripper_tactile.control` 只保留执行器绑定、profile 配置转换与名称再导出。
 
 ## 运行仿真
 
