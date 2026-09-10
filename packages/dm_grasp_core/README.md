@@ -1,11 +1,13 @@
 # dm-grasp-core 0.1.0
 
-DMgripper 的共享 Python 控制核，要求 Python >=3.12，无第三方运行依赖。
+DMgripper 的共享 Python 控制核，要求 Python >=3.12；运行依赖仅限
+numpy 与 simple-pid 两个纯计算库，不包含 ROS、MuJoCo、串口或模型路径。
 安装本目录后，两端使用 `from dm_grasp_core import ...`；版本为 `__version__`。
 
 ## 子域边界
 
-- `control/`：曲柄滑块运动学、二阶导纳状态与 MIT 合成力矩约束。
+- `control/`：曲柄滑块运动学、二阶导纳状态、MIT 合成力矩约束、达妙协议
+  量化与法向力跟踪（PID、一阶 LADRC、直接力矩、二阶力矩 LADRC 外环）。
 - `grasp/`：minimum-jerk 接近／接触过渡，以及导纳状态到 MIT 命令的映射。
 - `tactile/`：仅提供双侧法向力零窗口和稳定接触判定；不包含传感器解析、滤波、标定或设备 I/O。
 

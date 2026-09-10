@@ -5,11 +5,14 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "dm-grasp-core"
 version = "0.1.0"
-description = "无第三方运行依赖的 DMgripper 共享导纳控制核"
+description = "DMgripper 共享控制核：导纳、运动学、MIT 协议量化与法向力跟踪"
 readme = "README.md"
 requires-python = ">=3.12"
 license = {file = "LICENSE"}
-dependencies = []
+dependencies = [
+    "numpy>=2.0",
+    "simple-pid>=2.0",
+]
 
 [tool.setuptools.packages.find]
 where = ["src"]
