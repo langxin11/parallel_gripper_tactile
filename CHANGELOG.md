@@ -7,6 +7,8 @@
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-09-10
+
 ### 变更
 
 - 测试开发依赖新增 `pytest-xdist`，并隔离每个 worker 的 Matplotlib 字体缓存、默认限制
@@ -172,6 +174,13 @@
 - 根路径兼容导出模块（`profiles`、`run_artifacts`、`plotstyle`、`friction_plots`、
   `taxel_friction`、`tactile_slip`、`friction_estimation`、`discrete_force_control`）导入时
   发出 `DeprecationWarning`，计划于 0.4.0 移除；请改用各自规范路径。
+
+### 移除
+
+- 8 个根路径兼容导出模块（`profiles`、`run_artifacts`、`plotstyle`、`friction_plots`、
+  `taxel_friction`、`tactile_slip`、`friction_estimation`、`discrete_force_control`）与
+  对应兼容性测试在 0.4.0 删除，请使用各自规范路径（`config.profiles`、
+  `artifacts.run_artifacts`、`visualization.*`、`perception.*`、`robotiq_grasp_core`）。
 
 ## [0.3.0] - 2026-09-04
 

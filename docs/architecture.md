@@ -47,17 +47,17 @@ manifest。
 
 | 区域 | 主要职责 | 不应承担的职责 |
 | --- | --- | --- |
-| `config/profiles.py` | 用冻结的 Pydantic 模型校验 YAML，并以 YAML 所在目录解析相对路径；`profiles.py` 仅保留兼容导出 | 启动 MuJoCo 或写运行结果 |
-| `artifacts/` | 管理运行目录、输入快照、manifest 与安全清理；`run_artifacts.py` 仅保留兼容导出 | 推进仿真或决定实验控制逻辑 |
+| `config/profiles.py` | 用冻结的 Pydantic 模型校验 YAML，并以 YAML 所在目录解析相对路径 | 启动 MuJoCo 或写运行结果 |
+| `artifacts/` | 管理运行目录、输入快照、manifest 与安全清理 | 推进仿真或决定实验控制逻辑 |
 | `analysis/` | 读取触觉力轨迹并提供基础分析；原 `analysis` 导入路径由同名包兼容 | 设定论文样式或改变实验数据口径 |
-| `visualization/` | 提供论文绘图样式与摩擦检测图；`plotstyle.py`、`friction_plots.py` 仅保留兼容导出 | 读取控制状态或重新计算实验指标 |
+| `visualization/` | 提供论文绘图样式与摩擦检测图 | 读取控制状态或重新计算实验指标 |
 | `scenes/` | 装配 MJCF、物体材料、碰撞几何和求解选项 | 控制算法、指标统计 |
 | `tactile.py`、`contact_taxels.py` | 把不同后端统一为局部 `(3, rows, cols)` 力数组 | 决定目标力或控制状态 |
 | `force_scheduling.py` | 由切向载荷和摩擦系数生成受限的平均单侧目标力 | 读取 MuJoCo 状态或直接写执行器 |
-| `packages/robotiq_grasp_core` | 在整数命令空间执行稳定判定、单 tick 增益估计、HOLD 与安全动作决策；`discrete_force_control.py` 保留兼容导出 | 推进仿真、读取 oracle 刚度或依赖 DM 控制核 |
-| `perception/slip.py` | 仅由触觉时序生成变化评分，持续确认后冻结摩擦候选；`tactile_slip.py` 保留兼容导出 | 读取外部载荷、探测命令、真值 `μ` 或物体运动 |
-| `perception/friction.py` | 保留历史估计器和估计结果结构；`friction_estimation.py` 保留兼容导出 | 被当前实验实例化以使用残差检测 |
-| `perception/taxels.py` | 筛选逐 taxel 接触，并用局部摩擦比趋势和剪切重分配生成纯力局部起滑候选；`taxel_friction.py` 保留兼容导出 | 把未验证的局部候选直接用于目标力调度 |
+| `packages/robotiq_grasp_core` | 在整数命令空间执行稳定判定、单 tick 增益估计、HOLD 与安全动作决策 | 推进仿真、读取 oracle 刚度或依赖 DM 控制核 |
+| `perception/slip.py` | 仅由触觉时序生成变化评分，持续确认后冻结摩擦候选 | 读取外部载荷、探测命令、真值 `μ` 或物体运动 |
+| `perception/friction.py` | 保留历史估计器和估计结果结构 | 被当前实验实例化以使用残差检测 |
+| `perception/taxels.py` | 筛选逐 taxel 接触，并用局部摩擦比趋势和剪切重分配生成纯力局部起滑候选 | 把未验证的局部候选直接用于目标力调度 |
 | `control.py` | 接触状态、力语义、MIT 命令与法向力外环 | 创建输出目录或解析 CLI |
 | `experiments/` | 定义阶段机、仿真循环、trace 字段和指标 | 组织跨条件批量研究 |
 | `runners/` | 管理一次运行的输入快照、experiment 调用、产物登记和失败保留 | 展示 Rich 表格或展开 study 矩阵 |
@@ -167,8 +167,7 @@ DMgripper 的二阶导纳基线另由 `packages/dm_grasp_core` 独立包提供�
 模拟电机内部持续执行目标。此路径不改变旧实验的控制时序。详情见
 [DMgripper 共享控制核](dm-shared-control.md)。
 
-Robotiq 离散力控制由独立 workspace 成员 `packages/robotiq_grasp_core` 提供；仿真主包通过
-兼容模块接入。该核心仅依赖 NumPy，不依赖 ROS、MuJoCo、profile、DM 核或仿真主包。
+Robotiq 离散力控制由独立 workspace 成员 `packages/robotiq_grasp_core` 提供；仿真主包直接依赖该 workspace 成员。该核心仅依赖 NumPy，不依赖 ROS、MuJoCo、profile、DM 核或仿真主包。
 DM 与 Robotiq 分别维护控制算法、命令类型和状态机。
 
 纯 Python 真机基础层同样按夹爪隔离。`packages/dmgripper_hardware` 提供 DM4310P
@@ -193,12 +192,6 @@ DM 核心命令经显式适配后才进入协议量化；Robotiq 硬件单步只
 import-linter 契约机器检查：配置位于 `pyproject.toml` 的 `[tool.importlinter]`，可用
 `uv run lint-imports` 单独执行，并由 `tests/test_architecture_contracts.py` 并入裸 pytest 门禁。
 规则 2 与规则 5 涉及运行行为与产物登记时序，仍由评审与 runner 实现保证。
-
-根路径兼容导出层（`profiles.py`、`run_artifacts.py`、`plotstyle.py`、`friction_plots.py`、
-`taxel_friction.py`、`tactile_slip.py`、`friction_estimation.py`、`discrete_force_control.py`）
-已弃用：导入时发出指向规范路径的 `DeprecationWarning`，计划于 0.4.0 移除。仓库内部代码一律
-使用规范路径，“主包内部不回引兼容层”契约阻止新的内部引用；`tests/test_compat_deprecation.py`
-校验每个兼容层的警告与转发等价性。
 
 ## 科研绘图公共层
 
