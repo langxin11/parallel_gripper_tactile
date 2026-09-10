@@ -18,6 +18,21 @@
   SHA-256，并提供不自动续跑的既有条件与可恢复性报告。
 - Torque ADRC coarse／confirm 两阶段调参迁入 Hydra 正式 study：保留 102 条 coarse 权威矩阵及动态
   confirm 选择规则，confirm 严格验证 coarse 类型、阶段、科学配置哈希和排名摘要；旧实验脚本保留薄兼容入口。
+- 摩擦局部起滑（15 条）、刚度估计器对比（81 条）、DM 导纳调参（32 条）、Robotiq 离散力（60 条）与
+  因果诊断（10 个 phase 共 39 条）迁入 Hydra 正式 study 入口：条件矩阵、统计口径、排名规则与产物
+  文件名保持不变，manifest 升级为公共生命周期状态机并登记产物 SHA-256；新输出位于
+  `outputs/research/studies/<kind>/`（诊断多一层 phase 目录）。
+- 因果诊断新增 `study.phase` 选择字段（仅诊断研究可用、必填），一次调用执行一个 phase 并使 phase
+  进入科学配置哈希；原 `--phase all` 由逐 phase 调用替代。
+
+### 移除
+
+- 删除 `scripts/experiments/` 下 5 个专项研究旧入口：`friction_estimation_local_slip.py`、
+  `force_tracking_stiffness_estimator_comparison.py`、`dm_admittance_tuning.py`、
+  `robotiq_discrete_force.py` 与 `force_tracking_diagnosis.py`；其实现迁入
+  `studies/protocols/` 包内并由 Hydra 入口复用。
+- 移除 `dm_admittance_tuning` 的 `max_workers` 字段与 `robotiq_discrete_force` 的 `--jobs`/
+  `--dry-run` 参数：正式 study 统一串行执行，计划审阅改用 `study_execution=plan` 默认模式。
 
 ### 变更
 

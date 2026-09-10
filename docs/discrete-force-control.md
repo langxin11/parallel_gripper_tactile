@@ -96,16 +96,15 @@ trace 除双侧力、原始/含噪/滤波力、状态、动作、稳定性、局
 ## 完整 study
 
 ```bash
-uv run python scripts/experiments/robotiq_discrete_force.py \
-  --config configs/studies/robotiq_discrete_force.yaml \
-  --dry-run
-uv run python scripts/experiments/robotiq_discrete_force.py \
-  --config configs/studies/robotiq_discrete_force.yaml
+uv run python scripts/research/study.py \
+  --config-name robotiq_discrete_force
+uv run python scripts/research/study.py \
+  --config-name robotiq_discrete_force \
+  study_execution=run
 ```
 
-默认根据可用 CPU 和条件数量自动启用多进程，最多使用 12 个进程；`--jobs N` 可显式覆盖，
-`--jobs 1` 强制串行。条件之间相互独立且种子固定，
-并行结果与串行逐字节一致；条件耗时以本机绘图与仿真为主，60 条件矩阵在本机 12 进程约 33 s。
+正式 study 统一串行执行，不提供并行度参数。条件之间相互独立且种子固定，串行结果与历史
+并行逐字节一致。
 
 默认矩阵为 5 个控制器 × 4 种刚度 × 3 种噪声，共 60 个条件。每个条件均运行完整主曲线。study
 同时输出逐次、逐平台和聚合 CSV/Parquet、JSON 摘要、控制器总览/消融链/逐平台比较图 PDF/PNG、

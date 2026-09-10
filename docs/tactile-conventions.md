@@ -53,9 +53,10 @@ mesh 与多接触点求解方式的交互。该结论描述当前 MuJoCo 模型�
 可使用以下命令复现实验：
 
 ```bash
-uv run python scripts/experiments/force_tracking_diagnosis.py \
-  --config configs/studies/force_tracking_diagnosis.yaml \
-  --phase collision-geometry
+uv run python scripts/research/study.py \
+  --config-name force_tracking_diagnosis \
+  study.phase=collision-geometry \
+  study_execution=run
 ```
 
 实物 Pillar 确认为“中心高、边中间次之、四角低”后，默认 profile 采用保留该高度差的球体碰撞

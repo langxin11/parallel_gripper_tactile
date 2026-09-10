@@ -351,14 +351,14 @@ YAML；每个 force-track run 的 `effective_parameters.json` 记录完整解析
 
 上述图表统一输出 600 DPI PNG 和矢量 PDF，并登记到各自的 `study_manifest.json`。
 
-刚度估计器对比同样先 dry-run；它固定 `pid-stiffness-ff`，默认展开 81 个条件：
+刚度估计器对比同样先计划再审阅；它固定 `pid-stiffness-ff`，默认展开 81 个条件：
 
 <pre><code class="language-bash">
-uv run python scripts/experiments/force_tracking_stiffness_estimator_comparison.py \
-  --config configs/studies/force_tracking_stiffness_estimator_comparison.yaml \
-  --dry-run
-uv run python scripts/experiments/force_tracking_stiffness_estimator_comparison.py \
-  --config configs/studies/force_tracking_stiffness_estimator_comparison.yaml
+uv run python scripts/research/study.py \
+  --config-name force_tracking_stiffness_estimator_comparison
+uv run python scripts/research/study.py \
+  --config-name force_tracking_stiffness_estimator_comparison \
+  study_execution=run
 </code></pre>
 
 ## 9. 决策原则

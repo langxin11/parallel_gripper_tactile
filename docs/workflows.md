@@ -1,8 +1,8 @@
 # 🚀 常用工作流
 
-演示、查看和设备检查使用 `pgt`；科研组合、探索运行与已迁移的正式研究使用 `scripts/research`。
-尚未迁移的专项 study 继续使用 `scripts/experiments`。所有入口共享 Python runner 与产物格式，
-不会通过子进程调用 `pgt`。
+演示、查看和设备检查使用 `pgt`；科研组合、探索运行与正式研究统一使用 `scripts/research`。
+控制器对比、PID 消融与 Torque ADRC 调参的旧脚本保留为薄兼容包装。所有入口共享 Python runner
+与产物格式，不会通过子进程调用 `pgt`。
 
 ## 单次运行与交互检查
 
@@ -52,11 +52,14 @@ uv run pgt compare contact --profile configs/custom_parallel_gripper.yaml
 `hardware_scale_nominal.yaml` 另以目标传感器单 taxel 的 `0.05 N` 标称分辨率为依据，采用
 `0.5 N/0.25 N` 接触滞回阈值和 `4 N/侧` 预载；原有 `0.05 N/0.025 N` 仅保留为低力仿真基线。
 
-纯力局部起滑的多种子正例与低探测载荷负例 study：
+纯力局部起滑的多种子正例与低探测载荷负例 study（默认先生成计划，`study_execution=run` 执行）：
 
 <pre><code class="language-bash">
-uv run python scripts/experiments/friction_estimation_local_slip.py \
-  --config configs/studies/friction_estimation_local_slip.yaml
+uv run python scripts/research/study.py \
+  --config-name friction_estimation_local_slip
+uv run python scripts/research/study.py \
+  --config-name friction_estimation_local_slip \
+  study_execution=run
 </code></pre>
 
 study 输出逐次与聚合 CSV/Parquet、检测时刻与局部候选摩擦比图，以及每个条件的完整单次运行产物。
@@ -70,14 +73,14 @@ study 输出逐次与聚合 CSV/Parquet、检测时刻与局部候选摩擦比�
 60 条件 study：
 
 <pre><code class="language-bash">
-uv run python scripts/experiments/robotiq_discrete_force.py \
-  --config configs/studies/robotiq_discrete_force.yaml --dry-run
-uv run python scripts/experiments/robotiq_discrete_force.py \
-  --config configs/studies/robotiq_discrete_force.yaml
+uv run python scripts/research/study.py \
+  --config-name robotiq_discrete_force
+uv run python scripts/research/study.py \
+  --config-name robotiq_discrete_force \
+  study_execution=run
 </code></pre>
 
-完整矩阵默认自动并行，进程数取可用 CPU、条件数量与 12 的最小值；资源受限时可用 `--jobs 1`
-强制串行，或用 `--jobs N` 指定进程数。单次运行中的物理、控制和记录时钟分别配置；默认是
+正式 study 统一串行执行，不提供并行度参数。单次运行中的物理、控制和记录时钟分别配置；默认是
 500 Hz 物理、30 Hz 控制和 100 Hz 常规记录，并额外保留关键事件。
 
 算法、trace 字段、验收口径和当前四档可达力见
@@ -113,8 +116,11 @@ uv run python scripts/research/run.py -m \
   seed=0,1,2
 </code></pre>
 
-正式控制器对比、PID 模块消融与 Torque ADRC 两阶段调参由 study 自身展开权威 YAML 中的矩阵；默认只生成计划，显式选择
-`study_execution=run` 才会执行：
+正式控制器对比、PID 模块消融、Torque ADRC 两阶段调参、局部起滑、刚度估计器对比、DM 导纳调参、
+Robotiq 离散力与因果诊断由 study 自身展开权威 YAML 中的矩阵；默认只生成计划，显式选择
+`study_execution=run` 才会执行。除下表 preset 外，`friction_estimation_local_slip`、
+`force_tracking_stiffness_estimator_comparison`、`dm_admittance_tuning`、`robotiq_discrete_force`
+与 `force_tracking_diagnosis`（须再指定 `study.phase=<phase>`）用法相同：
 
 <pre><code class="language-bash">
 uv run python scripts/research/study.py \
@@ -137,24 +143,7 @@ uv run python scripts/research/study.py \
 study 入口拒绝外层 `-m`，从而保证计划、配对统计与实际执行只展开一次。配置组、覆盖优先级、列表
 替换、非法组合、路径与产物语义见 [Hydra 科研配置与实验编排](research-configuration.md)。
 
-## 多条件研究兼容入口
-
-控制器 × 材料 × 噪声种子的消融 protocol：
-
-<pre><code class="language-bash">
-uv run python scripts/experiments/force_tracking_ablation.py \
-  --config configs/studies/force_tracking_ablation.yaml
-</code></pre>
-
-跨三类目标曲线的规范化控制器对比先审阅矩阵，再运行完整 protocol：
-
-<pre><code class="language-bash">
-uv run python scripts/experiments/force_tracking_controller_comparison.py \
-  --config configs/studies/force_tracking_controller_comparison.yaml \
-  --dry-run
-uv run python scripts/experiments/force_tracking_controller_comparison.py \
-  --config configs/studies/force_tracking_controller_comparison.yaml
-</code></pre>
+## 多条件研究与产物约定
 
 默认矩阵为 6 个控制器变体 × 3 个任务 × 3 个正式接触 preset × 3 个 seed，共 162 个条件；其中包含
 四个 PID 2×2 变体、`pid-stiffness-limit` 与二阶直接力矩 `adrc-torque`。`direct-torque` 和一阶位置式
@@ -170,8 +159,8 @@ uv run python scripts/experiments/force_tracking_controller_comparison.py \
 所有 study 图同时输出 600 DPI PNG 和矢量 PDF。
 
 二阶直接力矩 ADRC 的测量轻滤波和控制／观测器带宽采用两阶段调参：粗扫先固定 `medium` 与一个 seed，
-确认阶段再在三种 preset 与三个 seed 上复验。Hydra 正式入口见上节；以下旧脚本仅作为薄兼容包装，
-与正式入口调用同一包内 protocol：
+确认阶段再在三种 preset 与三个 seed 上复验。控制器对比、PID 消融与 Torque ADRC 调参的旧脚本仅
+作为薄兼容包装，与 Hydra 正式入口调用同一包内 protocol：
 
 <pre><code class="language-bash">
 uv run python scripts/experiments/force_tracking_torque_adrc_tuning.py \
@@ -187,17 +176,26 @@ uv run python scripts/experiments/force_tracking_torque_adrc_tuning.py \
   --coarse-study-dir outputs/studies/force_tracking_torque_adrc_tuning/coarse/&lt;粗扫目录&gt;
 </code></pre>
 
-按阶段执行因果诊断；碰撞几何阶段包含原 mesh、两种球体、共面 mesh 和关闭 `multiccd` 五个条件：
+因果诊断按单 phase 一次调用执行，替代原 `--phase all` 循环；碰撞几何阶段包含原 mesh、两种球体、
+共面 mesh 和关闭 `multiccd` 五个条件：
 
 <pre><code class="language-bash">
-uv run python scripts/experiments/force_tracking_diagnosis.py \
-  --config configs/studies/force_tracking_diagnosis.yaml \
-  --phase collision-geometry
+uv run python scripts/research/study.py \
+  --config-name force_tracking_diagnosis \
+  study.phase=collision-geometry
+uv run python scripts/research/study.py \
+  --config-name force_tracking_diagnosis \
+  study.phase=collision-geometry \
+  study_execution=run
+for phase in reproducibility controllers materials force-scale contact-model \
+            collision-geometry force-semantics position-limit integral-gain filter-cutoff; do
+  uv run python scripts/research/study.py \
+    --config-name force_tracking_diagnosis \
+    "study.phase=${phase}" study_execution=run
+done
 </code></pre>
 
-研究脚本直接调用 `parallel_gripper_tactile.runners.execute_force_tracking`，不会启动 CLI 子进程。
-控制器对比、PID 消融与 Torque ADRC 调参的旧脚本都是兼容包装；其权威 protocol 已迁入包内并由
-Hydra study 入口复用。
+所有研究 protocol 直接调用 `parallel_gripper_tactile.runners` 中的 runner，不会启动 CLI 子进程。
 每个条件生成独立 run。study 父目录同时保存人工输入 `study.yaml` 和路径、默认值均已解析的
 `study.resolved.json`。force-track run 同时保留 YAML 输入快照，并写入包含完整解析 profile、task 和实际
 运行时覆盖的 `effective_parameters.json`。时序数据默认以 Zstd 压缩的 `trace.parquet` 保存：普通控制器

@@ -2,14 +2,15 @@
 
 项目把演示/检查、科研组合和正式研究分开：`pgt` 面向交互运行，`scripts/research/run.py` 面向
 Hydra 单次与探索性 Multirun，`scripts/research/study.py` 面向固定矩阵的正式研究；它们通过 Python
-runner 复用同一套实验实现和运行产物约定。尚未迁移的专项研究继续使用 `scripts/experiments`。
+runner 复用同一套实验实现和运行产物约定。控制器对比、PID 消融与 Torque ADRC 调参的旧
+脚本保留为 `scripts/experiments` 下的薄兼容包装。
 
 ```mermaid
 flowchart TB
   subgraph Entry[入口层]
     CLI["pgt CLI<br/>单次运行与交互检查"]
     Research["scripts/research<br/>Hydra 科研入口"]
-    Scripts["scripts/experiments<br/>兼容与专项 protocol"]
+    Scripts["scripts/experiments<br/>旧入口兼容包装"]
   end
 
   subgraph Orchestration[编排层]
@@ -73,7 +74,7 @@ manifest。
 | `research/` | 把 Hydra 组合解析为冻结领域配置，执行计划/运行并记录组合溯源 | 维护控制算法或设备 I/O |
 | `studies/` | 定义可校验的研究配置、唯一条件矩阵、公共生命周期与可复用 protocol | 通过子进程调用 CLI，或统一任务／控制器／统计公式 |
 | `scripts/research/` | 提供轻薄的 Hydra 原生科研入口 | 复制 runner、矩阵或实验物理逻辑 |
-| `scripts/experiments/` | 提供未迁移专项研究和旧入口兼容包装 | 复制单次实验物理逻辑 |
+| `scripts/experiments/` | 提供已迁移研究的旧入口兼容包装 | 复制单次实验物理逻辑 |
 | `cli/` | 参数适配、面向人的诊断和结果展示 | 作为包内模块的反向依赖 |
 
 ## 仿真循环所有权

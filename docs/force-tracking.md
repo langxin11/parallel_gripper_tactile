@@ -293,9 +293,10 @@ profile、task 等人工输入继续采用 YAML。`effective_parameters.json` �
 高载荷振荡的五条件对照由独立 diagnosis protocol 保存，避免把因果诊断开关混入默认任务：
 
 <pre><code class="language-bash">
-uv run python scripts/experiments/force_tracking_diagnosis.py \
-  --config configs/studies/force_tracking_diagnosis.yaml \
-  --phase collision-geometry
+uv run python scripts/research/study.py \
+  --config-name force_tracking_diagnosis \
+  study.phase=collision-geometry \
+  study_execution=run
 </code></pre>
 
 该阶段分别控制 Pillar 高度共面性、mesh/sphere 拓扑和 `multiccd`。当前证据表明，问题来自原始非共面

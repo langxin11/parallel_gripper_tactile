@@ -98,6 +98,32 @@ uv run python scripts/research/study.py \
   study_execution=run
 ```
 
+局部起滑验证、刚度估计器对比、DM 导纳调参与 Robotiq 离散力 study 用法相同，矩阵分别为
+5 场景 × 3 seed（15 条）、3 估计器 × 3 任务 × 3 材料 × 3 seed（81 条）、16 候选 × 1 材料 × 2 seed
+（32 条）与 5 控制器 × 4 材料 × 3 噪声 × 1 seed（60 条）：
+
+```bash
+uv run python scripts/research/study.py \
+  --config-name friction_estimation_local_slip
+uv run python scripts/research/study.py \
+  --config-name force_tracking_stiffness_estimator_comparison
+uv run python scripts/research/study.py \
+  --config-name dm_admittance_tuning
+uv run python scripts/research/study.py \
+  --config-name robotiq_discrete_force \
+  study_execution=run
+```
+
+因果诊断研究一次调用执行一个 phase，`study.phase` 必选（10 个 phase 共 39 条条件）；原
+`--phase all` 由逐 phase 循环替代：
+
+```bash
+uv run python scripts/research/study.py \
+  --config-name force_tracking_diagnosis \
+  study.phase=collision-geometry \
+  study_execution=run
+```
+
 Torque ADRC 调参也由同一正式入口承载。正式 coarse 为 34 个满足测量带宽约束的候选 × 3 个任务 ×
 `medium` × seed 0，共 102 条；confirm 从已完成 coarse 的可行排名取前五，并在缺席时追加基线，随后对
 所选候选执行 3 个任务 × 3 个材料 × 3 个 seed：
@@ -184,12 +210,13 @@ Hydra 拥有一次科研调用的外层目录，其中保存组合来源、选�
 
 ## 迁移边界
 
-本阶段已贯通 DM 单次力跟踪、DM 共享导纳、正式控制器对比、PID 模块消融和 Torque ADRC 两阶段调参。原
+本阶段已贯通 DM 单次力跟踪、DM 共享导纳、正式控制器对比、PID 模块消融、Torque ADRC 两阶段调参、
+摩擦局部起滑、刚度估计器对比、DM 导纳调参、Robotiq 离散力和因果诊断（单 phase 入口）。原
 `scripts/experiments/force_tracking_controller_comparison.py` 与
 `force_tracking_ablation.py`、`force_tracking_torque_adrc_tuning.py` 保留为兼容入口，但实现已迁入包内
-protocol。
+protocol；其余专项研究的旧脚本已删除，统一使用 Hydra 正式入口。
 
-以下研究暂沿用原 `scripts/experiments` 入口：DM 导纳调参、因果诊断、刚度估计器对比、摩擦局部起滑和
-Robotiq 离散力 study。它们仍调用共享 runner；后续迁移时应逐项保留各自的阶段、约束与统计语义，而
-不是改成任意 Hydra 笛卡尔积。正式 study 继续使用 Hydra basic launcher 串行执行，不引入自动 resume、
-Optuna、Ray、MLflow 或分布式执行框架。
+迁移中保留的语义边界：导纳调参的候选排名与 raw 物理力峰值口径、估计器对比的 secant 基线与公共
+seed 叠加、Robotiq 离散力的 HOLD/再激活时序与逐平台指标、诊断的单因素条件构造与数值/分类双横轴
+绘图均原样保留；dm_admittance_tuning 移除 `max_workers`、robotiq_discrete_force 移除 `--jobs`，
+正式 study 统一串行执行，不引入自动 resume、Optuna、Ray、MLflow 或分布式执行框架。

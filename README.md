@@ -128,7 +128,7 @@ uv run python scripts/research/study.py \
 Hydra 负责外层科研调用目录和组合溯源，现有 artifacts 继续管理每个实验的 manifest、trace、metrics
 与图。公共 study manifest 区分计划、运行中、部分完成、完成与失败状态，也区分科学验收失败、执行异常
 和聚合／绘图异常；稳定科学哈希不包含 cwd、时间或输出目录。恢复功能本阶段只生成兼容性报告，不会
-自动续跑。计划/执行、配置组所有权、覆盖规则、输出结构、兼容入口及尚未迁移的研究详见
+自动续跑。计划/执行、配置组所有权、覆盖规则、输出结构与兼容入口详见
 [Hydra 科研配置与实验编排](docs/research-configuration.md)。
 
 ## 🧩 Profiles

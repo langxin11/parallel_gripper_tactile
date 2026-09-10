@@ -47,11 +47,14 @@ uv run pgt run force-track \
 0.007 N；Ramp 阶段的 `force_tracking` 占比为 100%，且未触发位置或力矩饱和。
 低峰值的代价是该场景从全开位置建立 1 N 接触约需 41.5 s；这仍是仿真调参结果，
 不代表已通过实机安全验收。
-可用下列入口以进程并行方式重跑候选：
+可用下列 Hydra 正式入口重跑候选（串行执行）：
 
 ```bash
-uv run python scripts/experiments/dm_admittance_tuning.py \
-  --config configs/studies/dm_admittance_tuning.yaml
+uv run python scripts/research/study.py \
+  --config-name dm_admittance_tuning
+uv run python scripts/research/study.py \
+  --config-name dm_admittance_tuning \
+  study_execution=run
 ```
 
 `control.force.admittance` 只由 `admittance` 入口使用，和 ADRC/直接力矩反馈互斥。
