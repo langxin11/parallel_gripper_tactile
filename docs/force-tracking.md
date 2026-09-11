@@ -215,7 +215,7 @@ waypoint 的 `t_s` 应严格递增，`force_n` 应为非负值。任务总跟踪
 | `task.yaml` | 本次运行使用的 force tracking task 快照。 |
 | `effective_parameters.json` | 解析后的完整 profile、task 与本次实际生效的运行时覆盖。 |
 | `trace.parquet` | 使用 Zstd 压缩、事件感知降采样的状态、目标力、测量力和控制量。 |
-| `plot.png` / `plot.pdf` | 600 DPI 位图与矢量版任务诊断图。 |
+| `plot.png` | 600 DPI 任务诊断图。 |
 | `metrics.json` | 跟踪误差、饱和比例、接触时间等摘要指标。 |
 | `manifest.json` | 运行命令、时间戳和产物索引。 |
 

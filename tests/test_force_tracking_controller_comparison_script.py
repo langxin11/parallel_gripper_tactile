@@ -114,8 +114,7 @@ def test_summary_plots_are_generated(tmp_path: Path, fast_plot_render: None) -> 
         aggregates, outputs[2], controller_order=controllers
     )
 
-    artifacts = (*outputs, *(path.with_suffix(".pdf") for path in outputs))
-    assert all(path.is_file() and path.stat().st_size > 0 for path in artifacts)
+    assert all(path.is_file() and path.stat().st_size > 0 for path in outputs)
 
 
 def _write_trace(path: Path, *, offset: float) -> None:
@@ -175,9 +174,8 @@ def test_tracking_overlay_uses_common_seed(tmp_path: Path, fast_plot_render: Non
         controller_order=controllers,
     )
 
-    assert len(outputs) == 2
+    assert len(outputs) == 1
     assert outputs[0].suffix == ".png"
-    assert outputs[1].suffix == ".pdf"
     assert all(path.is_file() and path.stat().st_size > 0 for path in outputs)
 
 

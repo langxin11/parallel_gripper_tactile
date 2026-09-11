@@ -45,6 +45,8 @@
 
 ### 变更
 
+- 绘图导出改为只保存调用方请求的一种格式；现有单次实验与正式 study 默认保留 600 DPI PNG，
+  不再自动生成同名 PDF 或在 manifest 中重复登记。
 - 清理正式研究配置的跨层重复字段：活跃研究以 experiment 组合为唯一 profile 来源，以 execution 组为
   唯一输出目录来源，并移除用于占位的 task、seed、execution 覆盖；科学哈希改为摘要实际冻结的组合
   profile。归档模型诊断继续保留有注释的历史 profile 例外。

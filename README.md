@@ -155,7 +155,6 @@ outputs/<profile>/<experiment>/<UTC timestamp>-<id>/
 ├── trace.csv                  # discrete-force / force-schedule / friction-estimate
 ├── metrics.json
 ├── plot.png
-├── plot.pdf
 └── video.mp4
 ```
 
@@ -165,7 +164,7 @@ profile、task 以及本次实际生效的运行时覆盖，作为 force-track r
 使用 Zstd 压缩的 `trace.parquet`。普通控制器常规区段默认记录为 100 Hz，直接力矩 ADRC 记录为
 250 Hz；阶段切换、限幅状态变化和 waypoint 前后 0.2 s 仍保留完整控制频率。指标计算和绘图始终使用
 仿真中的完整频率数据，降采样只影响落盘 trace。读取接口仍兼容旧版 CSV API 和既有 `trace.csv` 历史产物。
-单次运行同时生成 600 DPI PNG 和矢量 PDF；Step、Ramp 与 Mixed/Smoothstep 分别突出瞬态误差、
+单次运行默认生成一份 600 DPI PNG；Step、Ramp 与 Mixed/Smoothstep 分别突出瞬态误差、
 加载—卸载滞后和 waypoint 误差。CLI 可用 `--trace-period` 覆盖常规采样周期；该值必须是
 任务控制周期的整数倍，设为控制周期即可保留全频常规数据。
 `pgt runs clean` 默认只预览将删除的目标；需要删除时加 `--apply`。

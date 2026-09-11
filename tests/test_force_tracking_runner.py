@@ -40,7 +40,6 @@ def test_execute_force_tracking_writes_complete_run_artifacts(tmp_path: Path, mo
     ) -> ForceTrackingResult:
         pq.write_table(pa.table({"time_s": [0.0]}), output_parquet, compression="zstd")
         output_plot.write_bytes(b"plot")
-        output_plot.with_suffix(".pdf").write_bytes(b"%PDF-1.4\n")
         return result
 
     monkeypatch.setattr(force_tracking, "run_force_tracking", fake_run)
@@ -76,7 +75,6 @@ def test_execute_force_tracking_writes_complete_run_artifacts(tmp_path: Path, mo
         "effective_parameters.json",
         "trace.parquet",
         "plot.png",
-        "plot.pdf",
         "metrics.json",
     } <= set(manifest["artifacts"])
     assert (run.path / "task.yaml").read_bytes() == task.read_bytes()

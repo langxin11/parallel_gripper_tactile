@@ -78,10 +78,10 @@ def _plot_rows() -> list[dict[str, float | str]]:
         ("smoothstep", "waypoint_error"),
     ],
 )
-def test_force_tracking_plot_is_task_aware_and_writes_format_pair(
+def test_force_tracking_plot_is_task_aware_and_writes_one_png(
     tmp_path: Path, interpolation: str, expected_layout: str, fast_plot_render: None
 ) -> None:
-    """三类任务分别选择瞬态、滞后和 waypoint 误差诊断，并输出 PNG/PDF。"""
+    """三类任务分别选择瞬态、滞后和 waypoint 误差诊断，并只输出 PNG。"""
     task = ForceTrackingTask(
         schema_version=1,
         name=f"{interpolation}_plot",
@@ -100,9 +100,7 @@ def test_force_tracking_plot_is_task_aware_and_writes_format_pair(
     _plot_force_tracking(output, _plot_rows(), task=task)
 
     assert output.is_file()
-    assert output.with_suffix(".pdf").is_file()
     assert output.stat().st_size > 0
-    assert output.with_suffix(".pdf").stat().st_size > 0
 
 
 def test_force_tracking_publication_plot_preserves_high_resolution(tmp_path: Path) -> None:
@@ -414,7 +412,6 @@ def test_force_tracking_run_writes_dynamic_reference_trace(
     assert result.rmse_n >= 0.0
     assert output_csv.is_file()
     assert output_plot.is_file()
-    assert output_plot.with_suffix(".pdf").is_file()
     with output_csv.open(newline="", encoding="utf-8") as stream:
         rows = list(csv.DictReader(stream))
     tracking_rows = [row for row in rows if row["phase"] == "track_reference"]

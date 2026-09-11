@@ -96,7 +96,7 @@ def _write_trace(path: Path, *, parquet: bool) -> None:
 def test_render_phase_figures_uses_numeric_x_and_skips_missing_traces(
     tmp_path: Path, fast_plot_render: None
 ) -> None:
-    """数值扫描输出双格式图表，缺失 trace 的失败运行不会中止绘图。"""
+    """数值扫描输出单份 PNG 图表，缺失 trace 的失败运行不会中止绘图。"""
     _write_trace(tmp_path / "runs" / "parquet" / "trace.csv", parquet=True)
     rows = [
         _diagnosis_row("scale-0.500", run_directory="runs/parquet", force_scale=0.5),
@@ -107,9 +107,7 @@ def test_render_phase_figures_uses_numeric_x_and_skips_missing_traces(
 
     expected = {
         "figures/diagnostic_metrics.png",
-        "figures/diagnostic_metrics.pdf",
         "figures/tracking_overlay.png",
-        "figures/tracking_overlay.pdf",
     }
     assert {str(path.relative_to(tmp_path)) for path in artifacts} == expected
     assert all(path.is_file() and path.stat().st_size > 0 for path in artifacts)
@@ -125,7 +123,7 @@ def test_historical_summary_infers_passed_from_stability_and_finite_rmse() -> No
 def test_run_phase_registers_figures_and_keeps_failed_run_without_trace(
     tmp_path, monkeypatch, fast_plot_render: None
 ) -> None:
-    """phase 收尾登记 PNG/PDF，并让没有跟踪段的失败 run 留在 manifest。"""
+    """phase 收尾登记 PNG，并让没有跟踪段的失败 run 留在 manifest。"""
     profile = tmp_path / "profile.yaml"
     task = tmp_path / "task.yaml"
     config_source = tmp_path / "diagnosis.yaml"
@@ -193,9 +191,7 @@ reference:
     assert set(manifest["failed_runs"]) == {"runs/pid-only"}
     assert {
         "figures/diagnostic_metrics.png",
-        "figures/diagnostic_metrics.pdf",
         "figures/tracking_overlay.png",
-        "figures/tracking_overlay.pdf",
     } <= set(manifest["artifacts"])
     assert all((study_dir / artifact).is_file() for artifact in manifest["artifacts"])
     summary = json.loads((study_dir / "summary.json").read_text(encoding="utf-8"))

@@ -125,7 +125,6 @@ def test_runner_does_not_reload_profile_when_final_profile_is_supplied(
         seen["profile"] = profile
         output_parquet.write_bytes(b"parquet")
         output_plot.write_bytes(b"plot")
-        output_plot.with_suffix(".pdf").write_bytes(b"pdf")
         return _result()
 
     monkeypatch.setattr(force_tracking_runner, "load_profile", forbidden_load)
@@ -158,7 +157,6 @@ def test_runner_snapshots_the_supplied_composed_profile(
     def fake_run(profile: object, *, output_parquet: Path, output_plot: Path, **kwargs: object):
         output_parquet.write_bytes(b"parquet")
         output_plot.write_bytes(b"plot")
-        output_plot.with_suffix(".pdf").write_bytes(b"pdf")
         return _result()
 
     monkeypatch.setattr(force_tracking_runner, "run_force_tracking", fake_run)

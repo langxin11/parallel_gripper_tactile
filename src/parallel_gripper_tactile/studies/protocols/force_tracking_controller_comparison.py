@@ -387,7 +387,7 @@ def plot_tracking_overlays(
         output = figures_dir / f"tracking_{safe_task}_{material}.png"
         pdf_path = save_publication_figure(figure, output)
         plt.close(figure)
-        outputs.extend((output, pdf_path))
+        outputs.append(pdf_path)
     return outputs
 
 
@@ -404,11 +404,11 @@ def render_study_figures(
     metric_plot = figures_dir / "metrics_by_controller.png"
     saturation_plot = figures_dir / "saturation_comparison.png"
     delta_plot = figures_dir / "ablation_delta.png"
-    metric_pdf = plot_metric_summary(aggregates, metric_plot, controller_order=controller_order)
-    saturation_pdf = plot_saturation_summary(
+    metric_path = plot_metric_summary(aggregates, metric_plot, controller_order=controller_order)
+    saturation_path = plot_saturation_summary(
         aggregates, saturation_plot, controller_order=controller_order
     )
-    delta_pdf = plot_ablation_delta(aggregates, delta_plot, controller_order=controller_order)
+    delta_path = plot_ablation_delta(aggregates, delta_plot, controller_order=controller_order)
     trace_plots = plot_tracking_overlays(
         rows,
         study_dir,
@@ -416,12 +416,9 @@ def render_study_figures(
         controller_order=controller_order,
     )
     return [
-        metric_plot,
-        metric_pdf,
-        saturation_plot,
-        saturation_pdf,
-        delta_plot,
-        delta_pdf,
+        metric_path,
+        saturation_path,
+        delta_path,
         *trace_plots,
     ]
 

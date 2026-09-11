@@ -123,7 +123,6 @@ outputs/<profile>/<experiment>/<UTC timestamp>-<id>/
 ├── trace.csv       # discrete-force、force-schedule 与 friction-estimate
 ├── metrics.json
 ├── plot.png
-├── plot.pdf
 └── video.mp4        # 仅请求录制时
 ```
 
@@ -154,21 +153,17 @@ outputs/studies/<study>/<UTC timestamp>-<id>/
 ├── aggregate.parquet     # 需要跨重复统计的批量研究提供
 ├── figures/              # study 级跨条件对比图
 │   ├── metrics_by_controller.png
-│   ├── metrics_by_controller.pdf
 │   ├── saturation_comparison.png
-│   ├── saturation_comparison.pdf
 │   ├── ablation_delta.png
-│   ├── ablation_delta.pdf
-│   ├── tracking_<task>_<material>.png
-│   └── tracking_<task>_<material>.pdf
+│   └── tracking_<task>_<material>.png
 └── study_manifest.json   # 登记子 run 与 study 级产物
 ```
 
 study 的 `summary` 与（适用时的）`aggregate` 同时输出 CSV 和 Parquet；diagnosis study 只输出 summary，
-不生成 aggregate。单次 run 的 `plot.png` / `plot.pdf` 由 experiment 从本次完整频率 trace 生成，并根据
+不生成 aggregate。单次 run 的 `plot.png` 由 experiment 从本次完整频率 trace 生成，并根据
 Step、Ramp、Mixed/Smoothstep 任务分别突出瞬态、滞后和 waypoint 误差；跨 run 的统计图由
-包内 study protocol 在所有条件结束后从 `summary`、`aggregate` 和子 run trace 生成 600 DPI PNG 与
-矢量 PDF，并登记到 `study_manifest.json`。公共生命周期持有同一个有序 `StudyPlan`，在执行前写入
+包内 study protocol 在所有条件结束后从 `summary`、`aggregate` 和子 run trace 生成 600 DPI PNG，
+并登记到 `study_manifest.json`。公共生命周期持有同一个有序 `StudyPlan`，在执行前写入
 `running` 状态并在每个条件后更新账本；最终状态为 `partial`、`completed` 或 `failed`。正常完成但
 `passed=false` 的条件记录为 `scientific_failure`，形成不了 run 的 Python 异常记录为
 `execution_error`；聚合和绘图异常独立登记。未建立 `track_reference` 的正常条件会在 summary 与
@@ -232,5 +227,5 @@ import-linter 契约机器检查：配置位于 `pyproject.toml` 的 `[tool.impo
 
 `visualization/plotstyle.py` 只负责样式、物理尺寸与文件导出，不处理实验数据和统计。
 `science_pyplot()` 注册 SciencePlots 并应用统一中英文字体；`paper_figsize()` 提供单栏和跨栏宽度；
-`save_publication_figure()` 保存同名 PDF 与 PNG，保留画布尺寸并由调用方关闭图像。
+`save_publication_figure()` 只按调用方请求的扩展名保存一份图像，保留画布尺寸并由调用方关闭图像。
 实验入口负责面板组织、标签与图例，runner 或 CLI 负责产物登记。视频叠加面板不属于论文图。

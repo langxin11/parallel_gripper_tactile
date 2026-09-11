@@ -76,8 +76,8 @@ CLI 使用可重复的 `--set` 选择控制器、材料、task 字段和 `seed`�
 pair；在 `u=255` 的当前模型中，稳定可达力约为 9.69、11.89、19.12 和 31.69 N。接触本身仍具有 MuJoCo
 `solimp` 非线性，可用于观察局部增益随压缩程度变化，但这些档位不对应真实材料杨氏模量。
 
-每次运行保存 `task.yaml`、`effective_parameters.json`、`trace.csv.gz`、`metrics.json`、600 DPI PNG、
-矢量 PDF 和 manifest。常规 trace 由独立 `record_period_s` 定时器采样，默认 100 Hz 并使用 gzip 压缩；
+每次运行保存 `task.yaml`、`effective_parameters.json`、`trace.csv.gz`、`metrics.json`、600 DPI PNG 和
+manifest。常规 trace 由独立 `record_period_s` 定时器采样，默认 100 Hz 并使用 gzip 压缩；
 动作生效、动作重新稳定、状态切换及首尾行强制保留。仿真不会为每个 500 Hz 物理步构造或保存完整记录；
 安全超限、峰值和有限性等必须覆盖物理步的量以在线标量方式累计，绘图使用事件增强 trace，RMSE、
 HOLD 占比与逐平台统计仍使用均匀的 30 Hz 控制周期样本，避免记录频率或额外事件行改变统计权重。
@@ -107,7 +107,7 @@ uv run python scripts/research/study.py \
 并行逐字节一致。
 
 默认矩阵为 5 个控制器 × 4 种刚度 × 3 种噪声，共 60 个条件。每个条件均运行完整主曲线。study
-同时输出逐次、逐平台和聚合 CSV/Parquet、JSON 摘要、控制器总览/消融链/逐平台比较图 PDF/PNG、
+同时输出逐次、逐平台和聚合 CSV/Parquet、JSON 摘要、控制器总览/消融链/逐平台比较 PNG、
 子 run 目录及 study manifest。增加噪声重复时，
 只需提高 study 中 `seeds.count`，矩阵展开和聚合逻辑不变。
 

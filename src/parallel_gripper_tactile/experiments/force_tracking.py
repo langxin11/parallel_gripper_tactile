@@ -395,7 +395,7 @@ def _plot_force_tracking(
     *,
     task: ForceTrackingTask | None = None,
 ) -> None:
-    """按目标曲线类型绘制力跟踪诊断，并同时生成 PNG 与 PDF。"""
+    """按目标曲线类型绘制力跟踪诊断。"""
     if not rows:
         raise ValueError("cannot plot an empty force tracking trace")
     plt = science_pyplot()

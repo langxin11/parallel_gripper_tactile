@@ -133,9 +133,7 @@ def execute_friction_estimation(
     for artifact in (
         trace_path,
         plot_path,
-        plot_path.with_suffix(".pdf"),
         taxel_plot_path,
-        taxel_plot_path.with_suffix(".pdf"),
     ):
         run.register_artifact(artifact)
     metrics_path = run.artifact_path("metrics.json")

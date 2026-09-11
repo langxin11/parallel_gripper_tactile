@@ -131,7 +131,6 @@ def test_execute_force_scheduling_writes_reproducible_artifacts(
         "effective_parameters.json",
         "trace.csv",
         "plot.png",
-        "plot.pdf",
         "metrics.json",
         "manifest.json",
     }

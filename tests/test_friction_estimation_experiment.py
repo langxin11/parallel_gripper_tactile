@@ -186,9 +186,7 @@ def test_execute_friction_estimation_writes_blind_estimator_artifacts(
         "effective_parameters.json",
         "trace.csv",
         "plot.png",
-        "plot.pdf",
         "taxel_plot.png",
-        "taxel_plot.pdf",
         "metrics.json",
         "manifest.json",
     }

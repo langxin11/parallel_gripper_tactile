@@ -139,12 +139,12 @@ study 入口拒绝外层 `-m`，从而保证计划、配对统计与实际执行
 阶次不匹配而保留为历史复现入口，不再参加默认正式对比。三个 preset 为
 `medium=(-650,-8)`、`hard=(-1200,-10)` 与 `stiff=(-2500,-15)`。原
 `soft=(-250,-5)` 不进入默认矩阵。study 完成后会同时输出 `summary.csv`、`summary.parquet`，以及适用时的
-`aggregate.csv`、`aggregate.parquet`；diagnosis study 只有 summary。图仍保存在 `figures/` 中的 PNG 与 PDF。
+`aggregate.csv`、`aggregate.parquet`；diagnosis study 只有 summary。图默认以 PNG 保存在 `figures/` 中。
 
 图表按 study 的科学问题组织：控制器对比展示误差、饱和、相对 Full 增量和同 seed 轨迹；PID 消融展示
 材料分组指标以及完整 2×2 配对的主效应/交互作用；ADRC 调参展示候选排序、约束可行域和参数—性能关系；
 刚度估计器对比展示相对 secant 的增量和力/刚度轨迹；因果诊断展示扫描变量—诊断指标曲线与有效轨迹叠加。
-所有 study 图同时输出 600 DPI PNG 和矢量 PDF。
+所有 study 图默认输出一份 600 DPI PNG。
 
 二阶直接力矩 ADRC 的测量轻滤波和控制／观测器带宽采用两阶段调参：粗扫先固定 `medium` 与一个 seed，
 确认阶段再在三种 preset 与三个 seed 上复验。计划、coarse 执行与 confirm 都使用 Hydra 正式入口：
@@ -214,7 +214,7 @@ typst compile --root . reports/wired_demo.typ
 
 工作稿的数据源是 `friction-estimate` 与 `force-schedule` 两次运行的产物目录，路径写在
 文件头部常量里。更换数据源时改头部的 `#let …-run = "/outputs/…"` 常量，并把新 run 的
-`plot.pdf` 复制到 `reports/figures/` 替换入库快照（插图不直接引用 `outputs/`，图像资产
+`plot.png` 复制到 `reports/figures/` 替换入库快照（插图不直接引用 `outputs/`，图像资产
 固定、不随 `pgt runs clean` 丢失）；产物不存在则先重跑对应实验（命令见上文）。
 
 报告内的 LaTeX 公式经 `mitex` 兼容，Typst 字符串中反斜杠须双写（如 `"\\rho"`），否则
@@ -257,6 +257,6 @@ SciencePlots IEEE 样式及字体配置。
 字体使用 TeX Gyre Termes 和 Noto Serif CJK SC，运行环境应安装这两种字体，中文需检查缺字警告。
 新增绘图入口复用 `plotstyle` 公共模块，以 `paper_figsize(height, columns=1)` 创建 3.5 英寸单栏图，
 默认 `columns=2` 创建 7.16 英寸跨栏图；高度由面板数量确定。创建时启用约束布局，
-通过 `save_publication_figure(figure, path)` 输出同名 PDF 和 600 DPI PNG。其他显式请求格式也会保留。
+通过 `save_publication_figure(figure, path)` 按 `path` 的扩展名输出一份图像；默认实验图为 600 DPI PNG。
 导出不使用紧边界裁切，以免改变最终栏宽。多面板长图仍需根据目标期刊页高拆分或安排到补充材料。
 历史产物不会自动覆盖；需重新执行绘图才能应用新样式。交付前按最终尺寸检查中文、负号、图例与裁切。

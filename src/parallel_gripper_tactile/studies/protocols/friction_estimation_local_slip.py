@@ -130,8 +130,8 @@ def plot_summary(rows: list[dict[str, object]], output: Path) -> Path:
 
 def render_study_figures(rows: list[dict[str, object]], study_dir: Path) -> list[Path]:
     """从 study 逐 run 行生成局部起滑验证图。"""
-    figure_pdf = plot_summary(rows, study_dir / "local_slip_validation.png")
-    return [figure_pdf.with_suffix(".png"), figure_pdf]
+    figure_path = plot_summary(rows, study_dir / "local_slip_validation.png")
+    return [figure_path]
 
 
 def _create_study_directory(config: FrictionEstimationLocalSlipStudyConfig) -> Path:

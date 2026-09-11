@@ -161,5 +161,5 @@ def test_tuning_figures_render_with_missing_step_metrics(
         max_mixed_rmse_ratio_to_baseline=1.10,
     )
 
-    assert [path.suffix for path in figures] == [".png", ".pdf", ".png", ".pdf"]
+    assert [path.suffix for path in figures] == [".png", ".png"]
     assert all(path.is_file() and path.stat().st_size > 0 for path in figures)

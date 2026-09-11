@@ -435,15 +435,15 @@ def render_study_figures(
     figures_dir.mkdir(exist_ok=True)
     ranking_plot = figures_dir / "candidate_ranking_and_feasibility.png"
     parameter_plot = figures_dir / "parameter_performance.png"
-    ranking_pdf = plot_candidate_ranking_and_feasibility(
+    ranking_path = plot_candidate_ranking_and_feasibility(
         ranking,
         ranking_plot,
         max_torque_saturation_ratio=max_torque_saturation_ratio,
         max_ramp_rmse_ratio_to_baseline=max_ramp_rmse_ratio_to_baseline,
         max_mixed_rmse_ratio_to_baseline=max_mixed_rmse_ratio_to_baseline,
     )
-    parameter_pdf = plot_parameter_performance(aggregates, parameter_plot)
-    return [ranking_plot, ranking_pdf, parameter_plot, parameter_pdf]
+    parameter_path = plot_parameter_performance(aggregates, parameter_plot)
+    return [ranking_path, parameter_path]
 
 
 def rank_candidates(

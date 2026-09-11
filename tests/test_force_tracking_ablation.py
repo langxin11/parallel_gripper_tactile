@@ -137,7 +137,7 @@ def test_ablation_figures_render_paired_factorial_effects(
         controller_order=("pid-only", "pid-torque-ff", "pid-stiffness-ff", "full"),
     )
 
-    assert [path.suffix for path in figures] == [".png", ".pdf", ".png", ".pdf"]
+    assert [path.suffix for path in figures] == [".png", ".png"]
     assert all(path.is_file() and path.stat().st_size > 0 for path in figures)
 
 

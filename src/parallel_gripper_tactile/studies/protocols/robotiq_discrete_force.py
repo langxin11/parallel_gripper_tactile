@@ -517,16 +517,13 @@ def run_study(
     def render(rows: list[dict[str, object]], payload: object, directory: Path) -> tuple[Path, ...]:
         if not rows:
             return ()
-        controller_pdf = plot_controller_summary(rows, directory / "controller_comparison.png")
-        ablation_pdf = plot_ablation_summary(rows, directory / "controller_ablation.png")
-        platform_pdf = plot_platform_error(platform_rows, directory / "platform_error.png")
+        controller_path = plot_controller_summary(rows, directory / "controller_comparison.png")
+        ablation_path = plot_ablation_summary(rows, directory / "controller_ablation.png")
+        platform_path = plot_platform_error(platform_rows, directory / "platform_error.png")
         return (
-            controller_pdf.with_suffix(".png"),
-            controller_pdf,
-            ablation_pdf.with_suffix(".png"),
-            ablation_pdf,
-            platform_pdf.with_suffix(".png"),
-            platform_pdf,
+            controller_path,
+            ablation_path,
+            platform_path,
         )
 
     manifest_fields: dict[str, object] = {

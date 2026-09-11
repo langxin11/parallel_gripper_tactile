@@ -82,8 +82,7 @@ outputs/dm_gripper/force-schedule/<UTC timestamp>-<id>/
 ├── effective_parameters.json
 ├── trace.csv
 ├── metrics.json
-├── plot.png
-└── plot.pdf
+└── plot.png
 ```
 
 `effective_parameters.json` 会把 `scheduler_kind` 记录为 `oracle`。`trace.csv` 包含真值摩擦系数、

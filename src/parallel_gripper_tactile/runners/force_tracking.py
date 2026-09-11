@@ -190,7 +190,6 @@ def execute_force_tracking(
         run.register_artifact(effective_parameters_path)
         parquet_path = run.artifact_path("trace.parquet")
         plot_path = run.artifact_path("plot.png")
-        plot_pdf_path = plot_path.with_suffix(".pdf")
         result = run_force_tracking(
             configured,
             task=task,
@@ -212,7 +211,6 @@ def execute_force_tracking(
         )
         run.register_artifact(parquet_path)
         run.register_artifact(plot_path)
-        run.register_artifact(plot_pdf_path)
         metrics_path = run.artifact_path("metrics.json")
         metrics_path.write_text(
             json.dumps(asdict(result), indent=2, sort_keys=True) + "\n", encoding="utf-8"

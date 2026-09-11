@@ -300,9 +300,11 @@ def render_study_figures(
     figures_dir.mkdir(exist_ok=True)
     summary_plot = figures_dir / "metrics_by_material.png"
     factorial_plot = figures_dir / "pid_factorial_effects.png"
-    summary_pdf = plot_material_summary(aggregates, summary_plot, controller_order=controller_order)
-    factorial_pdf = plot_pid_factorial_effects(rows, factorial_plot)
-    return [summary_plot, summary_pdf, factorial_plot, factorial_pdf]
+    summary_path = plot_material_summary(
+        aggregates, summary_plot, controller_order=controller_order
+    )
+    factorial_path = plot_pid_factorial_effects(rows, factorial_plot)
+    return [summary_path, factorial_path]
 
 
 def _create_study_directory(config: ForceTrackingAblationConfig) -> Path:

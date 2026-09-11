@@ -392,9 +392,9 @@ def plot_tracking_overlay(
     axis.set_title(f"{phase}: target and valid filtered-force trajectories")
     axis.grid(True, linewidth=0.3, alpha=0.5)
     axis.legend(frameon=False, ncol=2, fontsize=8)
-    pdf_path = save_publication_figure(figure, output)
+    output_path = save_publication_figure(figure, output)
     plt.close(figure)
-    return [output, pdf_path]
+    return [output_path]
 
 
 def render_phase_figures(
@@ -404,11 +404,11 @@ def render_phase_figures(
     figures_dir = study_dir / "figures"
     figures_dir.mkdir(exist_ok=True)
     metrics_path = figures_dir / "diagnostic_metrics.png"
-    metrics_pdf = plot_diagnostic_metrics(rows, metrics_path, phase=phase)
+    metrics_output = plot_diagnostic_metrics(rows, metrics_path, phase=phase)
     trace_paths = plot_tracking_overlay(
         rows, study_dir, figures_dir / "tracking_overlay.png", phase=phase
     )
-    return [metrics_path, metrics_pdf, *trace_paths]
+    return [metrics_output, *trace_paths]
 
 
 def _conditions(

@@ -354,7 +354,7 @@ def plot_tracking_and_stiffness_overlays(
         output = figures_dir / f"tracking_and_stiffness_{safe_task}_{material}.png"
         pdf_path = save_publication_figure(figure, output)
         plt.close(figure)
-        outputs.extend((output, pdf_path))
+        outputs.append(pdf_path)
     return outputs
 
 
@@ -370,12 +370,12 @@ def render_study_figures(
     figures_dir.mkdir(exist_ok=True)
     metric_plot = figures_dir / "metrics_by_estimator.png"
     delta_plot = figures_dir / "delta_vs_secant.png"
-    metric_pdf = plot_metric_summary(aggregates, metric_plot, estimator_order=estimator_order)
-    delta_pdf = plot_delta_vs_secant(aggregates, delta_plot, estimator_order=estimator_order)
+    metric_path = plot_metric_summary(aggregates, metric_plot, estimator_order=estimator_order)
+    delta_path = plot_delta_vs_secant(aggregates, delta_plot, estimator_order=estimator_order)
     trace_plots = plot_tracking_and_stiffness_overlays(
         rows, study_dir, figures_dir, estimator_order=estimator_order
     )
-    return [metric_plot, metric_pdf, delta_plot, delta_pdf, *trace_plots]
+    return [metric_path, delta_path, *trace_plots]
 
 
 def _create_study_directory(config: ForceTrackingStiffnessEstimatorComparisonConfig) -> Path:

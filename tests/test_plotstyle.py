@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import matplotlib.pyplot as plt
-import pytest
 
 from parallel_gripper_tactile.visualization.plotstyle import (
     COLUMN_WIDTH_IN,
@@ -71,10 +70,8 @@ def test_paper_width_constants_follow_ieee_layout() -> None:
 
 
 def test_publication_export_preserves_width_and_requested_format(tmp_path) -> None:
-    """全局紧裁切不能改变导出栏宽，且原请求格式仍然保留。"""
+    """全局紧裁切不能改变导出栏宽，且只保留请求格式。"""
     import re
-
-    from PIL import Image
 
     from parallel_gripper_tactile.visualization.plotstyle import (
         paper_figsize,
@@ -87,11 +84,10 @@ def test_publication_export_preserves_width_and_requested_format(tmp_path) -> No
         axis.plot([0, 1], [-1, 1])
         axis.set_xlabel("Time (s)")
         plt.rcParams["savefig.bbox"] = "tight"
-        pdf = save_publication_figure(figure, tmp_path / "figure.svg", bbox_inches="tight")
-        assert (tmp_path / "figure.svg").is_file()
-        with Image.open(tmp_path / "figure.png") as preview:
-            assert preview.size == (2100, 1200)
-            assert preview.info["dpi"][0] == pytest.approx(600.0, abs=0.1)
+        pdf = save_publication_figure(figure, tmp_path / "figure.pdf", bbox_inches="tight")
+        assert pdf == tmp_path / "figure.pdf"
+        assert pdf.is_file()
+        assert not (tmp_path / "figure.png").exists()
         bounds = re.search(rb"/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)", pdf.read_bytes())
         assert bounds is not None
         assert float(bounds[1]) == 252

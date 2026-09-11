@@ -114,30 +114,25 @@ def paper_figsize(height: float, *, columns: int = 2) -> tuple[float, float]:
 
 
 def save_publication_figure(figure: Any, path: Path, **kwargs: Any) -> Path:
-    """保存论文 PDF 和 600 DPI PNG，并保留其他显式请求的格式。
+    """按调用方指定的扩展名保存单份论文级图像。
 
     保持画布物理尺寸，不使用会改变最终栏宽的紧边界裁切；由绘图入口设置布局。
     不关闭图像，便于调用方继续显示或检查。
 
     Args:
         figure: 已完成布局的 Matplotlib 图像。
-        path: 原有输出路径；同名 PDF 和 PNG 总会生成。
+        path: 输出路径；扩展名唯一决定格式，不会额外生成 PNG 或 PDF。
         **kwargs: 其他保存选项，格式、分辨率与边界由本函数统一管理。
 
     Returns:
-        生成的 PDF 路径。
+        实际生成的图像路径。
     """
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     options = {k: v for k, v in kwargs.items() if k not in {"dpi", "format", "bbox_inches"}}
-    pdf_path = path.with_suffix(".pdf")
-    png_path = path.with_suffix(".png")
     # 屏蔽调用方的全局紧裁切设置，保证导出宽度等于设计栏宽。
     import matplotlib as mpl
 
     with mpl.rc_context({"savefig.bbox": None}):
-        figure.savefig(pdf_path, format="pdf", bbox_inches=None, **options)
-        figure.savefig(png_path, format="png", dpi=600, bbox_inches=None, **options)
-        if path not in (pdf_path, png_path):
-            figure.savefig(path, dpi=600, bbox_inches=None, **options)
-    return pdf_path
+        figure.savefig(path, dpi=600, bbox_inches=None, **options)
+    return path

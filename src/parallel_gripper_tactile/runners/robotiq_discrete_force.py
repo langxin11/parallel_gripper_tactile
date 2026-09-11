@@ -120,7 +120,7 @@ def execute_robotiq_discrete_force(
         output_csv=trace_path,
         output_plot=plot_path,
     )
-    for artifact in (trace_path, plot_path, plot_path.with_suffix(".pdf")):
+    for artifact in (trace_path, plot_path):
         run.register_artifact(artifact)
     metrics_path = run.artifact_path("metrics.json")
     metrics_path.write_text(

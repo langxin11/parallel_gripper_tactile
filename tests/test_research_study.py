@@ -618,7 +618,6 @@ def test_local_slip_protocol_preserves_validation_semantics(
     assert row["validation_passed"] is False
     assert row["control_candidate_qualified"] is False
     assert (tmp_path / "local_slip_validation.png").exists()
-    assert (tmp_path / "local_slip_validation.pdf").exists()
 
 
 def test_local_slip_protocol_records_condition_exceptions(

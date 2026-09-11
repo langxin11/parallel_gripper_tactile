@@ -82,7 +82,7 @@ def test_aggregate_rows_groups_estimator_task_and_material() -> None:
 
 
 def test_estimator_summary_plots_are_generated(tmp_path: Path, fast_plot_render: None) -> None:
-    """指标和相对割线的增量图均生成非空 PNG 与 PDF。"""
+    """指标和相对割线的增量图均生成非空 PNG。"""
     estimators = ("secant_ewma", "window_linear", "window_quadratic")
     aggregates = protocol.aggregate_rows(
         [
@@ -95,5 +95,4 @@ def test_estimator_summary_plots_are_generated(tmp_path: Path, fast_plot_render:
     protocol.plot_metric_summary(aggregates, outputs[0], estimator_order=estimators)
     protocol.plot_delta_vs_secant(aggregates, outputs[1], estimator_order=estimators)
 
-    artifacts = (*outputs, *(path.with_suffix(".pdf") for path in outputs))
-    assert all(path.is_file() and path.stat().st_size > 0 for path in artifacts)
+    assert all(path.is_file() and path.stat().st_size > 0 for path in outputs)
