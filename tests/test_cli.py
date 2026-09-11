@@ -1,5 +1,6 @@
 """不带子进程或旧版脚本导入的 CLI 集成测试。"""
 
+import re
 from pathlib import Path
 
 from typer.testing import CliRunner
@@ -9,6 +10,14 @@ from parallel_gripper_tactile.cli import app
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = CliRunner()
+# GitHub Actions 会经 GITHUB_ACTIONS 环境变量触发 typer 的终端模式渲染，
+# 选项名内部会被插入 ANSI 转义码，子串断言前必须先剥离。
+ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+
+def strip_ansi(output: str) -> str:
+    """剥离输出中的 ANSI 转义码，返回可供子串断言使用的纯文本。"""
+    return ANSI_ESCAPE_RE.sub("", output)
 
 
 def test_root_and_subcommand_help_are_available() -> None:
@@ -17,20 +26,20 @@ def test_root_and_subcommand_help_are_available() -> None:
 
     assert result.exit_code == 0
     for command in ("validate", "assets", "run", "compare", "view", "runs"):
-        assert command in result.output
+        assert command in strip_ansi(result.output)
     assert RUNNER.invoke(app, ["run", "grasp", "--help"]).exit_code == 0
     force_schedule_help = RUNNER.invoke(
         app, ["run", "force-schedule", "--help"], terminal_width=160
     )
     assert force_schedule_help.exit_code == 0
     for option in ("--experiment", "--set", "--run-prefix", "--run-suffix"):
-        assert option in force_schedule_help.output
+        assert option in strip_ansi(force_schedule_help.output)
     friction_estimate_help = RUNNER.invoke(
         app, ["run", "friction-estimate", "--help"], terminal_width=160
     )
     assert friction_estimate_help.exit_code == 0
     for option in ("--experiment", "--set", "--run-prefix", "--run-suffix"):
-        assert option in friction_estimate_help.output
+        assert option in strip_ansi(friction_estimate_help.output)
     discrete_force_help = RUNNER.invoke(
         app, ["run", "discrete-force", "--help"], terminal_width=180
     )
@@ -41,7 +50,7 @@ def test_root_and_subcommand_help_are_available() -> None:
         "--run-prefix",
         "--run-suffix",
     ):
-        assert option in discrete_force_help.output
+        assert option in strip_ansi(discrete_force_help.output)
     force_track_help = RUNNER.invoke(app, ["run", "force-track", "--help"], terminal_width=160)
     assert force_track_help.exit_code == 0
     for option in (
@@ -50,12 +59,12 @@ def test_root_and_subcommand_help_are_available() -> None:
         "--run-prefix",
         "--run-suffix",
     ):
-        assert option in force_track_help.output
+        assert option in strip_ansi(force_track_help.output)
     assert RUNNER.invoke(app, ["run", "force-track-ablation", "--help"]).exit_code != 0
     tactile_help = RUNNER.invoke(app, ["compare", "tactile", "--help"])
     assert tactile_help.exit_code == 0
     for option in ("--left-experiment", "--right-experiment", "--left-set", "--right-set"):
-        assert option in tactile_help.output
+        assert option in strip_ansi(tactile_help.output)
 
 
 def test_validate_profile_and_invalid_yaml_exit_codes(tmp_path: Path) -> None:
@@ -67,7 +76,7 @@ def test_validate_profile_and_invalid_yaml_exit_codes(tmp_path: Path) -> None:
     invalid.write_text("schema_version: 9\n", encoding="utf-8")
     result = RUNNER.invoke(app, ["validate", str(invalid)])
     assert result.exit_code == 2
-    assert "Profile validation failed" in result.output
+    assert "Profile validation failed" in strip_ansi(result.output)
 
 
 def test_runs_list_and_clean_are_safe_when_output_root_is_absent(tmp_path: Path) -> None:
@@ -76,4 +85,4 @@ def test_runs_list_and_clean_are_safe_when_output_root_is_absent(tmp_path: Path)
     assert RUNNER.invoke(app, ["runs", "list", "--output-root", str(output_root)]).exit_code == 0
     result = RUNNER.invoke(app, ["runs", "clean", "--all", "--output-root", str(output_root)])
     assert result.exit_code == 0
-    assert "Would remove 0" in result.output
+    assert "Would remove 0" in strip_ansi(result.output)
