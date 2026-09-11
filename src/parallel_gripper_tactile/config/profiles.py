@@ -214,6 +214,14 @@ class DMAdmittanceControl(_FrozenModel):
         return self
 
 
+class DMForceSupervisorControl(_FrozenModel):
+    """DM 公共接触阶段机参数。"""
+
+    contact_stable_time_s: Annotated[FiniteFloat, Field(ge=0)] = 0.0
+    contact_transition_time_s: Annotated[FiniteFloat, Field(ge=0)] = 0.05
+    release_policy: Literal["any_side", "both_sides"] = "any_side"
+
+
 class NormalForceControl(_FrozenModel):
     """外环法向力跟踪参数。"""
 
@@ -246,6 +254,7 @@ class NormalForceControl(_FrozenModel):
     # 依据在线刚度、机构雅可比和名义惯量调度输入增益并直接输出力矩。
     torque_adrc: TorqueAdrcControl | None = None
     admittance: DMAdmittanceControl | None = None
+    supervisor: DMForceSupervisorControl | None = None
 
     @model_validator(mode="after")
     def validate_force_control(self) -> "NormalForceControl":
@@ -499,6 +508,7 @@ __all__ = [
     "AdrcControl",
     "ControlLayout",
     "DMAdmittanceControl",
+    "DMForceSupervisorControl",
     "GripperProfile",
     "ContactStiffnessControl",
     "CrankSliderGeometry",

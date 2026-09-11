@@ -91,9 +91,15 @@ uv run python scripts/research/run.py \
 uv run python scripts/research/run.py \
   controller=dm_gripper/adrc_torque estimator=window_linear task=force_tracking/ramp material=hard seed=0
 uv run python scripts/research/run.py experiment=dm_gripper/force_tracking_admittance
+uv run python scripts/research/run.py experiment=dm_gripper/force_tracking_pid_unified
+uv run python scripts/research/run.py experiment=dm_gripper/force_tracking_admittance_unified
 uv run python scripts/research/run.py -m \
   material=medium,hard,stiff seed=0,1,2
 ```
+
+PID 与二阶导纳的控制律对比使用后两个 `*_unified` 入口。它们共享
+`1→3→6→1 N` Ramp、4 ms 外环、MIT 内环、接近轨迹和公共接触状态机；原
+`force_tracking_admittance` 继续保留 ROS 共享导纳基线语义。
 
 正式控制器对比、PID 模块消融和 Torque ADRC 两阶段调参由 study 入口内部展开唯一矩阵。默认是计划模式，确认后用
 `execution=study_run` 执行：

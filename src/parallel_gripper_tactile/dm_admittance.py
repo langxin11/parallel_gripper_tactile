@@ -7,6 +7,8 @@ import math
 import mujoco
 
 from dm_grasp_core import (
+    BilateralContactConfig,
+    BilateralContactStateMachine,
     ContactDetector,
     ContactTransition,
     CrankSliderKinematics,
@@ -82,6 +84,21 @@ class DMAdmittanceController:
         )
         self.admittance = SecondOrderAdmittance(cfg.mass_kg, cfg.damping_ns_m, cfg.stiffness_n_m)
         self.detector = ContactDetector(force.contact_threshold_n, cfg.contact_stable_time_s)
+        self.supervisor = (
+            BilateralContactStateMachine(
+                BilateralContactConfig(
+                    contact_threshold_n=force.contact_threshold_n,
+                    contact_confirm_steps=force.contact_confirm_steps,
+                    release_threshold_n=force.release_threshold_n,
+                    release_confirm_steps=force.release_confirm_steps,
+                    contact_transition_time_s=force.supervisor.contact_transition_time_s,
+                    contact_stable_time_s=force.supervisor.contact_stable_time_s,
+                    release_policy=force.supervisor.release_policy,
+                )
+            )
+            if force.supervisor is not None
+            else None
+        )
         self.reset()
 
     @classmethod
@@ -125,6 +142,8 @@ class DMAdmittanceController:
         """清除导纳、接触确认和阶段轨迹，下次从实测位置重新接近。"""
         self.admittance.reset()
         self.detector.reset()
+        if self.supervisor is not None:
+            self.supervisor.reset()
         self.state = "approach"
         self.trajectory = None
         self.transition = None
@@ -200,16 +219,43 @@ class DMAdmittanceController:
         ):
             raise ValueError("DM admittance requires finite dual force, feedback and positive dt")
         measured = 0.5 * (left + right)
-        if self.trajectory is None:
+        if self.supervisor is None and self.trajectory is None:
             self._start_approach(q, now)
-        if self.state == "force_tracking":
+        if self.supervisor is None and self.state == "force_tracking":
             one_side_released = min(left, right) <= self.force.release_threshold_n
             self._release_steps = self._release_steps + 1 if one_side_released else 0
             if self._release_steps >= self.force.release_confirm_steps:
                 self._start_approach(q, now)
         filtered = self._filter_force(measured, dt)
-        emitted_state = self.state
         cfg = self.config
+        if self.supervisor is not None:
+            update = self.supervisor.update(
+                left_force_n=left,
+                right_force_n=right,
+                now_s=now,
+                approach_velocity_rad_s=observation.approach_velocity,
+            )
+            self.state = update.state
+            if update.entered_transition:
+                self.reference_position_rad = min(
+                    max(q, cfg.position_min_rad), cfg.position_max_rad
+                )
+                self.admittance.reset()
+            elif update.entered_tracking:
+                self.reference_position_rad = min(
+                    max(q, cfg.position_min_rad), cfg.position_max_rad
+                )
+                self.admittance.reset()
+                self._release_steps = 0
+            elif update.reentered_approach:
+                self.reference_position_rad = 0.0
+                self.admittance.reset()
+                self._filtered_force_n = measured
+                filtered = measured
+            emitted_state = self.state
+        else:
+            emitted_state = self.state
+
         if self.state == "force_tracking":
             command = step_admittance(
                 self.admittance,
@@ -225,26 +271,57 @@ class DMAdmittanceController:
             )
         else:
             if self.state == "approach":
-                position, velocity, _ = self.trajectory.sample(now - self.started_s)
-                ff, ratio = cfg.approach_feedforward_force_n, cfg.approach_feedforward_ratio
+                if self.supervisor is None:
+                    position, velocity, _ = self.trajectory.sample(now - self.started_s)
+                    ff = cfg.approach_feedforward_force_n
+                    ratio = cfg.approach_feedforward_ratio
+                else:
+                    position = observation.approach_position
+                    velocity = observation.approach_velocity
+                    ff = reference.approach_feedforward_force_n
+                    ratio = 1.0
             else:
                 position = self.reference_position_rad
-                velocity = self.transition.velocity_at(now - self.started_s)
+                velocity = (
+                    self.transition.velocity_at(now - self.started_s)
+                    if self.supervisor is None
+                    else self.supervisor.transition_velocity(now)
+                )
                 ff, ratio = 0.0, 0.0
-            command = build_mit_command(
-                self.kinematics,
-                self.command_config,
-                reference_position_rad=position,
-                displacement_m=0.0,
-                velocity_m_s=cfg.closing_direction
-                * velocity
-                * self.kinematics.closure_jacobian(position),
-                measured_position_rad=q,
-                measured_velocity_rad_s=dq,
-                feedforward_force_n=ff,
-                feedforward_ratio=ratio,
-            )
-            if self.state == "approach" and self.detector.update(left, right, now):
+            if self.supervisor is None:
+                command = build_mit_command(
+                    self.kinematics,
+                    self.command_config,
+                    reference_position_rad=position,
+                    displacement_m=0.0,
+                    velocity_m_s=cfg.closing_direction
+                    * velocity
+                    * self.kinematics.closure_jacobian(position),
+                    measured_position_rad=q,
+                    measured_velocity_rad_s=dq,
+                    feedforward_force_n=ff,
+                    feedforward_ratio=ratio,
+                )
+            else:
+                feedforward_torque_nm = min(
+                    max(
+                        cfg.closing_direction * ratio * self.kinematics.closure_jacobian(q) * ff,
+                        -cfg.feedforward_torque_limit_nm,
+                    ),
+                    cfg.feedforward_torque_limit_nm,
+                )
+                command = MITCommand(
+                    position,
+                    velocity,
+                    self.command_config.kp,
+                    self.command_config.kd,
+                    feedforward_torque_nm,
+                )
+            if (
+                self.supervisor is None
+                and self.state == "approach"
+                and self.detector.update(left, right, now)
+            ):
                 self.reference_position_rad = min(
                     max(q, cfg.position_min_rad), cfg.position_max_rad
                 )
@@ -252,7 +329,7 @@ class DMAdmittanceController:
                 self.state, self.started_s = "contact_transition", now
                 self.detector.reset()
                 self.admittance.reset()
-            elif (
+            elif self.supervisor is None and (
                 self.state == "contact_transition"
                 and now - self.started_s >= self.transition.duration_s
             ):

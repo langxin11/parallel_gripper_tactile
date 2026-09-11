@@ -32,8 +32,18 @@ uv run pgt run force-track \
 另有独立的 [DMgripper 导纳基线](dm-shared-control.md)，通过
 `--experiment dm_gripper/force_tracking_admittance` 选择。它包含接近、接触速度过渡和跟踪，
 使用当前 ROS 2 的共享导纳核，不进入本页历史 PID/ADRC 默认比较矩阵。
-该变体的接近轨迹/前馈由 `control.force.admittance.approach_*` 配置，
-任务 `approach.timeout_s` 仍控制等待上限；旧任务的接近持续时间/前馈不会覆盖这些参数。
+全部 DMgripper 力控制器现在共用三阶段双侧接触状态机。接近轨迹与前馈统一由任务的
+`approach.duration_s` 和 `approach.feedforward_force_n` 提供，`approach.timeout_s` 控制等待上限；
+导纳配置中的 `approach_*` 字段只供未启用公共状态机的核心兼容调用使用。
+
+PID 与导纳的隔离对比使用
+`experiment=dm_gripper/force_tracking_pid_unified` 和
+`experiment=dm_gripper/force_tracking_admittance_unified`。两者共同选择
+`dm_unified_ramp`：目标力沿用 PID Ramp 的 `1→3→6→1 N`，外环周期统一为 4 ms；
+MIT 增益、6 s 线性关节接近轨迹、接近前馈、接触阈值和公共状态机参数也逐项相同；
+若 8 s 内仍未建立双侧接触则任务失败，避免预接触阶段长时间空跑。
+因此 `track_reference` 中只有 PID 与二阶导纳跟踪律不同。统一入口的双侧有效接触要求任一侧
+持续 100 ms 不高于 0.05 N 时重新接近；瞬时掉力和普通跟踪误差不触发状态切换。
 
 ### 接近阶段
 

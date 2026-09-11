@@ -17,6 +17,7 @@ from .adrc import SecondOrderTorqueLADRC, TorqueAdrcConfig, TorqueAdrcStep
 from .kinematics import CrankSliderKinematics
 from .mit import MITControlCommand
 from .stiffness import ContactStiffnessConfig, ContactStiffnessEstimator
+from ..grasp.contact_state import BilateralContactConfig, BilateralContactStateMachine
 
 
 ForceSemantics = Literal["average_side", "total"]
@@ -62,6 +63,7 @@ class NormalForceConfig:
         torque_feedback_gain: 直接力矩路径增益；大于 0 时替代 PID 位置修正。
         adrc: 一阶 LADRC 外环配置；与 PID 及二阶路径互斥。
         torque_adrc: 二阶直接力矩 LADRC 配置；与前两条路径互斥。
+        supervisor: 可选的公共双侧接触阶段机；``None`` 保持历史两阶段行为。
     """
 
     target_n: float
@@ -79,6 +81,7 @@ class NormalForceConfig:
     torque_feedback_gain: float = 0.0
     adrc: AdrcConfig | None = None
     torque_adrc: TorqueAdrcConfig | None = None
+    supervisor: BilateralContactConfig | None = None
 
     def __post_init__(self) -> None:
         """要求释放阈值和可选刚度估计配置相互一致。"""
@@ -262,12 +265,18 @@ class NormalForceController:
         self._adrc_u = 0.0
         self._adrc_adjustment = 0.0
         self._position_adjustment = 0.0
+        self._last_mit_torque_n_m = 0.0
+        self._supervisor = (
+            BilateralContactStateMachine(config.supervisor)
+            if config.supervisor is not None
+            else None
+        )
         self.reset()
 
     @property
     def state(self) -> str:
-        """返回 ``approach`` 或 ``force_tracking``。"""
-        return self._state
+        """返回当前接触阶段。"""
+        return self._supervisor.state if self._supervisor is not None else self._state
 
     def _reset_adrc(self, filtered_force_n: float | None = None) -> None:
         """把 LADRC 外环状态复位到跟踪起点。
@@ -311,6 +320,8 @@ class NormalForceController:
     def reset(self) -> None:
         """返回接近模式，并清除滤波器、计数器和 PID 历史。"""
         self._state = "approach"
+        if self._supervisor is not None:
+            self._supervisor.reset()
         self._filtered_force: float | None = None
         self._torque_adrc_measurement: float | None = None
         self._contact_position = 0.0
@@ -335,6 +346,7 @@ class NormalForceController:
         """实现 force tracking 实验使用的统一控制器接口。"""
         return self.apply(
             inner,
+            time_s=observation.time_s,
             approach_position=observation.approach_position,
             total_normal_force_n=observation.total_normal_force_n,
             left_normal_force_n=observation.left_normal_force_n,
@@ -664,10 +676,59 @@ class NormalForceController:
             stiffness_position_limited=stiffness_position_limited,
         )
 
+    def _start_tracking(
+        self,
+        inner: MITTorqueInner,
+        *,
+        measured_force_n: float,
+        torque_adrc_measurement_n: float | None,
+        target_force_n: float,
+        target_force_rate_n_s: float,
+        target_force_acceleration_n_s2: float,
+        dt: float,
+    ) -> _ForceTrackingStep:
+        """在公共接触过渡结束时初始化跟踪控制律。"""
+        self._contact_position = inner.position()
+        if self._stiffness_estimator is not None:
+            self._stiffness_estimator.reset(
+                position_rad=self._contact_position,
+                normal_force_n=measured_force_n,
+            )
+        self._reset_adrc(measured_force_n)
+        if self._torque_adrc is not None:
+            if self._stiffness_estimator is None:
+                raise RuntimeError("torque_adrc requires an active stiffness estimator")
+            input_gain = self._torque_adrc_input_gain(
+                position_rad=self._contact_position,
+                stiffness_n_per_m=self._stiffness_estimator.estimate_n_per_m,
+            )
+            model_feedforward, _, _ = self._force_feedforward_torque(
+                position_rad=self._contact_position,
+                target_force_n=target_force_n,
+            )
+            self._torque_adrc.reset(
+                measured_force_n=torque_adrc_measurement_n,
+                applied_torque_n_m=self._last_mit_torque_n_m,
+                model_feedforward_torque_n_m=model_feedforward,
+                input_gain_n_per_n_m_s2=input_gain,
+            )
+        self._pid.reset()
+        self._pid.set_auto_mode(True, last_output=0.0)
+        return self._tracking_command(
+            inner,
+            measured_force_n=measured_force_n,
+            torque_adrc_measurement_n=torque_adrc_measurement_n,
+            target_force_n=target_force_n,
+            target_force_rate_n_s=target_force_rate_n_s,
+            target_force_acceleration_n_s2=target_force_acceleration_n_s2,
+            dt=dt,
+        )
+
     def apply(
         self,
         inner: MITTorqueInner,
         *,
+        time_s: float = 0.0,
         approach_position: float,
         total_normal_force_n: float,
         left_normal_force_n: float,
@@ -683,6 +744,7 @@ class NormalForceController:
 
         接触要求两个指尖都保持在配置阈值之上。一旦确认，simple-pid 会
         调整检测到的接触位置，MIT 内环再将该位置目标转换为电机力矩。
+        启用公共状态机时，``time_s`` 用于接触稳定时间和速度过渡计时。
         """
         if dt <= 0:
             raise ValueError("dt must be positive")
@@ -721,7 +783,88 @@ class NormalForceController:
             float(config.target_n) if target_force_n is None else max(0.0, float(target_force_n))
         )
 
-        if self._state == "approach":
+        if self._supervisor is not None:
+            update = self._supervisor.update(
+                left_force_n=left_normal_force_n,
+                right_force_n=right_normal_force_n,
+                now_s=time_s,
+                approach_velocity_rad_s=approach_velocity,
+            )
+            self._state = update.state
+            if update.entered_transition:
+                self._contact_position = inner.position()
+            if update.reentered_approach:
+                self.reset()
+                mit = inner.apply(
+                    target_position=approach_position,
+                    target_velocity=approach_velocity,
+                )
+                adjustment = 0.0
+            elif update.state == "approach":
+                force_feedforward_torque, closure_jacobian, aperture = (
+                    self._force_feedforward_torque(
+                        position_rad=inner.position(),
+                        target_force_n=approach_feedforward_force_n,
+                        gain_override=1.0,
+                    )
+                )
+                mit = inner.apply(
+                    target_position=approach_position,
+                    target_velocity=approach_velocity,
+                    feedforward_torque=force_feedforward_torque,
+                )
+                adjustment = 0.0
+            elif update.state == "contact_transition":
+                mit = inner.apply(
+                    target_position=self._contact_position,
+                    target_velocity=self._supervisor.transition_velocity(time_s),
+                    feedforward_torque=0.0,
+                )
+                adjustment = 0.0
+            elif update.entered_tracking:
+                tracking = self._start_tracking(
+                    inner,
+                    measured_force_n=self._filtered_force,
+                    torque_adrc_measurement_n=self._torque_adrc_measurement,
+                    target_force_n=active_target_force,
+                    target_force_rate_n_s=target_force_rate_n_s,
+                    target_force_acceleration_n_s2=target_force_acceleration_n_s2,
+                    dt=dt,
+                )
+                mit = tracking.mit
+                adjustment = tracking.position_adjustment
+                pid_adjustment = tracking.pid_position_adjustment
+                stiffness_adjustment = tracking.stiffness_position_adjustment
+                force_feedforward_torque = tracking.force_feedforward_torque
+                stiffness_estimate = tracking.estimated_contact_stiffness_n_per_m
+                closure_jacobian = tracking.closure_jacobian_m_per_rad
+                aperture = tracking.aperture_m
+                stiffness_position_limit = tracking.stiffness_position_limit_rad
+                stiffness_position_limited = tracking.stiffness_position_limited
+                torque_adrc_step = tracking.torque_adrc
+            else:
+                tracking = self._tracking_command(
+                    inner,
+                    measured_force_n=self._filtered_force,
+                    torque_adrc_measurement_n=self._torque_adrc_measurement,
+                    target_force_n=active_target_force,
+                    target_force_rate_n_s=target_force_rate_n_s,
+                    target_force_acceleration_n_s2=target_force_acceleration_n_s2,
+                    dt=dt,
+                )
+                mit = tracking.mit
+                adjustment = tracking.position_adjustment
+                pid_adjustment = tracking.pid_position_adjustment
+                stiffness_adjustment = tracking.stiffness_position_adjustment
+                force_feedforward_torque = tracking.force_feedforward_torque
+                stiffness_estimate = tracking.estimated_contact_stiffness_n_per_m
+                closure_jacobian = tracking.closure_jacobian_m_per_rad
+                aperture = tracking.aperture_m
+                stiffness_position_limit = tracking.stiffness_position_limit_rad
+                stiffness_position_limited = tracking.stiffness_position_limited
+                torque_adrc_step = tracking.torque_adrc
+
+        elif self._state == "approach":
             both_contacting = min(left_normal_force_n, right_normal_force_n)
             self._contact_steps = (
                 self._contact_steps + 1 if both_contacting >= config.contact_threshold_n else 0
@@ -823,6 +966,7 @@ class NormalForceController:
         reported_filtered_force = (
             measured_force if self._filtered_force is None else self._filtered_force
         )
+        self._last_mit_torque_n_m = mit.torque
         return NormalForceControlCommand(
             state=self._state,
             target_force_n=active_target_force,

@@ -11,6 +11,8 @@ from dm_grasp_core.control import admittance, kinematics
 from dm_grasp_core.grasp import command, motion
 from dm_grasp_core.tactile import contact
 from dm_grasp_core import (
+    BilateralContactConfig,
+    BilateralContactStateMachine,
     CrankSliderKinematics,
     SecondOrderAdmittance,
     MITCommand,
@@ -24,6 +26,74 @@ from dm_grasp_core import (
     within_zero_window,
     limit_mit_position_for_torque,
 )
+
+
+def test_bilateral_contact_state_machine_debounces_contact_and_any_side_release() -> None:
+    """公共状态机完成接触过渡，并仅对持续单侧掉力重新接近。"""
+    supervisor = BilateralContactStateMachine(
+        BilateralContactConfig(
+            contact_threshold_n=1.0,
+            contact_confirm_steps=2,
+            release_threshold_n=0.05,
+            release_confirm_steps=3,
+            contact_transition_time_s=0.05,
+        )
+    )
+
+    assert (
+        supervisor.update(
+            left_force_n=1.1,
+            right_force_n=1.2,
+            now_s=0.0,
+            approach_velocity_rad_s=0.05,
+        ).state
+        == "approach"
+    )
+    update = supervisor.update(
+        left_force_n=1.1,
+        right_force_n=1.2,
+        now_s=0.01,
+        approach_velocity_rad_s=0.05,
+    )
+    assert update.entered_transition
+    assert supervisor.transition_velocity(0.01) == pytest.approx(0.05)
+    update = supervisor.update(
+        left_force_n=1.1,
+        right_force_n=1.2,
+        now_s=0.061,
+        approach_velocity_rad_s=0.05,
+    )
+    assert update.entered_tracking
+
+    for now_s in (0.064, 0.068):
+        update = supervisor.update(
+            left_force_n=0.01,
+            right_force_n=1.2,
+            now_s=now_s,
+            approach_velocity_rad_s=0.0,
+        )
+        assert update.state == "force_tracking"
+    supervisor.update(
+        left_force_n=1.1,
+        right_force_n=1.2,
+        now_s=0.072,
+        approach_velocity_rad_s=0.0,
+    )
+    for now_s in (0.076, 0.080):
+        supervisor.update(
+            left_force_n=0.01,
+            right_force_n=1.2,
+            now_s=now_s,
+            approach_velocity_rad_s=0.0,
+        )
+    update = supervisor.update(
+        left_force_n=0.01,
+        right_force_n=1.2,
+        now_s=0.084,
+        approach_velocity_rad_s=0.0,
+    )
+    assert update.reentered_approach
+
 
 K = CrankSliderKinematics(math.pi / 4, 0.03, 0.04, 0.021213203435596423)
 C = MITCommandConfig(0.0, 0.9, 0.4, 1, 8.0, 0.2, 0.7, 0.2, 0.6)

@@ -226,9 +226,17 @@ def _validate_profile_source_equivalence(
     profile: GripperProfile,
     source: Path,
 ) -> None:
-    """迁移期确保组合对象与保留的基础 profile 来源逐字段等价。"""
+    """确保组合对象除力跟踪公共状态机外与保留 profile 来源等价。"""
     legacy = load_profile(source)
-    if profile != legacy:
+    composed_values = profile.model_dump(mode="json")
+    legacy_values = legacy.model_dump(mode="json")
+    for values in (composed_values, legacy_values):
+        control = values.get("control")
+        if isinstance(control, dict):
+            force = control.get("force")
+            if isinstance(force, dict):
+                force.pop("supervisor", None)
+    if composed_values != legacy_values:
         raise ValueError(f"composed study profile differs from its legacy source: {source}")
 
 

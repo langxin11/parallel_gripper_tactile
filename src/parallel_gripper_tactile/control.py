@@ -26,6 +26,7 @@ from dm_grasp_core import (
     SecondOrderTorqueLADRC as _CoreSecondOrderTorqueLADRC,
     TorqueAdrcConfig as _TorqueAdrcConfig,
     TorqueAdrcStep as TorqueAdrcStep,
+    BilateralContactConfig,
 )
 from dm_grasp_core.control.mit import _roundtrip_unsigned
 from dm_grasp_core.control.normal_force import (
@@ -171,6 +172,19 @@ def _normal_force_config(config: NormalForceControl) -> _NormalForceConfig:
             else None
         ),
         torque_adrc=_adrc_config(config.torque_adrc) if config.torque_adrc is not None else None,
+        supervisor=(
+            BilateralContactConfig(
+                contact_threshold_n=config.contact_threshold_n,
+                contact_confirm_steps=config.contact_confirm_steps,
+                release_threshold_n=config.release_threshold_n,
+                release_confirm_steps=config.release_confirm_steps,
+                contact_transition_time_s=config.supervisor.contact_transition_time_s,
+                contact_stable_time_s=config.supervisor.contact_stable_time_s,
+                release_policy=config.supervisor.release_policy,
+            )
+            if config.supervisor is not None
+            else None
+        ),
     )
 
 
@@ -428,6 +442,7 @@ class NormalForceController:
             _normal_force_config(config),
             force_semantics=force_semantics,
         )
+        self.last_requested_command: MITControlCommand | None = None
 
     @classmethod
     def from_profile(
@@ -460,6 +475,7 @@ class NormalForceController:
     def reset(self) -> None:
         """返回接近模式，并清除滤波器、计数器和 PID 历史。"""
         self._core.reset()
+        self.last_requested_command = None
 
     def step(
         self,
@@ -469,16 +485,31 @@ class NormalForceController:
         reference: ForceControlReference,
     ) -> NormalForceControlCommand:
         """使用当前观测和参考量推进一个控制周期。"""
-        return self._core.step(
+        command = self._core.step(
             _DataBoundInner(self._inner, data),
             observation=observation,
             reference=reference,
+        )
+        self.last_requested_command = command.mit
+        return command
+
+    def apply_held_command(self, data) -> MITControlCommand:
+        """以最新反馈重新执行上一条 MIT 请求，但不推进外环状态。"""
+        command = self.last_requested_command
+        if command is None:
+            raise RuntimeError("MIT request is not initialized")
+        return self._inner.apply(
+            data,
+            target_position=command.target_position,
+            target_velocity=command.target_velocity,
+            feedforward_torque=command.feedforward_torque,
         )
 
     def apply(
         self,
         data,
         *,
+        time_s: float = 0.0,
         approach_position: float,
         total_normal_force_n: float,
         left_normal_force_n: float,
@@ -495,8 +526,9 @@ class NormalForceController:
         接触要求两个指尖都保持在配置阈值之上。一旦确认，simple-pid 会
         调整检测到的接触位置，现有 MIT 控制器再将该位置目标转换为电机力矩。
         """
-        return self._core.apply(
+        command = self._core.apply(
             _DataBoundInner(self._inner, data),
+            time_s=time_s,
             approach_position=approach_position,
             total_normal_force_n=total_normal_force_n,
             left_normal_force_n=left_normal_force_n,
@@ -508,6 +540,8 @@ class NormalForceController:
             target_force_rate_n_s=target_force_rate_n_s,
             target_force_acceleration_n_s2=target_force_acceleration_n_s2,
         )
+        self.last_requested_command = command.mit
+        return command
 
 
 class ForceTrackingController(Protocol):
@@ -530,4 +564,8 @@ class ForceTrackingController(Protocol):
         reference: ForceControlReference,
     ) -> NormalForceControlCommand:
         """使用当前观测和参考量推进一个控制周期。"""
+        ...
+
+    def apply_held_command(self, data) -> MITControlCommand:
+        """用最新反馈重新执行上一条 MIT 请求，不推进外环状态。"""
         ...

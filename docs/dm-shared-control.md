@@ -73,6 +73,31 @@ uv run python scripts/research/study.py \
 使用不带导纳配置的普通 profile 时，该变体注入导纳默认值，但沿用该 profile 的
 MIT 参数；要重现实机基线，应使用专门的示例 profile。
 
+## PID／导纳统一对比
+
+控制律隔离对比不改写上述 ROS 对齐基线，而使用两条独立组合：
+
+```bash
+uv run python scripts/research/run.py \
+  experiment=dm_gripper/force_tracking_pid_unified
+uv run python scripts/research/run.py \
+  experiment=dm_gripper/force_tracking_admittance_unified
+```
+
+两条组合共享 PID Ramp 目标、4 ms 外环、`kp=20`、`kd=0.63793536`、6 s 线性关节接近、
+1 N 接近前馈和公共双侧接触状态机。状态依次为 `approach`、`contact_transition`、
+`force_tracking`：双侧连续 5 个周期达到 0.15 N 后，用 50 ms 五次曲线将接近期望速度降至零；
+跟踪中任一侧连续 25 个周期不高于 0.05 N，状态机才返回 `approach`。目标力曲线只在
+`force_tracking` 建立后开始计时，接近耗时不会占用 Ramp。
+
+公共状态机属于 `dm-grasp-core`，不包含 PID 或导纳方程。统一入口下，具体控制器只决定
+跟踪阶段如何把同一平均单侧力误差转换为 MIT 请求。现有导纳参数尚未针对 6 N Ramp 调优，
+因此其饱和或跟踪失败应作为实验结果保留。
+
+DMgripper 的其他 PID、刚度前馈、直接力矩及 ADRC 配置也启用同一公共状态机；它们所用的
+接近时长、等待上限和目标曲线仍由各自选择的 task 决定。旧导纳实验不再由内部低速轨迹接管，
+因此不会再出现约 41 s 的预接触等待。
+
 共享二阶导纳在更新位移前先按当前机构雅可比裁剪速度，再积分位移；仿真适配器不再在
 积分完成后才补做角速度裁剪。这一顺序用于避免单个外环周期生成越过限速边界的位置跳变。
 

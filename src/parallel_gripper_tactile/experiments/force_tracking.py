@@ -990,6 +990,11 @@ def run_force_tracking(
             target_position = profile.open_control + min(1.0, time_s / task.approach.duration_s) * (
                 profile.closed_control - profile.open_control
             )
+            approach_velocity = (
+                (profile.closed_control - profile.open_control) / task.approach.duration_s
+                if profile.normal_force.supervisor is not None and time_s < task.approach.duration_s
+                else 0.0
+            )
             control_dt = control_timer.pop_due(time_s)
             if control_dt is not None:
                 feedback_tactile = reader.read(data)
@@ -1011,6 +1016,7 @@ def run_force_tracking(
                         left_normal_force_n=feedback_capacity.left_normal_force_n,
                         right_normal_force_n=feedback_capacity.right_normal_force_n,
                         dt=control_dt,
+                        approach_velocity=approach_velocity,
                     ),
                     reference=ForceControlReference(
                         target_force_n=target_force_n,
@@ -1030,8 +1036,9 @@ def run_force_tracking(
 
             if force_command is None:
                 raise RuntimeError("control timer did not produce an initial command")
-            if controller_variant == "admittance":
-                # 电机内环持续执行上一 MIT 请求，外环仍仅在控制时钟触发。
+            if controller_variant == "admittance" or profile.normal_force.supervisor is not None:
+                # 统一对比与导纳基线都在物理步持续执行上一 MIT 请求，
+                # 外环状态与控制律仍只在控制时钟触发。
                 force_command = replace(force_command, mit=controller.apply_held_command(data))
             motor_command = force_command.mit
             mujoco.mj_step(model, data)

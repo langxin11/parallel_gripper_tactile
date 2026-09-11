@@ -28,10 +28,15 @@ from .control import (
     limit_mit_position_for_torque,
 )
 from .grasp import (
+    BilateralContactConfig,
+    BilateralContactStateMachine,
+    ContactState,
+    ContactStateUpdate,
     ContactTransition,
     MITCommand,
     MITCommandConfig,
     MinimumJerkTrajectory,
+    ReleasePolicy,
     build_mit_command,
     quintic_blend,
     step_admittance,
@@ -41,6 +46,10 @@ from .tactile import ContactDetector, within_zero_window
 __version__ = "0.1.0"
 __all__ = [
     "AdrcConfig",
+    "BilateralContactConfig",
+    "BilateralContactStateMachine",
+    "ContactState",
+    "ContactStateUpdate",
     "ContactStiffnessConfig",
     "ContactStiffnessEstimator",
     "CrankSliderKinematics",
@@ -63,6 +72,7 @@ __all__ = [
     "NormalForceConfig",
     "NormalForceControlCommand",
     "NormalForceController",
+    "ReleasePolicy",
     "quintic_blend",
     "SecondOrderAdmittance",
     "SecondOrderTorqueLADRC",

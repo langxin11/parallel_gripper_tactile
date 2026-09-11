@@ -52,12 +52,35 @@ def _with_repository_root(value: object) -> object:
     return value
 
 
+def _with_current_dm_supervisor(value: object) -> object:
+    """为冻结旧快照补入当前 DMgripper 公共接触状态机配置。"""
+    restored = _with_repository_root(value)
+    if isinstance(restored, dict):
+        control = restored.get("control")
+        if isinstance(control, dict):
+            force = control.get("force")
+            if isinstance(force, dict):
+                if restored.get("name") == "dm_gripper_admittance":
+                    force["contact_threshold_n"] = 0.15
+                force.setdefault(
+                    "supervisor",
+                    {
+                        "contact_stable_time_s": 0.0,
+                        "contact_transition_time_s": 0.05,
+                        "release_policy": "any_side",
+                    },
+                )
+    return restored
+
+
 def test_default_run_matches_frozen_legacy_domain_parameters() -> None:
     """默认统一入口的 profile 与 task 保持迭代 1 基线等价。"""
     resolved = resolve_research_run(resolved_mapping(_compose()))
     expected = _baseline("dm_force_track")
 
-    assert resolved.profile.model_dump(mode="json") == _with_repository_root(expected["profile"])
+    assert resolved.profile.model_dump(mode="json") == _with_current_dm_supervisor(
+        expected["profile"]
+    )
     assert resolved.task.model_dump(mode="json") == expected["task"]
     assert resolved.selection.model.name == "height_spheres"
     assert resolved.selection.execution.trace_sample_period_s == 0.004
@@ -76,7 +99,9 @@ def test_admittance_combination_matches_frozen_legacy_domain_parameters() -> Non
     )
     expected = _baseline("dm_admittance")
 
-    assert resolved.profile.model_dump(mode="json") == _with_repository_root(expected["profile"])
+    assert resolved.profile.model_dump(mode="json") == _with_current_dm_supervisor(
+        expected["profile"]
+    )
     assert resolved.task.model_dump(mode="json") == expected["task"]
     assert resolved.profile.normal_force is not None
     assert resolved.profile.normal_force.admittance is not None

@@ -13,6 +13,10 @@ force:
   kd: 0.0
   max_position_adjustment: 0.15
   filter_cutoff_hz: 20.0
+  supervisor:
+    contact_stable_time_s: 0.0
+    contact_transition_time_s: 0.05
+    release_policy: any_side
 stiffness_control:
   position_feedforward_gain: 0.25
   torque_feedforward_gain: 1.0
