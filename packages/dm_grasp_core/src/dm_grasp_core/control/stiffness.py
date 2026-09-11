@@ -93,6 +93,14 @@ class ContactStiffnessEstimator:
         """返回当前滤波后的等效接触刚度估计。"""
         return self._estimate_n_per_m
 
+    @property
+    def is_valid(self) -> bool:
+        """返回本次接触重置后是否已接受过有效估计样本。
+
+        仅用于诊断；保持旧估计值时沿用有效性，不改变控制器的初值或更新公式。
+        """
+        return self._is_valid
+
     def reset(
         self,
         *,
@@ -101,6 +109,7 @@ class ContactStiffnessEstimator:
     ) -> None:
         """重置估计，并可选记录新的接触参考点。"""
         self._estimate_n_per_m = float(self._config.initial_n_per_m)
+        self._is_valid = False
         self._samples.clear()
         if position_rad is None or normal_force_n is None:
             self._last_closure_m = None
@@ -146,6 +155,7 @@ class ContactStiffnessEstimator:
             sample = float(np.clip(sample, self._config.min_n_per_m, self._config.max_n_per_m))
             alpha = float(self._config.filter_alpha)
             self._estimate_n_per_m += alpha * (sample - self._estimate_n_per_m)
+            self._is_valid = math.isfinite(self._estimate_n_per_m)
 
         self._last_closure_m = closure_m
         self._last_force_n = force_n
@@ -193,4 +203,5 @@ class ContactStiffnessEstimator:
         sample = float(np.clip(slope, self._config.min_n_per_m, self._config.max_n_per_m))
         alpha = float(self._config.filter_alpha)
         self._estimate_n_per_m += alpha * (sample - self._estimate_n_per_m)
+        self._is_valid = math.isfinite(self._estimate_n_per_m)
         return self._estimate_n_per_m

@@ -202,6 +202,7 @@ def test_contact_stiffness_estimator_secant_updates_on_valid_samples() -> None:
     q0 = 0.4
     q1 = 0.5
     estimator.reset(position_rad=q0, normal_force_n=1.0)
+    assert not estimator.is_valid
     delta_closure = GEOMETRY.closure(q1) - GEOMETRY.closure(q0)
     estimate = estimator.update(
         position_rad=q1,
@@ -212,6 +213,27 @@ def test_contact_stiffness_estimator_secant_updates_on_valid_samples() -> None:
         10000.0 - STIFFNESS_CONFIG.initial_n_per_m
     )
     assert estimate == pytest.approx(expected)
+    assert estimator.is_valid
+    estimator.reset(position_rad=q1, normal_force_n=1.0)
+    assert not estimator.is_valid
+
+
+@pytest.mark.parametrize("method", ["window_linear", "window_quadratic"])
+def test_stiffness_validity_requires_an_accepted_fit(method: str) -> None:
+    """窗口不足时初值无效，接受拟合后保持有效，重置清除有效性。"""
+    estimator = ContactStiffnessEstimator(
+        dataclasses.replace(STIFFNESS_CONFIG, method=method, min_samples=5), GEOMETRY
+    )
+    for index in range(8):
+        position = 0.4 + index * 0.01
+        force = 1.0 + 3000 * (GEOMETRY.closure(position) - GEOMETRY.closure(0.4))
+        estimator.update(position_rad=position, normal_force_n=force)
+        if index < 4:
+            assert not estimator.is_valid
+    assert estimator.is_valid
+    assert estimator.estimate_n_per_m > STIFFNESS_CONFIG.initial_n_per_m
+    estimator.reset()
+    assert not estimator.is_valid
 
 
 def test_normal_force_controller_switches_to_tracking_after_bilateral_contact() -> None:

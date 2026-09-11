@@ -175,6 +175,9 @@ class NormalForceControlCommand:
     torque_adrc_input_gain_n_per_n_m_s2: float | None = None
     torque_adrc_rate_limited: bool = False
     torque_adrc_amplitude_limited: bool = False
+    stiffness_valid: bool = False
+    admittance_displacement_m: float | None = None
+    admittance_velocity_m_s: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -983,6 +986,11 @@ class NormalForceController:
             aperture_m=aperture,
             stiffness_position_limit_rad=stiffness_position_limit,
             stiffness_position_limited=stiffness_position_limited,
+            stiffness_valid=(
+                stiffness_estimate is not None
+                and self._stiffness_estimator is not None
+                and self._stiffness_estimator.is_valid
+            ),
             torque_adrc_measurement_n=self._torque_adrc_measurement,
             torque_adrc_estimated_force_n=(
                 None if torque_adrc_step is None else torque_adrc_step.estimated_force_n

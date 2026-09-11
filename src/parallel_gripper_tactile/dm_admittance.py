@@ -356,6 +356,12 @@ class DMAdmittanceController:
             force_feedforward_torque=command.feedforward_torque_nm,
             closure_jacobian_m_per_rad=self.kinematics.closure_jacobian(q),
             aperture_m=self.kinematics.aperture(q),
+            admittance_displacement_m=(
+                self.admittance.displacement_m if emitted_state == "force_tracking" else None
+            ),
+            admittance_velocity_m_s=(
+                self.admittance.velocity_m_s if emitted_state == "force_tracking" else None
+            ),
         )
 
     def apply_held_command(self, data: mujoco.MjData) -> MITControlCommand:
