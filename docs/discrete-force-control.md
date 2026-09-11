@@ -100,11 +100,12 @@ uv run python scripts/research/study.py \
   research=robotiq_discrete_force_validation/study
 uv run python scripts/research/study.py \
   research=robotiq_discrete_force_validation/study \
-  execution=study_run
+  execution=study_run \
+  execution.workers=8
 ```
 
-正式 study 统一串行执行，不提供并行度参数。条件之间相互独立且种子固定，串行结果与历史
-并行逐字节一致。
+正式 study 由 `execution.workers` 控制条件级 CPU 进程数，默认 `1`；并行执行仍按计划顺序聚合，
+逐平台指标由子进程显式返回父进程，不依赖共享可变列表。
 
 默认矩阵为 5 个控制器 × 4 种刚度 × 3 种噪声，共 60 个条件。每个条件均运行完整主曲线。study
 同时输出逐次、逐平台和聚合 CSV/Parquet、JSON 摘要、控制器总览/消融链/逐平台比较 PNG、

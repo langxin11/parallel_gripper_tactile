@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+import time
 
 import pytest
 
@@ -59,6 +60,20 @@ def _render(rows: list[dict[str, object]], payload: object, directory: Path) -> 
     figure = directory / "figure.txt"
     figure.write_text("figure", encoding="utf-8")
     return (figure,)
+
+
+def _parallel_execute(condition: StudyCondition) -> ConditionExecution:
+    """制造乱序完成和一种执行异常，验证 spawn 多进程路径。"""
+    index = int(condition.parameters["index"])
+    time.sleep((2 - index) * 0.02)
+    if index == 2:
+        raise RuntimeError("parallel execution error")
+    return ConditionExecution(
+        row={"index": index, "passed": index == 0},
+        run_directory=f"runs/{condition.condition_id}",
+        passed=index == 0,
+        metadata={"worker_index": index},
+    )
 
 
 def test_plan_manifest_contains_no_executed_runs(tmp_path: Path) -> None:
@@ -131,6 +146,36 @@ def test_mixed_condition_results_are_classified_without_stopping(tmp_path: Path)
         "summary.json",
         "figure.txt",
     }
+
+
+def test_parallel_conditions_keep_plan_order_and_parent_side_metadata(tmp_path: Path) -> None:
+    """多进程乱序完成不改变结果顺序，附加信息只在父进程按计划顺序收集。"""
+    observed_metadata: list[int] = []
+
+    execute_study_lifecycle(
+        _plan(),
+        study_directory=tmp_path,
+        execute_condition=_parallel_execute,
+        aggregate_and_persist=_postprocess,
+        render=_render,
+        workers=2,
+        record_condition_execution=lambda execution: observed_metadata.append(
+            int(execution.metadata["worker_index"])
+        ),
+    )
+
+    manifest = json.loads((tmp_path / "study_manifest.json").read_text(encoding="utf-8"))
+    assert [item["condition_id"] for item in manifest["condition_results"]] == [
+        "condition-0",
+        "condition-1",
+        "condition-2",
+    ]
+    assert [item["status"] for item in manifest["condition_results"]] == [
+        "completed",
+        "scientific_failure",
+        "execution_error",
+    ]
+    assert observed_metadata == [0, 1]
 
 
 @pytest.mark.parametrize(

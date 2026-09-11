@@ -1,10 +1,11 @@
-"""串行运行 DMgripper 二阶导纳 Ramp 参数调优。"""
+"""运行 DMgripper 二阶导纳 Ramp 参数调优。"""
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 from datetime import UTC, datetime
+from functools import partial
 import json
 import math
 from pathlib import Path
@@ -266,6 +267,58 @@ def build_plan(
     )
 
 
+def _execute_condition(
+    condition: StudyCondition,
+    *,
+    config: DMAdmittanceTuningConfig,
+    profile: GripperProfile,
+    task: ForceTrackingTask,
+    study_dir: Path,
+) -> ConditionExecution:
+    """在独立进程中执行一个导纳候选条件。"""
+    parameters = condition.parameters
+    candidate = DMAdmittanceCandidate.model_validate(parameters["candidate"])
+    material = str(parameters["object_material"])
+    seed = int(parameters["sensor_noise_seed"])
+    candidate_profile = _candidate_profile(profile, candidate)
+    run, result = execute_force_tracking(
+        profile="composed_profile",
+        resolved_profile=candidate_profile,
+        task_path=config.task,
+        tracking_task=task,
+        output_root=study_dir / "runs" / candidate.identifier,
+        run_prefix=(f"{candidate.identifier}-{config.task.stem}-{material}-seed{seed:03d}"),
+        object_material=material,  # type: ignore[arg-type]
+        controller_variant="admittance",
+        sensor_noise_seed=seed,
+    )
+    row = {
+        "candidate_id": candidate.identifier,
+        "mass_kg": candidate.mass_kg,
+        "damping_ns_m": candidate.damping_ns_m,
+        "stiffness_n_m": candidate.stiffness_n_m,
+        "filter_cutoff_hz": candidate.filter_cutoff_hz,
+        "velocity_limit_rad_s": candidate.velocity_limit_rad_s,
+        "approach_velocity_rad_s": candidate.approach_velocity_rad_s,
+        "contact_stable_time_s": candidate.contact_stable_time_s,
+        "contact_transition_time_s": candidate.contact_transition_time_s,
+        "approach_feedforward_force_n": candidate.approach_feedforward_force_n,
+        "task_name": task.name,
+        "task_path": str(config.task),
+        "object_material": material,
+        "sensor_noise_seed": seed,
+        "passed": result.passed,
+        "run_directory": str(run.path.relative_to(study_dir)),
+        **asdict(result),
+        **_trace_diagnostics(run.path, ignore_initial_s=task.metrics.ignore_initial_s),
+    }
+    return ConditionExecution(
+        row=row,
+        run_directory=str(row["run_directory"]),
+        passed=result.passed,
+    )
+
+
 def run_study(
     config: DMAdmittanceTuningConfig,
     *,
@@ -275,8 +328,9 @@ def run_study(
     study_plan: StudyPlan | None = None,
     additional_artifacts: Sequence[Path] = (),
     lifecycle_manifest_fields: Mapping[str, object] | None = None,
+    workers: int = 1,
 ) -> Path:
-    """通过公共生命周期串行执行导纳 Ramp 调参，并返回 study 父目录。"""
+    """通过公共生命周期执行导纳 Ramp 调参，并返回 study 父目录。"""
     profile = validate_resolved_profile(resolved_profile)
     task = ForceTrackingTask.load(config.task)
     study_dir = (
@@ -297,48 +351,13 @@ def run_study(
         else require_matching_study_plan(expected_plan, study_plan)
     )
 
-    def execute(condition: StudyCondition) -> ConditionExecution:
-        parameters = condition.parameters
-        candidate = DMAdmittanceCandidate.model_validate(parameters["candidate"])
-        material = str(parameters["object_material"])
-        seed = int(parameters["sensor_noise_seed"])
-        candidate_profile = _candidate_profile(profile, candidate)
-        run, result = execute_force_tracking(
-            profile="composed_profile",
-            resolved_profile=candidate_profile,
-            task_path=config.task,
-            tracking_task=task,
-            output_root=study_dir / "runs" / candidate.identifier,
-            run_prefix=(f"{candidate.identifier}-{config.task.stem}-{material}-seed{seed:03d}"),
-            object_material=material,  # type: ignore[arg-type]
-            controller_variant="admittance",
-            sensor_noise_seed=seed,
-        )
-        row = {
-            "candidate_id": candidate.identifier,
-            "mass_kg": candidate.mass_kg,
-            "damping_ns_m": candidate.damping_ns_m,
-            "stiffness_n_m": candidate.stiffness_n_m,
-            "filter_cutoff_hz": candidate.filter_cutoff_hz,
-            "velocity_limit_rad_s": candidate.velocity_limit_rad_s,
-            "approach_velocity_rad_s": candidate.approach_velocity_rad_s,
-            "contact_stable_time_s": candidate.contact_stable_time_s,
-            "contact_transition_time_s": candidate.contact_transition_time_s,
-            "approach_feedforward_force_n": candidate.approach_feedforward_force_n,
-            "task_name": task.name,
-            "task_path": str(config.task),
-            "object_material": material,
-            "sensor_noise_seed": seed,
-            "passed": result.passed,
-            "run_directory": str(run.path.relative_to(study_dir)),
-            **asdict(result),
-            **_trace_diagnostics(run.path, ignore_initial_s=task.metrics.ignore_initial_s),
-        }
-        return ConditionExecution(
-            row=row,
-            run_directory=str(row["run_directory"]),
-            passed=result.passed,
-        )
+    execute = partial(
+        _execute_condition,
+        config=config,
+        profile=profile,
+        task=task,
+        study_dir=study_dir,
+    )
 
     def aggregate_and_persist(
         rows: list[dict[str, object]],
@@ -397,4 +416,5 @@ def run_study(
         render=render,
         initial_artifacts=(study_dir / "study.yaml", resolved_config, *additional_artifacts),
         legacy_manifest_fields=manifest_fields,
+        workers=workers,
     )

@@ -57,7 +57,7 @@ uv run pgt run force-track \
 0.007 N；Ramp 阶段的 `force_tracking` 占比为 100%，且未触发位置或力矩饱和。
 低峰值的代价是该场景从全开位置建立 1 N 接触约需 41.5 s；这仍是仿真调参结果，
 不代表已通过实机安全验收。
-可用下列 Hydra 正式入口重跑候选（串行执行）：
+可用下列 Hydra 正式入口重跑候选；执行命令可追加 `execution.workers=8` 使用 CPU 多进程：
 
 ```bash
 uv run python scripts/research/study.py \

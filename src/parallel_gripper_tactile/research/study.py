@@ -7,7 +7,7 @@ import json
 from pathlib import Path
 from typing import Literal, Mapping, get_args
 
-from pydantic import BaseModel, ConfigDict, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
 from ..config.profiles import GripperProfile, TorqueAdrcControl, load_profile
 from ..experiments.force_tracking import (
@@ -151,6 +151,7 @@ class StudyExecution(_StudyModel):
     mode: Literal["plan", "run"] = "plan"
     output_root: Path
     recovery_source: Path | None = None
+    workers: int = Field(default=1, ge=1)
 
 
 class ResearchStudyConfig(_StudyModel):
@@ -613,6 +614,10 @@ def execute_research_study(
         "provenance": dict(provenance),
         "recovery_assessment": None if recovery_path is None else recovery_path.name,
         "automatic_resume_enabled": False,
+        "condition_executor": {
+            "backend": "process" if resolved.selection.execution.workers > 1 else "serial",
+            "workers": resolved.selection.execution.workers,
+        },
     }
     if resolved.selection.execution.mode == "plan":
         plan_path = _write_json(
@@ -653,6 +658,7 @@ def execute_research_study(
         "study_plan": resolved.plan,
         "additional_artifacts": tuple(extra_artifacts),
         "lifecycle_manifest_fields": lifecycle_fields,
+        "workers": resolved.selection.execution.workers,
     }
     if isinstance(resolved.domain_config, ForceTrackingComparisonConfig):
         return comparison_protocol.run_study(

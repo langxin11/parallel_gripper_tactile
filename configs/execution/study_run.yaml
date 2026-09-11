@@ -1,5 +1,6 @@
 # @package execution
-# 逐条件执行同一个已校验 StudyPlan。
+# 逐条件执行同一个已校验 StudyPlan；workers > 1 时使用 CPU 多进程。
 mode: run
 output_root: ${pgt_repo:}/outputs/research/studies
 recovery_source: null
+workers: 1

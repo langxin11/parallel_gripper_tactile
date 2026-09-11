@@ -169,7 +169,8 @@ study 的 `summary` 与（适用时的）`aggregate` 同时输出 CSV 和 Parque
 从本次完整频率 trace 生成三张单次图并登记实际文件；跨 run 的统计图由
 包内 study protocol 在所有条件结束后从 `summary`、`aggregate` 和子 run trace 生成 600 DPI PNG，
 并登记到 `study_manifest.json`。公共生命周期持有同一个有序 `StudyPlan`，在执行前写入
-`running` 状态并在每个条件后更新账本；最终状态为 `partial`、`completed` 或 `failed`。正常完成但
+`running` 状态；`execution.workers>1` 时以 `spawn` 进程并行运行独立条件，父进程在每个条件完成后
+按计划顺序更新账本，并独占聚合与绘图。最终状态为 `partial`、`completed` 或 `failed`。正常完成但
 `passed=false` 的条件记录为 `scientific_failure`，形成不了 run 的 Python 异常记录为
 `execution_error`；聚合和绘图异常独立登记。未建立 `track_reference` 的正常条件会在 summary 与
 manifest 的 `failed_runs` 中保留，

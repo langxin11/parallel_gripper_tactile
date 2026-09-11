@@ -70,7 +70,7 @@ uv run python scripts/research/study.py \
   execution=study_run
 </code></pre>
 
-正式 study 统一串行执行，不提供并行度参数。单次运行中的物理、控制和记录时钟分别配置；默认是
+正式 study 可用 `execution.workers=N` 在 CPU 上并行执行独立条件。单次运行中的物理、控制和记录时钟分别配置；默认是
 500 Hz 物理、30 Hz 控制和 100 Hz 常规记录，并额外保留关键事件。
 
 算法、trace 字段、验收口径和当前四档可达力见
@@ -130,6 +130,11 @@ uv run python scripts/research/study.py \
 
 study 入口拒绝外层 `-m`，从而保证计划、配对统计与实际执行只展开一次。配置组、覆盖优先级、列表
 替换、非法组合、路径与产物语义见 [Hydra 科研配置与实验编排](research-configuration.md)。
+
+`execution.workers` 默认为 `1`，大于 `1` 时使用 `spawn` 启动条件级 CPU 进程。每个 worker 独占一个
+run 目录，只负责 MuJoCo 仿真和条件指标；父进程按计划顺序更新 `study_manifest.json`，并在所有条件结束后
+统一聚合和绘图。并行完成顺序不会改变 `condition_results`、配对关系或统计输入顺序。建议先比较
+`N=1,4,8` 的耗时与内存占用，不要直接使用全部逻辑核。
 
 ## 多条件研究与产物约定
 

@@ -6,6 +6,7 @@ from collections.abc import Mapping, Sequence
 import csv
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
+from functools import partial
 from hashlib import sha256
 import json
 import math
@@ -623,6 +624,64 @@ def describe_conditions(
     return "\n".join(lines)
 
 
+def _execute_condition(
+    condition: StudyCondition,
+    *,
+    config: ForceTrackingTorqueAdrcTuningConfig,
+    resolved_profile: GripperProfile | None,
+    tasks: Mapping[Path, ForceTrackingTask],
+    study_dir: Path,
+) -> ConditionExecution:
+    """在独立进程中执行一个 Torque ADRC 候选条件。"""
+    parameters = condition.parameters
+    task_path = Path(str(parameters["task_path"]))
+    candidate = TorqueAdrcCandidate(
+        measurement_filter_cutoff_hz=float(parameters["measurement_filter_cutoff_hz"]),
+        controller_bandwidth_rad_s=float(parameters["controller_bandwidth_rad_s"]),
+        observer_bandwidth_ratio=float(parameters["observer_bandwidth_ratio"]),
+    )
+    override = TorqueAdrcControl(
+        measurement_filter_cutoff_hz=candidate.measurement_filter_cutoff_hz,
+        controller_bandwidth_rad_s=candidate.controller_bandwidth_rad_s,
+        observer_bandwidth_rad_s=candidate.observer_bandwidth_rad_s,
+    )
+    task = tasks[task_path]
+    material = str(parameters["object_material"])
+    seed = int(parameters["sensor_noise_seed"])
+    run, result = execute_force_tracking(
+        profile=config.profile,
+        resolved_profile=resolved_profile,
+        task_path=task_path,
+        tracking_task=task,
+        output_root=study_dir / "runs",
+        run_prefix=condition.condition_id,
+        object_material=material,
+        controller_variant="adrc-torque",
+        stiffness_estimator_method=config.stiffness_estimator_method,
+        sensor_noise_seed=seed,
+        torque_adrc_override=override,
+    )
+    row = {
+        "candidate_id": candidate.identifier,
+        "measurement_filter_cutoff_hz": candidate.measurement_filter_cutoff_hz,
+        "controller_bandwidth_rad_s": candidate.controller_bandwidth_rad_s,
+        "observer_bandwidth_ratio": candidate.observer_bandwidth_ratio,
+        "observer_bandwidth_rad_s": candidate.observer_bandwidth_rad_s,
+        "task_name": task.name,
+        "task_path": str(task_path),
+        "object_material": material,
+        "sensor_noise_seed": seed,
+        "passed": result.passed,
+        "run_directory": str(run.path.relative_to(study_dir)),
+        **asdict(result),
+    }
+    return ConditionExecution(
+        row=row,
+        run_directory=str(row["run_directory"]),
+        passed=result.passed,
+    )
+
+
 def run_study(
     config: ForceTrackingTorqueAdrcTuningConfig,
     *,
@@ -634,6 +693,7 @@ def run_study(
     study_plan: StudyPlan | None = None,
     additional_artifacts: Sequence[Path] = (),
     lifecycle_manifest_fields: Mapping[str, object] | None = None,
+    workers: int = 1,
 ) -> Path:
     """通过公共生命周期执行调参阶段并生成候选排名。"""
     if resolved_profile is None:
@@ -659,54 +719,13 @@ def run_study(
     (study_dir / "study.yaml").write_bytes(config_source.read_bytes())
     resolved_config = write_resolved_config(study_dir / "study.resolved.json", config)
 
-    def execute(condition: StudyCondition) -> ConditionExecution:
-        parameters = condition.parameters
-        task_path = Path(str(parameters["task_path"]))
-        candidate = TorqueAdrcCandidate(
-            measurement_filter_cutoff_hz=float(parameters["measurement_filter_cutoff_hz"]),
-            controller_bandwidth_rad_s=float(parameters["controller_bandwidth_rad_s"]),
-            observer_bandwidth_ratio=float(parameters["observer_bandwidth_ratio"]),
-        )
-        override = TorqueAdrcControl(
-            measurement_filter_cutoff_hz=candidate.measurement_filter_cutoff_hz,
-            controller_bandwidth_rad_s=candidate.controller_bandwidth_rad_s,
-            observer_bandwidth_rad_s=candidate.observer_bandwidth_rad_s,
-        )
-        task = tasks[task_path]
-        material = str(parameters["object_material"])
-        seed = int(parameters["sensor_noise_seed"])
-        run, result = execute_force_tracking(
-            profile=config.profile,
-            resolved_profile=resolved_profile,
-            task_path=task_path,
-            tracking_task=task,
-            output_root=study_dir / "runs",
-            run_prefix=condition.condition_id,
-            object_material=material,
-            controller_variant="adrc-torque",
-            stiffness_estimator_method=config.stiffness_estimator_method,
-            sensor_noise_seed=seed,
-            torque_adrc_override=override,
-        )
-        row = {
-            "candidate_id": candidate.identifier,
-            "measurement_filter_cutoff_hz": candidate.measurement_filter_cutoff_hz,
-            "controller_bandwidth_rad_s": candidate.controller_bandwidth_rad_s,
-            "observer_bandwidth_ratio": candidate.observer_bandwidth_ratio,
-            "observer_bandwidth_rad_s": candidate.observer_bandwidth_rad_s,
-            "task_name": task.name,
-            "task_path": str(task_path),
-            "object_material": material,
-            "sensor_noise_seed": seed,
-            "passed": result.passed,
-            "run_directory": str(run.path.relative_to(study_dir)),
-            **asdict(result),
-        }
-        return ConditionExecution(
-            row=row,
-            run_directory=str(row["run_directory"]),
-            passed=result.passed,
-        )
+    execute = partial(
+        _execute_condition,
+        config=config,
+        resolved_profile=resolved_profile,
+        tasks=tasks,
+        study_dir=study_dir,
+    )
 
     candidates = tuple(
         dict.fromkeys(
@@ -809,4 +828,5 @@ def run_study(
         render=render,
         initial_artifacts=(study_dir / "study.yaml", resolved_config, *additional_artifacts),
         legacy_manifest_fields=manifest_fields,
+        workers=workers,
     )

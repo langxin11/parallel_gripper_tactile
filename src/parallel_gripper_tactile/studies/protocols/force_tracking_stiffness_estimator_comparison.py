@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 from datetime import UTC, datetime
+from functools import partial
 import json
 import math
 from pathlib import Path
@@ -440,6 +441,51 @@ def build_plan(
     )
 
 
+def _execute_condition(
+    condition: StudyCondition,
+    *,
+    config: ForceTrackingStiffnessEstimatorComparisonConfig,
+    resolved_profile: GripperProfile | None,
+    tasks: Mapping[Path, ForceTrackingTask],
+    study_dir: Path,
+) -> ConditionExecution:
+    """在独立进程中执行一个刚度估计器条件。"""
+    parameters = condition.parameters
+    estimator = str(parameters["stiffness_estimator_method"])
+    task_path = Path(str(parameters["task_path"]))
+    material = str(parameters["object_material"])
+    seed = int(parameters["sensor_noise_seed"])
+    task = tasks[task_path]
+    run, result = execute_force_tracking(
+        profile=config.profile,
+        resolved_profile=resolved_profile,
+        task_path=task_path,
+        tracking_task=task,
+        output_root=study_dir / "runs",
+        run_prefix=condition.condition_id,
+        object_material=material,
+        controller_variant="pid-stiffness-ff",
+        stiffness_estimator_method=estimator,
+        sensor_noise_seed=seed,
+    )
+    row = {
+        "controller_variant": "pid-stiffness-ff",
+        "stiffness_estimator_method": estimator,
+        "task_name": task.name,
+        "task_path": str(task_path),
+        "object_material": material,
+        "sensor_noise_seed": seed,
+        "passed": result.passed,
+        "run_directory": str(run.path.relative_to(study_dir)),
+        **asdict(result),
+    }
+    return ConditionExecution(
+        row=row,
+        run_directory=str(row["run_directory"]),
+        passed=result.passed,
+    )
+
+
 def run_study(
     config: ForceTrackingStiffnessEstimatorComparisonConfig,
     *,
@@ -449,6 +495,7 @@ def run_study(
     study_plan: StudyPlan | None = None,
     additional_artifacts: Sequence[Path] = (),
     lifecycle_manifest_fields: Mapping[str, object] | None = None,
+    workers: int = 1,
 ) -> Path:
     """通过公共生命周期执行整个 protocol，并返回 study 父目录。"""
     tasks = {task_path: ForceTrackingTask.load(task_path) for task_path in config.tasks}
@@ -470,41 +517,13 @@ def run_study(
         else require_matching_study_plan(expected_plan, study_plan)
     )
 
-    def execute(condition: StudyCondition) -> ConditionExecution:
-        parameters = condition.parameters
-        estimator = str(parameters["stiffness_estimator_method"])
-        task_path = Path(str(parameters["task_path"]))
-        material = str(parameters["object_material"])
-        seed = int(parameters["sensor_noise_seed"])
-        task = tasks[task_path]
-        run, result = execute_force_tracking(
-            profile=config.profile,
-            resolved_profile=resolved_profile,
-            task_path=task_path,
-            tracking_task=task,
-            output_root=study_dir / "runs",
-            run_prefix=condition.condition_id,
-            object_material=material,
-            controller_variant="pid-stiffness-ff",
-            stiffness_estimator_method=estimator,
-            sensor_noise_seed=seed,
-        )
-        row = {
-            "controller_variant": "pid-stiffness-ff",
-            "stiffness_estimator_method": estimator,
-            "task_name": task.name,
-            "task_path": str(task_path),
-            "object_material": material,
-            "sensor_noise_seed": seed,
-            "passed": result.passed,
-            "run_directory": str(run.path.relative_to(study_dir)),
-            **asdict(result),
-        }
-        return ConditionExecution(
-            row=row,
-            run_directory=str(row["run_directory"]),
-            passed=result.passed,
-        )
+    execute = partial(
+        _execute_condition,
+        config=config,
+        resolved_profile=resolved_profile,
+        tasks=tasks,
+        study_dir=study_dir,
+    )
 
     def aggregate_and_persist(
         rows: list[dict[str, object]],
@@ -564,6 +583,7 @@ def run_study(
         render=render,
         initial_artifacts=(study_dir / "study.yaml", resolved_config, *additional_artifacts),
         legacy_manifest_fields=manifest_fields,
+        workers=workers,
     )
 
 

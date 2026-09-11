@@ -107,6 +107,20 @@ def _resolved(name: str, *, overrides: list[str] | None = None):
     return resolve_research_study(resolved_mapping(config))
 
 
+def test_execution_workers_override_is_validated() -> None:
+    """正式研究接受正整数进程数，并拒绝零进程。"""
+    resolved = _resolved(
+        "force_tracking_stiffness_estimator_comparison",
+        overrides=["execution.workers=4"],
+    )
+    assert resolved.selection.execution.workers == 4
+    with pytest.raises(ResearchStudySetupError, match="greater than or equal to 1"):
+        _resolved(
+            "force_tracking_stiffness_estimator_comparison",
+            overrides=["execution.workers=0"],
+        )
+
+
 def _write_coarse_reference(
     directory: Path,
     config: ForceTrackingTorqueAdrcTuningConfig,
@@ -845,7 +859,11 @@ def test_execution_passes_the_exact_resolved_plan_to_protocol(
 
     resolved = _resolved("force_tracking_ablation")
     run_selection = resolved.selection.model_copy(
-        update={"execution": resolved.selection.execution.model_copy(update={"mode": "run"})}
+        update={
+            "execution": resolved.selection.execution.model_copy(
+                update={"mode": "run", "workers": 3}
+            )
+        }
     )
     runnable = replace(resolved, selection=run_selection)
     captured: dict[str, object] = {}
@@ -862,6 +880,7 @@ def test_execution_passes_the_exact_resolved_plan_to_protocol(
     )
     assert captured["study_plan"] is resolved.plan
     assert captured["resolved_profile"] is resolved.profile
+    assert captured["workers"] == 3
     assert {Path(path).name for path in captured["additional_artifacts"]} == {
         "effective_study_configuration.json",
         "composition_provenance.json",

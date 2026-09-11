@@ -9,6 +9,8 @@
 
 ### 新增
 
+- 正式 study 新增统一的 `execution.workers`：执行模式可用 `spawn` 条件级 MuJoCo CPU 多进程，父进程
+  独占 manifest、聚合与绘图，并保持 `StudyPlan` 结果顺序；默认值 `1` 保持原串行行为。
 - 新增 force-track 单次绘图层与重绘命令：runner 通过 `on_result(full_rows, result)` 生成
   `plots/tracking.png`、`plots/tactile.png` 和 `plots/controller.png`，并登记实际产物；新增
   `scripts/research/render.py` 的独占重绘目录、`rendering_manifest.json`、Parquet 优先读取和可选逐 taxel 细节。
@@ -47,7 +49,8 @@
 - 删除 `scripts/experiments/` 下全部 8 个专项研究旧入口；其实现迁入 `studies/protocols/` 包内并由
   Hydra 正式入口复用，避免直接路径参数绕过统一组合解析。
 - 移除 `dm_admittance_tuning` 的 `max_workers` 字段与 `robotiq_discrete_force` 的 `--jobs`/
-  `--dry-run` 参数：正式 study 统一串行执行，计划审阅改用默认的 `execution=study_plan`。
+  `--dry-run` 参数：并行度改由公共 `execution.workers` 负责，计划审阅改用默认的
+  `execution=study_plan`。
 
 ### 变更
 

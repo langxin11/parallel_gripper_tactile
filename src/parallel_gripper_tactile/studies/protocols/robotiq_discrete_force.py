@@ -1,10 +1,11 @@
-"""串行运行 Robotiq 单 tick 力增量离散控制的完整消融矩阵。"""
+"""运行 Robotiq 单 tick 力增量离散控制的完整消融矩阵。"""
 
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 from datetime import UTC, datetime
+from functools import partial
 import json
 import math
 from pathlib import Path
@@ -405,6 +406,59 @@ def build_plan(
     )
 
 
+def _execute_condition(
+    condition: StudyCondition,
+    *,
+    config: RobotiqDiscreteForceStudyConfig,
+    resolved_profile: GripperProfile | None,
+    study_dir: Path,
+) -> ConditionExecution:
+    """在独立进程中执行一个 Robotiq 离散力条件。"""
+    parameters = condition.parameters
+    controller_variant = str(parameters["controller_variant"])
+    material = str(parameters["object_material"])
+    noise_std_n = float(parameters["force_noise_std_n"])
+    noise_seed = int(parameters["sensor_noise_seed"])
+    run_prefix = (
+        f"{controller_variant}-{material}-noise{noise_std_n:g}-seed{noise_seed:03d}".replace(
+            ".", "p"
+        )
+    )
+
+    def base_row(run_path: Path) -> dict[str, object]:
+        return {
+            "controller_variant": controller_variant,
+            "object_material": material,
+            "force_noise_std_n": noise_std_n,
+            "noise_seed": noise_seed,
+            "run_directory": str(run_path.relative_to(study_dir)),
+        }
+
+    task = RobotiqDiscreteForceTask.load(config.task)
+    run, result = execute_robotiq_discrete_force(
+        profile=config.profile,
+        resolved_profile=resolved_profile,
+        task_path=config.task,
+        discrete_task=task,
+        output_root=study_dir / "runs",
+        run_prefix=run_prefix,
+        controller_variant=controller_variant,
+        object_material=material,
+        force_noise_std_n=noise_std_n,
+        noise_seed=noise_seed,
+    )
+    result_values = asdict(result)
+    platforms = result_values.pop("platform_metrics")
+    row = {**base_row(run.path), **result_values}
+    platform_rows = tuple({**base_row(run.path), **platform} for platform in platforms)
+    return ConditionExecution(
+        row=row,
+        run_directory=str(row["run_directory"]),
+        passed=result.passed,
+        metadata={"platform_rows": platform_rows},
+    )
+
+
 def run_study(
     config: RobotiqDiscreteForceStudyConfig,
     *,
@@ -414,8 +468,9 @@ def run_study(
     study_plan: StudyPlan | None = None,
     additional_artifacts: Sequence[Path] = (),
     lifecycle_manifest_fields: Mapping[str, object] | None = None,
+    workers: int = 1,
 ) -> Path:
-    """通过公共生命周期串行执行离散力消融矩阵，并返回 study 目录。"""
+    """通过公共生命周期执行离散力消融矩阵，并返回 study 目录。"""
     study_dir = (
         _create_study_directory(config) if study_directory is None else study_directory.resolve()
     )
@@ -436,50 +491,19 @@ def run_study(
     # 逐平台指标行不进入 summary 行，按计划执行顺序单独收集，保持旧 platforms.csv 口径。
     platform_rows: list[dict[str, object]] = []
 
-    def execute(condition: StudyCondition) -> ConditionExecution:
-        parameters = condition.parameters
-        controller_variant = str(parameters["controller_variant"])
-        material = str(parameters["object_material"])
-        noise_std_n = float(parameters["force_noise_std_n"])
-        noise_seed = int(parameters["sensor_noise_seed"])
-        # 沿用旧脚本的 run 目录命名：小数点替换为 p，避免噪声档位被误读为扩展名。
-        run_prefix = (
-            f"{controller_variant}-{material}-noise{noise_std_n:g}-seed{noise_seed:03d}".replace(
-                ".", "p"
-            )
-        )
+    execute = partial(
+        _execute_condition,
+        config=config,
+        resolved_profile=resolved_profile,
+        study_dir=study_dir,
+    )
 
-        def _base_row(run_path: Path) -> dict[str, object]:
-            return {
-                "controller_variant": controller_variant,
-                "object_material": material,
-                "force_noise_std_n": noise_std_n,
-                "noise_seed": noise_seed,
-                "run_directory": str(run_path.relative_to(study_dir)),
-            }
-
-        task = RobotiqDiscreteForceTask.load(config.task)
-        run, result = execute_robotiq_discrete_force(
-            profile=config.profile,
-            resolved_profile=resolved_profile,
-            task_path=config.task,
-            discrete_task=task,
-            output_root=study_dir / "runs",
-            run_prefix=run_prefix,
-            controller_variant=controller_variant,
-            object_material=material,
-            force_noise_std_n=noise_std_n,
-            noise_seed=noise_seed,
-        )
-        result_values = asdict(result)
-        platforms = result_values.pop("platform_metrics")
-        row = {**_base_row(run.path), **result_values}
-        platform_rows.extend({**_base_row(run.path), **platform} for platform in platforms)
-        return ConditionExecution(
-            row=row,
-            run_directory=str(row["run_directory"]),
-            passed=result.passed,
-        )
+    def record_execution(execution: ConditionExecution) -> None:
+        """按计划顺序把子进程返回的逐平台指标并入父进程。"""
+        rows = execution.metadata.get("platform_rows", ())
+        if not isinstance(rows, (list, tuple)):
+            raise TypeError("platform_rows metadata must be a sequence")
+        platform_rows.extend(dict(row) for row in rows if isinstance(row, Mapping))
 
     def aggregate_and_persist(
         rows: list[dict[str, object]],
@@ -541,4 +565,6 @@ def run_study(
         render=render,
         initial_artifacts=(study_dir / "study.yaml", resolved_config, *additional_artifacts),
         legacy_manifest_fields=manifest_fields,
+        workers=workers,
+        record_condition_execution=record_execution,
     )

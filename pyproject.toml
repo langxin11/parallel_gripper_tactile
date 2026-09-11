@@ -50,6 +50,7 @@ research = [
 ]
 
 [tool.pytest.ini_options]
+pythonpath = ["."]
 testpaths = [
     "tests",
     "packages/dm_grasp_core/tests",

@@ -166,7 +166,7 @@ profile 摘要来自实际冻结的组合对象，而不是兼容 profile 文件
 控制器、指标、统计公式或仿真循环。`study_manifest.json` 的状态为：
 
 - `planned`：已完成预检，但没有创建 `MjData`、推进仿真或登记 run；
-- `running`：正在逐条件执行，manifest 在每个条件后更新；
+- `running`：正在逐条件执行，manifest 在每个条件完成后由父进程更新；
 - `partial`：至少一个条件形成正常 run，同时至少一个条件发生 Python 执行异常；
 - `completed`：所有条件都形成正常 run；其中仍可包含科学验收失败；
 - `failed`：没有任何正常 run，或聚合／绘图阶段无法完成。
@@ -185,7 +185,7 @@ profile 摘要来自实际冻结的组合对象，而不是兼容 profile 文件
 | `estimator` | 刚度估计方法或显式关闭 | 控制器增益 |
 | `task` | 任务家族及 task 文件 | profile 或材料 |
 | `material` | 接触材料 preset | 控制时序 |
-| `execution` | 计划/执行、输出、viewer、记录与只读恢复检测 | 科学条件 |
+| `execution` | 计划/执行、输出、条件进程数、viewer、记录与只读恢复检测 | 科学条件 |
 | `research` | 研究问题、决策、准入／停止／排除依据、阶段谱系及唯一矩阵 | 外层笛卡尔积 |
 
 优先级从低到高依次为：配置组默认值、根 preset 的 `_self_` 值、命令行覆盖。Hydra 对列表采用整表
@@ -226,5 +226,7 @@ protocol。
 
 迁移中保留的语义边界：导纳调参的候选排名与 raw 物理力峰值口径、估计器对比的 secant 基线与公共
 seed 叠加、Robotiq 离散力的 HOLD/再激活时序与逐平台指标、诊断的单因素条件构造与数值/分类双横轴
-绘图均原样保留；dm_admittance_tuning 移除 `max_workers`、robotiq_discrete_force 移除 `--jobs`，
-正式 study 统一串行执行，不引入自动 resume、Optuna、Ray、MLflow 或分布式执行框架。
+绘图均原样保留；旧 protocol 私有的 `max_workers` 和 `--jobs` 已统一为 `execution.workers`。当
+`execution.workers>1` 时，公共生命周期使用 `spawn` 条件级 CPU 多进程；每个进程独占 run 目录，父进程
+独占 manifest、聚合与绘图。该调度参数不进入科学配置哈希，也不引入自动 resume、Optuna、Ray、MLflow
+或分布式执行框架。

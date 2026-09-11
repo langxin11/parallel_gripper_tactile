@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from concurrent.futures import Future, ProcessPoolExecutor, as_completed
+from dataclasses import dataclass, field as dataclass_field
 from hashlib import sha256
 import json
 import math
+import multiprocessing
 from pathlib import Path
 from typing import Any, Literal
 
@@ -135,6 +137,7 @@ class ConditionExecution:
     row: dict[str, object]
     run_directory: str
     passed: bool
+    metadata: Mapping[str, object] = dataclass_field(default_factory=dict)
 
 
 @dataclass(frozen=True, slots=True)
@@ -364,6 +367,33 @@ def _failure(stage: FailureStage, error: Exception) -> LifecycleFailure:
     return LifecycleFailure(stage=stage, error_type=type(error).__name__, message=str(error))
 
 
+def _condition_outcome(
+    condition: StudyCondition,
+    execution: ConditionExecution | None,
+    error: Exception | None,
+) -> ConditionOutcome:
+    """把一个条件的返回值或异常转换成稳定的公共结果。"""
+    if error is not None:
+        return ConditionOutcome(
+            condition_id=condition.condition_id,
+            status="execution_error",
+            parameters=condition.parameters,
+            pair_key=condition.pair_key,
+            baseline_role=condition.baseline_role,
+            failure=_failure("condition_execution", error),
+        )
+    assert execution is not None
+    return ConditionOutcome(
+        condition_id=condition.condition_id,
+        status="completed" if execution.passed else "scientific_failure",
+        parameters=condition.parameters,
+        pair_key=condition.pair_key,
+        baseline_role=condition.baseline_role,
+        run_directory=execution.run_directory,
+        metrics=execution.row,
+    )
+
+
 def execute_study_lifecycle(
     plan: StudyPlan,
     *,
@@ -375,21 +405,53 @@ def execute_study_lifecycle(
     render: Callable[[list[dict[str, object]], object, Path], Sequence[Path]],
     initial_artifacts: Sequence[Path] = (),
     legacy_manifest_fields: Mapping[str, object] | None = None,
+    workers: int = 1,
+    record_condition_execution: Callable[[ConditionExecution], None] | None = None,
 ) -> Path:
-    """执行公共 study 生命周期，并在所有可恢复边界保存 manifest。"""
+    """执行公共 study 生命周期，并在所有可恢复边界保存 manifest。
+
+    条件级并行仅覆盖仿真执行；manifest、聚合和绘图始终由父进程串行负责。
+    """
+    if workers < 1:
+        raise ValueError("workers must be at least 1")
     directory = study_directory.resolve()
     directory.mkdir(parents=True, exist_ok=True)
     manifest_path = directory / "study_manifest.json"
     legacy = dict(legacy_manifest_fields or {})
     artifacts = list(initial_artifacts)
-    outcomes: list[ConditionOutcome] = []
+    outcomes_by_id: dict[str, ConditionOutcome] = {}
+    executions_by_id: dict[str, ConditionExecution] = {}
     lifecycle_failures: list[LifecycleFailure] = []
+
+    def ordered_outcomes() -> list[ConditionOutcome]:
+        """按 StudyPlan 顺序投影已完成结果，屏蔽并行完成顺序。"""
+        return [
+            outcomes_by_id[condition.condition_id]
+            for condition in plan.conditions
+            if condition.condition_id in outcomes_by_id
+        ]
+
+    def persist_progress() -> None:
+        """只由父进程原子更新运行中 manifest。"""
+        _write_json(
+            manifest_path,
+            _manifest_mapping(
+                plan,
+                state="running",
+                outcomes=ordered_outcomes(),
+                failures=lifecycle_failures,
+                artifacts=artifacts,
+                study_directory=directory,
+                legacy_fields=legacy,
+            ),
+        )
+
     _write_json(
         manifest_path,
         _manifest_mapping(
             plan,
             state="running",
-            outcomes=outcomes,
+            outcomes=(),
             failures=lifecycle_failures,
             artifacts=artifacts,
             study_directory=directory,
@@ -397,45 +459,46 @@ def execute_study_lifecycle(
         ),
     )
 
-    for condition in plan.conditions:
-        try:
-            execution = execute_condition(condition)
-        except Exception as error:
-            failure = _failure("condition_execution", error)
-            outcomes.append(
-                ConditionOutcome(
-                    condition_id=condition.condition_id,
-                    status="execution_error",
-                    parameters=condition.parameters,
-                    pair_key=condition.pair_key,
-                    baseline_role=condition.baseline_role,
-                    failure=failure,
+    if workers == 1:
+        for condition in plan.conditions:
+            execution: ConditionExecution | None = None
+            error: Exception | None = None
+            try:
+                execution = execute_condition(condition)
+            except Exception as caught:
+                error = caught
+            outcomes_by_id[condition.condition_id] = _condition_outcome(condition, execution, error)
+            if execution is not None:
+                executions_by_id[condition.condition_id] = execution
+            persist_progress()
+    else:
+        context = multiprocessing.get_context("spawn")
+        with ProcessPoolExecutor(max_workers=workers, mp_context=context) as executor:
+            futures: dict[Future[ConditionExecution], StudyCondition] = {
+                executor.submit(execute_condition, condition): condition
+                for condition in plan.conditions
+            }
+            for future in as_completed(futures):
+                condition = futures[future]
+                execution = None
+                error = None
+                try:
+                    execution = future.result()
+                except Exception as caught:
+                    error = caught
+                outcomes_by_id[condition.condition_id] = _condition_outcome(
+                    condition, execution, error
                 )
-            )
-        else:
-            outcomes.append(
-                ConditionOutcome(
-                    condition_id=condition.condition_id,
-                    status="completed" if execution.passed else "scientific_failure",
-                    parameters=condition.parameters,
-                    pair_key=condition.pair_key,
-                    baseline_role=condition.baseline_role,
-                    run_directory=execution.run_directory,
-                    metrics=execution.row,
-                )
-            )
-        _write_json(
-            manifest_path,
-            _manifest_mapping(
-                plan,
-                state="running",
-                outcomes=outcomes,
-                failures=lifecycle_failures,
-                artifacts=artifacts,
-                study_directory=directory,
-                legacy_fields=legacy,
-            ),
-        )
+                if execution is not None:
+                    executions_by_id[condition.condition_id] = execution
+                persist_progress()
+
+    outcomes = ordered_outcomes()
+    if record_condition_execution is not None:
+        for condition in plan.conditions:
+            execution = executions_by_id.get(condition.condition_id)
+            if execution is not None:
+                record_condition_execution(execution)
 
     rows = [
         dict(outcome.metrics)

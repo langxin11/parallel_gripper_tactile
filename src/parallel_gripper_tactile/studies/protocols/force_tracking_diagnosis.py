@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 from datetime import UTC, datetime
+from functools import partial
 import json
 import math
 from pathlib import Path
@@ -670,6 +671,77 @@ def build_plan(config: DiagnosisConfig, *, phase: Phase) -> StudyPlan:
     )
 
 
+def _execute_condition(
+    condition: StudyCondition,
+    *,
+    config: DiagnosisConfig,
+    study_dir: Path,
+) -> ConditionExecution:
+    """在独立进程中执行一个诊断条件。"""
+    parameters = condition.parameters
+    label = str(parameters["label"])
+    task_path = _scaled_task(config.task, float(parameters["force_scale"]), study_dir / "tasks")
+    profile_path = (
+        _semantics_scaled_profile(config.profile, study_dir / "profiles")
+        if bool(parameters["parameter_scale_conversion"])
+        else config.profile
+    )
+    swept_parameter = parameters["swept_parameter"]
+    if swept_parameter is not None:
+        profile_path = _tuning_profile(
+            config.profile,
+            study_dir / "profiles",
+            label,
+            (str(swept_parameter), float(parameters["swept_value"])),
+        )
+    collision_model = parameters["collision_model"]
+    if collision_model is not None:
+        profile_path = _model_profile(
+            config.profile,
+            study_dir / "profiles",
+            label,
+            Path(str(collision_model)),
+        )
+    targets = _task_targets(task_path, str(parameters["force_semantics"]))
+    run, result = execute_force_tracking(
+        profile=profile_path,
+        task_path=task_path,
+        output_root=study_dir / "runs",
+        run_prefix=condition.condition_id,
+        object_material=str(parameters["object_material"]),
+        object_contact_model=str(parameters["object_contact_model"]),
+        multiccd_enabled=bool(parameters["multiccd_enabled"]),
+        force_semantics=str(parameters["force_semantics"]),
+        controller_variant=str(parameters["controller_variant"]),
+        sensor_noise_seed=int(parameters["sensor_noise_seed"]),
+    )
+    row = {
+        "label": label,
+        "controller_variant": parameters["controller_variant"],
+        "object_material": parameters["object_material"],
+        "object_contact_model": parameters["object_contact_model"],
+        "collision_model": None if collision_model is None else Path(str(collision_model)).name,
+        "multiccd_enabled": parameters["multiccd_enabled"],
+        "force_semantics": parameters["force_semantics"],
+        "force_scale": parameters["force_scale"],
+        "parameter_scale_conversion": parameters["parameter_scale_conversion"],
+        "swept_parameter": swept_parameter,
+        "swept_value": parameters["swept_value"],
+        "sensor_noise_seed": int(parameters["sensor_noise_seed"]),
+        "run_directory": str(run.path.relative_to(study_dir)),
+        "passed": result.passed,
+        **targets,
+        **_force_parameters(profile_path),
+        **asdict(result),
+        **_contact_diagnostics(run.path),
+    }
+    return ConditionExecution(
+        row=row,
+        run_directory=str(row["run_directory"]),
+        passed=result.passed,
+    )
+
+
 def run_study(
     config: DiagnosisConfig,
     *,
@@ -679,6 +751,7 @@ def run_study(
     study_plan: StudyPlan | None = None,
     additional_artifacts: Sequence[Path] = (),
     lifecycle_manifest_fields: Mapping[str, object] | None = None,
+    workers: int = 1,
 ) -> Path:
     """通过公共生命周期执行一个诊断 phase，并返回 study 父目录。"""
     study_dir = (
@@ -699,71 +772,7 @@ def run_study(
         else require_matching_study_plan(expected_plan, study_plan)
     )
 
-    def execute(condition: StudyCondition) -> ConditionExecution:
-        parameters = condition.parameters
-        label = str(parameters["label"])
-        task_path = _scaled_task(config.task, float(parameters["force_scale"]), study_dir / "tasks")
-        profile_path = (
-            _semantics_scaled_profile(config.profile, study_dir / "profiles")
-            if bool(parameters["parameter_scale_conversion"])
-            else config.profile
-        )
-        swept_parameter = parameters["swept_parameter"]
-        if swept_parameter is not None:
-            profile_path = _tuning_profile(
-                config.profile,
-                study_dir / "profiles",
-                label,
-                (str(swept_parameter), float(parameters["swept_value"])),
-            )
-        collision_model = parameters["collision_model"]
-        if collision_model is not None:
-            profile_path = _model_profile(
-                config.profile,
-                study_dir / "profiles",
-                label,
-                Path(str(collision_model)),
-            )
-        targets = _task_targets(task_path, str(parameters["force_semantics"]))
-        run, result = execute_force_tracking(
-            profile=profile_path,
-            task_path=task_path,
-            output_root=study_dir / "runs",
-            run_prefix=condition.condition_id,
-            object_material=str(parameters["object_material"]),
-            object_contact_model=str(parameters["object_contact_model"]),
-            multiccd_enabled=bool(parameters["multiccd_enabled"]),
-            force_semantics=str(parameters["force_semantics"]),
-            controller_variant=str(parameters["controller_variant"]),
-            sensor_noise_seed=int(parameters["sensor_noise_seed"]),
-        )
-        row = {
-            "label": label,
-            "controller_variant": parameters["controller_variant"],
-            "object_material": parameters["object_material"],
-            "object_contact_model": parameters["object_contact_model"],
-            "collision_model": (
-                None if collision_model is None else Path(str(collision_model)).name
-            ),
-            "multiccd_enabled": parameters["multiccd_enabled"],
-            "force_semantics": parameters["force_semantics"],
-            "force_scale": parameters["force_scale"],
-            "parameter_scale_conversion": parameters["parameter_scale_conversion"],
-            "swept_parameter": swept_parameter,
-            "swept_value": parameters["swept_value"],
-            "sensor_noise_seed": int(parameters["sensor_noise_seed"]),
-            "run_directory": str(run.path.relative_to(study_dir)),
-            "passed": result.passed,
-            **targets,
-            **_force_parameters(profile_path),
-            **asdict(result),
-            **_contact_diagnostics(run.path),
-        }
-        return ConditionExecution(
-            row=row,
-            run_directory=str(row["run_directory"]),
-            passed=result.passed,
-        )
+    execute = partial(_execute_condition, config=config, study_dir=study_dir)
 
     def aggregate_and_persist(
         rows: list[dict[str, object]],
@@ -811,4 +820,5 @@ def run_study(
         render=render,
         initial_artifacts=(study_dir / "study.yaml", resolved_config, *additional_artifacts),
         legacy_manifest_fields=manifest_fields,
+        workers=workers,
     )

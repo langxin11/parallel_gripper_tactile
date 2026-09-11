@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping, Sequence
 from dataclasses import asdict
 from datetime import UTC, datetime
+from functools import partial
 import json
 import math
 from pathlib import Path
@@ -205,6 +206,79 @@ def build_plan(
     )
 
 
+def _execute_condition(
+    condition: StudyCondition,
+    *,
+    config: FrictionEstimationLocalSlipStudyConfig,
+    resolved_profile: GripperProfile | None,
+    study_dir: Path,
+) -> ConditionExecution:
+    """在独立进程中执行一个局部滑移验证条件。"""
+    parameters = condition.parameters
+    task_path = Path(str(parameters["task_path"]))
+    seed = int(parameters["sensor_noise_seed"])
+    task = FrictionEstimationTask.load(task_path)
+    run, result = execute_friction_estimation(
+        profile=config.profile,
+        resolved_profile=resolved_profile,
+        task_path=task_path,
+        estimation_task=task,
+        output_root=study_dir / "runs",
+        run_prefix=condition.condition_id,
+        sensor_noise_seed=seed,
+    )
+    local_estimates = [
+        value
+        for value in (
+            result.local_left_friction_estimate,
+            result.local_right_friction_estimate,
+        )
+        if value is not None
+    ]
+    local_detected = result.local_slip_detection_time_s is not None
+    local_estimate = min(local_estimates) if local_estimates else None
+    local_estimate_ratio = (
+        None if local_estimate is None else local_estimate / task.friction_coefficient
+    )
+    expect_local_slip = bool(parameters["expect_local_slip"])
+    event_expectation_passed = local_detected == expect_local_slip
+    control_candidate_qualified = bool(
+        expect_local_slip
+        and local_estimate_ratio is not None
+        and _CONTROL_CANDIDATE_RATIO_BOUNDS[0]
+        <= local_estimate_ratio
+        <= _CONTROL_CANDIDATE_RATIO_BOUNDS[1]
+    )
+    lead = (
+        None
+        if result.probe_detection_time_s is None or result.local_slip_detection_time_s is None
+        else result.probe_detection_time_s - result.local_slip_detection_time_s
+    )
+    validation_passed = event_expectation_passed and (
+        control_candidate_qualified if expect_local_slip else True
+    )
+    row = {
+        "scenario": task.name,
+        "task": str(task_path),
+        "sensor_noise_seed": seed,
+        "expect_local_slip": expect_local_slip,
+        "local_slip_detected": local_detected,
+        "event_expectation_passed": event_expectation_passed,
+        "control_candidate_qualified": control_candidate_qualified,
+        "validation_passed": validation_passed,
+        "local_estimate": local_estimate,
+        "local_estimate_ratio": local_estimate_ratio,
+        "detection_lead_s": lead,
+        "run_directory": str(run.path.relative_to(study_dir)),
+        **asdict(result),
+    }
+    return ConditionExecution(
+        row=row,
+        run_directory=str(row["run_directory"]),
+        passed=validation_passed,
+    )
+
+
 def run_study(
     config: FrictionEstimationLocalSlipStudyConfig,
     *,
@@ -214,6 +288,7 @@ def run_study(
     study_plan: StudyPlan | None = None,
     additional_artifacts: Sequence[Path] = (),
     lifecycle_manifest_fields: Mapping[str, object] | None = None,
+    workers: int = 1,
 ) -> Path:
     """通过公共生命周期执行整个 protocol，并返回 study 父目录。"""
     study_dir = (
@@ -234,70 +309,12 @@ def run_study(
         else require_matching_study_plan(expected_plan, study_plan)
     )
 
-    def execute(condition: StudyCondition) -> ConditionExecution:
-        parameters = condition.parameters
-        task_path = Path(str(parameters["task_path"]))
-        seed = int(parameters["sensor_noise_seed"])
-        task = FrictionEstimationTask.load(task_path)
-        run, result = execute_friction_estimation(
-            profile=config.profile,
-            resolved_profile=resolved_profile,
-            task_path=task_path,
-            estimation_task=task,
-            output_root=study_dir / "runs",
-            run_prefix=condition.condition_id,
-            sensor_noise_seed=seed,
-        )
-        local_estimates = [
-            value
-            for value in (
-                result.local_left_friction_estimate,
-                result.local_right_friction_estimate,
-            )
-            if value is not None
-        ]
-        local_detected = result.local_slip_detection_time_s is not None
-        local_estimate = min(local_estimates) if local_estimates else None
-        local_estimate_ratio = (
-            None if local_estimate is None else local_estimate / task.friction_coefficient
-        )
-        expect_local_slip = bool(parameters["expect_local_slip"])
-        event_expectation_passed = local_detected == expect_local_slip
-        control_candidate_qualified = bool(
-            expect_local_slip
-            and local_estimate_ratio is not None
-            and _CONTROL_CANDIDATE_RATIO_BOUNDS[0]
-            <= local_estimate_ratio
-            <= _CONTROL_CANDIDATE_RATIO_BOUNDS[1]
-        )
-        lead = (
-            None
-            if result.probe_detection_time_s is None or result.local_slip_detection_time_s is None
-            else result.probe_detection_time_s - result.local_slip_detection_time_s
-        )
-        validation_passed = event_expectation_passed and (
-            control_candidate_qualified if expect_local_slip else True
-        )
-        row = {
-            "scenario": task.name,
-            "task": str(task_path),
-            "sensor_noise_seed": seed,
-            "expect_local_slip": expect_local_slip,
-            "local_slip_detected": local_detected,
-            "event_expectation_passed": event_expectation_passed,
-            "control_candidate_qualified": control_candidate_qualified,
-            "validation_passed": validation_passed,
-            "local_estimate": local_estimate,
-            "local_estimate_ratio": local_estimate_ratio,
-            "detection_lead_s": lead,
-            "run_directory": str(run.path.relative_to(study_dir)),
-            **asdict(result),
-        }
-        return ConditionExecution(
-            row=row,
-            run_directory=str(row["run_directory"]),
-            passed=validation_passed,
-        )
+    execute = partial(
+        _execute_condition,
+        config=config,
+        resolved_profile=resolved_profile,
+        study_dir=study_dir,
+    )
 
     def aggregate_and_persist(
         rows: list[dict[str, object]],
@@ -355,4 +372,5 @@ def run_study(
         render=render,
         initial_artifacts=(study_dir / "study.yaml", resolved_config, *additional_artifacts),
         legacy_manifest_fields=manifest_fields,
+        workers=workers,
     )
