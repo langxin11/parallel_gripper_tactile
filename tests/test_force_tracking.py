@@ -15,7 +15,6 @@ from parallel_gripper_tactile.experiments.force_tracking import (
     ForceWaypoint,
     _downsample_force_tracking_rows,
     _evaluate_tracking,
-    _force_tracking_plot_layout,
     _plot_force_tracking,
     configure_force_controller,
     run_force_tracking,
@@ -70,18 +69,11 @@ def _plot_rows() -> list[dict[str, float | str]]:
     return rows
 
 
-@pytest.mark.parametrize(
-    ("interpolation", "expected_layout"),
-    [
-        ("hold", "step_transient"),
-        ("linear", "ramp_hysteresis"),
-        ("smoothstep", "waypoint_error"),
-    ],
-)
+@pytest.mark.parametrize("interpolation", ["hold", "linear", "smoothstep"])
 def test_force_tracking_plot_is_task_aware_and_writes_one_png(
-    tmp_path: Path, interpolation: str, expected_layout: str, fast_plot_render: None
+    tmp_path: Path, interpolation: str, fast_plot_render: None
 ) -> None:
-    """三类任务分别选择瞬态、滞后和 waypoint 误差诊断，并只输出 PNG。"""
+    """三类任务共用单跟踪面板，兼容显式单图 API。"""
     task = ForceTrackingTask(
         schema_version=1,
         name=f"{interpolation}_plot",
@@ -96,7 +88,6 @@ def test_force_tracking_plot_is_task_aware_and_writes_one_png(
     )
     output = tmp_path / f"{interpolation}.png"
 
-    assert _force_tracking_plot_layout(task) == expected_layout
     _plot_force_tracking(output, _plot_rows(), task=task)
 
     assert output.is_file()
@@ -104,7 +95,7 @@ def test_force_tracking_plot_is_task_aware_and_writes_one_png(
 
 
 def test_force_tracking_publication_plot_preserves_high_resolution(tmp_path: Path) -> None:
-    """代表性 Step 图应保留跨栏宽度和 600 DPI 出版契约。"""
+    """代表性 Step 图应保留单栏宽度和 600 DPI 出版契约。"""
     task = ForceTrackingTask(
         schema_version=1,
         name="publication_plot",
@@ -121,7 +112,7 @@ def test_force_tracking_publication_plot_preserves_high_resolution(tmp_path: Pat
     _plot_force_tracking(output, _plot_rows(), task=task)
 
     with Image.open(output) as image:
-        assert image.size[0] >= 4_000
+        assert image.size[0] == 2_100
         assert image.info["dpi"][0] == pytest.approx(600.0, abs=0.1)
 
 
@@ -388,13 +379,13 @@ def test_force_tracking_run_writes_dynamic_reference_trace(
     plotted_rows: list[dict[str, float | str]] = []
 
     def capture_plot(
-        path: Path, rows: list[dict[str, float | str]], *, task: ForceTrackingTask
+        path: Path, rows: list[dict[str, float | str]], *, task: ForceTrackingTask, **kwargs
     ) -> None:
         """记录直接 API 的完整绘图输入，并继续生成输出工件。"""
         assert path == output_plot
         assert task.name == "short_force_track"
         plotted_rows.extend(rows)
-        _plot_force_tracking(path, rows, task=task)
+        _plot_force_tracking(path, rows, task=task, **kwargs)
 
     monkeypatch.setattr(force_tracking_module, "_plot_force_tracking", capture_plot)
 
@@ -424,9 +415,24 @@ def test_force_tracking_run_writes_dynamic_reference_trace(
     assert parquet.metadata.row_group(0).column(0).compression == "ZSTD"
     schema = parquet.schema_arrow
     assert schema.metadata is not None
-    assert schema.metadata[b"pgt.trace.schema_version"] == b"1"
+    assert schema.metadata[b"pgt.trace.schema_version"] == b"2"
     assert schema.metadata[b"pgt.trace.compression"] == b"zstd"
     assert schema.names == list(rows[0])
+    assert schema.field("stiffness_valid").type == "bool"
+    for row in rows:
+        assert float(row["control_time_s"]) <= float(row["command_time_s"]) < float(row["time_s"])
+        assert float(row["desired_position_rad"]) == float(row["control"])
+        assert float(row["commanded_torque_n_m"]) == float(row["motor_torque_n_m"])
+        for side in ("left", "right"):
+            assert float(row[f"{side}_tangential_force_n"]) == pytest.approx(
+                math.hypot(float(row[f"measured_{side}_fx"]), float(row[f"measured_{side}_fy"]))
+            )
+            for component in ("fx", "fy", "fz"):
+                assert sum(
+                    float(value)
+                    for key, value in row.items()
+                    if key.startswith(f"{side}_taxel_{component}_")
+                ) == pytest.approx(float(row[f"measured_{side}_{component}"]))
     assert schema.field("phase").type == "string"
     assert schema.field("multiccd_enabled").type == "bool"
     assert schema.field("stiffness_position_limited").type == "bool"

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 import csv
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, replace
 import math
 from pathlib import Path
 import time
@@ -22,7 +22,6 @@ from ..control import (
     ForceTrackingController,
     NormalForceController,
 )
-from ..visualization import paper_figsize, save_publication_figure, science_pyplot
 from ..config.profiles import (
     STIFFNESS_ESTIMATOR_METHODS,
     AdrcControl,
@@ -372,15 +371,6 @@ class ForceTrackingResult:
         return self.simulation_stable and math.isfinite(self.rmse_n)
 
 
-def _force_tracking_plot_layout(task: ForceTrackingTask) -> str:
-    """返回与目标曲线实验目的匹配的单次图布局名称。"""
-    if task.reference.interpolation == "hold":
-        return "step_transient"
-    if task.reference.interpolation == "linear":
-        return "ramp_hysteresis"
-    return "waypoint_error"
-
-
 def _tracking_start_time(rows: list[dict[str, float | str]]) -> float:
     """返回 trace 中参考跟踪阶段的绝对起始时间。"""
     for row in rows:
@@ -394,174 +384,18 @@ def _plot_force_tracking(
     rows: list[dict[str, float | str]],
     *,
     task: ForceTrackingTask | None = None,
+    metrics: dict | None = None,
+    profile: GripperProfile | None = None,
 ) -> None:
-    """按目标曲线类型绘制力跟踪诊断。"""
-    if not rows:
-        raise ValueError("cannot plot an empty force tracking trace")
-    plt = science_pyplot()
-    times = [float(row["time_s"]) for row in rows]
-    target = [float(row["target_normal_force_n"]) for row in rows]
-    filtered = [float(row["filtered_normal_force_n"]) for row in rows]
-    measured = [float(row["measured_normal_force_n"]) for row in rows]
-    error = [float(row["tracking_error_n"]) for row in rows]
-    torque = [float(row["motor_torque_n_m"]) for row in rows]
-    stiffness = [float(row["estimated_contact_stiffness_n_per_m"]) for row in rows]
-    stiffness = [math.nan if value <= 0 else value for value in stiffness]
-    colors = {"black": "#000000", "blue": "#0072B2", "orange": "#D55E00", "green": "#009E73"}
-    layout = _force_tracking_plot_layout(task) if task is not None else "waypoint_error"
-    figure = plt.figure(figsize=paper_figsize(8.0), layout="constrained")
-    grid = figure.add_gridspec(3, 2, height_ratios=(1.25, 1.0, 0.9))
-    force_axis = figure.add_subplot(grid[0, :])
-    error_axis = figure.add_subplot(grid[1, 0], sharex=force_axis)
-    task_axis = figure.add_subplot(grid[1, 1])
-    torque_axis = figure.add_subplot(grid[2, 0], sharex=force_axis)
-    stiffness_axis = figure.add_subplot(grid[2, 1], sharex=force_axis)
-    force_axis.plot(times, target, color=colors["black"], label="Target", linewidth=1.3)
-    force_axis.plot(times, filtered, color=colors["blue"], label="Filtered", linewidth=1.3)
-    force_axis.plot(
-        times, measured, color=colors["orange"], label="Measured", linewidth=0.8, alpha=0.7
-    )
-    force_label = (
-        "Total normal force (N)"
-        if rows[0].get("force_semantics") == "total"
-        else "Mean side normal force (N)"
-    )
-    force_axis.set_ylabel(force_label)
-    force_axis.set_title(f"Force tracking: {layout.replace('_', ' ')}")
-    force_axis.legend(loc="best", ncol=3, frameon=False)
+    """兼容直接 API 的单图路径，绘制统一力跟踪面板。"""
+    from ..visualization.force_tracking import render_tracking_plot
 
-    error_axis.axhline(0.0, color=colors["black"], linewidth=0.7)
-    error_axis.plot(times, error, color=colors["orange"], linewidth=1.0)
-    error_axis.fill_between(times, error, 0.0, color=colors["orange"], alpha=0.2)
-    error_axis.set_ylabel("Tracking error (N)")
-    error_axis.set_xlabel("Time (s)")
-
-    tracking_start_s = _tracking_start_time(rows)
+    config = {}
     if task is not None:
-        waypoint_times = [tracking_start_s + waypoint.t_s for waypoint in task.reference.waypoints]
-        for index, (waypoint, event_time) in enumerate(
-            zip(task.reference.waypoints[1:], waypoint_times[1:], strict=True), start=1
-        ):
-            for axis in (force_axis, error_axis, torque_axis, stiffness_axis):
-                axis.axvline(event_time, color="#666666", linestyle="--", linewidth=0.7, alpha=0.75)
-            if layout == "step_transient":
-                previous = task.reference.waypoints[index - 1]
-                delta_force = waypoint.force_n - previous.force_n
-                if not math.isclose(delta_force, 0.0, abs_tol=1e-12):
-                    force_axis.annotate(
-                        f"ΔF={delta_force:+.1f} N",
-                        xy=(event_time, waypoint.force_n),
-                        xytext=(3, 8 if delta_force > 0 else -8),
-                        textcoords="offset points",
-                        va="bottom" if delta_force > 0 else "top",
-                        fontsize=8,
-                        color="#444444",
-                    )
-                    window_end = min(event_time + 0.2, times[-1])
-                    error_axis.axvspan(event_time, window_end, color=colors["orange"], alpha=0.12)
-            elif layout == "waypoint_error":
-                force_axis.annotate(
-                    f"W{index}",
-                    xy=(event_time, waypoint.force_n),
-                    xytext=(3, -8),
-                    textcoords="offset points",
-                    va="top",
-                    fontsize=8,
-                    color="#444444",
-                )
-
-    if layout == "step_transient":
-        task_axis.set_title("Step transient error")
-        tracking_indices = [
-            index for index, row in enumerate(rows) if row.get("phase") == "track_reference"
-        ]
-        task_axis.plot(
-            [times[index] for index in tracking_indices],
-            [abs(error[index]) for index in tracking_indices],
-            color=colors["orange"],
-            linewidth=1.1,
-        )
-        task_axis.set_ylabel("|error| (N)")
-        task_axis.set_xlabel("Time (s)")
-        if task is not None:
-            for previous, waypoint in zip(task.reference.waypoints, task.reference.waypoints[1:]):
-                if math.isclose(waypoint.force_n, previous.force_n, abs_tol=1e-12):
-                    continue
-                event_time = tracking_start_s + waypoint.t_s
-                task_axis.axvline(event_time, color="#666666", linestyle="--", linewidth=0.7)
-    elif layout == "ramp_hysteresis":
-        task_axis.set_title("Loading / unloading lag")
-        tracking_indices = [
-            index for index, row in enumerate(rows) if row.get("phase") == "track_reference"
-        ]
-        if len(tracking_indices) >= 2:
-            start, stop = tracking_indices[0], tracking_indices[-1] + 1
-            seen_directions: set[str] = set()
-            for index in range(start, stop - 1):
-                direction = target[index + 1] - target[index]
-                color = colors["green"] if direction >= 0 else colors["orange"]
-                label = "Loading" if direction >= 0 else "Unloading"
-                task_axis.plot(
-                    target[index : index + 2],
-                    filtered[index : index + 2],
-                    color=color,
-                    linewidth=1.2,
-                    label=label if label not in seen_directions else None,
-                )
-                seen_directions.add(label)
-            limits = (
-                min(target[start:stop] + filtered[start:stop]),
-                max(target[start:stop] + filtered[start:stop]),
-            )
-            task_axis.plot(
-                limits, limits, color="#666666", linestyle="--", linewidth=0.8, label="Ideal"
-            )
-        task_axis.set_xlabel("Target force (N)")
-        task_axis.set_ylabel("Filtered force (N)")
-        task_axis.legend(loc="best", frameon=False)
-    else:
-        task_axis.set_title("Waypoint tracking error")
-        if task is not None:
-            waypoint_errors: list[float] = []
-            waypoint_labels: list[str] = []
-            tracking_indices = [
-                index for index, row in enumerate(rows) if row.get("phase") == "track_reference"
-            ]
-            for index, waypoint in enumerate(task.reference.waypoints):
-                nearest = min(
-                    tracking_indices or range(len(rows)),
-                    key=lambda row_index: abs(
-                        float(rows[row_index]["tracking_time_s"]) - waypoint.t_s
-                    ),
-                )
-                waypoint_errors.append(error[nearest])
-                waypoint_labels.append(f"W{index}")
-            task_axis.axhline(0.0, color=colors["black"], linewidth=0.7)
-            task_axis.scatter(
-                range(len(waypoint_errors)), waypoint_errors, color=colors["orange"], zorder=2
-            )
-            task_axis.vlines(
-                range(len(waypoint_errors)),
-                0.0,
-                waypoint_errors,
-                color=colors["orange"],
-                linewidth=1.0,
-            )
-            task_axis.set_xticks(range(len(waypoint_labels)), waypoint_labels)
-        task_axis.set_ylabel("Error (N)")
-        task_axis.set_xlabel("Reference waypoint")
-
-    torque_axis.plot(times, torque, color=colors["green"], linewidth=1.2)
-    torque_axis.set_ylabel("Motor torque (N m)")
-    torque_axis.set_xlabel("Time (s)")
-    stiffness_axis.plot(times, stiffness, color=colors["blue"], linewidth=1.2)
-    stiffness_axis.set_ylabel("K estimate (N/m)")
-    stiffness_axis.set_xlabel("Time (s)")
-    for axis in (force_axis, error_axis, task_axis, torque_axis, stiffness_axis):
-        axis.grid(True, linewidth=0.3, alpha=0.5)
-    path.parent.mkdir(parents=True, exist_ok=True)
-    save_publication_figure(figure, path)
-    plt.close(figure)
+        config["task"] = task.model_dump(mode="json")
+    if profile is not None:
+        config["profile"] = profile.model_dump(mode="json")
+    render_tracking_plot(path, rows, metrics=metrics, config=config)
 
 
 def _validate_trace_sampling(
@@ -691,6 +525,7 @@ def _write_force_tracking_parquet(
         "torque_adrc_rate_limited",
         "torque_adrc_amplitude_limited",
         "stiffness_position_limited",
+        "stiffness_valid",
     )
     parquet_rows = [
         {
@@ -701,7 +536,7 @@ def _write_force_tracking_parquet(
     ]
     table = pa.Table.from_pylist(parquet_rows)
     metadata = dict(table.schema.metadata or {})
-    metadata[b"pgt.trace.schema_version"] = b"1"
+    metadata[b"pgt.trace.schema_version"] = b"2"
     metadata[b"pgt.trace.compression"] = b"zstd"
     metadata[b"pgt.trace.sample_period_s"] = (
         b"full" if trace_sample_period_s is None else f"{trace_sample_period_s:.9g}".encode()
@@ -865,11 +700,13 @@ def run_force_tracking(
     render_fps: float = 30.0,
     realtime_factor: float = 1.0,
     on_frame: FrameCallback | None = None,
+    on_result: Callable[[list[dict[str, float | str]], ForceTrackingResult], None] | None = None,
 ) -> ForceTrackingResult:
     """运行两阶段目标法向力跟踪测试。
 
     当传入 ``on_frame`` 时，仿真在每 ``1/render_fps`` 秒仿真时间回调一次
     最新采样行与模型/数据快照，供离屏录制脚本叠加实时曲线，不改变物理与产物。
+    ``on_result`` 在指标计算后接收完整频率 trace，由调用方完成绘图与产物登记。
     """
     profile = (
         validate_resolved_profile(profile_path)
@@ -927,12 +764,16 @@ def run_force_tracking(
     cube_joint_id = model.joint(CUBE_JOINT_NAME).id
     cube_geom_id = model.geom(f"{CUBE_PREFIX}target_cube_geom").id
     cube_dof = model.jnt_dofadr[cube_joint_id]
+    drive_joint_id = model.joint(f"{GRIPPER_PREFIX}{profile.actuator}").id
+    drive_dof = int(model.jnt_dofadr[drive_joint_id])
     taxel_geom_sides = _taxel_geom_sides(model, profile)
     contact_time_s: float | None = None
     tracking_start_time_s: float | None = None
     support_released = False
     simulation_stable = True
     force_command = None
+    control_time_s = 0.0
+    command_time_s = 0.0
     rows: list[dict[str, float | str]] = []
     max_duration = (
         task.approach.timeout_s
@@ -997,6 +838,8 @@ def run_force_tracking(
             )
             control_dt = control_timer.pop_due(time_s)
             if control_dt is not None:
+                control_time_s = time_s
+                command_time_s = time_s
                 feedback_tactile = reader.read(data)
                 feedback_measurement = _tactile_measurement(
                     feedback_tactile,
@@ -1040,6 +883,7 @@ def run_force_tracking(
                 # 统一对比与导纳基线都在物理步持续执行上一 MIT 请求，
                 # 外环状态与控制律仍只在控制时钟触发。
                 force_command = replace(force_command, mit=controller.apply_held_command(data))
+                command_time_s = time_s
             motor_command = force_command.mit
             mujoco.mj_step(model, data)
             if (
@@ -1070,6 +914,11 @@ def run_force_tracking(
             rows.append(
                 {
                     "time_s": float(data.time),
+                    "control_time_s": control_time_s,
+                    "command_time_s": command_time_s,
+                    "reference_start_time_s": (
+                        math.nan if tracking_start_time_s is None else tracking_start_time_s
+                    ),
                     "phase": phase,
                     "force_semantics": force_semantics,
                     "multiccd_enabled": str(multiccd_enabled).lower(),
@@ -1087,9 +936,24 @@ def run_force_tracking(
                     ),
                     "tracking_error_n": force_command.force_error_n,
                     "control": motor_command.target_position,
+                    "desired_position_rad": motor_command.target_position,
+                    "desired_velocity_rad_s": motor_command.target_velocity,
                     "drive_position_rad": motor_command.position,
                     "drive_velocity_rad_s": motor_command.velocity,
                     "motor_torque_n_m": motor_command.torque,
+                    "commanded_torque_n_m": motor_command.torque,
+                    "actuator_torque_n_m": float(data.qfrc_actuator[drive_dof]),
+                    "stiffness_valid": str(force_command.stiffness_valid).lower(),
+                    "admittance_displacement_m": (
+                        force_command.admittance_displacement_m
+                        if force_command.admittance_displacement_m is not None
+                        else math.nan
+                    ),
+                    "admittance_velocity_m_s": (
+                        force_command.admittance_velocity_m_s
+                        if force_command.admittance_velocity_m_s is not None
+                        else math.nan
+                    ),
                     "force_position_adjustment_rad": force_command.position_adjustment,
                     "pid_position_adjustment_rad": force_command.pid_position_adjustment,
                     "stiffness_position_adjustment_rad": (
@@ -1180,6 +1044,22 @@ def run_force_tracking(
                     "measured_right_fx": float(tactile_measurement.right_force[0]),
                     "measured_right_fy": float(tactile_measurement.right_force[1]),
                     "measured_right_fz": float(tactile_measurement.right_force[2]),
+                    "left_tangential_force_n": float(
+                        np.linalg.norm(tactile_measurement.left_force[:2])
+                    ),
+                    "right_tangential_force_n": float(
+                        np.linalg.norm(tactile_measurement.right_force[:2])
+                    ),
+                    **{
+                        f"{side}_taxel_{component}_{row}_{col}": float(values[axis, row, col])
+                        for side, values in (
+                            ("left", tactile_measurement.left),
+                            ("right", tactile_measurement.right),
+                        )
+                        for axis, component in enumerate(("fx", "fy", "fz"))
+                        for row in range(values.shape[1])
+                        for col in range(values.shape[2])
+                    },
                     "taxel_normal_force_n": capacity.normal_force_n,
                     "left_taxel_normal_force_n": capacity.left_normal_force_n,
                     "right_taxel_normal_force_n": capacity.right_normal_force_n,
@@ -1227,9 +1107,6 @@ def run_force_tracking(
             trace_sample_period_s=trace_sample_period_s,
             trace_event_window_s=trace_event_window_s,
         )
-    if output_plot is not None and rows:
-        _plot_force_tracking(output_plot, rows, task=task)
-
     (
         rmse_n,
         mae_n,
@@ -1253,7 +1130,7 @@ def run_force_tracking(
         interpolation=task.reference.interpolation,
         ignore_initial_s=task.metrics.ignore_initial_s,
     )
-    return ForceTrackingResult(
+    result = ForceTrackingResult(
         contact_time_s=math.nan if contact_time_s is None else contact_time_s,
         tracking_start_time_s=math.nan if tracking_start_time_s is None else tracking_start_time_s,
         tracking_duration_s=task.reference.duration_s,
@@ -1271,6 +1148,11 @@ def run_force_tracking(
         simulation_stable=simulation_stable,
         stiffness_position_limit_ratio=stiffness_position_limit_ratio,
     )
+    if output_plot is not None and rows:
+        _plot_force_tracking(output_plot, rows, task=task, metrics=asdict(result), profile=profile)
+    if on_result is not None:
+        on_result(rows, result)
+    return result
 
 
 __all__ = [
