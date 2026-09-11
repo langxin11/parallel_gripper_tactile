@@ -26,6 +26,7 @@ from ..config.profiles import (
 )
 from ..artifacts import RunDirectory
 from ..scenes.custom import ObjectContactModel, ObjectMaterial
+from ..visualization.force_tracking import render_run_artifacts
 
 
 def execute_force_tracking(
@@ -51,6 +52,7 @@ def execute_force_tracking(
     viewer: bool = False,
     render_fps: float = 30.0,
     realtime_factor: float = 1.0,
+    tactile_detail: bool = False,
 ) -> tuple[RunDirectory, ForceTrackingResult]:
     """运行一次完整力跟踪，并返回其目录与结构化结果。"""
     task = tracking_task or ForceTrackingTask.load(task_path)
@@ -115,7 +117,8 @@ def execute_force_tracking(
             "sensor_noise_seed": sensor_noise_seed,
             "trace_format": "parquet",
             "trace_compression": "zstd",
-            "trace_schema_version": 1,
+            "trace_schema_version": 2,
+            "tactile_detail": tactile_detail,
             "trace_sample_period_s": resolved_trace_sample_period_s,
             "trace_event_window_s": trace_event_window_s,
             "torque_adrc_override": (
@@ -171,7 +174,8 @@ def execute_force_tracking(
                         "realtime_factor": realtime_factor,
                         "trace_format": "parquet",
                         "trace_compression": "zstd",
-                        "trace_schema_version": 1,
+                        "trace_schema_version": 2,
+                        "tactile_detail": tactile_detail,
                         "trace_sample_period_s": resolved_trace_sample_period_s,
                         "trace_event_window_s": trace_event_window_s,
                         "torque_adrc_override": (
@@ -189,12 +193,30 @@ def execute_force_tracking(
         )
         run.register_artifact(effective_parameters_path)
         parquet_path = run.artifact_path("trace.parquet")
-        plot_path = run.artifact_path("plot.png")
+        metrics_path = run.artifact_path("metrics.json")
+        plot_config = json.loads(effective_parameters_path.read_text(encoding="utf-8"))
+
+        def render_result(rows: list[dict[str, float | str]], result: ForceTrackingResult) -> None:
+            """使用统一指标和未降采样轨迹绘图，并登记实际产物。"""
+            metrics = asdict(result)
+            metrics_path.write_text(
+                json.dumps(metrics, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+            )
+            run.register_artifact(metrics_path)
+            for path in render_run_artifacts(
+                trace=rows,
+                metrics=metrics,
+                config=plot_config,
+                output_dir=run.path / "plots",
+                tactile_detail=tactile_detail,
+            ):
+                run.register_artifact(path)
+
         result = run_force_tracking(
             configured,
             task=task,
             output_parquet=parquet_path,
-            output_plot=plot_path,
+            on_result=render_result,
             trace_sample_period_s=resolved_trace_sample_period_s,
             trace_event_window_s=trace_event_window_s,
             viewer=viewer,
@@ -210,8 +232,6 @@ def execute_force_tracking(
             torque_adrc_override=torque_adrc_override,
         )
         run.register_artifact(parquet_path)
-        run.register_artifact(plot_path)
-        metrics_path = run.artifact_path("metrics.json")
         metrics_path.write_text(
             json.dumps(asdict(result), indent=2, sort_keys=True) + "\n", encoding="utf-8"
         )

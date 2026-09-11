@@ -121,10 +121,9 @@ def test_runner_does_not_reload_profile_when_final_profile_is_supplied(
     def forbidden_load(path: Path):
         raise AssertionError(f"unexpected reload: {path}")
 
-    def fake_run(profile: object, *, output_parquet: Path, output_plot: Path, **kwargs: object):
+    def fake_run(profile: object, *, output_parquet: Path, **kwargs: object):
         seen["profile"] = profile
         output_parquet.write_bytes(b"parquet")
-        output_plot.write_bytes(b"plot")
         return _result()
 
     monkeypatch.setattr(force_tracking_runner, "load_profile", forbidden_load)
@@ -154,9 +153,8 @@ def test_runner_snapshots_the_supplied_composed_profile(
     """组合入口保存最终 profile，而非误把平台片段保存为完整 profile。"""
     resolved = _resolved()
 
-    def fake_run(profile: object, *, output_parquet: Path, output_plot: Path, **kwargs: object):
+    def fake_run(profile: object, *, output_parquet: Path, **kwargs: object):
         output_parquet.write_bytes(b"parquet")
-        output_plot.write_bytes(b"plot")
         return _result()
 
     monkeypatch.setattr(force_tracking_runner, "run_force_tracking", fake_run)
