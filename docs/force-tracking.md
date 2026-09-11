@@ -215,7 +215,9 @@ waypoint 的 `t_s` 应严格递增，`force_n` 应为非负值。任务总跟踪
 | `task.yaml` | 本次运行使用的 force tracking task 快照。 |
 | `effective_parameters.json` | 解析后的完整 profile、task 与本次实际生效的运行时覆盖。 |
 | `trace.parquet` | 使用 Zstd 压缩、事件感知降采样的状态、目标力、测量力和控制量。 |
-| `plot.png` | 600 DPI 任务诊断图。 |
+| `plots/tracking.png` | 600 DPI 目标力与滤波力单面板 PNG。 |
+| `plots/tactile.png` | 600 DPI 双侧法向力与切向力 PNG。 |
+| `plots/controller.png` | 600 DPI 关节、力矩及可用控制分解 PNG。 |
 | `metrics.json` | 跟踪误差、饱和比例、接触时间等摘要指标。 |
 | `manifest.json` | 运行命令、时间戳和产物索引。 |
 
@@ -228,11 +230,31 @@ profile、task 等人工输入继续采用 YAML。`effective_parameters.json` �
 需要覆盖默认策略时，可使用 `--trace-period` 和 `--event-window`；采样周期必须不小于
 且为任务控制周期的整数倍，设置为控制周期等价于全频记录常规区段。
 
-单次图的公共面板包括目标/测量/滤波力、跟踪误差、力矩和在线刚度；任务专用面板为：
+单次 force-track runner 将完整频率行通过 `on_result(full_rows, result)` 回调交给
+`visualization/force_tracking.py`。默认只生成三张图：`tracking.png` 为 `F_ref` 与 `F_filt`
+（缺失时回退 `meas`），`tactile.png` 为 `F_{nL}`／`F_{nR}` 与 `F_{tL}`／`F_{tR}`，
+`controller.png` 为 `q_des`／`q`、`dq_des`／`dq`、`tau_cmd` 与 MuJoCo 执行的 `tau_act`。
+存在有效字段时，控制器图还加入 `K_hat`、导纳 `x_a`／`dx_a`、ADRC 扰动和位置修正分解；
+缺字段按 capability 省略。所有轴都标明物理量和单位（例如 `t (s)`），使用 SciencePlots 与
+MathText；waypoint 只在线性参考曲线上放置 marker，关键接触事件才使用细灰色竖线。默认不生成
+误差、滞回、limits 或 state 面板。PNG 为 600 DPI，默认不自动生成 PDF。
 
-- Step/hold：标出阶跃时刻和短时瞬态窗口，展示绝对瞬态误差；
-- Ramp/linear：用目标力—滤波力加载/卸载曲线检查跟踪滞后与回差；
-- Mixed/Smoothstep：逐 waypoint 展示误差，便于定位复杂参考中的局部失配。
+可用以下命令从既有 run 重绘。命令优先读取 `trace.parquet`，不存在时回退 `trace.csv`；指标始终
+读取原 `metrics.json`，不从降采样数据重算。`effective_parameters.json` 优先，旧 `task.yaml` 可用；
+若只有旧 profile，不把它当作有效参数，避免旧 profile 覆盖组合解析结果。
+
+<pre><code class="language-bash">
+uv run python scripts/research/render.py &lt;run-directory&gt; [--tactile-detail] \
+  [--format png|pdf|both] [--output-dir 新目录]
+</code></pre>
+
+默认重绘写入原 run 下独占的 `plots/replots/&lt;UTC&gt;-&lt;id&gt;/`，拒绝覆盖已存在的
+`--output-dir`，并写入独立的 `rendering_manifest.json`，登记 source hashes、实际图像和 notes。
+它不修改原 `trace`、`metrics` 或 run manifest，因此不会破坏 study 摘要。默认 `tactile_detail` 为关闭；
+开启后可为左右触觉阵列分别绘制空间对应的 3×3 taxel 小倍图，且只显示接触确认后的数据。每个面板
+对应一个 `T_{r,c}`：左轴显示 `Fz`，右轴显示 `Fx`／`Fy`；九个面板共享法向量程和切向量程，避免
+切向小信号被法向力淹没，也不采用各 taxel 独立缩放而破坏空间比较。PDF 仅在
+显式请求 `--format pdf` 或 `both` 时生成。
 
 `trace.parquet` 中最常用的列包括：
 
@@ -261,6 +283,30 @@ profile、task 等人工输入继续采用 YAML。`effective_parameters.json` �
 | `aperture_m` | 由开度公式计算的当前夹爪开口。 |
 | `stiffness_position_limit_rad` | 刚度感知变体本周期允许的 PID 位置目标最大变化量。 |
 | `stiffness_position_limited` | 本周期 PID 输出是否触及刚度感知动态边界。 |
+
+### 4.1 trace schema v2 与时间语义
+
+force-track trace schema 升级为版本 2。既有字段值、控制律和指标口径保持不变；其中
+`motor_torque_n_m` 明确表示命令力矩，不是实测力矩。新增字段包括：
+
+- `desired_position_rad`、`desired_velocity_rad_s`、`commanded_torque_n_m`、`actuator_torque_n_m`；后者来自
+  MuJoCo `qfrc_actuator`；
+- `stiffness_valid`、`admittance_displacement_m`、`admittance_velocity_m_s`；
+- `left/right_tangential_force_n`，以及 `left/right_taxel_fx/fy/fz_<row>_<col>`。
+
+`stiffness_valid` 表示本次接触 reset 后至少完成过一次有效估计更新；估计保持期间仍为有效，
+不表示当前周期有新更新，也不代表材料真值。未有效时绘图使用 NaN；缺字段时按 capability 省略，
+不伪造 `K_hat`。
+
+时间列按控制边界定义：`control_time_s` 是最近外环步之前的时间，用于目标、滤波力和估计器；
+`command_time_s` 是最近 MIT 命令应用步之前的时间，用于关节反馈和命令；
+`reference_start_time_s` 是精确任务起点；原 `time_s` 仍是物理步后的触觉时间。
+
+runner 参数 `tactile_detail=False`。逐 taxel 字段始终写入 trace；细节图可通过 Python runner 的
+`tactile_detail=True` 或重绘 CLI 的 `--tactile-detail` 开启。降采样不能恢复高频信息，指标仍在完整频率数据上统一计算。
+
+兼容的 Python `run_force_tracking(output_plot=path)` 调用仍保留；只有显式传入单个路径时才写出
+单张 tracking 图，不改变 runner 默认的三张图布局。
 
 ## 5. 指标解读
 

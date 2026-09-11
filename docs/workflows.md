@@ -189,6 +189,17 @@ done
 科学配置哈希和产物摘要；`execution.recovery_source` 只生成可恢复性报告，本阶段不会自动续跑。
 
 动态目标力跟踪任务的配置、两阶段流程和指标解读见[动态目标力跟踪](force-tracking.md)。
+[force-track](force-tracking.md) 单次运行默认登记 `plots/tracking.png`、`plots/tactile.png` 和
+`plots/controller.png`；既有其他实验的 `plot.png` 产物约定不变。需要从已有目录重绘时使用：
+
+<pre><code class="language-bash">
+uv run python scripts/research/render.py &lt;run-directory&gt; [--tactile-detail] \
+  [--format png|pdf|both] [--output-dir 新目录]
+</code></pre>
+
+重绘读取 Parquet（缺失时回退 CSV），指标沿用原 `metrics.json`，默认写入独占的
+`plots/replots/&lt;UTC&gt;-&lt;id&gt;/` 并登记独立 `rendering_manifest.json`；不会覆盖已有输出目录，也不修改原
+trace、metrics 或 run manifest。PDF 仅在显式请求时生成。
 [Oracle 抓取目标力调度](force-scheduling.md)说明已知摩擦系数下的目标力调度基线。
 控制算法对比、消融矩阵和项目分工见[控制算法对比与消融](control-comparison-ablation.md)。
 碰撞几何对照的结论和使用边界见[触觉读数约定](tactile-conventions.md#collision-geometry-conclusions)。

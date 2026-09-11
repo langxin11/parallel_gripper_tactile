@@ -106,7 +106,8 @@ sequenceDiagram
   R->>A: 快照 task
   R->>A: 写入解析后的有效参数与运行时覆盖
   R->>X: 传入已校验配置与产物路径
-  X-->>R: trace、plot 与结构化 metrics
+  X-->>R: 完整频率 trace 与结构化 metrics
+  R->>R: 调用独立绘图层生成 plots
   R->>A: 登记产物并 finalize manifest
   R-->>E: RunDirectory 与结果
 ```
@@ -122,7 +123,11 @@ outputs/<profile>/<experiment>/<UTC timestamp>-<id>/
 ├── trace.parquet
 ├── trace.csv       # discrete-force、force-schedule 与 friction-estimate
 ├── metrics.json
-├── plot.png
+├── plot.png         # 其他实验的单次图
+├── plots/           # force-track 的单次图
+│   ├── tracking.png
+│   ├── tactile.png
+│   └── controller.png
 └── video.mp4        # 仅请求录制时
 ```
 
@@ -160,8 +165,8 @@ outputs/studies/<study>/<UTC timestamp>-<id>/
 ```
 
 study 的 `summary` 与（适用时的）`aggregate` 同时输出 CSV 和 Parquet；diagnosis study 只输出 summary，
-不生成 aggregate。单次 run 的 `plot.png` 由 experiment 从本次完整频率 trace 生成，并根据
-Step、Ramp、Mixed/Smoothstep 任务分别突出瞬态、滞后和 waypoint 误差；跨 run 的统计图由
+不生成 aggregate。单次 force-track run 由 runner 的 `on_result(full_rows, result)` 回调调用纯绘图层，
+从本次完整频率 trace 生成三张单次图并登记实际文件；跨 run 的统计图由
 包内 study protocol 在所有条件结束后从 `summary`、`aggregate` 和子 run trace 生成 600 DPI PNG，
 并登记到 `study_manifest.json`。公共生命周期持有同一个有序 `StudyPlan`，在执行前写入
 `running` 状态并在每个条件后更新账本；最终状态为 `partial`、`completed` 或 `failed`。正常完成但
@@ -229,3 +234,11 @@ import-linter 契约机器检查：配置位于 `pyproject.toml` 的 `[tool.impo
 `science_pyplot()` 注册 SciencePlots 并应用统一中英文字体；`paper_figsize()` 提供单栏和跨栏宽度；
 `save_publication_figure()` 只按调用方请求的扩展名保存一份图像，保留画布尺寸并由调用方关闭图像。
 实验入口负责面板组织、标签与图例，runner 或 CLI 负责产物登记。视频叠加面板不属于论文图。
+
+force-track 单次绘图层位于 `visualization/force_tracking.py`：默认输出 600 DPI PNG，不自动生成 PDF。
+`tracking.png` 为目标力 `F_ref` 与滤波力 `F_filt`（缺失时回退 `meas`）单面板；`tactile.png`
+展示左右法向力 `F_{nL}`／`F_{nR}` 与切向模长 `F_{tL}`／`F_{tR}`；`controller.png` 展示
+`q_des`／`q`、`dq_des`／`dq`、命令力矩 `tau_cmd` 与 MuJoCo 执行力矩 `tau_act`，并按有效数据
+增加 `K_hat`、导纳 `x_a`／`dx_a`、ADRC 扰动和位置修正分解。坐标轴使用带单位的 MathText 标签
+（例如 `t (s)`），关键接触事件用细灰色竖线；waypoint 仅在线性参考曲线上使用 marker，不绘制
+事件竖线。默认不含误差、滞回、limits 或 state 面板。

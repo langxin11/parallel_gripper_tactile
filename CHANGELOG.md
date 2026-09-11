@@ -9,6 +9,12 @@
 
 ### 新增
 
+- 新增 force-track 单次绘图层与重绘命令：runner 通过 `on_result(full_rows, result)` 生成
+  `plots/tracking.png`、`plots/tactile.png` 和 `plots/controller.png`，并登记实际产物；新增
+  `scripts/research/render.py` 的独占重绘目录、`rendering_manifest.json`、Parquet 优先读取和可选逐 taxel 细节。
+- 新增 force-track trace schema v2 字段：期望位置／速度、命令与执行力矩、刚度有效性、导纳状态、双侧切向力和
+  逐 taxel 三轴力，并明确 `control_time_s`、`command_time_s`、`reference_start_time_s` 的边界时间语义。
+
 - 新增 DMgripper PID／二阶导纳统一对比入口：两者共享 PID Ramp 目标、4 ms 外环、MIT 增益、
   线性关节接近轨迹、双侧接触确认、50 ms 速度过渡及任一侧持续掉力后的重接近语义。
 - `dm-grasp-core` 新增双侧接触公共状态机，将接触确认、速度过渡与可配置的掉力判据从具体力控制律中解耦。
@@ -44,6 +50,13 @@
   `--dry-run` 参数：正式 study 统一串行执行，计划审阅改用默认的 `execution=study_plan`。
 
 ### 变更
+
+- DMgripper 单次力跟踪默认改为三张 600 DPI PNG：目标／滤波力、双侧触觉力和控制器状态；复用
+  SciencePlots／MathText，默认不再生成误差、滞回、limits 或 state 面板，也不自动生成 PDF。waypoint 仅在线性
+  参考曲线上使用 marker，关键接触事件使用细灰竖线；既有指标、控制律、study 级图表和其他实验的 `plot.png`
+  保持不变。
+- 可选逐 taxel 细节图改为空间对应的 3×3 小倍图；每个面板保留 `Fx`／`Fy`／`Fz` 原始单位，法向与
+  切向分别使用跨 taxel 统一量程，便于定位偏载和局部异常。
 
 - 绘图导出改为只保存调用方请求的一种格式；现有单次实验与正式 study 默认保留 600 DPI PNG，
   不再自动生成同名 PDF 或在 manifest 中重复登记。

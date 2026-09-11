@@ -154,7 +154,11 @@ outputs/<profile>/<experiment>/<UTC timestamp>-<id>/
 ├── trace.parquet              # force-track
 ├── trace.csv                  # discrete-force / force-schedule / friction-estimate
 ├── metrics.json
-├── plot.png
+├── plot.png                   # force-track 之外的单次实验
+├── plots/                     # force-track
+│   ├── tracking.png
+│   ├── tactile.png
+│   └── controller.png
 └── video.mp4
 ```
 
@@ -164,9 +168,9 @@ profile、task 以及本次实际生效的运行时覆盖，作为 force-track r
 使用 Zstd 压缩的 `trace.parquet`。普通控制器常规区段默认记录为 100 Hz，直接力矩 ADRC 记录为
 250 Hz；阶段切换、限幅状态变化和 waypoint 前后 0.2 s 仍保留完整控制频率。指标计算和绘图始终使用
 仿真中的完整频率数据，降采样只影响落盘 trace。读取接口仍兼容旧版 CSV API 和既有 `trace.csv` 历史产物。
-单次运行默认生成一份 600 DPI PNG；Step、Ramp 与 Mixed/Smoothstep 分别突出瞬态误差、
-加载—卸载滞后和 waypoint 误差。CLI 可用 `--trace-period` 覆盖常规采样周期；该值必须是
-任务控制周期的整数倍，设为控制周期即可保留全频常规数据。
+force-track 单次运行默认生成三张 600 DPI PNG，分别展示目标力跟踪、双侧触觉力和控制器行为；
+坐标轴使用带单位的数学符号，Ramp waypoint 直接标在参考曲线上。CLI 可用 `--trace-period`
+覆盖常规采样周期；该值必须是任务控制周期的整数倍，设为控制周期即可保留全频常规数据。
 `pgt runs clean` 默认只预览将删除的目标；需要删除时加 `--apply`。
 
 `force-schedule` 的运行目录还包含 `task.yaml`；其 `effective_parameters.json` 明确记录 oracle

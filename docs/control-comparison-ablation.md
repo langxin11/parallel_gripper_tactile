@@ -40,7 +40,8 @@
 
 1. 固定一组 `configs/task/force_tracking/*.yaml` 目标力曲线；
 2. 固定每组实验的 profile 或 controller 配置快照；
-3. 保留 `trace.parquet`、`plot.png`、`metrics.json` 和 `manifest.json`，并为每个 force-track run 保存 `effective_parameters.json`；
+3. 保留 `trace.parquet`、`plots/tracking.png`、`plots/tactile.png`、`plots/controller.png`、`metrics.json` 和
+   `manifest.json`，并为每个 force-track run 保存 `effective_parameters.json`；
 4. 支持 `--viewer` 观察接触过程，默认仍 headless 批量运行；
 5. 明确每个指标的统计时间窗，例如使用 `metrics.ignore_initial_s` 跳过初始过渡。
 
