@@ -153,6 +153,13 @@ schema 正确。任一项不一致都会在任何 confirm 子 run 前失败。
 服务；解析、预检、执行与有效配置快照持有同一冻结对象。归档模型诊断因需改写历史模型路径而保留原始
 profile 来源字段，但其基础对象仍会通过组合入口预检。
 
+活跃研究的 profile 以 `study.profile.experiment` 组合结果为唯一来源。`study.profile.overrides` 只保存
+矩阵共享且确实改变基础 profile 的 controller、estimator 或 model 选择，不再用 task、seed 或 execution
+充当组合占位。任务与 seed 归 `study.definition` 的矩阵所有，研究目录归
+`execution.output_root` 所有；领域定义不再重复保存旧完整 profile 路径和 `output_root`。研究计划中的
+profile 摘要来自实际冻结的组合对象，而不是兼容 profile 文件。归档模型诊断因需要改写历史模型资源，
+继续显式保留原始 profile 路径，并在解析时执行新旧等价检查。
+
 ## 生命周期、状态与失败分类
 
 公共生命周期仅统一“已校验计划→逐条件执行→失败记录→聚合→研究专属绘图→产物登记”，不改变任务、

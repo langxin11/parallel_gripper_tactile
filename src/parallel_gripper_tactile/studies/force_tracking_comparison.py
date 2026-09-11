@@ -24,13 +24,15 @@ class ForceTrackingComparisonConfig(_ComparisonStudyModel):
     """按控制器、任务、材料和噪声种子展开的力跟踪对比 protocol。"""
 
     name: str = Field(default="force_tracking_controller_comparison", min_length=1)
-    profile: Path
+    # 仅供旧的 protocol 直调入口使用；正式 Hydra 研究由 experiment 组合 profile。
+    profile: Path = Field(default=Path("configs/dm_gripper.yaml"), exclude=True)
     tasks: tuple[Path, ...]
     controllers: tuple[ControllerVariant, ...]
     stiffness_estimator_method: StiffnessEstimatorMethod = "window_linear"
     materials: tuple[ObjectMaterial, ...]
     seeds: SeedSweep = SeedSweep()
-    output_root: Path = Path("outputs/studies")
+    # 仅供旧的 protocol 直调入口使用；正式研究目录由 execution 组唯一管理。
+    output_root: Path = Field(default=Path("outputs/studies"), exclude=True)
 
     @field_validator("tasks", "controllers", "materials")
     @classmethod
@@ -78,7 +80,11 @@ def load_comparison_config(path: str | Path) -> ForceTrackingComparisonConfig:
 
     return config.model_copy(
         update={
-            "profile": _resolve_relative_path(config.profile, base=base),
+            "profile": (
+                None
+                if config.profile is None
+                else _resolve_relative_path(config.profile, base=base)
+            ),
             "tasks": tuple(_resolve_relative_path(task, base=base) for task in config.tasks),
             "output_root": _resolve_relative_path(config.output_root, base=base),
         }

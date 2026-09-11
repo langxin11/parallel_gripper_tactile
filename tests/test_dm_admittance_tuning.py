@@ -25,7 +25,7 @@ def _resolved_profile():
     """返回正式调参入口使用的组合后导纳 profile。"""
     return compose_research_run(
         experiment="dm_gripper/force_tracking_admittance",
-        overrides=("task=force_tracking/dm_admittance_ramp", "execution=plan"),
+        overrides=("execution=plan",),
     ).profile
 
 

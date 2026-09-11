@@ -225,6 +225,18 @@ def file_sha256(path: Path) -> str:
     return sha256(path.read_bytes()).hexdigest()
 
 
+def model_configuration_sha256(
+    model: BaseModel,
+    *,
+    repository_root: Path | None = None,
+) -> str:
+    """摘要已校验模型，而不是摘要可能已被组合结果取代的来源文件。"""
+    return scientific_configuration_hash(
+        model.model_dump(mode="json"),
+        repository_root=repository_root,
+    )
+
+
 def _write_json(path: Path, value: object) -> Path:
     """原子写入稳定 JSON，避免中断留下半个 manifest。"""
     temporary = path.with_name(f".{path.name}.tmp")
@@ -653,6 +665,7 @@ __all__ = [
     "execute_study_lifecycle",
     "execution_failure_rows",
     "file_sha256",
+    "model_configuration_sha256",
     "record_study_setup_failure",
     "require_matching_study_plan",
     "scientific_configuration_hash",

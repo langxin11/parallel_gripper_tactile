@@ -23,13 +23,15 @@ class RobotiqDiscreteForceStudyConfig(_StudyModel):
     """离散控制消融与鲁棒性验证的笛卡尔积配置。"""
 
     name: str = Field(default="robotiq_discrete_force", min_length=1)
-    profile: Path
+    # 仅供旧的 protocol 直调入口使用；正式 Hydra 研究由 experiment 组合 profile。
+    profile: Path = Field(default=Path("configs/robotiq_2f85.yaml"), exclude=True)
     task: Path
     controllers: tuple[ControllerVariant, ...]
     materials: tuple[RobotiqObjectMaterial, ...]
     noise_std_n: tuple[FiniteFloat, ...]
     seeds: SeedSweep = SeedSweep(start=0, count=1)
-    output_root: Path = Path("outputs/studies")
+    # 仅供旧的 protocol 直调入口使用；正式研究目录由 execution 组唯一管理。
+    output_root: Path = Field(default=Path("outputs/studies"), exclude=True)
 
     @field_validator("controllers", "materials", "noise_std_n")
     @classmethod
@@ -88,9 +90,13 @@ def load_robotiq_discrete_force_study_config(
         raise StudyConfigError(str(error)) from error
     return config.model_copy(
         update={
-            "profile": (base / config.profile).resolve()
-            if not config.profile.is_absolute()
-            else config.profile,
+            "profile": (
+                None
+                if config.profile is None
+                else (base / config.profile).resolve()
+                if not config.profile.is_absolute()
+                else config.profile
+            ),
             "task": (base / config.task).resolve()
             if not config.task.is_absolute()
             else config.task,

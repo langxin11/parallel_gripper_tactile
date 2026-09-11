@@ -53,6 +53,48 @@ STUDY_GROUPS = {
 }
 
 
+@pytest.mark.parametrize(
+    "research_group",
+    [
+        "force_controller_selection/study",
+        "force_controller_ablation/study",
+        "friction_local_slip_validation/study",
+        "stiffness_estimator_validation/study",
+        "dm_admittance_tuning/study",
+        "robotiq_discrete_force_validation/study",
+        "torque_adrc_tuning/study",
+    ],
+)
+def test_active_research_groups_do_not_repeat_cross_layer_fields(
+    research_group: str,
+) -> None:
+    """活跃研究不重复保存 profile、输出目录或矩阵占位选择。"""
+    register_resolvers()
+    with initialize_config_dir(version_base="1.3", config_dir=str(CONFIG_ROOT)):
+        raw = resolved_mapping(
+            compose(config_name="study", overrides=[f"research={research_group}"])
+        )
+    study = raw["study"]
+    definition = study["definition"]
+    assert "profile" not in definition
+    assert "output_root" not in definition
+    overrides = tuple(study["profile"].get("overrides", ()))
+    assert not any(value.startswith(("task=", "seed=", "execution=")) for value in overrides)
+
+
+def test_archived_diagnosis_documents_its_historical_profile_exception() -> None:
+    """归档诊断保留改写历史模型所需的原始 profile 来源。"""
+    register_resolvers()
+    with initialize_config_dir(version_base="1.3", config_dir=str(CONFIG_ROOT)):
+        raw = resolved_mapping(
+            compose(
+                config_name="study",
+                overrides=["research=archive/model_bug_diagnosis/study"],
+            )
+        )
+    assert raw["study"]["definition"]["profile"] == "configs/dm_gripper.yaml"
+
+
 def _resolved(name: str, *, overrides: list[str] | None = None):
     """组合并解析一个正式研究 preset。"""
     register_resolvers()

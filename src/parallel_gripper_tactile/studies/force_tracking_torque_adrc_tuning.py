@@ -104,10 +104,12 @@ class ForceTrackingTorqueAdrcTuningConfig(_TuningStudyModel):
     """二阶段二阶直接力矩 ADRC 调参 protocol。"""
 
     name: str = Field(default="force_tracking_torque_adrc_tuning", min_length=1)
-    profile: Path
+    # 仅供旧的 protocol 直调入口使用；正式 Hydra 研究由 experiment 组合 profile。
+    profile: Path = Field(default=Path("configs/dm_gripper.yaml"), exclude=True)
     tasks: tuple[Path, ...]
     stiffness_estimator_method: StiffnessEstimatorMethod = "secant_ewma"
-    output_root: Path = Path("outputs/studies")
+    # 仅供旧的 protocol 直调入口使用；正式研究目录由 execution 组唯一管理。
+    output_root: Path = Field(default=Path("outputs/studies"), exclude=True)
     baseline: TorqueAdrcCandidate
     coarse: TorqueAdrcTuningStage
     confirm: TorqueAdrcTuningStage
@@ -185,7 +187,7 @@ def load_torque_adrc_tuning_config(path: str | Path) -> ForceTrackingTorqueAdrcT
         raise StudyConfigError(str(error)) from error
     return config.model_copy(
         update={
-            "profile": _resolve(config.profile, base),
+            "profile": None if config.profile is None else _resolve(config.profile, base),
             "tasks": tuple(_resolve(task, base) for task in config.tasks),
             "output_root": _resolve(config.output_root, base),
         }

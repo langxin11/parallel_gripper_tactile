@@ -513,8 +513,11 @@ def resolve_research_study(
             overrides=selection.study.profile.overrides,
         )
         profile = composed.profile
+        # 活跃研究以 experiment 组合结果为唯一 profile；仅归档诊断仍校验历史来源。
         legacy_profile_source = getattr(domain_config, "profile", None)
-        if isinstance(legacy_profile_source, Path):
+        if selection.study.kind == "force_tracking_diagnosis" and isinstance(
+            legacy_profile_source, Path
+        ):
             _validate_profile_source_equivalence(profile, legacy_profile_source)
     except (OSError, ValidationError, ValueError) as error:
         raise ResearchStudySetupError(str(error), stage="configuration") from error
@@ -522,16 +525,16 @@ def resolve_research_study(
     try:
         if isinstance(domain_config, ForceTrackingComparisonConfig):
             _validate_comparison(domain_config, profile)
-            plan = comparison_protocol.build_plan(domain_config)
+            plan = comparison_protocol.build_plan(domain_config, resolved_profile=profile)
         elif isinstance(domain_config, ForceTrackingAblationConfig):
             _validate_ablation(domain_config, profile)
-            plan = ablation_protocol.build_plan(domain_config)
+            plan = ablation_protocol.build_plan(domain_config, resolved_profile=profile)
         elif isinstance(domain_config, FrictionEstimationLocalSlipStudyConfig):
             _validate_local_slip(domain_config, profile)
-            plan = friction_local_slip_protocol.build_plan(domain_config)
+            plan = friction_local_slip_protocol.build_plan(domain_config, resolved_profile=profile)
         elif isinstance(domain_config, ForceTrackingStiffnessEstimatorComparisonConfig):
             _validate_stiffness_estimator_comparison(domain_config, profile)
-            plan = stiffness_comparison_protocol.build_plan(domain_config)
+            plan = stiffness_comparison_protocol.build_plan(domain_config, resolved_profile=profile)
         elif isinstance(domain_config, DMAdmittanceTuningConfig):
             _validate_dm_admittance_tuning(domain_config, profile)
             plan = dm_admittance_tuning_protocol.build_plan(
@@ -540,7 +543,9 @@ def resolve_research_study(
             )
         elif isinstance(domain_config, RobotiqDiscreteForceStudyConfig):
             _validate_robotiq_discrete_force(domain_config, profile)
-            plan = robotiq_discrete_force_protocol.build_plan(domain_config)
+            plan = robotiq_discrete_force_protocol.build_plan(
+                domain_config, resolved_profile=profile
+            )
         elif isinstance(domain_config, DiagnosisConfig):
             assert selection.study.phase is not None
             _validate_diagnosis(domain_config, profile)
@@ -551,6 +556,7 @@ def resolve_research_study(
                 domain_config,
                 stage=selection.study.stage,
                 coarse_study_dir=selection.study.coarse_study_dir,
+                resolved_profile=profile,
             )
             _validate_torque_tuning(domain_config, plan, profile)
         plan = plan.model_copy(

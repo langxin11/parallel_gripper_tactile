@@ -28,10 +28,12 @@ class FrictionEstimationLocalSlipStudyConfig(_StudyModel):
     """任务场景与噪声种子组成的局部起滑验证矩阵。"""
 
     name: str = Field(default="friction_estimation_local_slip", min_length=1)
-    profile: Path
+    # 仅供旧的 protocol 直调入口使用；正式 Hydra 研究由 experiment 组合 profile。
+    profile: Path = Field(default=Path("configs/dm_gripper.yaml"), exclude=True)
     scenarios: tuple[LocalSlipScenario, ...]
     seeds: SeedSweep = SeedSweep()
-    output_root: Path = Path("outputs/studies")
+    # 仅供旧的 protocol 直调入口使用；正式研究目录由 execution 组唯一管理。
+    output_root: Path = Field(default=Path("outputs/studies"), exclude=True)
 
     @field_validator("scenarios")
     @classmethod
@@ -86,9 +88,13 @@ def load_local_slip_study_config(
     )
     return config.model_copy(
         update={
-            "profile": (base / config.profile).resolve()
-            if not config.profile.is_absolute()
-            else config.profile,
+            "profile": (
+                None
+                if config.profile is None
+                else (base / config.profile).resolve()
+                if not config.profile.is_absolute()
+                else config.profile
+            ),
             "scenarios": scenarios,
             "output_root": (base / config.output_root).resolve()
             if not config.output_root.is_absolute()

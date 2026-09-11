@@ -48,6 +48,7 @@ from parallel_gripper_tactile.studies.lifecycle import (
     execute_study_lifecycle,
     execution_failure_rows,
     file_sha256,
+    model_configuration_sha256,
     require_matching_study_plan,
     scientific_configuration_hash,
 )
@@ -312,9 +313,13 @@ def _create_study_directory(config: ForceTrackingAblationConfig) -> Path:
     return directory
 
 
-def build_plan(config: ForceTrackingAblationConfig) -> StudyPlan:
+def build_plan(
+    config: ForceTrackingAblationConfig,
+    *,
+    resolved_profile: GripperProfile | None = None,
+) -> StudyPlan:
     """从权威 domain config 生成 PID 消融唯一有序计划。"""
-    base_profile = load_profile(config.profile)
+    base_profile = resolved_profile or load_profile(config.profile)
     representative_seed = config.seeds.values()[0]
     controller_profiles = {
         controller: configure_force_controller(
@@ -343,7 +348,9 @@ def build_plan(config: ForceTrackingAblationConfig) -> StudyPlan:
         "protocol_revision": "force_tracking_ablation.v1",
         "study": config.model_dump(mode="python", exclude={"output_root"}),
         "resources": {
-            "profile_sha256": file_sha256(config.profile),
+            "profile_sha256": model_configuration_sha256(
+                base_profile, repository_root=_REPOSITORY_ROOT
+            ),
             "task_sha256": file_sha256(config.task),
         },
         "resolved_controller_profiles": controller_profiles,
@@ -398,7 +405,7 @@ def run_study(
         )
     resolved_config = write_resolved_config(study_dir / "study.resolved.json", config)
     task = ForceTrackingTask.load(config.task)
-    expected_plan = build_plan(config)
+    expected_plan = build_plan(config, resolved_profile=resolved_profile)
     plan = (
         expected_plan
         if study_plan is None

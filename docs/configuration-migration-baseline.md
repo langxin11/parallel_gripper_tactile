@@ -41,7 +41,7 @@
 | `name` | `dm_gripper` → `dm_gripper_admittance` | `experiment` 组合名 |
 | `control.mit.kp` | `20.0` → `10.0` | `controller/dm_gripper/admittance` |
 | `control.mit.kd` | `0.63793536` → `5.0` | `controller/dm_gripper/admittance` |
-| `control.force.target_n` | `8.0` → `1.0` | `task/force_tracking/dm_admittance` |
+| `control.force.target_n` | `8.0` → `1.0` | `task/force_tracking/dm_admittance_ramp` 的初始目标 |
 | `control.force.contact_threshold_n` | `0.15` → `1.0` | `controller/dm_gripper/admittance` |
 | `control.force.kp/ki` | `0.016/0.2` → `0.0/0.0` | `controller/dm_gripper/admittance` |
 | `control.force.filter_cutoff_hz` | `20.0` → `2.0` | `controller/dm_gripper/admittance` |
@@ -50,8 +50,8 @@
 | 导纳位置上下限、闭合方向 | `null` → `0/π/2/+1` | `platform/dm_gripper/simulation`，组合时注入控制器 |
 | `admittance.mit_torque_limit_nm` | `null` → `4.0` | 不设第二权威值；由 platform `mit.t_max` 派生并校验 |
 
-导纳 task 另有 `dm_admittance.yaml` 和 `dm_admittance_ramp.yaml` 两套时间曲线；它们保持为两个 task，
-不能用 profile 的 `target_n` 代替。导纳调参仍以专用 Ramp task 为准。
+迁移初期曾同时保留恒定 1 N 的 `dm_admittance.yaml` 和低力 Ramp；统一状态机稳定后，旧恒力任务已删除，
+单次导纳与正式调参统一使用 `dm_admittance_ramp.yaml`。profile 的 `target_n` 仍不能代替任务曲线。
 
 ### Task 时间语义
 
@@ -94,7 +94,7 @@ model 能力校验解释，不能在切换模型时静默沿用。前两者是 `
 | `configs/robotiq_2f85.yaml` | `platform/robotiq_2f85/simulation` + `model/robotiq_2f85/sphere_force_sensor`；根文件仅保留为底层 API 兼容默认值 |
 | `configs/robotiq_2f85_box.yaml` | 同一 platform + `model/robotiq_2f85/box_force_sensor` |
 | `configs/robotiq_2f85_touch_grid.yaml` | 同一 platform + `model/robotiq_2f85/touch_grid_3x3` |
-| `configs/force_tracking/{default_waypoints,step,ramp,mixed_waypoints,dm_admittance,dm_admittance_ramp}.yaml` | `configs/task/force_tracking/` 下同语义文件；`mixed_waypoints` 收敛为 `mixed` |
+| `configs/force_tracking/{default_waypoints,step,ramp,mixed_waypoints,dm_admittance,dm_admittance_ramp}.yaml` | `configs/task/force_tracking/` 下保留正式任务；`mixed_waypoints` 收敛为 `mixed`，旧恒力 `dm_admittance` 后续由低力 Ramp 取代 |
 | `configs/force_scheduling/{gravity_hold,dynamic_filling}.yaml` | `configs/task/force_scheduling/` 下同名文件 |
 | `configs/friction_estimation/{low_friction,nominal_friction,high_friction,noisy_friction,no_slip_low_probe,hardware_scale_nominal}.yaml` | `configs/task/friction_estimation/` 下同名文件 |
 | `configs/discrete_force/robotiq_delta_f_tick.yaml` | `configs/task/discrete_force/robotiq_delta_f_tick.yaml` |

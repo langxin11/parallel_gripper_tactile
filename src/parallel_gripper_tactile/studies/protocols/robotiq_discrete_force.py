@@ -14,7 +14,7 @@ from uuid import uuid4
 import numpy as np
 import yaml
 
-from parallel_gripper_tactile.config.profiles import GripperProfile
+from parallel_gripper_tactile.config.profiles import GripperProfile, load_profile
 from parallel_gripper_tactile.experiments.robotiq_discrete_force import (
     RobotiqDiscreteForceTask,
 )
@@ -36,6 +36,7 @@ from parallel_gripper_tactile.studies.lifecycle import (
     execute_study_lifecycle,
     execution_failure_rows,
     file_sha256,
+    model_configuration_sha256,
     require_matching_study_plan,
     scientific_configuration_hash,
 )
@@ -351,8 +352,13 @@ def _create_study_directory(config: RobotiqDiscreteForceStudyConfig) -> Path:
     return directory
 
 
-def build_plan(config: RobotiqDiscreteForceStudyConfig) -> StudyPlan:
+def build_plan(
+    config: RobotiqDiscreteForceStudyConfig,
+    *,
+    resolved_profile: GripperProfile | None = None,
+) -> StudyPlan:
     """从权威 domain config 生成离散力消融矩阵的唯一有序计划。"""
+    base_profile = resolved_profile or load_profile(config.profile)
     conditions = tuple(
         StudyCondition(
             condition_id=f"{controller}-{material}-noise{noise}-seed{seed:03d}",
@@ -372,7 +378,9 @@ def build_plan(config: RobotiqDiscreteForceStudyConfig) -> StudyPlan:
         "protocol_revision": "robotiq_discrete_force.v1",
         "study": config.model_dump(mode="python", exclude={"output_root"}),
         "resources": {
-            "profile_sha256": file_sha256(config.profile),
+            "profile_sha256": model_configuration_sha256(
+                base_profile, repository_root=_REPOSITORY_ROOT
+            ),
             "task_sha256": file_sha256(config.task),
         },
         # 延续旧脚本的 17 列控制器聚合口径；quantized-pi 为连续对照基线。
@@ -419,7 +427,7 @@ def run_study(
             yaml.safe_dump(config.model_dump(mode="json"), sort_keys=False), encoding="utf-8"
         )
     resolved_config = write_resolved_config(study_dir / "study.resolved.json", config)
-    expected_plan = build_plan(config)
+    expected_plan = build_plan(config, resolved_profile=resolved_profile)
     plan = (
         expected_plan
         if study_plan is None

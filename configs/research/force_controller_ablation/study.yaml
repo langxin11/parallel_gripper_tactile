@@ -5,7 +5,8 @@ study:
   source: configs/research/force_controller_ablation/study.yaml
   profile:
     experiment: dm_gripper/force_tracking_default
-    overrides: [controller=dm_gripper/full, estimator=window_linear, task=force_tracking/default_waypoints, seed=20260814, execution=plan]
+    # 基础控制配置用于预检；单任务、配对 seed 和输出目录在各自唯一字段中声明。
+    overrides: [controller=dm_gripper/full, estimator=window_linear]
   rationale:
     question: PID、刚度位置前馈与力矩前馈各自贡献多大？
     decision: 确定默认 PID 控制器必须保留的模块。
@@ -16,7 +17,6 @@ study:
     exclusions: {direct-torque: 该控制器改变控制结构，不属于 PID 模块消融。}
   definition:
     name: force_tracking_ablation
-    profile: configs/dm_gripper.yaml
     task: configs/task/force_tracking/default_waypoints.yaml
     # PID 模块消融研究的官方矩阵定义：单任务下对不同控制器、材料和 seed 做完整交叉。
     controllers:
@@ -33,5 +33,3 @@ study:
     seeds:
       start: 0
       count: 3
-    # 结果统一落在 studies 产物目录，兼容历史统计入口。
-    output_root: outputs/studies

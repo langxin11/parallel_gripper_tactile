@@ -50,10 +50,10 @@ def _enter_tracking(controller):
     controller.supervisor.state = "force_tracking"
 
 
-def test_example_uses_one_newton_target_and_contact_hysteresis():
-    """示例使用 1 N 目标，并让接触进入阈值高于释放阈值。"""
+def test_example_uses_low_force_ramp_and_contact_hysteresis():
+    """示例使用低力 Ramp，并让接触进入阈值高于释放阈值。"""
     profile = _profile()
-    task = ForceTrackingTask.load(ROOT / "configs/task/force_tracking/dm_admittance.yaml")
+    task = ForceTrackingTask.load(ROOT / "configs/task/force_tracking/dm_admittance_ramp.yaml")
 
     assert profile.normal_force.target_n == 1.0
     assert profile.normal_force.contact_threshold_n == 0.15
@@ -69,7 +69,13 @@ def test_example_uses_one_newton_target_and_contact_hysteresis():
     assert profile.normal_force.admittance.approach_feedforward_force_n == 0.5
     assert profile.normal_force.supervisor.contact_transition_time_s == 0.05
     assert profile.normal_force.supervisor.release_policy == "any_side"
-    assert all(waypoint.force_n == 1.0 for waypoint in task.reference.waypoints)
+    assert task.reference.interpolation == "linear"
+    assert tuple(waypoint.force_n for waypoint in task.reference.waypoints) == (
+        1.0,
+        1.2,
+        1.4,
+        1.0,
+    )
 
 
 def test_admittance_rejects_zero_mit_gain_before_first_step():
@@ -241,7 +247,7 @@ def test_admittance_variant_is_explicit_and_average_side_only():
 
 def test_mujoco_force_tracking_admittance_smoke(tmp_path):
     """4 ms 仿真入口完成接近并输出有限跟踪指标，测试不评价硬件稳定性。"""
-    task = ForceTrackingTask.load(ROOT / "configs/task/force_tracking/dm_admittance.yaml")
+    task = ForceTrackingTask.load(ROOT / "configs/task/force_tracking/dm_admittance_ramp.yaml")
     result = run_force_tracking(
         _profile(), task=task, controller_variant="admittance", output_csv=tmp_path / "trace.csv"
     )

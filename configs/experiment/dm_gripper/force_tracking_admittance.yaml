@@ -4,7 +4,8 @@ defaults:
   - override /model: dm_gripper/height_spheres
   - override /controller: dm_gripper/admittance
   - override /estimator: none
-  - override /task: force_tracking/dm_admittance
+  # 旧恒定 1 N task 已移除；单次导纳与正式调参共用低力 Ramp 任务。
+  - override /task: force_tracking/dm_admittance_ramp
   - override /material: hard
   - override /execution: run
   - _self_

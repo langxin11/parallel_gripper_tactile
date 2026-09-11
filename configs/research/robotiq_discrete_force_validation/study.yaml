@@ -5,7 +5,8 @@ study:
   source: configs/research/robotiq_discrete_force_validation/study.yaml
   profile:
     experiment: robotiq_2f85/discrete_force
-    overrides: [model=robotiq_2f85/sphere_force_sensor, execution=plan]
+    # 球形传感布局是本研究共享的 profile 差异，因而保留为基础组合覆盖。
+    overrides: [model=robotiq_2f85/sphere_force_sensor]
   rationale:
     question: 哪种整数命令控制策略在材料与噪声变化下兼顾误差和动作数？
     decision: 选择 Robotiq 离散力默认控制器。
@@ -17,8 +18,7 @@ study:
   definition:
     # Robotiq 离散力控制 study：控制器 × 材料 × 噪声的消融矩阵，共 5×4×3=60 个条件。
     name: robotiq_discrete_force
-    # 夹爪 profile 与主任务配置；相对路径按本文件所在目录解析。
-    profile: configs/robotiq_2f85.yaml
+    # 主任务资源是矩阵的固定输入；相对路径按仓库根解析。
     task: configs/task/discrete_force/robotiq_delta_f_tick.yaml
     
     # 参与消融的整数命令控制器；连续 PI 对照不在矩阵内，需按同曲线单独运行。
@@ -42,6 +42,3 @@ study:
     seeds:
       start: 0
       count: 1
-    
-    # study 产物（runs、CSV/Parquet、summary.json、比较图、manifest）的输出根目录。
-    output_root: outputs/studies

@@ -36,12 +36,14 @@ class ForceTrackingAblationConfig(_StudyModel):
     """控制器、材料和噪声种子组成的力跟踪消融 protocol。"""
 
     name: str = Field(default="force_tracking_ablation", min_length=1)
-    profile: Path
+    # 仅供旧的 protocol 直调入口使用；正式 Hydra 研究由 experiment 组合 profile。
+    profile: Path = Field(default=Path("configs/dm_gripper.yaml"), exclude=True)
     task: Path
     controllers: tuple[ControllerVariant, ...]
     materials: tuple[ObjectMaterial, ...]
     seeds: SeedSweep = SeedSweep()
-    output_root: Path = Path("outputs/studies")
+    # 仅供旧的 protocol 直调入口使用；正式研究目录由 execution 组唯一管理。
+    output_root: Path = Field(default=Path("outputs/studies"), exclude=True)
 
     @field_validator("controllers", "materials")
     @classmethod
@@ -81,9 +83,13 @@ def load_study_config(path: str | Path) -> ForceTrackingAblationConfig:
         raise StudyConfigError(str(error)) from error
     return config.model_copy(
         update={
-            "profile": (base / config.profile).resolve()
-            if not config.profile.is_absolute()
-            else config.profile,
+            "profile": (
+                None
+                if config.profile is None
+                else (base / config.profile).resolve()
+                if not config.profile.is_absolute()
+                else config.profile
+            ),
             "task": (base / config.task).resolve()
             if not config.task.is_absolute()
             else config.task,

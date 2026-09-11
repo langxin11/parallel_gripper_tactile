@@ -5,7 +5,8 @@ study:
   source: configs/research/stiffness_estimator_validation/study.yaml
   profile:
     experiment: dm_gripper/force_tracking_default
-    overrides: [controller=dm_gripper/full, estimator=window_linear, task=force_tracking/default_waypoints, seed=20260814, execution=plan]
+    # 固定控制器基线；待比较任务、估计器和 seed 只在矩阵中维护。
+    overrides: [controller=dm_gripper/full, estimator=window_linear]
   rationale:
     question: 三种刚度估计器对位置前馈力跟踪的影响是什么？
     decision: 选择默认在线刚度估计方法。
@@ -16,7 +17,6 @@ study:
     exclusions: {}
   definition:
     name: force_tracking_stiffness_estimator_comparison
-    profile: configs/dm_gripper.yaml
     # 刚度估计器消融研究：仅比较 secant_ewma / window_linear / window_quadratic 三套估计器。
     tasks:
       - configs/task/force_tracking/step.yaml
@@ -36,5 +36,3 @@ study:
     seeds:
       start: 0
       count: 3
-    # 输出到 study 统一目录，保持与历史聚合脚本兼容。
-    output_root: outputs/studies

@@ -36,6 +36,8 @@
 
 ### 移除
 
+- 删除仅供旧导纳单次实验使用的恒定 1 N `dm_admittance` task；导纳 experiment、仿真测试与正式调参
+  统一使用 `dm_admittance_ramp`，不再维护两套专用预接触时序。
 - 删除 `scripts/experiments/` 下全部 8 个专项研究旧入口；其实现迁入 `studies/protocols/` 包内并由
   Hydra 正式入口复用，避免直接路径参数绕过统一组合解析。
 - 移除 `dm_admittance_tuning` 的 `max_workers` 字段与 `robotiq_discrete_force` 的 `--jobs`/
@@ -43,6 +45,9 @@
 
 ### 变更
 
+- 清理正式研究配置的跨层重复字段：活跃研究以 experiment 组合为唯一 profile 来源，以 execution 组为
+  唯一输出目录来源，并移除用于占位的 task、seed、execution 覆盖；科学哈希改为摘要实际冻结的组合
+  profile。归档模型诊断继续保留有注释的历史 profile 例外。
 - DMgripper PID／二阶导纳统一对比入口的预接触线性关节轨迹由 25 s 缩短为 6 s，
   双侧接触等待上限由 30 s 缩短为 8 s，避免正式采集前长时间空跑。其余 DMgripper 力控制器
   也统一启用相同的双侧接触状态机；旧导纳实验的接近阶段改由 task 轨迹控制，不再使用内部

@@ -5,7 +5,7 @@ study:
   source: configs/research/dm_admittance_tuning/study.yaml
   profile:
     experiment: dm_gripper/force_tracking_admittance
-    overrides: [task=force_tracking/dm_admittance_ramp, seed=20260814, execution=plan]
+    # experiment 已唯一确定共享导纳 profile；Ramp、seed 和执行方式由其他配置层所有。
   rationale:
     question: 哪组导纳接近与接触切换参数能稳定完成低力 Ramp？
     decision: 选择共享导纳链路的默认切换参数。
@@ -20,7 +20,6 @@ study:
     task: configs/task/force_tracking/dm_admittance_ramp.yaml
     materials: [hard]
     seeds: {start: 0, count: 2}
-    output_root: outputs/studies
     
     # 固定第一轮选出的二阶导纳和 2 Hz 低通，集中扫描接近与接触切换参数。
     # 排名优先物理步进后左右触觉侧力的平均峰值，不忽略切入跟踪的首个瞬态。

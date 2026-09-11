@@ -86,8 +86,8 @@ def test_default_run_matches_frozen_legacy_domain_parameters() -> None:
     assert resolved.selection.execution.trace_sample_period_s == 0.004
 
 
-def test_admittance_combination_matches_frozen_legacy_domain_parameters() -> None:
-    """导纳片段、显式关闭估计器与导纳 task 保持完整领域参数等价。"""
+def test_admittance_combination_preserves_profile_and_uses_canonical_ramp() -> None:
+    """导纳 profile 保持迁移等价，但任务收敛到唯一低力 Ramp。"""
     resolved = resolve_research_run(
         resolved_mapping(
             _compose(
@@ -102,7 +102,14 @@ def test_admittance_combination_matches_frozen_legacy_domain_parameters() -> Non
     assert resolved.profile.model_dump(mode="json") == _with_current_dm_supervisor(
         expected["profile"]
     )
-    assert resolved.task.model_dump(mode="json") == expected["task"]
+    assert resolved.task.name == "dm_admittance_ramp"
+    assert resolved.task.reference.interpolation == "linear"
+    assert tuple(waypoint.force_n for waypoint in resolved.task.reference.waypoints) == (
+        1.0,
+        1.2,
+        1.4,
+        1.0,
+    )
     assert resolved.profile.normal_force is not None
     assert resolved.profile.normal_force.admittance is not None
     assert resolved.profile.normal_force.stiffness is not None

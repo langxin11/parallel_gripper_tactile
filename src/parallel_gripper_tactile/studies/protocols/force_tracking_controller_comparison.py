@@ -48,6 +48,7 @@ from parallel_gripper_tactile.studies.lifecycle import (
     execute_study_lifecycle,
     execution_failure_rows,
     file_sha256,
+    model_configuration_sha256,
     require_matching_study_plan,
     scientific_configuration_hash,
 )
@@ -460,9 +461,13 @@ def describe_conditions(config: ForceTrackingComparisonConfig) -> str:
     return "\n".join(lines)
 
 
-def build_plan(config: ForceTrackingComparisonConfig) -> StudyPlan:
+def build_plan(
+    config: ForceTrackingComparisonConfig,
+    *,
+    resolved_profile: GripperProfile | None = None,
+) -> StudyPlan:
     """从权威 comparison config 生成唯一有序计划。"""
-    base_profile = load_profile(config.profile)
+    base_profile = resolved_profile or load_profile(config.profile)
     representative_seed = config.seeds.values()[0]
     controller_profiles = {
         controller: configure_force_controller(
@@ -493,7 +498,9 @@ def build_plan(config: ForceTrackingComparisonConfig) -> StudyPlan:
         "protocol_revision": "force_tracking_controller_comparison.v1",
         "study": config.model_dump(mode="python", exclude={"output_root"}),
         "resources": {
-            "profile_sha256": file_sha256(config.profile),
+            "profile_sha256": model_configuration_sha256(
+                base_profile, repository_root=_REPOSITORY_ROOT
+            ),
             "task_sha256": {str(task): file_sha256(task) for task in config.tasks},
         },
         "resolved_controller_profiles": controller_profiles,
@@ -549,7 +556,7 @@ def run_study(
     else:
         raise ValueError("config_source is required for a reproducible comparison study")
     resolved_config = write_resolved_config(study_dir / "study.resolved.json", config)
-    expected_plan = build_plan(config)
+    expected_plan = build_plan(config, resolved_profile=resolved_profile)
     plan = (
         expected_plan
         if study_plan is None

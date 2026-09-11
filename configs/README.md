@@ -96,6 +96,11 @@ uv run pgt compare tactile \
 研究问题、预期决策、准入／停止／排除依据、profile 的命名 experiment 组合和唯一领域矩阵，不再跳转到
 第二份 domain YAML。计划与执行都接收该组合产生的同一冻结 profile：
 
+活跃研究只在 `study.profile` 中选择基础 experiment 和确有必要的 controller、estimator 或 model 覆盖；
+任务与 seed 由 `study.definition` 的条件矩阵唯一拥有，输出目录由 `execution.output_root` 唯一拥有。
+因此 `study.definition` 不再重复保存完整 profile 路径或 `output_root`。归档模型诊断是唯一例外：它必须
+保留历史 profile 来源，才能改写旧碰撞模型并复现诊断端点。
+
 ```bash
 # 默认控制器选型，计划为 162 条；direct-torque 与一阶 ADRC 已有证据退出。
 uv run python scripts/research/study.py

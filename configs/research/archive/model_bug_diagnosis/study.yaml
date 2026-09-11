@@ -17,11 +17,11 @@ study:
     exclusions: {正式矩阵: 碰撞几何问题已由 height-sphere 修复，证据见 20260904T080635Z-f4cd4ddf 与提交 37cc30e。}
   definition:
     name: force_tracking_diagnosis
+    # 归档诊断必须保留历史原始 profile 路径，用于改写碰撞模型并复现旧端点。
     profile: configs/dm_gripper.yaml
     task: configs/task/force_tracking/default_waypoints.yaml
-    output_root: outputs/studies
     
-    # A fixed seed turns each phase into a causal, directly comparable experiment.
+    # 固定 seed，使各 phase 构成可直接比较的因果实验。
     sensor_noise_seed: 20260814
     reproducibility_repeats: 2
     
@@ -35,14 +35,12 @@ study:
       - hard
       - stiff
     
-    # Diagnostic load sweep only: factors scale average-side task references and do
-    # not change the waypoint or feedback force semantics.
+    # 仅用于诊断的载荷扫描：倍率缩放双侧平均力目标，不改变 waypoint 或反馈力语义。
     force_scales: [0.5, 0.625, 0.75, 0.875, 1.0]
     contact_models: [explicit, legacy]
     
-    # Five conditions isolate three factors: original height variation, mesh versus
-    # sphere topology, and multiccd.  The first and last conditions retain the
-    # original A/B endpoints; the middle three are the added causal controls.
+    # 五个条件隔离原始高度差、mesh／sphere 拓扑与 multiccd 三个因素；首尾保留原 A/B 端点，
+    # 中间三个条件作为新增因果对照。
     collision_geometry_models:
       - label: original-mesh-multiccd
         model: assets/grippers/dm_gripper/parallel_gripper_prepared.xml
@@ -60,8 +58,7 @@ study:
         model: assets/grippers/dm_gripper/parallel_gripper_flat_sphere_collision.xml
         multiccd_enabled: true
     
-    # Sequential high-load stability sweeps. Each phase changes only one value; once
-    # a condition is selected, make it the profile baseline before running the next phase.
+    # 高载稳定性按顺序扫描；每个 phase 只改变一个值，选定条件后再作为下一 phase 的基线。
     stability_controller: pid-torque-ff
     position_adjustment_limits_rad: [0.15, 0.10, 0.075, 0.05, 0.03]
     integral_gains: [0.2, 0.1, 0.05, 0.025, 0.0]

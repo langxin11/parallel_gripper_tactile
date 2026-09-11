@@ -72,7 +72,8 @@ class DMAdmittanceTuningConfig(_TuningStudyModel):
     materials: tuple[ObjectMaterial, ...]
     seeds: SeedSweep = SeedSweep()
     candidates: tuple[DMAdmittanceCandidate, ...]
-    output_root: Path = Path("outputs/studies")
+    # 仅供旧的 protocol 直调入口使用；正式研究目录由 execution 组唯一管理。
+    output_root: Path = Field(default=Path("outputs/studies"), exclude=True)
     minimum_force_tracking_ratio: float = Field(default=0.995, gt=0, le=1)
 
     @field_validator("materials", "candidates")

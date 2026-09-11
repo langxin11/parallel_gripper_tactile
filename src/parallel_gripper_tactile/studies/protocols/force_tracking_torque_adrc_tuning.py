@@ -45,6 +45,7 @@ from parallel_gripper_tactile.studies.lifecycle import (
     execute_study_lifecycle,
     execution_failure_rows,
     file_sha256,
+    model_configuration_sha256,
     require_matching_study_plan,
     scientific_configuration_hash,
 )
@@ -105,6 +106,7 @@ def _candidate_from_row(row: dict[str, str]) -> TorqueAdrcCandidate:
 
 def _study_definition(
     config: ForceTrackingTorqueAdrcTuningConfig,
+    profile: GripperProfile,
 ) -> tuple[dict[str, object], str]:
     """返回包含隐式运行参数与资源内容的两阶段科学定义及哈希。"""
     baseline_control = TorqueAdrcControl(
@@ -117,7 +119,7 @@ def _study_definition(
         "protocol_revision": "force_tracking_torque_adrc_tuning.v1",
         "study": config.model_dump(mode="python", exclude={"output_root"}),
         "resources": {
-            "profile_sha256": file_sha256(config.profile),
+            "profile_sha256": model_configuration_sha256(profile, repository_root=_REPOSITORY_ROOT),
             "task_sha256": {str(task): file_sha256(task) for task in config.tasks},
         },
         "torque_adrc_defaults": baseline_control.model_dump(mode="python"),
@@ -521,8 +523,10 @@ def build_plan(
     *,
     stage: TorqueAdrcTuningStageName,
     coarse_study_dir: Path | None = None,
+    resolved_profile: GripperProfile | None = None,
 ) -> StudyPlan:
     """生成 coarse 或经严格谱系校验的 confirm 唯一有序计划。"""
+    base_profile = resolved_profile or load_profile(config.profile)
     reference = None
     if stage == "confirm":
         if coarse_study_dir is None:
@@ -556,7 +560,7 @@ def build_plan(
                 baseline_role="baseline" if candidate == config.baseline else None,
             )
         )
-    definition, definition_hash = _study_definition(config)
+    definition, definition_hash = _study_definition(config, base_profile)
     lineage = (
         None
         if reference is None
@@ -639,6 +643,7 @@ def run_study(
         config,
         stage=stage,
         coarse_study_dir=coarse_study_dir,
+        resolved_profile=resolved_profile,
     )
     plan = (
         expected_plan
