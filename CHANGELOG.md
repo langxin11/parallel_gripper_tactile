@@ -9,6 +9,10 @@
 
 ### 新增
 
+- 新增 DM 纯仿真 `tangential-disturbance` 单次实验：稳定预载、撤支撑和初始保持合格后施加 ramp／step／pulse
+  切向载荷；支持 `full`／`pid-only` 的 MIT 法向 PID 路径、constant／fixed_step／dynamic_step 只增目标策略及
+  shear_increase／force_ratio 检测器。runner 保存全频 CSV、指标及同 stem PNG／PDF；Hydra 支持单次计划与探索性
+  Multirun，尚未定义正式 study。
 - 新增 `pgt configs list [GROUP] [--search TEXT]`，从现有 YAML 元数据发现配置名与用途，无需先运行仿真。
 - 正式 study 终端显示已处理／总条件数、科学失败、执行异常、状态和目录；Python 入口支持可选
   `on_progress` 观察回调，仅在父进程账本落盘后通知，计划模式只显示条件数与目录。

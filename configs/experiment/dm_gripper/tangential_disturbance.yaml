@@ -1,0 +1,14 @@
+# @package _global_
+defaults:
+  - override /platform: dm_gripper/simulation
+  - override /model: dm_gripper/height_spheres
+  - override /controller: dm_gripper/full
+  - override /estimator: window_linear
+  - override /task: tangential_disturbance/ramp
+  - override /material: hard
+  - override /execution: run
+  - _self_
+
+experiment:
+  name: dm_tangential_disturbance
+  kind: tangential_disturbance

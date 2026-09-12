@@ -13,11 +13,13 @@ from ..experiments.force_scheduling import ForceSchedulingTask
 from ..experiments.force_tracking import ForceTrackingTask
 from ..experiments.friction_estimation import FrictionEstimationTask
 from ..experiments.robotiq_discrete_force import RobotiqDiscreteForceTask
+from ..experiments.tangential_disturbance import TangentialDisturbanceTask
 from ..runners import (
     execute_force_scheduling,
     execute_force_tracking,
     execute_friction_estimation,
     execute_robotiq_discrete_force,
+    execute_tangential_disturbance,
 )
 from .configuration import DMControllerSelection, ResolvedResearchRun
 
@@ -124,6 +126,11 @@ def execute_research_run(
             controller_variant=selection.controller.name,
             object_material=selection.material.name,
             noise_seed=selection.seed,
+        )
+    elif isinstance(resolved.task, TangentialDisturbanceTask):
+        run, result = execute_tangential_disturbance(
+            **common,
+            disturbance_task=resolved.task,
         )
     else:
         raise TypeError(f"unsupported run task: {type(resolved.task).__name__}")

@@ -1,0 +1,52 @@
+# @package task
+family: tangential_disturbance
+path: configs/task/tangential_disturbance/ramp.yaml
+definition:
+  schema_version: 1
+  name: tangential_ramp
+  cube_mass_kg: 0.05
+  friction_coefficient: 0.8
+  object_material: hard
+  approach:
+    duration_s: 1.0
+    timeout_s: 3.0
+    settle_after_contact_s: 0.5
+    feedforward_force_n: 1.0
+  solver:
+    noslip_iterations: 5
+  policy:
+    strategy: dynamic_step
+    detector: shear_increase
+    initial_force_n: 0.8
+    max_force_n: 5.0
+    max_force_rate_n_s: 30.0
+    update_period_s: 0.01
+    filter_tau_s: 0.005
+    confirm_time_s: 0.006
+    shear_threshold_n: 0.06
+    shear_gain: 1.0
+    fixed_step_n: 0.15
+    min_step_n: 0.03
+    max_step_n: 0.3
+    ratio_window_s: 0.06
+    normal_delta_floor_n: 0.02
+    ratio_threshold: -0.1
+    closure_scale_m: 0.01
+    contact_floor_n: 0.05
+  disturbance:
+    kind: ramp
+    amplitude_n: 1.5
+    onset_s: 0.5
+    rise_duration_s: 1.5
+    pulse_duration_s: 0.6
+    duration_s: 4.0
+    direction_yz:
+    - 0.0
+    - -1.0
+  metrics:
+    slip_threshold_m: 0.002
+    initial_hold_s: 0.8
+    force_tolerance_n: 0.2
+    recovery_speed_m_s: 0.001
+    recovery_dwell_s: 0.3
+  control_period_s: 0.002

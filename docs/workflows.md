@@ -18,6 +18,7 @@ uv run pgt run grasp --video
 uv run pgt run force-track --set task=force_tracking/default_waypoints
 uv run pgt run force-schedule --experiment dm_gripper/force_scheduling_gravity_hold
 uv run pgt run force-schedule --experiment dm_gripper/force_scheduling_dynamic_filling
+uv run pgt run tangential-disturbance --experiment dm_gripper/tangential_disturbance
 uv run pgt run friction-estimate --experiment dm_gripper/friction_estimation_nominal
 uv run pgt run discrete-force --experiment robotiq_2f85/discrete_force
 uv run pgt compare contact
@@ -32,6 +33,13 @@ uv run pgt compare contact
 设置 `noslip_iterations=5` 以抑制摩擦锥内的长时数值爬移；目标力固定为不足的 `0.5 N/侧` 时仍会
 滑落，因此该求解设置不会掩盖摩擦容量不足。公式、task 字段、输出列和当前验收结果见
 [Oracle 抓取目标力调度](force-scheduling.md)。
+
+`tangential-disturbance` 是 DM 的纯仿真触觉增力入口：稳定预载、撤支撑与初始保持均合格后，才施加
+`ramp`、`step` 或 `pulse` 切向载荷。它只接受 `full`／`pid-only` 的 MIT 法向 PID 外环，外环按 task
+周期更新而 MIT 内环每个物理步执行；不支持导纳、ADRC 或 viewer。默认 `shear_increase` 将触觉剪切增长
+映射为有限且只增不减的目标包络，不估计摩擦。`force_ratio` 是与论文判据的适配对照，不代表磁触觉实机
+阈值，也不构成微滑移证明。完整边界、策略、恢复口径和 trace 字段见
+[切向扰动下的触觉增力](tangential-disturbance.md)。
 
 `friction-estimate` 在固定预抓取力下沿世界 `+Y` 缓慢加载，仅从逐 taxel 三轴触觉的利用率趋势、
 空间重分布和双侧不对称性生成接触变化评分。检测器不读取外部载荷、真实 `μ`、位移或速度；
@@ -102,6 +110,16 @@ DM 共享导纳使用 `experiment=dm_gripper/force_tracking_admittance`。探索
 uv run python scripts/research/run.py -m \
   material=medium,hard,stiff \
   seed=0,1,2
+</code></pre>
+
+切向扰动当前只提供单次组合与探索性 Multirun，尚未定义正式 study：
+
+<pre><code class="language-bash">
+uv run python scripts/research/run.py \
+  experiment=dm_gripper/tangential_disturbance execution=plan
+uv run python scripts/research/run.py -m \
+  experiment=dm_gripper/tangential_disturbance \
+  task=tangential_disturbance/ramp,tangential_disturbance/step,tangential_disturbance/pulse
 </code></pre>
 
 正式控制器对比、PID 模块消融、Torque ADRC 两阶段调参、局部起滑、刚度估计器对比、DM 导纳调参、

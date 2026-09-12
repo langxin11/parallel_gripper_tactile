@@ -61,6 +61,7 @@ manifest。
 | `scenes/` | 装配 MJCF、物体材料、碰撞几何和求解选项 | 控制算法、指标统计 |
 | `tactile.py`、`contact_taxels.py` | 把不同后端统一为局部 `(3, rows, cols)` 力数组 | 决定目标力或控制状态 |
 | `force_scheduling.py` | 由切向载荷和摩擦系数生成受限的平均单侧目标力 | 读取 MuJoCo 状态或直接写执行器 |
+| `tangential_disturbance.py` | 从触觉历史生成只增不减的法向目标策略，不消费外载或物体运动真值 | 估计摩擦系数或证明微滑移 |
 | `packages/robotiq_grasp_core` | 在整数命令空间执行稳定判定、单 tick 增益估计、HOLD 与安全动作决策 | 推进仿真、读取 oracle 刚度或依赖 DM 控制核 |
 | `perception/slip.py` | 仅由触觉时序生成变化评分，持续确认后冻结摩擦候选 | 读取外部载荷、探测命令、真值 `μ` 或物体运动 |
 | `perception/friction.py` | 保留历史估计器和估计结果结构 | 被当前实验实例化以使用残差检测 |
@@ -127,9 +128,10 @@ outputs/<profile>/<experiment>/<UTC timestamp>-<id>/
 ├── task.yaml        # 仅需要 task 的实验
 ├── effective_parameters.json  # 任务实验：完整解析结果与实际覆盖
 ├── trace.parquet
-├── trace.csv       # discrete-force、force-schedule 与 friction-estimate
+├── trace.csv       # discrete-force、force-schedule、friction-estimate 与 tangential-disturbance
 ├── metrics.json
 ├── plot.png         # 其他实验的单次图
+├── plot.pdf         # tangential-disturbance 与 PNG 同 stem 的矢量图
 ├── plots/           # force-track 的单次图
 │   ├── tracking.png
 │   ├── tactile.png      # 诊断模式或科学失败
@@ -250,3 +252,9 @@ diagnostic 模式输出完整诊断；科学失败自动保留诊断。图像为
 增加 `K_hat`、导纳 `x_a`／`dx_a`、ADRC 扰动和位置修正分解。坐标轴使用带单位的 MathText 标签
 （例如 `t (s)`），关键接触事件用细灰色竖线；waypoint 仅在线性参考曲线上使用 marker，不绘制
 事件竖线。默认不含误差、滞回、limits 或 state 面板。
+
+切向扰动实验由 `experiments/tangential_disturbance.py` 持有唯一物理循环。它在触觉外环到期时更新
+`TactileDisturbancePolicy` 与 `NormalForceController`，每个物理步调用 MIT 内环的保持命令；外加载荷与
+物体运动只用于场景和离线指标。`runners/tangential_disturbance.py` 负责输入快照、全频 CSV、指标和实际
+生成的 PNG／PDF 登记，异常时保留目录、写入 `error.json` 并 finalize manifest。该任务的组合预检仅允许
+DM `full`／`pid-only`，不支持 viewer。详见[切向扰动下的触觉增力](tangential-disturbance.md)。

@@ -24,6 +24,10 @@ from ..experiments.force_tracking import (
 )
 from ..experiments.force_scheduling import ForceSchedulingTask
 from ..experiments.friction_estimation import FrictionEstimationTask
+from ..experiments.tangential_disturbance import (
+    TangentialDisturbanceTask,
+    validate_tangential_disturbance_configuration,
+)
 from ..experiments.robotiq_discrete_force import (
     ControllerVariant as RobotiqControllerVariant,
     RobotiqDiscreteForceTask,
@@ -158,6 +162,7 @@ class TaskSelection(_ResearchModel):
         "force_scheduling",
         "friction_estimation",
         "discrete_force",
+        "tangential_disturbance",
     ]
     path: Path
     definition: dict[str, object]
@@ -192,6 +197,7 @@ class ExperimentSelection(_ResearchModel):
         "force_scheduling",
         "friction_estimation",
         "discrete_force",
+        "tangential_disturbance",
     ] = "force_tracking"
     profile_name: str | None = Field(default=None, min_length=1)
 
@@ -220,6 +226,24 @@ class ResearchRunConfig(_ResearchModel):
             raise ValueError("experiment kind is incompatible with the selected platform")
         if self.task.family != self.experiment.kind:
             raise ValueError("experiment kind and task family must match")
+        if self.experiment.kind == "tangential_disturbance":
+            if self.execution.viewer:
+                raise ValueError("tangential disturbance does not support viewer")
+            if not self.execution.multiccd_enabled:
+                raise ValueError("tangential disturbance currently requires multiccd_enabled=true")
+            if self.execution.trace_sample_period_s is not None:
+                raise ValueError(
+                    "tangential disturbance records every physics step; leave trace_sample_period_s=null"
+                )
+            if not isinstance(
+                self.controller, DMControllerSelection
+            ) or self.controller.name not in {
+                "pid-only",
+                "full",
+            }:
+                raise ValueError(
+                    "tangential disturbance supports only pid-only or full controllers"
+                )
         if isinstance(self.controller, DMControllerSelection):
             if self.controller.name == "admittance":
                 if self.estimator.name != "none":
@@ -232,7 +256,11 @@ class ResearchRunConfig(_ResearchModel):
 
 
 RunTask: TypeAlias = (
-    ForceTrackingTask | ForceSchedulingTask | FrictionEstimationTask | RobotiqDiscreteForceTask
+    ForceTrackingTask
+    | ForceSchedulingTask
+    | FrictionEstimationTask
+    | RobotiqDiscreteForceTask
+    | TangentialDisturbanceTask
 )
 
 
@@ -495,8 +523,11 @@ def resolve_research_run(
             "force_scheduling": ForceSchedulingTask,
             "friction_estimation": FrictionEstimationTask,
             "discrete_force": RobotiqDiscreteForceTask,
+            "tangential_disturbance": TangentialDisturbanceTask,
         }
         task = task_model[selection.task.family].model_validate(selection.task.definition)
+        if isinstance(task, TangentialDisturbanceTask):
+            task = task.model_copy(update={"object_material": selection.material.name})
         profile = _profile_from_fragments(selection, repository_root=root)
         if isinstance(selection.controller, DMControllerSelection):
             estimator = None if selection.estimator.name == "none" else selection.estimator.name
@@ -509,7 +540,7 @@ def resolve_research_run(
             )
         validate_profile(profile)
         trace_sample_period_s = selection.execution.trace_sample_period_s
-        if trace_sample_period_s is None:
+        if trace_sample_period_s is None and not isinstance(task, TangentialDisturbanceTask):
             trace_sample_period_s = (
                 task.control_period_s
                 if selection.controller.name == "admittance"
@@ -535,6 +566,8 @@ def resolve_research_run(
                 render_fps=resolved_execution.render_fps,
                 realtime_factor=resolved_execution.realtime_factor,
             )
+        elif isinstance(task, TangentialDisturbanceTask):
+            validate_tangential_disturbance_configuration(profile, task)
     except (OSError, ValidationError, ValueError) as error:
         raise ResearchConfigurationError(str(error)) from error
     resolved_selection = ResearchRunConfig.model_validate(

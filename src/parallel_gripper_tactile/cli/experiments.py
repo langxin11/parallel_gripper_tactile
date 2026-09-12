@@ -22,6 +22,7 @@ from ..experiments.friction_estimation import FrictionEstimationTask
 from ..experiments.grasp import run_acceptance
 from ..experiments.grasp_video import record_custom_grasp_video
 from ..experiments.robotiq_discrete_force import RobotiqDiscreteForceTask
+from ..experiments.tangential_disturbance import TangentialDisturbanceTask
 from ..config.profiles import GripperProfile, validate_resolved_profile
 from ..protocols import DisturbanceProtocol
 from ..artifacts import RunDirectory
@@ -30,6 +31,7 @@ from ..runners import (
     execute_force_tracking,
     execute_friction_estimation,
     execute_robotiq_discrete_force,
+    execute_tangential_disturbance,
 )
 from ..research import compose_research_run
 from ..research.configuration import DMControllerSelection
@@ -247,6 +249,58 @@ def run_force_schedule(
         f"{result.max_tangential_displacement_m * 1000:.3f} mm",
     )
     table.add_row("Mean target force", f"{result.mean_target_force_n:.3f} N")
+    table.add_row("Final target force", f"{result.final_target_force_n:.3f} N")
+    state(context).console.print(table)
+    state(context).console.print(f"Run: [cyan]{run.path}[/cyan]")
+    if not result.passed:
+        raise typer.Exit(1)
+
+
+@run_app.command("tangential-disturbance")
+def run_tangential_disturbance(
+    context: typer.Context,
+    experiment: Annotated[
+        str, typer.Option("--experiment", help="Named experiment under configs/experiment.")
+    ] = "dm_gripper/tangential_disturbance",
+    set_values: Annotated[
+        list[str] | None,
+        typer.Option("--set", help="Repeatable Hydra override applied after the experiment."),
+    ] = None,
+    run_name: Annotated[str | None, typer.Option()] = None,
+    run_prefix: Annotated[str | None, typer.Option("--run-prefix")] = None,
+    run_suffix: Annotated[str | None, typer.Option("--run-suffix")] = None,
+) -> None:
+    """运行法向力控制下的切向扰动抓取实验。"""
+    try:
+        resolved = _composed_run(experiment, set_values)
+        if not isinstance(resolved.task, TangentialDisturbanceTask):
+            raise ValueError("selected experiment does not define a tangential-disturbance task")
+        run, result = execute_tangential_disturbance(
+            profile=_profile_snapshot(resolved.profile),
+            resolved_profile=resolved.profile,
+            task_path=resolved.task_source,
+            disturbance_task=resolved.task,
+            output_root=resolved.selection.execution.output_root,
+            run_name=run_name,
+            run_prefix=run_prefix,
+            run_suffix=run_suffix,
+        )
+    except Exception as error:
+        fail(context, error, title="Tangential disturbance experiment failed")
+    table = Table(title="Tangential disturbance")
+    table.add_column("Result")
+    table.add_column("Value")
+    table.add_row("Passed", "PASS" if result.passed else "FAIL")
+    table.add_row(
+        "Max tangential displacement",
+        "n/a"
+        if result.max_tangential_displacement_m is None
+        else f"{result.max_tangential_displacement_m * 1000:.3f} mm",
+    )
+    table.add_row(
+        "Peak actual force",
+        "n/a" if result.peak_actual_force_n is None else f"{result.peak_actual_force_n:.3f} N",
+    )
     table.add_row("Final target force", f"{result.final_target_force_n:.3f} N")
     state(context).console.print(table)
     state(context).console.print(f"Run: [cyan]{run.path}[/cyan]")

@@ -16,8 +16,9 @@ uv run pgt runs list
 2. [Hydra 科研配置与实验编排](research-configuration.md)：组合配置、审阅计划并执行正式研究；
 3. [Oracle 抓取目标力调度](force-scheduling.md)：根据已知摩擦系数和切向载荷生成目标力；
 4. [微滑移探测与保守摩擦估计](friction-estimation.md)：触觉检测、估计边界与当前结果；
-5. [Robotiq 2F-85 离散力控制](discrete-force-control.md)：用 `ΔF_tick` 实现整数控制；
-6. [控制算法对比与消融](control-comparison-ablation.md)：在一致任务下比较结果。
+5. [切向扰动下的触觉增力](tangential-disturbance.md)：稳定夹持后以触觉变化有限增力的仿真边界；
+6. [Robotiq 2F-85 离散力控制](discrete-force-control.md)：用 `ΔF_tick` 实现整数控制；
+7. [控制算法对比与消融](control-comparison-ablation.md)：在一致任务下比较结果。
 
 模型与接口背景：
 
@@ -38,6 +39,7 @@ uv run pgt validate configs/dm_gripper.yaml
 uv run pgt run demo
 uv run pgt run force-track --set task=force_tracking/default_waypoints
 uv run pgt run force-schedule --experiment dm_gripper/force_scheduling_gravity_hold
+uv run pgt run tangential-disturbance --experiment dm_gripper/tangential_disturbance
 uv run pgt run friction-estimate --experiment dm_gripper/friction_estimation_nominal
 uv run pgt run discrete-force --experiment robotiq_2f85/discrete_force
 </code></pre>
@@ -46,5 +48,6 @@ uv run pgt run discrete-force --experiment robotiq_2f85/discrete_force
 [Hydra 科研配置与实验编排](research-configuration.md)、
 [Oracle 抓取目标力调度](force-scheduling.md)、
 [微滑移探测与保守摩擦估计](friction-estimation.md)、
+[切向扰动下的触觉增力](tangential-disturbance.md)、
 [Robotiq 2F-85 离散力控制](discrete-force-control.md)、
 [控制算法对比与消融](control-comparison-ablation.md)与[项目架构](architecture.md)。

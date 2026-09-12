@@ -51,12 +51,31 @@ uv run python scripts/research/run.py \
   experiment=dm_gripper/force_tracking_admittance
 ```
 
+切向扰动使用自己的 experiment 组合。它只允许 `controller=dm_gripper/full` 或
+`controller=dm_gripper/pid_only`，并拒绝导纳、其他控制器及 `execution.viewer=true`；material 选择会
+写入实际任务的 `object_material`。先以计划模式检查组合：
+
+```bash
+uv run python scripts/research/run.py \
+  experiment=dm_gripper/tangential_disturbance \
+  execution=plan
+```
+
 探索性参数组合使用 Hydra 原生 Multirun。每个组合拥有独立的 Hydra 外层目录和内部 run artifacts：
 
 ```bash
 uv run python scripts/research/run.py -m \
   material=medium,hard,stiff \
   seed=0,1,2
+```
+
+切向扰动可使用同一单次入口进行探索性 Multirun，但没有正式 study 或预定义条件矩阵：
+
+```bash
+uv run python scripts/research/run.py -m \
+  experiment=dm_gripper/tangential_disturbance \
+  task=tangential_disturbance/ramp,tangential_disturbance/step,tangential_disturbance/pulse \
+  material=medium,hard
 ```
 
 ## 计划模式
@@ -290,6 +309,11 @@ uv run pgt run force-track --set execution.plot_mode=diagnostic
 当前声明 DM 与 Robotiq 仿真组合。导纳必须配 `estimator=none`；非导纳控制器中仅 `pid-only` 允许显式关闭估计器；
 Torque ADRC 参数只能随 `adrc-torque` 或 `adrc-torque-td` 出现。选择 platform 不会打开串口、连接设备、
 使能电机或发送命令；尚未支持的硬件组合会被 schema 拒绝。
+
+`tangential_disturbance` 是额外的 DM 单次任务家族。解析时会先构造最终 profile，再以任务实际材料编译
+scene，检查 MIT 法向控制、非导纳／非 ADRC 路径以及 `control_period_s` 不小于物理步长。计划模式完成这些
+检查但不创建 `MjData` 或推进时间。实验方法和输出语义见
+[切向扰动下的触觉增力](tangential-disturbance.md)。
 
 ## 路径、产物与复现
 

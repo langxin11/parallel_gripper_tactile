@@ -10,6 +10,7 @@ nav = [
     { "3. 曲柄滑块力控模型" = "crank-slider-force-control.md" },
     { "4. 动态目标力跟踪" = "force-tracking.md" },
     { "5. Oracle 目标力调度" = "force-scheduling.md" },
+    { "切向扰动与 MIT 触觉增力" = "tangential-disturbance.md" },
     { "6. 微滑移探测与摩擦估计" = "friction-estimation.md" },
     { "7. Robotiq 离散力控制" = "discrete-force-control.md" },
     { "8. 控制算法对比与消融" = "control-comparison-ablation.md" },
