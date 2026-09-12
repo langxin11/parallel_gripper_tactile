@@ -389,12 +389,15 @@ def run_friction_estimation(
     output_taxel_plot: Path | None = None,
     sensor_noise_seed: int | None = None,
     on_frame: FrameCallback | None = None,
+    on_result: Callable[[list[dict[str, object]], FrictionEstimationResult], None] | None = None,
     render_fps: float = 30.0,
 ) -> FrictionEstimationResult:
     """运行探测、保守估计与估计值目标力调度仿真。
 
     当传入 ``on_frame`` 时，仿真在每 ``1/render_fps`` 秒仿真时间回调一次
     最新采样行与模型/数据快照，供离屏录制脚本叠加实时曲线，不改变物理与产物。
+    当传入 ``on_result`` 时，它在完整轨迹和结果仍在内存时优先接管绘图；此时
+    ``output_plot`` 与 ``output_taxel_plot`` 不再自动绘制。
     """
     if on_frame is not None and render_fps <= 0:
         raise ValueError("render_fps must be positive when on_frame is enabled")
@@ -790,15 +793,6 @@ def run_friction_estimation(
             writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
             writer.writeheader()
             writer.writerows(rows)
-    if rows and output_plot is not None:
-        from ..visualization.friction import plot_summary
-
-        plot_summary(output_plot, rows, task=task)
-    if rows and output_taxel_plot is not None:
-        from ..visualization.friction import plot_taxel_diagnostics
-
-        plot_taxel_diagnostics(output_taxel_plot, rows, task=task)
-
     probe_local_ratios = [
         float(row["active_taxel_max_ratio"])
         for row in rows
@@ -807,7 +801,7 @@ def run_friction_estimation(
     detection_rows = [row for row in rows if row["phase"] == "probe" and bool(row["slip_detected"])]
     detection_row = detection_rows[0] if detection_rows else None
 
-    return FrictionEstimationResult(
+    result = FrictionEstimationResult(
         true_friction_coefficient=float(task.friction_coefficient),
         estimated_friction_coefficient=estimated_mu,
         raw_friction_coefficient=estimate.raw_friction_coefficient,
@@ -856,6 +850,18 @@ def run_friction_estimation(
         probe_displacement_limit_exceeded=not probe_slip_passed,
         hold_succeeded=hold_slip_passed and force_tracking_passed and bool(hold_rows),
     )
+    if rows and on_result is not None:
+        on_result(rows, result)
+    else:
+        if rows and output_plot is not None:
+            from ..visualization.friction import plot_summary
+
+            plot_summary(output_plot, rows, task=task)
+        if rows and output_taxel_plot is not None:
+            from ..visualization.friction import plot_taxel_diagnostics
+
+            plot_taxel_diagnostics(output_taxel_plot, rows, task=task)
+    return result
 
 
 __all__ = [

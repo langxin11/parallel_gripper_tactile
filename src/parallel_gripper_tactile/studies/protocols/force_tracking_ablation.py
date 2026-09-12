@@ -10,7 +10,7 @@ import json
 import math
 from pathlib import Path
 from statistics import fmean, stdev
-from typing import Iterable
+from typing import Iterable, Literal
 from uuid import uuid4
 
 import numpy as np
@@ -393,6 +393,8 @@ def _execute_condition(
     resolved_profile: GripperProfile | None,
     task: ForceTrackingTask,
     study_dir: Path,
+    plot_mode: Literal["summary", "diagnostic"],
+    diagnostic_seed: int,
 ) -> ConditionExecution:
     """在独立进程中执行一个力跟踪消融条件。"""
     parameters = condition.parameters
@@ -409,6 +411,9 @@ def _execute_condition(
         object_material=material,
         controller_variant=controller,
         sensor_noise_seed=seed,
+        plot_mode=(
+            "diagnostic" if plot_mode == "diagnostic" or seed == diagnostic_seed else "none"
+        ),
     )
     row = {
         "controller_variant": controller,
@@ -436,6 +441,7 @@ def run_study(
     lifecycle_manifest_fields: Mapping[str, object] | None = None,
     workers: int = 1,
     on_progress: StudyProgressCallback | None = None,
+    plot_mode: Literal["summary", "diagnostic"] = "summary",
 ) -> Path:
     """通过公共生命周期执行整个 protocol，并返回 study 父目录。"""
     study_dir = (
@@ -463,6 +469,8 @@ def run_study(
         resolved_profile=resolved_profile,
         task=task,
         study_dir=study_dir,
+        plot_mode=plot_mode,
+        diagnostic_seed=min(plan.seeds),
     )
 
     def aggregate_and_persist(

@@ -12,7 +12,7 @@ import json
 import math
 from pathlib import Path
 from statistics import fmean, stdev
-from typing import Iterable
+from typing import Iterable, Literal
 from uuid import uuid4
 
 from parallel_gripper_tactile.experiments.force_tracking import ForceTrackingTask
@@ -431,12 +431,13 @@ def render_study_figures(
     max_torque_saturation_ratio: float,
     max_ramp_rmse_ratio_to_baseline: float,
     max_mixed_rmse_ratio_to_baseline: float,
+    stage: TorqueAdrcTuningStageName = "coarse",
+    plot_mode: Literal["summary", "diagnostic"] = "summary",
 ) -> list[Path]:
     """生成适用于 coarse 和 confirm 阶段的论文级调参图表。"""
     figures_dir = study_dir / "figures"
     figures_dir.mkdir(exist_ok=True)
     ranking_plot = figures_dir / "candidate_ranking_and_feasibility.png"
-    parameter_plot = figures_dir / "parameter_performance.png"
     ranking_path = plot_candidate_ranking_and_feasibility(
         ranking,
         ranking_plot,
@@ -444,8 +445,12 @@ def render_study_figures(
         max_ramp_rmse_ratio_to_baseline=max_ramp_rmse_ratio_to_baseline,
         max_mixed_rmse_ratio_to_baseline=max_mixed_rmse_ratio_to_baseline,
     )
-    parameter_path = plot_parameter_performance(aggregates, parameter_plot)
-    return [ranking_path, parameter_path]
+    parameter_paths: list[Path] = []
+    if stage == "coarse" or plot_mode == "diagnostic":
+        parameter_paths.append(
+            plot_parameter_performance(aggregates, figures_dir / "parameter_performance.png")
+        )
+    return [ranking_path, *parameter_paths]
 
 
 def rank_candidates(
@@ -632,6 +637,8 @@ def _execute_condition(
     resolved_profile: GripperProfile | None,
     tasks: Mapping[Path, ForceTrackingTask],
     study_dir: Path,
+    plot_mode: Literal["summary", "diagnostic"],
+    diagnostic_seed: int,
 ) -> ConditionExecution:
     """在独立进程中执行一个 Torque ADRC 候选条件。"""
     parameters = condition.parameters
@@ -661,6 +668,9 @@ def _execute_condition(
         stiffness_estimator_method=config.stiffness_estimator_method,
         sensor_noise_seed=seed,
         torque_adrc_override=override,
+        plot_mode=(
+            "diagnostic" if plot_mode == "diagnostic" or seed == diagnostic_seed else "none"
+        ),
     )
     row = {
         "candidate_id": candidate.identifier,
@@ -696,6 +706,7 @@ def run_study(
     lifecycle_manifest_fields: Mapping[str, object] | None = None,
     workers: int = 1,
     on_progress: StudyProgressCallback | None = None,
+    plot_mode: Literal["summary", "diagnostic"] = "summary",
 ) -> Path:
     """通过公共生命周期执行调参阶段并生成候选排名。"""
     if resolved_profile is None:
@@ -727,6 +738,8 @@ def run_study(
         resolved_profile=resolved_profile,
         tasks=tasks,
         study_dir=study_dir,
+        plot_mode=plot_mode,
+        diagnostic_seed=min(plan.seeds),
     )
 
     candidates = tuple(
@@ -803,6 +816,8 @@ def run_study(
                 aggregates,
                 ranking,
                 directory,
+                stage=stage,
+                plot_mode=plot_mode,
                 max_torque_saturation_ratio=(config.constraints.max_torque_saturation_ratio),
                 max_ramp_rmse_ratio_to_baseline=(
                     config.constraints.max_ramp_rmse_ratio_to_baseline

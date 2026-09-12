@@ -10,7 +10,7 @@ import json
 import math
 from pathlib import Path
 from statistics import fmean, stdev
-from typing import Iterable
+from typing import Iterable, Literal
 from uuid import uuid4
 
 import numpy as np
@@ -83,6 +83,7 @@ PLOTTED_METRICS = (
     ("mae_n", "MAE (N)"),
     ("peak_abs_error_n", "Peak absolute error (N)"),
 )
+SUMMARY_PLOTTED_METRICS = tuple(metric for metric in PLOTTED_METRICS if metric[0] != "mae_n")
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 
 
@@ -134,18 +135,20 @@ def plot_metric_summary(
     output: Path,
     *,
     controller_order: Iterable[str],
+    plot_mode: Literal["summary", "diagnostic"] = "summary",
 ) -> Path:
     """按任务绘制各控制器跟踪误差的均值与样本标准差。"""
     if not aggregates:
         raise ValueError("cannot plot empty aggregates")
     plt = science_pyplot()
     controllers = tuple(controller_order)
+    metrics = SUMMARY_PLOTTED_METRICS if plot_mode == "summary" else PLOTTED_METRICS
     tasks = tuple(dict.fromkeys(str(row["task_name"]) for row in aggregates))
     materials = tuple(dict.fromkeys(str(row["object_material"]) for row in aggregates))
     colors = ("#0072B2", "#E69F00", "#009E73", "#D55E00")
     figure, axes = plt.subplots(
         len(tasks),
-        len(PLOTTED_METRICS),
+        len(metrics),
         figsize=paper_figsize(3.1 * len(tasks)),
         squeeze=False,
         layout="constrained",
@@ -157,7 +160,7 @@ def plot_metric_summary(
     x = np.arange(len(controllers), dtype=np.float64)
     width = 0.8 / max(1, len(materials))
     for task_index, task_name in enumerate(tasks):
-        for metric_index, (metric, label) in enumerate(PLOTTED_METRICS):
+        for metric_index, (metric, label) in enumerate(metrics):
             axis = axes[task_index][metric_index]
             for material_index, material in enumerate(materials):
                 positions = x - 0.4 + width / 2.0 + material_index * width
@@ -185,7 +188,7 @@ def plot_metric_summary(
             axis.grid(True, axis="y", linewidth=0.3, alpha=0.5)
             if metric_index == 0:
                 axis.set_title(task_name)
-            if task_index == 0 and metric_index == len(PLOTTED_METRICS) - 1:
+            if task_index == 0 and metric_index == len(metrics) - 1:
                 figure.legend(
                     *axis.get_legend_handles_labels(),
                     loc="outside upper center",
@@ -311,6 +314,29 @@ def plot_ablation_delta(
     return pdf_path
 
 
+def _has_finite_baseline_comparison(
+    aggregates: list[dict[str, object]], controller_order: Iterable[str]
+) -> bool:
+    """确认 ``full`` 与至少一个对比控制器在同一条件有有限 RMSE。"""
+    controllers = tuple(controller_order)
+    comparisons = set(controllers) - {"full"}
+    if "full" not in controllers or not comparisons:
+        return False
+    finite: set[tuple[str, str, str]] = set()
+    for row in aggregates:
+        value = row.get("rmse_n_mean")
+        if value is None or not math.isfinite(float(value)):
+            continue
+        finite.add(
+            (str(row["controller_variant"]), str(row["task_name"]), str(row["object_material"]))
+        )
+    return any(
+        ("full", task, material) in finite
+        and any((controller, task, material) in finite for controller in comparisons)
+        for _, task, material in finite
+    )
+
+
 def _read_tracking_rows(run_directory: Path) -> list[dict[str, object]]:
     """读取单次 run 的跟踪阶段 trace。"""
     rows = [row for row in read_trace_rows(run_directory) if row["phase"] == "track_reference"]
@@ -399,28 +425,39 @@ def render_study_figures(
     study_dir: Path,
     *,
     controller_order: Iterable[str],
+    plot_mode: Literal["summary", "diagnostic"] = "summary",
 ) -> list[Path]:
     """从已保存 summary 与子 run trace 生成或刷新论文级对比图。"""
     figures_dir = study_dir / "figures"
     figures_dir.mkdir(exist_ok=True)
     metric_plot = figures_dir / "metrics_by_controller.png"
     saturation_plot = figures_dir / "saturation_comparison.png"
-    delta_plot = figures_dir / "ablation_delta.png"
-    metric_path = plot_metric_summary(aggregates, metric_plot, controller_order=controller_order)
-    saturation_path = plot_saturation_summary(
-        aggregates, saturation_plot, controller_order=controller_order
+    controllers = tuple(controller_order)
+    metric_path = plot_metric_summary(
+        aggregates, metric_plot, controller_order=controllers, plot_mode=plot_mode
     )
-    delta_path = plot_ablation_delta(aggregates, delta_plot, controller_order=controller_order)
+    saturation_path = plot_saturation_summary(
+        aggregates, saturation_plot, controller_order=controllers
+    )
+    delta_paths: list[Path] = []
+    if plot_mode == "diagnostic" and _has_finite_baseline_comparison(aggregates, controllers):
+        delta_paths.append(
+            plot_ablation_delta(
+                aggregates,
+                figures_dir / "ablation_delta.png",
+                controller_order=controllers,
+            )
+        )
     trace_plots = plot_tracking_overlays(
         rows,
         study_dir,
         figures_dir,
-        controller_order=controller_order,
+        controller_order=controllers,
     )
     return [
         metric_path,
         saturation_path,
-        delta_path,
+        *delta_paths,
         *trace_plots,
     ]
 
@@ -542,6 +579,8 @@ def _execute_condition(
     resolved_profile: GripperProfile | None,
     tasks: Mapping[Path, ForceTrackingTask],
     study_dir: Path,
+    plot_mode: Literal["summary", "diagnostic"],
+    diagnostic_seed: int,
 ) -> ConditionExecution:
     """在独立进程中执行一个控制器比较条件。"""
     parameters = condition.parameters
@@ -562,6 +601,9 @@ def _execute_condition(
         stiffness_estimator_method=config.stiffness_estimator_method,
         sensor_noise_seed=seed,
         trace_sample_period_s=task.control_period_s if config.trace_at_control_rate else None,
+        plot_mode=(
+            "diagnostic" if plot_mode == "diagnostic" or seed == diagnostic_seed else "none"
+        ),
     )
     row = {
         "controller_variant": controller,
@@ -592,6 +634,7 @@ def run_study(
     lifecycle_manifest_fields: Mapping[str, object] | None = None,
     workers: int = 1,
     on_progress: StudyProgressCallback | None = None,
+    plot_mode: Literal["summary", "diagnostic"] = "summary",
 ) -> Path:
     """通过公共生命周期执行 comparison protocol 并返回 study 目录。"""
     tasks = validate_inputs(config, resolved_profile=resolved_profile)
@@ -617,6 +660,8 @@ def run_study(
         resolved_profile=resolved_profile,
         tasks=tasks,
         study_dir=study_dir,
+        plot_mode=plot_mode,
+        diagnostic_seed=min(plan.seeds),
     )
 
     def aggregate_and_persist(
@@ -659,6 +704,7 @@ def run_study(
                 aggregates,
                 directory,
                 controller_order=config.controllers,
+                plot_mode=plot_mode,
             )
         )
 
@@ -688,7 +734,9 @@ def _write_failure_records(path: Path, rows: list[dict[str, object]]) -> Path:
     return path
 
 
-def render_existing_study(study_dir: Path) -> list[Path]:
+def render_existing_study(
+    study_dir: Path, *, plot_mode: Literal["summary", "diagnostic"] = "summary"
+) -> list[Path]:
     """从已完成 study 的 summary 重建论文级图表并更新 manifest。"""
     summary_path = study_dir / "summary.json"
     manifest_path = study_dir / "study_manifest.json"
@@ -712,6 +760,7 @@ def render_existing_study(study_dir: Path) -> list[Path]:
         typed_aggregates,
         study_dir,
         controller_order=controller_order,
+        plot_mode=plot_mode,
     )
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))

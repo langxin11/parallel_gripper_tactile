@@ -287,8 +287,8 @@ waypoint 的 `t_s` 应严格递增，`force_n` 应为非负值。任务总跟踪
 | `effective_parameters.json` | 解析后的完整 profile、task 与本次实际生效的运行时覆盖。 |
 | `trace.parquet` | 使用 Zstd 压缩、事件感知降采样的状态、目标力、测量力和控制量。 |
 | `plots/tracking.png` | 600 DPI 目标力与滤波力单面板 PNG。 |
-| `plots/tactile.png` | 600 DPI 双侧法向力与切向力 PNG。 |
-| `plots/controller.png` | 600 DPI 关节、力矩及可用控制分解 PNG。 |
+| `plots/tactile.png` | 诊断模式或科学失败时生成的双侧法向力与切向力 PNG。 |
+| `plots/controller.png` | 诊断模式或科学失败时生成的关节、力矩及可用控制分解 PNG。 |
 | `metrics.json` | 跟踪误差、饱和比例、接触时间等摘要指标。 |
 | `manifest.json` | 运行命令、时间戳和产物索引。 |
 
@@ -298,12 +298,14 @@ profile、task 等人工输入继续采用 YAML。`effective_parameters.json` �
 限幅状态变化以及 waypoint 前后 0.2 s 保留完整控制频率。误差指标和图像均在降采样前计算/生成，
 不会因存储采样率改变。实际采样周期和事件窗口记录在 Parquet metadata、manifest 与
 `effective_parameters.json` 中。读取接口继续兼容旧 CSV API 及历史 `trace.csv` 产物。
-需要覆盖默认策略时，可使用 `--trace-period` 和 `--event-window`；采样周期必须不小于
+需要覆盖默认策略时，可使用 `--set execution.trace_sample_period_s=...` 和
+`--set execution.trace_event_window_s=...`；采样周期必须不小于
 且为任务控制周期的整数倍，设置为控制周期等价于全频记录常规区段。
 
 单次 force-track runner 将完整频率行通过 `on_result(full_rows, result)` 回调交给
-`visualization/force_tracking.py`。默认只生成三张图：`tracking.png` 为 `F_ref` 与 `F_filt`
-（缺失时回退 `meas`），`tactile.png` 为 `F_{nL}`／`F_{nR}` 与 `F_{tL}`／`F_{tR}`，
+`visualization/force_tracking.py`。默认 `summary` 只生成 `tracking.png`，展示 `F_ref` 与 `F_filt`
+（缺失时回退 `meas`）。`--set execution.plot_mode=diagnostic` 或科学失败时生成完整图组：
+`tactile.png` 为 `F_{nL}`／`F_{nR}` 与 `F_{tL}`／`F_{tR}`，
 `controller.png` 为 `q_des`／`q`、`dq_des`／`dq`、`tau_cmd` 与 MuJoCo 执行的 `tau_act`。
 存在有效字段时，控制器图还加入 `K_hat`、导纳 `x_a`／`dx_a`、ADRC 扰动和位置修正分解；
 缺字段按 capability 省略。所有轴都标明物理量和单位（例如 `t (s)`），使用 SciencePlots 与
@@ -381,7 +383,7 @@ runner 参数 `tactile_detail=False`。逐 taxel 字段始终写入 trace；细�
 `tactile_detail=True` 或重绘 CLI 的 `--tactile-detail` 开启。降采样不能恢复高频信息，指标仍在完整频率数据上统一计算。
 
 兼容的 Python `run_force_tracking(output_plot=path)` 调用仍保留；只有显式传入单个路径时才写出
-单张 tracking 图，不改变 runner 默认的三张图布局。
+单张 tracking 图；runner 的 summary／diagnostic 图组由出图模式选择。
 
 ## 5. 指标解读
 

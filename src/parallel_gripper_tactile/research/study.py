@@ -179,6 +179,7 @@ class StudyExecution(_StudyModel):
     output_root: Path
     recovery_source: Path | None = None
     workers: int = Field(default=1, ge=1)
+    plot_mode: Literal["summary", "diagnostic"] = "summary"
 
 
 class ResearchStudyConfig(_StudyModel):
@@ -753,6 +754,7 @@ def execute_research_study(
         extra_artifacts.append(recovery_path)
 
     lifecycle_fields: dict[str, object] = {
+        "plot_mode": resolved.selection.execution.plot_mode,
         "effective_configuration": effective_path.name,
         "composition_provenance": provenance_path.name,
         "provenance": dict(provenance),
@@ -803,6 +805,7 @@ def execute_research_study(
         "additional_artifacts": tuple(extra_artifacts),
         "lifecycle_manifest_fields": lifecycle_fields,
         "workers": resolved.selection.execution.workers,
+        "plot_mode": resolved.selection.execution.plot_mode,
     }
     if on_progress is not None:
         common_arguments["on_progress"] = on_progress

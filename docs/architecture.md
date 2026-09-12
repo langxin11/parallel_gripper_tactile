@@ -132,8 +132,8 @@ outputs/<profile>/<experiment>/<UTC timestamp>-<id>/
 ├── plot.png         # 其他实验的单次图
 ├── plots/           # force-track 的单次图
 │   ├── tracking.png
-│   ├── tactile.png
-│   └── controller.png
+│   ├── tactile.png      # 诊断模式或科学失败
+│   └── controller.png   # 诊断模式或科学失败
 └── video.mp4        # 仅请求录制时
 ```
 
@@ -172,7 +172,7 @@ outputs/research/studies/<study>/<UTC timestamp>-<id>/
 
 study 的 `summary` 与（适用时的）`aggregate` 同时输出 CSV 和 Parquet；diagnosis study 只输出 summary，
 不生成 aggregate。单次 force-track run 由 runner 的 `on_result(full_rows, result)` 回调调用纯绘图层，
-从本次完整频率 trace 生成三张单次图并登记实际文件；跨 run 的统计图由
+从本次完整频率 trace 按出图模式生成单次图并登记实际文件；跨 run 的统计图由
 包内 study protocol 在所有条件结束后从 `summary`、`aggregate` 和子 run trace 生成 600 DPI PNG，
 并登记到 `study_manifest.json`。公共生命周期持有同一个有序 `StudyPlan`，在执行前写入
 `running` 状态；`execution.workers>1` 时以 `spawn` 进程并行运行独立条件，父进程在每个条件完成后
@@ -242,7 +242,8 @@ import-linter 契约机器检查：配置位于 `pyproject.toml` 的 `[tool.impo
 `save_publication_figure()` 只按调用方请求的扩展名保存一份图像，保留画布尺寸并由调用方关闭图像。
 实验入口负责面板组织、标签与图例，runner 或 CLI 负责产物登记。视频叠加面板不属于论文图。
 
-force-track 单次绘图层位于 `visualization/force_tracking.py`：默认输出 600 DPI PNG，不自动生成 PDF。
+force-track 单次绘图层位于 `visualization/force_tracking.py`：默认 summary 模式只输出跟踪主图，
+diagnostic 模式输出完整诊断；科学失败自动保留诊断。图像为 600 DPI PNG，不自动生成 PDF。
 `tracking.png` 为目标力 `F_ref` 与滤波力 `F_filt`（缺失时回退 `meas`）单面板；`tactile.png`
 展示左右法向力 `F_{nL}`／`F_{nR}` 与切向模长 `F_{tL}`／`F_{tR}`；`controller.png` 展示
 `q_des`／`q`、`dq_des`／`dq`、命令力矩 `tau_cmd` 与 MuJoCo 执行力矩 `tau_act`，并按有效数据

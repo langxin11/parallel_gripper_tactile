@@ -5,3 +5,4 @@ output_root: ${pgt_repo:}/outputs/research/studies
 recovery_source: null
 # 计划模式不创建 worker；保留该字段便于计划与执行配置同构。
 workers: 1
+plot_mode: summary

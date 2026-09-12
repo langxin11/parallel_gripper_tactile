@@ -174,6 +174,7 @@ class ExecutionConfig(_ResearchModel):
 
     mode: Literal["plan", "run"] = "run"
     output_root: Path
+    plot_mode: Literal["summary", "diagnostic"] = "summary"
     viewer: bool = False
     render_fps: float = Field(default=30.0, gt=0)
     realtime_factor: float = Field(default=1.0, gt=0)
@@ -266,6 +267,7 @@ class ResolvedResearchRun:
                 "sensor_noise_seed": self.selection.seed,
                 "multiccd_enabled": self.selection.execution.multiccd_enabled,
                 "viewer": self.selection.execution.viewer,
+                "plot_mode": self.selection.execution.plot_mode,
                 "render_fps": self.selection.execution.render_fps,
                 "realtime_factor": self.selection.execution.realtime_factor,
                 "trace_sample_period_s": self.selection.execution.trace_sample_period_s,

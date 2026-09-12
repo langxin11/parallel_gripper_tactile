@@ -10,8 +10,10 @@ import json
 import math
 from pathlib import Path
 from statistics import fmean
+from typing import Literal
 from uuid import uuid4
 
+import numpy as np
 import yaml
 
 from parallel_gripper_tactile.config.profiles import GripperProfile, validate_resolved_profile
@@ -49,6 +51,11 @@ from parallel_gripper_tactile.studies.tabular import (
     read_trace_rows,
     write_resolved_config,
     write_rows_csv_and_parquet,
+)
+from parallel_gripper_tactile.visualization import (
+    paper_figsize,
+    save_publication_figure,
+    science_pyplot,
 )
 
 
@@ -275,6 +282,8 @@ def _execute_condition(
     profile: GripperProfile,
     task: ForceTrackingTask,
     study_dir: Path,
+    plot_mode: Literal["summary", "diagnostic"],
+    diagnostic_seed: int,
 ) -> ConditionExecution:
     """在独立进程中执行一个导纳候选条件。"""
     parameters = condition.parameters
@@ -292,6 +301,9 @@ def _execute_condition(
         object_material=material,  # type: ignore[arg-type]
         controller_variant="admittance",
         sensor_noise_seed=seed,
+        plot_mode=(
+            "diagnostic" if plot_mode == "diagnostic" or seed == diagnostic_seed else "none"
+        ),
     )
     row = {
         "candidate_id": candidate.identifier,
@@ -320,6 +332,47 @@ def _execute_condition(
     )
 
 
+def plot_candidate_ranking(ranking: list[dict[str, object]], output: Path) -> Path:
+    """按既有候选排名展示资格约束及原始物理力误差。"""
+    plt = science_pyplot()
+    figure, axes = plt.subplots(1, 2, figsize=paper_figsize(3.8), layout="constrained")
+    ordered = sorted(ranking, key=lambda row: int(row["rank"]))
+    x = np.arange(len(ordered))
+    labels = [f"#{int(row['rank'])}" for row in ordered]
+    stable = [1.0 if row["stable"] == "true" else 0.0 for row in ordered]
+    complete = [1.0 if row["complete_force_tracking"] == "true" else 0.0 for row in ordered]
+    width = 0.38
+    axes[0].bar(x - width / 2, stable, width, label="stable", color="#0072B2")
+    axes[0].bar(x + width / 2, complete, width, label="complete tracking", color="#009E73")
+    axes[0].set_ylim(0.0, 1.15)
+    axes[0].set_ylabel("资格约束满足")
+    axes[0].set_title("候选资格")
+    axes[0].legend(frameon=False, fontsize=7)
+    peak = [
+        math.nan
+        if row["raw_peak_abs_error_n_mean"] is None
+        else float(row["raw_peak_abs_error_n_mean"])
+        for row in ordered
+    ]
+    rmse = [
+        math.nan if row["raw_rmse_n_mean"] is None else float(row["raw_rmse_n_mean"])
+        for row in ordered
+    ]
+    axes[1].scatter(x, peak, label="raw peak error", color="#D55E00", marker="o")
+    axes[1].scatter(x, rmse, label="raw RMSE", color="#CC79A7", marker="s")
+    axes[1].set_ylabel("力误差（N）")
+    axes[1].set_title("既有排名误差项")
+    axes[1].legend(frameon=False, fontsize=7)
+    for axis in axes:
+        axis.set_xticks(x, labels)
+        axis.set_xlabel("既有候选排名")
+        axis.grid(True, axis="y", linewidth=0.3, alpha=0.5)
+    output.parent.mkdir(parents=True, exist_ok=True)
+    path = save_publication_figure(figure, output)
+    plt.close(figure)
+    return path
+
+
 def run_study(
     config: DMAdmittanceTuningConfig,
     *,
@@ -331,6 +384,7 @@ def run_study(
     lifecycle_manifest_fields: Mapping[str, object] | None = None,
     workers: int = 1,
     on_progress: StudyProgressCallback | None = None,
+    plot_mode: Literal["summary", "diagnostic"] = "summary",
 ) -> Path:
     """通过公共生命周期执行导纳 Ramp 调参，并返回 study 父目录。"""
     profile = validate_resolved_profile(resolved_profile)
@@ -359,6 +413,8 @@ def run_study(
         profile=profile,
         task=task,
         study_dir=study_dir,
+        plot_mode=plot_mode,
+        diagnostic_seed=min(plan.seeds),
     )
 
     def aggregate_and_persist(
@@ -397,11 +453,18 @@ def run_study(
             encoding="utf-8",
         )
         artifacts.append(summary_json)
-        return StudyPostprocessResult(tuple(artifacts), {}, aggregates)
+        return StudyPostprocessResult(
+            tuple(artifacts), {}, {"aggregates": aggregates, "ranking": ranking}
+        )
 
     def render(rows: list[dict[str, object]], payload: object, directory: Path) -> tuple[Path, ...]:
-        # 导纳调参研究历史上不产出图，迁移后同样只保留表格与 JSON 产物。
-        return ()
+        del rows
+        if not isinstance(payload, dict):
+            raise TypeError("导纳调参绘图载荷必须为映射。")
+        ranking = payload.get("ranking")
+        if not isinstance(ranking, list) or not ranking:
+            return ()
+        return (plot_candidate_ranking(ranking, directory / "figures/admittance_ranking.png"),)
 
     manifest_fields: dict[str, object] = {
         "schema_version": 1,

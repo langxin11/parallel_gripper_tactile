@@ -4,3 +4,4 @@ mode: run
 output_root: ${pgt_repo:}/outputs/research/studies
 recovery_source: null
 workers: 1
+plot_mode: summary

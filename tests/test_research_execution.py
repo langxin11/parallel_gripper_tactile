@@ -106,6 +106,7 @@ def test_execution_passes_the_same_final_profile_to_shared_runner(
 
     effective = json.loads((tmp_path / "effective_configuration.json").read_text(encoding="utf-8"))
     assert captured["resolved_profile"] is resolved.profile
+    assert captured["plot_mode"] == resolved.selection.execution.plot_mode
     assert captured["tracking_task"] is resolved.task
     assert effective["profile"] == resolved.profile.model_dump(mode="json")
     assert outcome.passed is True

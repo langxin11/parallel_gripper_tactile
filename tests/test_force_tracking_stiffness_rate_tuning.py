@@ -122,6 +122,36 @@ def test_confirmation_figure_renders_frequency_material_matrix(tmp_path: Path) -
     assert output.stat().st_size > 0
 
 
+def test_confirmation_summary_omits_oscillation_amplitude(tmp_path: Path) -> None:
+    """研究总览仅保留 RMSE、平台标准差和超调，振荡幅值留给诊断图。"""
+    task_paths = (REPOSITORY_ROOT / "configs/task/force_tracking/step.yaml",)
+    config = ForceTrackingStiffnessRateTuningConfig(
+        analysis_mode="confirmation",
+        tasks=task_paths,
+        materials=("medium",),
+        kp_s_inv=(30.0,),
+        max_force_rate_n_s=(70.0,),
+    )
+    task_name = ForceTrackingTask.load(task_paths[0]).name
+    aggregates = [
+        {
+            "candidate_id": candidate_id,
+            "controller_variant": candidate_id,
+            "task_name": task_name,
+            "object_material": "medium",
+            "rmse_n_mean": rmse,
+            "plateau_force_std_n_mean": 0.01,
+            "overshoot_ratio_mean": 0.05,
+            "dominant_oscillation_amplitude_n_mean": 0.005,
+        }
+        for candidate_id, rmse in (("pid-torque-ff", 0.4), ("kp30-rate70", 0.6))
+    ]
+
+    output = _render_confirmation_maps(aggregates, config, tmp_path / "summary.png")
+
+    assert output.is_file()
+
+
 def test_tuning_heatmap_uses_worst_case_across_materials() -> None:
     """多材料调优图与候选排名统一使用最坏工况口径。"""
     rows = [

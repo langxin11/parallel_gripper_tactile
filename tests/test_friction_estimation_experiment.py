@@ -17,6 +17,7 @@ from parallel_gripper_tactile.experiments.friction_estimation import (
     run_friction_estimation,
 )
 from parallel_gripper_tactile.runners import execute_friction_estimation
+from parallel_gripper_tactile.visualization.friction import _select_taxel_snapshots
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -32,6 +33,47 @@ STANDARD_TASKS = tuple(
     )
 )
 HARDWARE_SCALE_TASK = TASK_ROOT / "hardware_scale_nominal.yaml"
+
+
+def test_taxel_snapshot_selection_collapses_absent_or_duplicate_events() -> None:
+    """无确认时保留稳定负例，重复相邻帧不额外生成快照。"""
+    rows = [
+        {
+            "slip_state": state,
+            "left_taxel_normal_0_0": value,
+            "left_taxel_shear_0_0": value,
+            "left_taxel_ratio_0_0": value,
+            "right_taxel_normal_0_0": value,
+            "right_taxel_shear_0_0": value,
+            "right_taxel_ratio_0_0": value,
+        }
+        for state, value in (
+            ("stable", 0.1),
+            ("incipient_slip_candidate", 0.2),
+            ("incipient_slip_candidate", 0.2),
+            ("incipient_slip_confirmed", 0.2),
+        )
+    ]
+
+    assert _select_taxel_snapshots(rows, stable=[0], confirmed=None) == [("Stable", 0)]
+    assert _select_taxel_snapshots(rows, stable=[0], confirmed=3) == [
+        ("Stable", 0),
+        ("Confirmed", 3),
+    ]
+
+    rows[1]["left_taxel_ratio_0_0"] = 0.200001
+    assert _select_taxel_snapshots(rows, stable=[0], confirmed=3) == [
+        ("Stable", 0),
+        ("Candidate", 1),
+        ("Confirmed", 3),
+    ]
+
+    rows[1]["left_taxel_ratio_0_0"] = 0.5
+    assert _select_taxel_snapshots(rows, stable=[0], confirmed=3) == [
+        ("Stable", 0),
+        ("Candidate", 1),
+        ("Confirmed", 3),
+    ]
 
 
 @pytest.fixture(scope="module")
@@ -204,6 +246,7 @@ def test_execute_friction_estimation_writes_blind_estimator_artifacts(
         estimation_task=task,
         output_root=tmp_path,
         run_name="friction-test",
+        plot_mode="diagnostic",
     )
 
     assert result.passed

@@ -217,16 +217,10 @@ def plot_trace(path: Path, rows: list[dict[str, float | str]]) -> None:
     ]
     friction_capacity = [float(row["available_friction_n"]) for row in rows]
     static_hold_demand = [float(row["static_hold_demand_tangential_n"]) for row in rows]
-    friction_margin = [float(row["friction_margin_n"]) for row in rows]
-    measured_normal_force = [float(row["measured_normal_force_n"]) for row in rows]
     filtered_normal_force = [float(row["filtered_normal_force_n"]) for row in rows]
     target_normal_force = [float(row["target_normal_force_n"]) for row in rows]
     left_normal_force = [float(row["left_taxel_normal_force_n"]) for row in rows]
     right_normal_force = [float(row["right_taxel_normal_force_n"]) for row in rows]
-    mean_side_normal_force = [
-        0.5 * (left_force + right_force)
-        for left_force, right_force in zip(left_normal_force, right_normal_force)
-    ]
     initial_position = np.array([float(rows[0]["cube_y"]), float(rows[0]["cube_z"])])
     displacement = [
         1000.0
@@ -243,12 +237,11 @@ def plot_trace(path: Path, rows: list[dict[str, float | str]]) -> None:
 
     colors = {"black": "#000000", "blue": "#0072B2", "orange": "#D55E00", "green": "#009E73"}
     figure, axes = plt.subplots(
-        7, 1, figsize=paper_figsize(12.4), sharex=True, layout="constrained"
+        6, 1, figsize=paper_figsize(11.0), sharex=True, layout="constrained"
     )
     (
         control_axis,
         force_axis,
-        tactile_axis,
         normal_axis,
         friction_axis,
         displacement_axis,
@@ -265,13 +258,12 @@ def plot_trace(path: Path, rows: list[dict[str, float | str]]) -> None:
     )
     control_axis.set_ylabel("Drive target\n(rad)")
     force_axis.plot(
-        times, applied_force, color=colors["orange"], linewidth=1.4, label=r"Applied $F_y^W$"
+        times, applied_force, color=colors["black"], linewidth=1.3, label=r"Applied $F_y^W$"
     )
-    force_axis.set_ylabel("Force\n(N)")
-    tactile_axis.plot(
-        times, left_shear, color=colors["blue"], linewidth=1.2, label="Left Pillar shear"
+    force_axis.plot(
+        times, left_shear, color=colors["blue"], linewidth=1.1, label="Left Pillar shear"
     )
-    tactile_axis.plot(
+    force_axis.plot(
         times,
         right_shear,
         color=colors["orange"],
@@ -279,29 +271,13 @@ def plot_trace(path: Path, rows: list[dict[str, float | str]]) -> None:
         linestyle="--",
         label="Right Pillar shear",
     )
-    tactile_axis.set_ylabel("Local shear\n(N)")
-    normal_axis.plot(
-        times,
-        mean_side_normal_force,
-        color=colors["black"],
-        linewidth=1.3,
-        label="Mean side normal pressure",
-    )
+    force_axis.set_ylabel("Tangential\nforce (N)")
     normal_axis.plot(
         times,
         filtered_normal_force,
-        color=colors["green"],
-        linewidth=1.0,
-        linestyle=":",
-        label="Filtered normal pressure",
-    )
-    normal_axis.plot(
-        times,
-        measured_normal_force,
-        color="0.55",
-        linewidth=0.7,
-        alpha=0.8,
-        label="Measured normal pressure",
+        color=colors["black"],
+        linewidth=1.3,
+        label="Measured normal force (filtered)",
     )
     normal_axis.plot(
         times,
@@ -341,13 +317,13 @@ def plot_trace(path: Path, rows: list[dict[str, float | str]]) -> None:
         linewidth=1.2,
         label="Static hold demand",
     )
-    friction_axis.plot(
+    friction_axis.fill_between(
         times,
-        friction_margin,
+        static_hold_demand,
+        friction_capacity,
         color=colors["green"],
-        linewidth=1.1,
-        linestyle="--",
-        label="Friction margin",
+        alpha=0.18,
+        label="Capacity-demand margin",
     )
     friction_axis.axhline(0.0, color="0.45", linewidth=0.7, zorder=0)
     friction_axis.set_ylabel("Friction\n(N)")

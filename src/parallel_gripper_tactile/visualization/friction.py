@@ -127,15 +127,14 @@ def plot_taxel_diagnostics(path: Path, rows, *, task):
     stable = [
         i for i, r in enumerate(rows) if r["phase"] == "probe" and r["slip_state"] == "stable"
     ]
-    snapshots = [
-        stable[len(stable) // 2] if stable else 0,
-        None if confirmed is None else max(0, confirmed - 1),
-        confirmed,
-    ]
+    snapshots = _select_taxel_snapshots(rows, stable=stable, confirmed=confirmed)
     fig = plt.figure(figsize=paper_figsize(13), layout="constrained")
     outer = fig.add_gridspec(2, 1, height_ratios=[1, 1.5])
     heat = outer[0].subgridspec(2, 2)
-    spaces = outer[1].subgridspec(6, 3)
+    if confirmed is None:
+        spaces = outer[1].subgridspec(4, 2, height_ratios=[1, 1, 1, 0.12])
+    else:
+        spaces = outer[1].subgridspec(6, len(snapshots))
     for side_index, side in enumerate(("left", "right")):
         matrices = {}
         for field in ("normal", "shear", "ratio"):
@@ -168,22 +167,16 @@ def plot_taxel_diagnostics(path: Path, rows, *, task):
         for field_index, field in enumerate(("normal", "shear", "ratio")):
             finite = matrices[field][np.isfinite(matrices[field])]
             vmax = max(float(finite.max()), 1e-6) if len(finite) else 1
-            for column, (name, index) in enumerate(
-                zip(("Stable", "Pre-confirm", "Confirmed"), snapshots, strict=True)
-            ):
-                ax = fig.add_subplot(spaces[side_index * 3 + field_index, column])
-                if index is None:
-                    ax.text(
-                        0.5,
-                        0.5,
-                        "No confirmed event",
-                        ha="center",
-                        va="center",
-                        transform=ax.transAxes,
-                        fontsize=7,
-                    )
-                    ax.set_axis_off()
-                    continue
+            if confirmed is None:
+                snapshot_items = [("Stable", snapshots[0][1])]
+                row = field_index
+                column = side_index
+            else:
+                snapshot_items = snapshots
+                row = side_index * 3 + field_index
+                column = None
+            for snapshot_column, (name, index) in enumerate(snapshot_items):
+                ax = fig.add_subplot(spaces[row, column if column is not None else snapshot_column])
                 grid = np.full(shape, np.nan)
                 for k, coord in enumerate(coords):
                     grid[coord] = matrices[field][index, k]
@@ -193,5 +186,54 @@ def plot_taxel_diagnostics(path: Path, rows, *, task):
                 ax.set_yticks(range(shape[0]))
                 ax.tick_params(labelsize=6)
                 fig.colorbar(im, ax=ax, shrink=0.8)
+    if confirmed is None:
+        message_axis = fig.add_subplot(spaces[3, :])
+        message_axis.text(
+            0.5,
+            0.5,
+            "未确认起滑：省略重复的事件快照；上方时间热图保留完整负例证据。",
+            ha="center",
+            va="center",
+            fontsize=8,
+        )
+        message_axis.set_axis_off()
     save_publication_figure(fig, path)
     plt.close(fig)
+
+
+def _select_taxel_snapshots(
+    rows, *, stable: list[int], confirmed: int | None
+) -> list[tuple[str, int]]:
+    """选择稳定、候选与确认快照，避免相邻帧重复展示。"""
+    stable_index = stable[len(stable) // 2] if stable else 0
+    if confirmed is None:
+        return [("Stable", stable_index)]
+
+    candidates = [
+        index
+        for index, row in enumerate(rows[:confirmed])
+        if row["slip_state"] == "incipient_slip_candidate"
+    ]
+    pre_confirm = candidates[-1] if candidates else max(0, confirmed - 1)
+    if candidates:
+        while pre_confirm > 0 and rows[pre_confirm - 1]["slip_state"] == "incipient_slip_candidate":
+            pre_confirm -= 1
+    label = "Candidate" if candidates else "Pre-confirm"
+    snapshots = [("Stable", stable_index)]
+    if pre_confirm != confirmed and _taxel_snapshot_differs(rows, pre_confirm, confirmed):
+        snapshots.append((label, pre_confirm))
+    snapshots.append(("Confirmed", confirmed))
+    return snapshots
+
+
+def _taxel_snapshot_differs(rows, earlier: int, later: int) -> bool:
+    """判断两个时刻的逐 taxel 读数是否足以构成独立视觉证据。"""
+    fields = [
+        key
+        for key in rows[0]
+        if key.startswith(("left_taxel_", "right_taxel_"))
+        and any(f"_{field}_" in key for field in ("normal", "shear", "ratio"))
+    ]
+    before = np.asarray([rows[earlier][key] for key in fields], dtype=float)
+    after = np.asarray([rows[later][key] for key in fields], dtype=float)
+    return not np.array_equal(before, after, equal_nan=True)

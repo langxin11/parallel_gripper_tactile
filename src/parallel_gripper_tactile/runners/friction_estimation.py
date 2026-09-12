@@ -6,6 +6,7 @@ from dataclasses import asdict
 import json
 from pathlib import Path
 import sys
+from typing import Callable, Literal
 
 import yaml
 
@@ -29,8 +30,12 @@ def execute_friction_estimation(
     run_prefix: str | None = None,
     run_suffix: str | None = None,
     sensor_noise_seed: int | None = None,
+    plot_mode: Literal["summary", "diagnostic", "none"] = "summary",
+    diagnostic_on_result: Callable[[FrictionEstimationResult], bool] | None = None,
 ) -> tuple[RunDirectory, FrictionEstimationResult]:
     """运行一次探测—估计—调度仿真并保存全部复现产物。"""
+    if plot_mode not in {"summary", "diagnostic", "none"}:
+        raise ValueError("plot_mode 必须为 summary、diagnostic 或 none。")
     task = estimation_task or FrictionEstimationTask.load(task_path)
     configured = (
         validate_resolved_profile(resolved_profile)
@@ -65,6 +70,7 @@ def execute_friction_estimation(
             "cube_mass_kg": float(task.cube_mass_kg),
             "sensor_noise_scale": float(task.sensor_noise_scale),
             "sensor_noise_seed": int(configured.normal_force.sensor_noise_seed),
+            "plot_mode": plot_mode,
             "probe": task.probe.model_dump(mode="json"),
             "estimator": task.estimator.model_dump(mode="json"),
             "taxel_observer": task.taxel_observer.model_dump(mode="json"),
@@ -110,6 +116,7 @@ def execute_friction_estimation(
                     "legacy_estimator_detection_parameters": "ignored; use tactile_slip",
                     "oracle_signals_used_by_estimator": [],
                     "sensor_noise_seed": int(configured.normal_force.sensor_noise_seed),
+                    "plot_mode": plot_mode,
                 },
             },
             indent=2,
@@ -122,19 +129,36 @@ def execute_friction_estimation(
     trace_path = run.artifact_path("trace.csv")
     plot_path = run.artifact_path("plot.png")
     taxel_plot_path = run.artifact_path("taxel_plot.png")
+
+    def render_selected_plots(
+        rows: list[dict[str, object]], result: FrictionEstimationResult
+    ) -> None:
+        """在完整轨迹尚在内存时，仅为请求或失败条件渲染图表。"""
+        protocol_passed = (
+            result.passed if diagnostic_on_result is None else not diagnostic_on_result(result)
+        )
+        diagnostic_required = not result.simulation_stable or not protocol_passed
+        selected_mode = "diagnostic" if diagnostic_required else plot_mode
+        if selected_mode == "none":
+            return
+        from ..visualization.friction import plot_summary
+
+        plot_summary(plot_path, rows, task=task)
+        if selected_mode == "diagnostic":
+            from ..visualization.friction import plot_taxel_diagnostics
+
+            plot_taxel_diagnostics(taxel_plot_path, rows, task=task)
+
     result = run_friction_estimation(
         configured,
         task=task,
         output_csv=trace_path,
-        output_plot=plot_path,
-        output_taxel_plot=taxel_plot_path,
         sensor_noise_seed=sensor_noise_seed,
+        on_result=render_selected_plots,
     )
-    for artifact in (
-        trace_path,
-        plot_path,
-        taxel_plot_path,
-    ):
+    for artifact in (trace_path, plot_path, taxel_plot_path):
+        if not artifact.exists():
+            continue
         run.register_artifact(artifact)
     metrics_path = run.artifact_path("metrics.json")
     metrics_path.write_text(

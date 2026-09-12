@@ -103,6 +103,7 @@ def execute_research_run(
             torque_adrc_override=selection.controller.torque_adrc,
             trace_sample_period_s=selection.execution.trace_sample_period_s,
             trace_event_window_s=selection.execution.trace_event_window_s,
+            plot_mode=selection.execution.plot_mode,
             viewer=selection.execution.viewer,
             render_fps=selection.execution.render_fps,
             realtime_factor=selection.execution.realtime_factor,
@@ -113,6 +114,7 @@ def execute_research_run(
         run, result = execute_friction_estimation(
             **common,
             estimation_task=resolved.task,
+            plot_mode=selection.execution.plot_mode,
             sensor_noise_seed=selection.seed,
         )
     elif isinstance(resolved.task, RobotiqDiscreteForceTask):

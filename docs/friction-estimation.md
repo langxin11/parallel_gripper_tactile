@@ -58,10 +58,11 @@ uv run pgt run friction-estimate \
   --set task=friction_estimation/hardware_scale_nominal
 ```
 
-保留 `trace.csv`、`metrics.json`、输入快照、有效参数、manifest，以及两组 PNG：
+保留 `trace.csv`、`metrics.json`、输入快照、有效参数、manifest。默认 summary 模式生成主图；
+`--set execution.plot_mode=diagnostic` 额外生成逐点图，科学失败保留诊断。
 主图五行分别显示总触觉力与总法向目标、整体和 q95 利用率、评分/阈值/状态、冻结估计、
 仅用于评价的位移。逐点图分别显示左右 Fn/利用率时间热图及稳定、确认前、确认时的二维网格快照。
-无确认事件时明确标注，不能虚构确认快照。确认后的评分为锁存事件评分，触觉特征继续更新。
+无确认事件时仅保留稳定快照并集中说明，不能虚构确认快照。确认后的评分为锁存事件评分，触觉特征继续更新。
 
 trace 新增全部触觉特征、评分分量、状态和阈值，以及 `mu_raw`、`mu_hat`、
 `mu_true_score_only`、`load_ground_truth` 和逐 taxel 法向/切向力。旧列继续保留；

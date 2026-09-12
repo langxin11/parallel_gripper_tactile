@@ -10,6 +10,7 @@ import json
 import math
 from pathlib import Path
 from statistics import fmean
+from typing import Literal
 from uuid import uuid4
 
 import numpy as np
@@ -230,10 +231,10 @@ def plot_controller_summary(rows: list[dict[str, object]], output: Path) -> Path
     group_actions = axes[1][0].bar(x - width / 2, actions, width, color="#0072B2")
     group_movement = axes[1][0].bar(x + width / 2, movement, width, color="#CC79A7")
     _mark_reference([group_actions, group_movement])
-    axes[1][0].set_ylabel("tick")
+    axes[1][0].set_ylabel("次数／tick")
     _metric_legend(
         axes[1][0],
-        [("动作次数", "#0072B2"), ("总移动量", "#CC79A7")],
+        [("动作次数（次）", "#0072B2"), ("总移动量（tick）", "#CC79A7")],
         loc="upper right",
         fontsize=6.5,
     )
@@ -243,10 +244,10 @@ def plot_controller_summary(rows: list[dict[str, object]], output: Path) -> Path
     oscillation = [
         _condition_mean(rows, "oscillation_count", controller) for controller in controllers
     ]
-    group_reverse = axes[1][1].bar(x, reverse, 0.55, color="#D55E00")
-    axes[1][1].bar(x, oscillation, 0.55, bottom=reverse, color="#CC79A7")
-    _mark_reference([group_reverse])
-    axes[1][1].set_ylabel("平均抖动事件数")
+    group_reverse = axes[1][1].bar(x - width / 2, reverse, width, color="#D55E00")
+    group_oscillation = axes[1][1].bar(x + width / 2, oscillation, width, color="#CC79A7")
+    _mark_reference([group_reverse, group_oscillation])
+    axes[1][1].set_ylabel("平均事件次数")
     _metric_legend(
         axes[1][1],
         [("方向反转", "#D55E00"), ("相邻位置振荡", "#CC79A7")],
@@ -471,6 +472,7 @@ def run_study(
     lifecycle_manifest_fields: Mapping[str, object] | None = None,
     workers: int = 1,
     on_progress: StudyProgressCallback | None = None,
+    plot_mode: Literal["summary", "diagnostic"] = "summary",
 ) -> Path:
     """通过公共生命周期执行离散力消融矩阵，并返回 study 目录。"""
     study_dir = (
@@ -557,6 +559,7 @@ def run_study(
         "name": config.name,
         "config": "study.yaml",
         "resolved_config": str(resolved_config.relative_to(study_dir)),
+        "plot_mode": plot_mode,
     }
     manifest_fields.update(lifecycle_manifest_fields or {})
     return execute_study_lifecycle(

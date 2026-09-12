@@ -8,6 +8,7 @@ from functools import partial
 import json
 import math
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 
@@ -281,6 +282,8 @@ def _execute_condition(
     resolved_profile: GripperProfile,
     tasks: Mapping[Path, ForceTrackingTask],
     study_dir: Path,
+    plot_mode: Literal["summary", "diagnostic"],
+    diagnostic_seed: int,
 ) -> ConditionExecution:
     """执行一个基线或速率参数候选条件。"""
     parameters = condition.parameters
@@ -309,6 +312,11 @@ def _execute_condition(
         sensor_noise_seed=int(parameters["sensor_noise_seed"]),
         stiffness_rate_override=override,
         trace_sample_period_s=task.control_period_s,
+        plot_mode=(
+            "diagnostic"
+            if plot_mode == "diagnostic" or int(parameters["sensor_noise_seed"]) == diagnostic_seed
+            else "none"
+        ),
     )
     row = {
         **dict(parameters),
@@ -386,6 +394,8 @@ def _render_confirmation_maps(
     aggregates: list[dict[str, object]],
     config: ForceTrackingStiffnessRateTuningConfig,
     output: Path,
+    *,
+    plot_mode: Literal["summary", "diagnostic"] = "summary",
 ) -> Path:
     """按材料和控制频率绘制单一候选相对基线的确认矩阵。"""
     candidates = config.candidates()
@@ -413,11 +423,15 @@ def _render_confirmation_maps(
     matrices.append(
         (np.asarray(rmse_ratio), r"$\mathrm{RMSE}_{\mathrm{rate}}/\mathrm{RMSE}_{\mathrm{base}}$")
     )
-    for metric, title in (
+    metrics = [
         ("plateau_force_std_n_mean", r"$\sigma_F\;\mathrm{(N)}$"),
         ("overshoot_ratio_mean", r"$M_p$"),
-        ("dominant_oscillation_amplitude_n_mean", r"$A_{\mathrm{osc}}\;\mathrm{(N)}$"),
-    ):
+    ]
+    if plot_mode == "diagnostic":
+        metrics.append(
+            ("dominant_oscillation_amplitude_n_mean", r"$A_{\mathrm{osc}}\;\mathrm{(N)}$")
+        )
+    for metric, title in metrics:
         matrices.append(
             (
                 np.asarray(
@@ -432,30 +446,32 @@ def _render_confirmation_maps(
 
     plt = science_pyplot()
     figure, axes = plt.subplots(
-        2,
-        2,
-        figsize=paper_figsize(4.0, columns=2),
+        1 if plot_mode == "summary" else 2,
+        3 if plot_mode == "summary" else 2,
+        figsize=paper_figsize(2.7 if plot_mode == "summary" else 4.0, columns=2),
         layout="constrained",
     )
+    axes = np.atleast_1d(axes).ravel()
     frequencies_hz = [1.0 / task.control_period_s for task in tasks]
-    for axis, (values, title) in zip(axes.flat, matrices, strict=True):
+    for axis, (values, title) in zip(axes, matrices, strict=True):
         image = axis.imshow(values, origin="upper", aspect="auto", cmap="viridis")
         axis.set_xticks(range(len(tasks)), [f"{value:g}" for value in frequencies_hz])
         axis.set_yticks(range(len(config.materials)), config.materials)
         axis.set_xlabel(r"$f_c\;\mathrm{(Hz)}$")
         axis.set_ylabel("material")
         axis.set_title(title)
-        midpoint = float(np.nanmean(values))
         for row_index in range(values.shape[0]):
             for column_index in range(values.shape[1]):
                 value = values[row_index, column_index]
+                red, green, blue, _ = image.cmap(image.norm(value))
+                luminance = 0.2126 * red + 0.7152 * green + 0.0722 * blue
                 axis.text(
                     column_index,
                     row_index,
                     f"{value:.3f}",
                     ha="center",
                     va="center",
-                    color="white" if value > midpoint else "black",
+                    color="black" if luminance > 0.5 else "white",
                     fontsize=7,
                 )
         figure.colorbar(image, ax=axis, shrink=0.78)
@@ -476,6 +492,7 @@ def run_study(
     workers: int = 1,
     on_progress: StudyProgressCallback | None = None,
     study_kind: str = _TUNING_STUDY_KIND,
+    plot_mode: Literal["summary", "diagnostic"] = "summary",
 ) -> Path:
     """执行调优、生成聚合表、候选排名和参数热图。"""
     tasks = {path: ForceTrackingTask.load(path) for path in config.tasks}
@@ -495,6 +512,8 @@ def run_study(
         resolved_profile=resolved_profile,
         tasks=tasks,
         study_dir=directory,
+        plot_mode=plot_mode,
+        diagnostic_seed=min(plan.seeds),
     )
 
     def aggregate_and_persist(
@@ -543,6 +562,7 @@ def run_study(
                     aggregates,
                     config,
                     output_directory / "figures/stiffness_rate_confirmation.png",
+                    plot_mode=plot_mode,
                 ),
             )
         return (

@@ -423,7 +423,7 @@ def _should_keep_trace_row(
 
 
 def _plot_trace(rows: list[dict[str, object]], output_plot: Path) -> None:
-    """生成力、命令、局部增益与自适应阈值四面板图。"""
+    """生成力、命令动作、局部增益与自适应阈值四面板图。"""
     plt = science_pyplot()
     time = np.asarray([row["time_s"] for row in rows], dtype=float)
     force = np.asarray([row["force_filtered_n"] for row in rows], dtype=float)
@@ -443,12 +443,28 @@ def _plot_trace(rows: list[dict[str, object]], output_plot: Path) -> None:
     axes[0].set_ylabel("力 / N")
     axes[0].legend(ncol=2)
     axes[1].step(time, command, where="post", color="#009E73", label=r"命令 $u$")
-    action_axis = axes[1].twinx()
-    action_axis.step(
-        time, delta, where="post", color="#D55E00", alpha=0.75, label=r"动作 $\Delta u$"
+    positive_action = delta > 0
+    negative_action = delta < 0
+    axes[1].scatter(
+        time[positive_action],
+        command[positive_action],
+        s=18 + 10 * np.abs(delta[positive_action]),
+        color="#D55E00",
+        marker="^",
+        zorder=3,
+        label=r"增力动作 $\Delta u$",
+    )
+    axes[1].scatter(
+        time[negative_action],
+        command[negative_action],
+        s=18 + 10 * np.abs(delta[negative_action]),
+        color="#0072B2",
+        marker="v",
+        zorder=3,
+        label=r"减力动作 $\Delta u$",
     )
     axes[1].set_ylabel(r"$u$ / tick")
-    action_axis.set_ylabel(r"$\Delta u$ / tick")
+    axes[1].legend(ncol=3, fontsize=7)
     axes[2].plot(time, tick, color="#CC79A7")
     axes[2].set_ylabel(r"$\widehat{\Delta F}_{tick}$ / N")
     axes[3].plot(time, error, color="#D55E00", label=r"$|e|$")

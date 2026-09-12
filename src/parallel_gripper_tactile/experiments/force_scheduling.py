@@ -217,6 +217,18 @@ def _tangential_displacement(position: np.ndarray, reference: np.ndarray) -> flo
     return float(np.linalg.norm(position[1:3] - reference[1:3]))
 
 
+def _has_fixed_load_offset(demand: np.ndarray, added_load: np.ndarray) -> bool:
+    """判断需求与外载是否只相差数值舍入量级的固定基线。"""
+    return np.allclose(demand - added_load, (demand - added_load)[0], rtol=1e-10, atol=1e-12)
+
+
+def _should_show_load_panel(demand: np.ndarray, added_load: np.ndarray) -> bool:
+    """仅在载荷变化或两条曲线独立时保留载荷面板。"""
+    fixed_offset = _has_fixed_load_offset(demand, added_load)
+    varying_load = not np.allclose(demand, demand[0], rtol=1e-10, atol=1e-12)
+    return varying_load or not fixed_offset
+
+
 def _plot_force_scheduling(
     path: Path, rows: list[dict[str, float | str]], *, task: ForceSchedulingTask
 ) -> None:
@@ -227,39 +239,60 @@ def _plot_force_scheduling(
     plt = science_pyplot(font_scale=FULL_WIDTH_FONT_SCALE)
     rows = scenario_rows
     times = np.asarray([float(row["scenario_time_s"]) for row in rows])
+    demand = np.asarray([float(row["tangential_demand_n"]) for row in rows])
+    added_load = np.asarray([float(row["additional_downward_force_n"]) for row in rows])
+    fixed_offset = _has_fixed_load_offset(demand, added_load)
+    show_load_panel = _should_show_load_panel(demand, added_load)
     figure, axes = plt.subplots(
-        4, 1, figsize=paper_figsize(7.8), sharex=True, constrained_layout=True
+        4 if show_load_panel else 3,
+        1,
+        figsize=paper_figsize(7.8 if show_load_panel else 6.2),
+        sharex=True,
+        constrained_layout=True,
     )
-    axes[0].plot(times, [float(row["tangential_demand_n"]) for row in rows], label="Demand")
-    axes[0].plot(
-        times,
-        [float(row["additional_downward_force_n"]) for row in rows],
-        label="Added load",
+    axis_offset = 1 if show_load_panel else 0
+    if show_load_panel:
+        axes[0].plot(times, demand, label="Demand")
+        if fixed_offset:
+            axes[0].set_title(
+                f"Demand = added load + {float((demand - added_load)[0]):.3g} N",
+                fontsize=8,
+            )
+        else:
+            axes[0].plot(times, added_load, label="Added load")
+        axes[0].set_ylabel("Load (N)")
+        axes[0].legend()
+
+    axes[axis_offset].plot(
+        times, [float(row["scheduled_target_force_n"]) for row in rows], label="Target"
     )
-    axes[0].set_ylabel("Load (N)")
-    axes[0].legend()
+    axes[axis_offset].plot(
+        times, [float(row["filtered_normal_force_n"]) for row in rows], label="Measured"
+    )
+    axes[axis_offset].set_ylabel("Mean-side\nforce (N)")
+    axes[axis_offset].legend()
+    if not show_load_panel:
+        axes[axis_offset].set_title(
+            f"Demand = {demand[0]:.3g} N; added load = {added_load[0]:.3g} N",
+            fontsize=8,
+        )
 
-    axes[1].plot(times, [float(row["scheduled_target_force_n"]) for row in rows], label="Target")
-    axes[1].plot(times, [float(row["filtered_normal_force_n"]) for row in rows], label="Measured")
-    axes[1].set_ylabel("Mean-side\nforce (N)")
-    axes[1].legend()
+    axes[axis_offset + 1].plot(times, [float(row["friction_margin_n"]) for row in rows])
+    axes[axis_offset + 1].axhline(0.0, color="0.45", linewidth=0.7)
+    axes[axis_offset + 1].set_ylabel("Friction\nmargin (N)")
 
-    axes[2].plot(times, [float(row["friction_margin_n"]) for row in rows])
-    axes[2].axhline(0.0, color="0.45", linewidth=0.7)
-    axes[2].set_ylabel("Friction\nmargin (N)")
-
-    axes[3].plot(
+    axes[axis_offset + 2].plot(
         times,
         [1000.0 * float(row["tangential_displacement_m"]) for row in rows],
     )
-    axes[3].axhline(
+    axes[axis_offset + 2].axhline(
         1000.0 * float(task.metrics.slip_threshold_m),
         color="tab:red",
         linestyle="--",
         linewidth=0.8,
     )
-    axes[3].set_ylabel("Slip (mm)")
-    axes[3].set_xlabel("Scenario time (s)")
+    axes[axis_offset + 2].set_ylabel("Slip (mm)")
+    axes[axis_offset + 2].set_xlabel("Scenario time (s)")
     path.parent.mkdir(parents=True, exist_ok=True)
     save_publication_figure(figure, path)
     plt.close(figure)

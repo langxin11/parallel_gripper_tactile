@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import asdict
 import json
 from pathlib import Path
 import sys
+from typing import Literal
 
 import yaml
 
@@ -55,8 +57,12 @@ def execute_force_tracking(
     render_fps: float = 30.0,
     realtime_factor: float = 1.0,
     tactile_detail: bool = False,
+    plot_mode: Literal["summary", "diagnostic", "none"] = "summary",
+    diagnostic_on_result: Callable[[ForceTrackingResult], bool] | None = None,
 ) -> tuple[RunDirectory, ForceTrackingResult]:
     """运行一次完整力跟踪，并返回其目录与结构化结果。"""
+    if plot_mode not in {"summary", "diagnostic", "none"}:
+        raise ValueError("plot_mode 必须为 summary、diagnostic 或 none。")
     task = tracking_task or ForceTrackingTask.load(task_path)
     configured = (
         configure_force_controller(
@@ -123,6 +129,7 @@ def execute_force_tracking(
             "trace_compression": "zstd",
             "trace_schema_version": 2,
             "tactile_detail": tactile_detail,
+            "plot_mode": plot_mode,
             "trace_sample_period_s": resolved_trace_sample_period_s,
             "trace_event_window_s": trace_event_window_s,
             "torque_adrc_override": (
@@ -185,6 +192,7 @@ def execute_force_tracking(
                         "trace_compression": "zstd",
                         "trace_schema_version": 2,
                         "tactile_detail": tactile_detail,
+                        "plot_mode": plot_mode,
                         "trace_sample_period_s": resolved_trace_sample_period_s,
                         "trace_event_window_s": trace_event_window_s,
                         "torque_adrc_override": (
@@ -217,12 +225,22 @@ def execute_force_tracking(
                 json.dumps(metrics, indent=2, sort_keys=True) + "\n", encoding="utf-8"
             )
             run.register_artifact(metrics_path)
+            # 科学失败在完整频率轨迹释放前保留诊断，避免降采样重绘丢失瞬态。
+            needs_diagnostic = (
+                not result.passed
+                or tactile_detail
+                or (diagnostic_on_result is not None and diagnostic_on_result(result))
+            )
+            selected_mode = "diagnostic" if needs_diagnostic else plot_mode
+            if selected_mode == "none":
+                return
             for path in render_run_artifacts(
                 trace=rows,
                 metrics=metrics,
                 config=plot_config,
                 output_dir=run.path / "plots",
                 tactile_detail=tactile_detail,
+                plot_mode=selected_mode,
             ):
                 run.register_artifact(path)
 

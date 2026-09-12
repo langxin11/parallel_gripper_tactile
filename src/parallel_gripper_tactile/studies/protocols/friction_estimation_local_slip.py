@@ -9,13 +9,17 @@ from functools import partial
 import json
 import math
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
 import numpy as np
 import yaml
 
 from parallel_gripper_tactile.config.profiles import GripperProfile, load_profile
-from parallel_gripper_tactile.experiments.friction_estimation import FrictionEstimationTask
+from parallel_gripper_tactile.experiments.friction_estimation import (
+    FrictionEstimationResult,
+    FrictionEstimationTask,
+)
 from parallel_gripper_tactile.runners import execute_friction_estimation
 from parallel_gripper_tactile.studies.aggregation import (
     aggregate_records,
@@ -58,6 +62,42 @@ from parallel_gripper_tactile.visualization import (
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 # 控制候选资格沿用历史研究口径：局部估计比落在该区间才允许进入后续力控候选。
 _CONTROL_CANDIDATE_RATIO_BOUNDS = (0.55, 1.02)
+
+
+def _validation_fields(
+    result: FrictionEstimationResult,
+    *,
+    task: FrictionEstimationTask,
+    expect_local_slip: bool,
+) -> dict[str, object]:
+    """按局部起滑 protocol 口径计算事件与控制候选资格。"""
+    estimates = [
+        value
+        for value in (result.local_left_friction_estimate, result.local_right_friction_estimate)
+        if value is not None
+    ]
+    local_estimate = min(estimates) if estimates else None
+    local_estimate_ratio = (
+        None if local_estimate is None else local_estimate / task.friction_coefficient
+    )
+    local_detected = result.local_slip_detection_time_s is not None
+    event_expectation_passed = local_detected == expect_local_slip
+    control_candidate_qualified = bool(
+        expect_local_slip
+        and local_estimate_ratio is not None
+        and _CONTROL_CANDIDATE_RATIO_BOUNDS[0]
+        <= local_estimate_ratio
+        <= _CONTROL_CANDIDATE_RATIO_BOUNDS[1]
+    )
+    return {
+        "local_slip_detected": local_detected,
+        "event_expectation_passed": event_expectation_passed,
+        "control_candidate_qualified": control_candidate_qualified,
+        "validation_passed": event_expectation_passed
+        and (control_candidate_qualified if expect_local_slip else True),
+        "local_estimate": local_estimate,
+        "local_estimate_ratio": local_estimate_ratio,
+    }
 
 
 def aggregate_rows(rows: list[dict[str, object]]) -> list[dict[str, object]]:
@@ -213,12 +253,16 @@ def _execute_condition(
     config: FrictionEstimationLocalSlipStudyConfig,
     resolved_profile: GripperProfile | None,
     study_dir: Path,
+    plot_mode: Literal["summary", "diagnostic"],
+    diagnostic_seed: int,
 ) -> ConditionExecution:
     """在独立进程中执行一个局部滑移验证条件。"""
     parameters = condition.parameters
     task_path = Path(str(parameters["task_path"]))
     seed = int(parameters["sensor_noise_seed"])
     task = FrictionEstimationTask.load(task_path)
+    expect_local_slip = bool(parameters["expect_local_slip"])
+
     run, result = execute_friction_estimation(
         profile=config.profile,
         resolved_profile=resolved_profile,
@@ -227,48 +271,33 @@ def _execute_condition(
         output_root=study_dir / "runs",
         run_prefix=condition.condition_id,
         sensor_noise_seed=seed,
+        plot_mode=(
+            "diagnostic" if plot_mode == "diagnostic" or seed == diagnostic_seed else "none"
+        ),
+        diagnostic_on_result=lambda result: (
+            not bool(
+                _validation_fields(
+                    result,
+                    task=task,
+                    expect_local_slip=expect_local_slip,
+                )["validation_passed"]
+            )
+        ),
     )
-    local_estimates = [
-        value
-        for value in (
-            result.local_left_friction_estimate,
-            result.local_right_friction_estimate,
-        )
-        if value is not None
-    ]
-    local_detected = result.local_slip_detection_time_s is not None
-    local_estimate = min(local_estimates) if local_estimates else None
-    local_estimate_ratio = (
-        None if local_estimate is None else local_estimate / task.friction_coefficient
-    )
-    expect_local_slip = bool(parameters["expect_local_slip"])
-    event_expectation_passed = local_detected == expect_local_slip
-    control_candidate_qualified = bool(
-        expect_local_slip
-        and local_estimate_ratio is not None
-        and _CONTROL_CANDIDATE_RATIO_BOUNDS[0]
-        <= local_estimate_ratio
-        <= _CONTROL_CANDIDATE_RATIO_BOUNDS[1]
-    )
+    validation = _validation_fields(result, task=task, expect_local_slip=expect_local_slip)
     lead = (
         None
         if result.probe_detection_time_s is None or result.local_slip_detection_time_s is None
         else result.probe_detection_time_s - result.local_slip_detection_time_s
     )
-    validation_passed = event_expectation_passed and (
-        control_candidate_qualified if expect_local_slip else True
-    )
+    validation_passed = bool(validation["validation_passed"])
     row = {
         "scenario": task.name,
         "task": str(task_path),
         "sensor_noise_seed": seed,
         "expect_local_slip": expect_local_slip,
-        "local_slip_detected": local_detected,
-        "event_expectation_passed": event_expectation_passed,
-        "control_candidate_qualified": control_candidate_qualified,
+        **validation,
         "validation_passed": validation_passed,
-        "local_estimate": local_estimate,
-        "local_estimate_ratio": local_estimate_ratio,
         "detection_lead_s": lead,
         "run_directory": str(run.path.relative_to(study_dir)),
         **asdict(result),
@@ -291,6 +320,7 @@ def run_study(
     lifecycle_manifest_fields: Mapping[str, object] | None = None,
     workers: int = 1,
     on_progress: StudyProgressCallback | None = None,
+    plot_mode: Literal["summary", "diagnostic"] = "summary",
 ) -> Path:
     """通过公共生命周期执行整个 protocol，并返回 study 父目录。"""
     study_dir = (
@@ -316,6 +346,8 @@ def run_study(
         config=config,
         resolved_profile=resolved_profile,
         study_dir=study_dir,
+        plot_mode=plot_mode,
+        diagnostic_seed=min(plan.seeds),
     )
 
     def aggregate_and_persist(

@@ -6,7 +6,7 @@ from collections.abc import Mapping, Sequence
 import math
 from pathlib import Path
 import re
-from typing import Any
+from typing import Any, Literal
 
 import numpy as np
 
@@ -837,6 +837,7 @@ def render_run_artifacts(
     config: Mapping[str, object] | None,
     output_dir: Path,
     tactile_detail: bool = False,
+    plot_mode: Literal["summary", "diagnostic"] = "diagnostic",
     formats: tuple[str, ...] = ("png",),
 ) -> list[Path]:
     """从内存 trace 生成可重绘的 DMgripper 力跟踪图组。
@@ -849,6 +850,7 @@ def render_run_artifacts(
         metrics: 已保存或本次已计算的指标；不在这里重新统计。
         config: ``effective_parameters.json`` 内容，或仅含 ``profile``/``task`` 的映射。
         output_dir: 图像输出目录。
+        plot_mode: summary 仅绘制力跟踪，diagnostic 绘制完整诊断图组。
         tactile_detail: 是否在存在完整 3×3 taxel 且明确接触确认时额外输出细节图。
         formats: 需要生成的 ``png`` 与/或 ``pdf`` 格式。
 
@@ -858,15 +860,22 @@ def render_run_artifacts(
     Raises:
         ValueError: trace 为空、格式无效或没有任何可绘制信号。
     """
+    if plot_mode not in {"summary", "diagnostic"}:
+        raise ValueError("plot_mode 必须为 summary 或 diagnostic。")
     if not trace:
         raise ValueError("trace 不能为空。")
     resolved_formats = _formats(formats)
     output_dir = Path(output_dir)
-    renderers = (
+    renderers = [
         ("tracking", _render_tracking_figure(trace, metrics=metrics, config=config)),
-        ("tactile", _render_tactile_figure(trace)),
-        ("controller", _render_controller_figure(trace, config=config)),
-    )
+    ]
+    if plot_mode == "diagnostic":
+        renderers.extend(
+            [
+                ("tactile", _render_tactile_figure(trace)),
+                ("controller", _render_controller_figure(trace, config=config)),
+            ]
+        )
     paths: list[Path] = []
     for stem, figure in renderers:
         if figure is not None:

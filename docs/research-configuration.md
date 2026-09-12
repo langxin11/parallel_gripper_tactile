@@ -236,6 +236,34 @@ profile 摘要来自实际冻结的组合对象，而不是兼容 profile 文件
 正常 run 的 Python 异常。入口、配置、预检、聚合与绘图异常另存于 `lifecycle_failures`，不会混入
 `failed_runs`。所有登记产物同时保存 SHA-256 摘要。
 
+## 出图模式
+
+单次运行与正式 study 都支持 `execution.plot_mode=summary|diagnostic`，默认 `summary`。
+
+```bash
+# 单次力跟踪默认只生成 tracking.png；完整控制器和双侧触觉诊断显式开启。
+uv run python scripts/research/run.py execution.plot_mode=diagnostic
+# 正式研究恢复全部逐次诊断和补充汇总图。
+uv run python scripts/research/study.py research=force_controller_ablation/study \
+  execution=study_run execution.plot_mode=diagnostic
+# CLI 通过相同组合字段选择。
+uv run pgt run force-track --set execution.plot_mode=diagnostic
+```
+
+`summary` 模式下，力跟踪研究按计划预先确定的最小 seed 保留完整逐次诊断，其余成功运行只保存
+轨迹、指标和输入快照；科学失败保留诊断。代表 seed 不按误差或完成顺序选择，研究级同 seed
+轨迹叠加继续使用原有共同有效 seed 规则。只有一个 seed 的研究仍会保留每个条件的诊断。候选在跨条件聚合中被判定不可行，不等于单条件
+科学失败，也不会触发所有逐次图的补绘；需要分析此类候选时应选择完整诊断模式。
+摩擦局部起滑研究采用同样的预定 seed 策略，负例按研究自己的验收规则处理。其他实验的必要主图
+与刚度真值验证汇总继续保留。执行异常若未产生有效轨迹，只保留已有输入和失败账本。
+
+控制器／估计器比较的汇总默认省略简单基线差值图和 MAE 补充面板；完整配对消融效应、饱和指标、刚度真值验证和
+刚度限制的各项独立指标仍保留。`diagnostic` 可恢复补充图，但缺少有效基线时不会生成空差值图。
+模式写入有效配置与研究 manifest，不进入科学配置哈希，不改变指标、条件矩阵或验收规则。
+
+运行时选中的逐次图仍读取完整频率数据。保存轨迹继续使用既有采样策略，事后重绘不能恢复被降采样
+丢失的瞬态；需要完整诊断应在运行前选择 `diagnostic`，或显式配置按控制周期保存轨迹。
+
 ## 配置组及所有权
 
 正式执行默认输出逐条件进度：已处理／总条件数、科学失败数、执行异常数、状态与绝对目录。

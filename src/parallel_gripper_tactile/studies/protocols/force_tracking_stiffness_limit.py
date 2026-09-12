@@ -8,6 +8,7 @@ from functools import partial
 import json
 import math
 from pathlib import Path
+from typing import Literal
 
 import numpy as np
 
@@ -235,6 +236,8 @@ def _execute_condition(
     resolved_profile: GripperProfile,
     tasks: Mapping[Path, ForceTrackingTask],
     study_dir: Path,
+    plot_mode: Literal["summary", "diagnostic"],
+    diagnostic_seed: int,
 ) -> ConditionExecution:
     """运行一个模式—任务—材料—seed 条件。"""
     parameters = condition.parameters
@@ -263,6 +266,9 @@ def _execute_condition(
         stiffness_estimator_method="window_linear",
         sensor_noise_seed=seed,
         trace_sample_period_s=tasks[task_path].control_period_s,
+        plot_mode=(
+            "diagnostic" if plot_mode == "diagnostic" or seed == diagnostic_seed else "none"
+        ),
     )
     safety = trace_safety_metrics(
         read_trace_rows(run.path),
@@ -344,6 +350,7 @@ def run_study(
     lifecycle_manifest_fields: Mapping[str, object] | None = None,
     workers: int = 1,
     on_progress: StudyProgressCallback | None = None,
+    plot_mode: Literal["summary", "diagnostic"] = "summary",
 ) -> Path:
     """通过公共生命周期执行限幅研究。"""
     study_dir = study_directory.resolve()
@@ -359,6 +366,8 @@ def run_study(
         resolved_profile=resolved_profile,
         tasks=tasks,
         study_dir=study_dir,
+        plot_mode=plot_mode,
+        diagnostic_seed=min(plan.seeds),
     )
 
     def aggregate_and_persist(

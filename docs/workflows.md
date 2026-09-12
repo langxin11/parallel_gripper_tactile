@@ -236,11 +236,13 @@ stiff Step 平台极限环退出最终矩阵，只保留专项复现；`direct-t
 `soft=(-250,-5)` 不进入默认矩阵。study 完成后会同时输出 `summary.csv`、`summary.parquet`，以及适用时的
 `aggregate.csv`、`aggregate.parquet`；diagnosis study 只有 summary。图默认以 PNG 保存在 `figures/` 中。
 
-图表按 study 的科学问题组织：控制器对比展示误差、饱和、相对 Full 增量和同 seed 轨迹；速率调优展示
+图表按 study 的科学问题组织：控制器对比展示误差、饱和和同 seed 轨迹；速率调优展示
 \(K_P\)、\(\dot F_{\max}\) 与 RMSE、\(\sigma_F\)、超调之间的热图；PID 消融展示
 材料分组指标以及完整 2×2 配对的主效应/交互作用；ADRC 调参展示候选排序、约束可行域和参数—性能关系；
-刚度估计器对比展示相对 secant 的增量和力/刚度轨迹；因果诊断展示扫描变量—诊断指标曲线与有效轨迹叠加。
-所有 study 图默认输出一份 600 DPI PNG。
+刚度估计器对比展示误差指标和力/刚度轨迹；因果诊断展示扫描变量—诊断指标曲线与有效轨迹叠加。
+所有 study 图默认输出一份 600 DPI PNG。控制器／估计器比较的简单基线差值图与 MAE 补充面板仅在
+`execution.plot_mode=diagnostic` 下生成，且差值图必须有有效基线。ADRC 参数关系图在 coarse 阶段
+保留，在 confirm 阶段转为诊断图。出图模式和逐次图选择见[科研出图模式](research-configuration.md#出图模式)。
 
 二阶直接力矩 ADRC 的测量轻滤波和控制／观测器带宽采用两阶段调参：粗扫先固定 `medium` 与一个 seed，
 确认阶段再在三种 preset 与三个 seed 上复验。计划、coarse 执行与 confirm 都使用 Hydra 正式入口：
@@ -285,8 +287,8 @@ done
 科学配置哈希和产物摘要；`execution.recovery_source` 只生成可恢复性报告，本阶段不会自动续跑。
 
 动态目标力跟踪任务的配置、两阶段流程和指标解读见[动态目标力跟踪](force-tracking.md)。
-[force-track](force-tracking.md) 单次运行默认登记 `plots/tracking.png`、`plots/tactile.png` 和
-`plots/controller.png`；既有其他实验的 `plot.png` 产物约定不变。需要从已有目录重绘时使用：
+[force-track](force-tracking.md) 单次运行默认登记 `plots/tracking.png`；
+`execution.plot_mode=diagnostic` 额外生成 `plots/tactile.png` 和 `plots/controller.png`，科学失败同样保留诊断。需要从已有目录重绘时使用：
 
 <pre><code class="language-bash">
 uv run python scripts/research/render.py &lt;run-directory&gt; [--tactile-detail] \

@@ -8,6 +8,7 @@ from pydantic import ValidationError
 from parallel_gripper_tactile.experiments.robotiq_discrete_force import (
     _TRACE_COLUMNS,
     _equivalent_actuator_position,
+    _plot_trace,
     _should_keep_trace_row,
     RobotiqDiscreteForceTask,
 )
@@ -16,6 +17,35 @@ from parallel_gripper_tactile.scenes.robotiq import load_grasp_model
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_trace_plot_renders_command_steps_with_action_markers(
+    tmp_path: Path, fast_png_render: None
+) -> None:
+    """命令面板以同一坐标轴上的阶梯和动作标记呈现。"""
+    rows = [
+        {
+            "time_s": time_s,
+            "force_filtered_n": force,
+            "force_target_n": 2.0,
+            "u": command,
+            "delta_u": delta,
+            "delta_f_tick_est_n": 0.12,
+            "hold_deadband_n": 0.08,
+            "reactivate_threshold_n": 0.18,
+        }
+        for time_s, force, command, delta in (
+            (0.0, 0.2, 10, 1),
+            (0.1, 1.8, 11, 0),
+            (0.2, 2.0, 10, -1),
+        )
+    ]
+    output = tmp_path / "trace.png"
+
+    _plot_trace(rows, output)
+
+    assert output.is_file()
+    assert output.stat().st_size > 0
 
 
 def test_equivalent_actuator_position_uses_mujoco_affine_scale() -> None:

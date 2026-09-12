@@ -154,6 +154,25 @@ def test_execution_workers_override_is_validated() -> None:
         )
 
 
+def test_plot_mode_preserves_scientific_plan_and_rejects_unknown_mode() -> None:
+    """出图只影响工件选择，不改变科学哈希或有序实验条件。"""
+    summary = _resolved("force_tracking_stiffness_estimator_comparison")
+    diagnostic = _resolved(
+        "force_tracking_stiffness_estimator_comparison",
+        overrides=["execution.plot_mode=diagnostic"],
+    )
+    assert summary.plan == diagnostic.plan
+    assert diagnostic.selection.execution.plot_mode == "diagnostic"
+    assert (
+        diagnostic.effective_configuration()["selection"]["execution"]["plot_mode"] == "diagnostic"
+    )
+    with pytest.raises(ResearchStudySetupError, match="plot_mode"):
+        _resolved(
+            "force_tracking_stiffness_estimator_comparison",
+            overrides=["execution.plot_mode=all"],
+        )
+
+
 def _write_coarse_reference(
     directory: Path,
     config: ForceTrackingTorqueAdrcTuningConfig,
@@ -949,6 +968,7 @@ def test_execution_passes_the_exact_resolved_plan_to_protocol(
     assert captured["study_plan"] is resolved.plan
     assert captured["resolved_profile"] is resolved.profile
     assert captured["workers"] == 3
+    assert captured["plot_mode"] == "summary"
     assert captured["on_progress"] is on_progress
     assert updates == []
     assert {Path(path).name for path in captured["additional_artifacts"]} == {
@@ -1103,3 +1123,26 @@ def test_study_rejects_outer_multirun_before_hydra_dispatch(argument: str) -> No
     """正式研究在 Hydra 创建任何 job 前拒绝外层矩阵展开。"""
     with pytest.raises(SystemExit, match="禁止 Hydra 外层 Multirun"):
         _entry_module().reject_outer_multirun([argument])
+
+
+@pytest.mark.parametrize("plot_mode", ["summary", "diagnostic"])
+def test_study_selects_diagnostic_seed_before_results(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, plot_mode: str
+) -> None:
+    """代表 seed 由计划决定，首条件失败不会把后续 seed 改选为代表。"""
+    from parallel_gripper_tactile.studies.protocols import force_tracking_ablation as protocol
+
+    source = REPOSITORY_ROOT / "tests/fixtures/studies/force_tracking_ablation.yaml"
+    original = load_study_config(source)
+    config = original.model_copy(
+        update={"seeds": original.seeds.model_copy(update={"start": 7, "count": 2})}
+    )
+    seen = {}
+
+    def capture(**kwargs: object):
+        seen[kwargs["sensor_noise_seed"]] = kwargs["plot_mode"]
+        raise RuntimeError("仅核对计划派发，不启动仿真。")
+
+    monkeypatch.setattr(protocol, "execute_force_tracking", capture)
+    protocol.run_study(config, config_source=source, study_directory=tmp_path, plot_mode=plot_mode)
+    assert seen == {7: "diagnostic", 8: "diagnostic" if plot_mode == "diagnostic" else "none"}

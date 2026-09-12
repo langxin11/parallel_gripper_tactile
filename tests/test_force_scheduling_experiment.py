@@ -6,6 +6,7 @@ import csv
 import json
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from parallel_gripper_tactile.experiments.force_scheduling import (
@@ -13,6 +14,7 @@ from parallel_gripper_tactile.experiments.force_scheduling import (
     DownwardLoadWaypoint,
     ForceSchedulingConfigError,
     ForceSchedulingTask,
+    _should_show_load_panel,
     run_force_scheduling,
 )
 from parallel_gripper_tactile.runners import execute_force_scheduling
@@ -36,6 +38,14 @@ def test_downward_load_reference_samples_linear_ramp() -> None:
 
     assert reference.sample_at(1.0) == pytest.approx((0.5, 0.5))
     assert reference.sample_at(3.0) == pytest.approx((1.0, 0.0))
+
+
+def test_load_panel_only_collapses_constant_fixed_offset_curves() -> None:
+    """恒定重力基线不重复展示，变化或独立载荷仍保留面板。"""
+    assert not _should_show_load_panel(np.array([0.5, 0.5]), np.array([0.0, 0.0]))
+    assert _should_show_load_panel(np.array([0.5, 0.8]), np.array([0.0, 0.3]))
+    assert _should_show_load_panel(np.array([0.5, 0.5]), np.array([0.0, 0.2]))
+    assert _should_show_load_panel(np.array([0.5, 0.5000001]), np.array([0.0, 0.0]))
 
 
 def test_force_scheduling_task_rejects_nonzero_start_time(tmp_path: Path) -> None:

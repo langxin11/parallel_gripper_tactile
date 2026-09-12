@@ -9,7 +9,7 @@ from functools import partial
 import json
 import math
 from pathlib import Path
-from typing import Iterable
+from typing import Iterable, Literal
 from uuid import uuid4
 
 import numpy as np
@@ -80,6 +80,7 @@ PLOTTED_METRICS = (
     ("mae_n", "MAE (N)"),
     ("final_error_n", "Final error (N)"),
 )
+SUMMARY_PLOTTED_METRICS = tuple(metric for metric in PLOTTED_METRICS if metric[0] != "mae_n")
 BASELINE_ESTIMATOR = "secant_ewma"
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 
@@ -128,19 +129,24 @@ def _finite_error(value: object) -> float:
 
 
 def plot_metric_summary(
-    aggregates: list[dict[str, object]], output: Path, *, estimator_order: Iterable[str]
+    aggregates: list[dict[str, object]],
+    output: Path,
+    *,
+    estimator_order: Iterable[str],
+    plot_mode: Literal["summary", "diagnostic"] = "summary",
 ) -> Path:
     """按任务绘制各刚度估计器的跟踪指标均值与样本标准差。"""
     if not aggregates:
         raise ValueError("cannot plot empty aggregates")
     plt = science_pyplot()
     estimators = tuple(estimator_order)
+    metrics = SUMMARY_PLOTTED_METRICS if plot_mode == "summary" else PLOTTED_METRICS
     tasks = tuple(dict.fromkeys(str(row["task_name"]) for row in aggregates))
     materials = tuple(dict.fromkeys(str(row["object_material"]) for row in aggregates))
     colors = ("#0072B2", "#E69F00", "#009E73")
     figure, axes = plt.subplots(
         len(tasks),
-        len(PLOTTED_METRICS),
+        len(metrics),
         figsize=paper_figsize(3.1 * len(tasks)),
         squeeze=False,
         layout="constrained",
@@ -156,7 +162,7 @@ def plot_metric_summary(
     x = np.arange(len(estimators), dtype=np.float64)
     width = 0.8 / max(1, len(materials))
     for task_index, task_name in enumerate(tasks):
-        for metric_index, (metric, label) in enumerate(PLOTTED_METRICS):
+        for metric_index, (metric, label) in enumerate(metrics):
             axis = axes[task_index][metric_index]
             for material_index, material in enumerate(materials):
                 positions = x - 0.4 + width / 2.0 + material_index * width
@@ -184,7 +190,7 @@ def plot_metric_summary(
             axis.grid(True, axis="y", linewidth=0.3, alpha=0.5)
             if metric_index == 0:
                 axis.set_title(task_name)
-            if task_index == 0 and metric_index == len(PLOTTED_METRICS) - 1:
+            if task_index == 0 and metric_index == len(metrics) - 1:
                 figure.legend(
                     *axis.get_legend_handles_labels(),
                     loc="outside upper center",
@@ -268,6 +274,33 @@ def plot_delta_vs_secant(
     pdf_path = save_publication_figure(figure, output)
     plt.close(figure)
     return pdf_path
+
+
+def _has_finite_baseline_comparison(
+    aggregates: list[dict[str, object]], estimator_order: Iterable[str]
+) -> bool:
+    """确认割线基线与至少一个估计器在同一条件有有限 RMSE。"""
+    estimators = tuple(estimator_order)
+    comparisons = set(estimators) - {BASELINE_ESTIMATOR}
+    if BASELINE_ESTIMATOR not in estimators or not comparisons:
+        return False
+    finite: set[tuple[str, str, str]] = set()
+    for row in aggregates:
+        value = row.get("rmse_n_mean")
+        if value is None or not math.isfinite(float(value)):
+            continue
+        finite.add(
+            (
+                str(row["stiffness_estimator_method"]),
+                str(row["task_name"]),
+                str(row["object_material"]),
+            )
+        )
+    return any(
+        (BASELINE_ESTIMATOR, task, material) in finite
+        and any((estimator, task, material) in finite for estimator in comparisons)
+        for _, task, material in finite
+    )
 
 
 def _read_tracking_rows(run_directory: Path) -> list[dict[str, object]]:
@@ -366,18 +399,29 @@ def render_study_figures(
     study_dir: Path,
     *,
     estimator_order: Iterable[str],
+    plot_mode: Literal["summary", "diagnostic"] = "summary",
 ) -> list[Path]:
     """从已保存 summary 与子 run trace 生成或刷新论文级对比图。"""
     figures_dir = study_dir / "figures"
     figures_dir.mkdir(exist_ok=True)
     metric_plot = figures_dir / "metrics_by_estimator.png"
-    delta_plot = figures_dir / "delta_vs_secant.png"
-    metric_path = plot_metric_summary(aggregates, metric_plot, estimator_order=estimator_order)
-    delta_path = plot_delta_vs_secant(aggregates, delta_plot, estimator_order=estimator_order)
-    trace_plots = plot_tracking_and_stiffness_overlays(
-        rows, study_dir, figures_dir, estimator_order=estimator_order
+    estimators = tuple(estimator_order)
+    metric_path = plot_metric_summary(
+        aggregates, metric_plot, estimator_order=estimators, plot_mode=plot_mode
     )
-    return [metric_path, delta_path, *trace_plots]
+    delta_paths: list[Path] = []
+    if plot_mode == "diagnostic" and _has_finite_baseline_comparison(aggregates, estimators):
+        delta_paths.append(
+            plot_delta_vs_secant(
+                aggregates,
+                figures_dir / "delta_vs_secant.png",
+                estimator_order=estimators,
+            )
+        )
+    trace_plots = plot_tracking_and_stiffness_overlays(
+        rows, study_dir, figures_dir, estimator_order=estimators
+    )
+    return [metric_path, *delta_paths, *trace_plots]
 
 
 def _create_study_directory(config: ForceTrackingStiffnessEstimatorComparisonConfig) -> Path:
@@ -449,6 +493,8 @@ def _execute_condition(
     resolved_profile: GripperProfile | None,
     tasks: Mapping[Path, ForceTrackingTask],
     study_dir: Path,
+    plot_mode: Literal["summary", "diagnostic"],
+    diagnostic_seed: int,
 ) -> ConditionExecution:
     """在独立进程中执行一个刚度估计器条件。"""
     parameters = condition.parameters
@@ -468,6 +514,9 @@ def _execute_condition(
         controller_variant="pid-stiffness-ff",
         stiffness_estimator_method=estimator,
         sensor_noise_seed=seed,
+        plot_mode=(
+            "diagnostic" if plot_mode == "diagnostic" or seed == diagnostic_seed else "none"
+        ),
     )
     row = {
         "controller_variant": "pid-stiffness-ff",
@@ -498,6 +547,7 @@ def run_study(
     lifecycle_manifest_fields: Mapping[str, object] | None = None,
     workers: int = 1,
     on_progress: StudyProgressCallback | None = None,
+    plot_mode: Literal["summary", "diagnostic"] = "summary",
 ) -> Path:
     """通过公共生命周期执行整个 protocol，并返回 study 父目录。"""
     tasks = {task_path: ForceTrackingTask.load(task_path) for task_path in config.tasks}
@@ -525,6 +575,8 @@ def run_study(
         resolved_profile=resolved_profile,
         tasks=tasks,
         study_dir=study_dir,
+        plot_mode=plot_mode,
+        diagnostic_seed=min(plan.seeds),
     )
 
     def aggregate_and_persist(
@@ -567,6 +619,7 @@ def run_study(
                 aggregates,
                 directory,
                 estimator_order=config.estimators,
+                plot_mode=plot_mode,
             )
         )
 
@@ -590,7 +643,9 @@ def run_study(
     )
 
 
-def render_existing_study(study_dir: Path) -> list[Path]:
+def render_existing_study(
+    study_dir: Path, *, plot_mode: Literal["summary", "diagnostic"] = "summary"
+) -> list[Path]:
     """从已完成 study 的 summary 重建论文级图表并更新 manifest。"""
     summary_path = study_dir / "summary.json"
     manifest_path = study_dir / "study_manifest.json"
@@ -612,7 +667,11 @@ def render_existing_study(study_dir: Path) -> list[Path]:
         dict.fromkeys(str(row["stiffness_estimator_method"]) for row in typed_rows)
     )
     figure_artifacts = render_study_figures(
-        typed_rows, typed_aggregates, study_dir, estimator_order=estimator_order
+        typed_rows,
+        typed_aggregates,
+        study_dir,
+        estimator_order=estimator_order,
+        plot_mode=plot_mode,
     )
     try:
         manifest = json.loads(manifest_path.read_text(encoding="utf-8"))

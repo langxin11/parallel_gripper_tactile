@@ -96,3 +96,48 @@ def test_estimator_summary_plots_are_generated(tmp_path: Path, fast_plot_render:
     protocol.plot_delta_vs_secant(aggregates, outputs[1], estimator_order=estimators)
 
     assert all(path.is_file() and path.stat().st_size > 0 for path in outputs)
+
+
+def test_estimator_summary_omits_mae_and_delta_requires_secant_pair() -> None:
+    """研究总览不重复 MAE，诊断差分必须有同条件有限割线基线。"""
+    assert tuple(metric for metric, _ in protocol.SUMMARY_PLOTTED_METRICS) == (
+        "rmse_n",
+        "final_error_n",
+    )
+    assert tuple(metric for metric, _ in protocol.PLOTTED_METRICS) == (
+        "rmse_n",
+        "mae_n",
+        "final_error_n",
+    )
+    aggregates = protocol.aggregate_rows(
+        [
+            _result_row("secant_ewma", seed=0, rmse=0.2),
+            _result_row("window_linear", seed=0, rmse=math.nan),
+        ]
+    )
+
+    assert not protocol._has_finite_baseline_comparison(
+        aggregates, ("secant_ewma", "window_linear")
+    )
+
+
+@pytest.mark.parametrize(("plot_mode", "expected_axes"), [("summary", 2), ("diagnostic", 3)])
+def test_estimator_metric_summary_uses_mode_specific_column_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, plot_mode: str, expected_axes: int
+) -> None:
+    """summary 省略 MAE，而 diagnostic 保留三列误差指标。"""
+    captured: list[int] = []
+    monkeypatch.setattr(
+        protocol,
+        "save_publication_figure",
+        lambda figure, output: captured.append(len(figure.axes)) or output,
+    )
+
+    protocol.plot_metric_summary(
+        protocol.aggregate_rows([_result_row("secant_ewma", seed=0, rmse=0.2)]),
+        tmp_path / "metrics.png",
+        estimator_order=("secant_ewma",),
+        plot_mode=plot_mode,  # type: ignore[arg-type]
+    )
+
+    assert captured == [expected_axes]

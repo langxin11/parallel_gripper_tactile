@@ -9,6 +9,7 @@ from functools import partial
 import json
 import math
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
 import yaml
@@ -677,6 +678,7 @@ def _execute_condition(
     *,
     config: DiagnosisConfig,
     study_dir: Path,
+    plot_mode: Literal["summary", "diagnostic"],
 ) -> ConditionExecution:
     """在独立进程中执行一个诊断条件。"""
     parameters = condition.parameters
@@ -715,6 +717,7 @@ def _execute_condition(
         force_semantics=str(parameters["force_semantics"]),
         controller_variant=str(parameters["controller_variant"]),
         sensor_noise_seed=int(parameters["sensor_noise_seed"]),
+        plot_mode="diagnostic",
     )
     row = {
         "label": label,
@@ -754,6 +757,7 @@ def run_study(
     lifecycle_manifest_fields: Mapping[str, object] | None = None,
     workers: int = 1,
     on_progress: StudyProgressCallback | None = None,
+    plot_mode: Literal["summary", "diagnostic"] = "summary",
 ) -> Path:
     """通过公共生命周期执行一个诊断 phase，并返回 study 父目录。"""
     study_dir = (
@@ -774,7 +778,12 @@ def run_study(
         else require_matching_study_plan(expected_plan, study_plan)
     )
 
-    execute = partial(_execute_condition, config=config, study_dir=study_dir)
+    execute = partial(
+        _execute_condition,
+        config=config,
+        study_dir=study_dir,
+        plot_mode=plot_mode,
+    )
 
     def aggregate_and_persist(
         rows: list[dict[str, object]],

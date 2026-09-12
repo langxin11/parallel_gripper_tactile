@@ -109,6 +109,21 @@ def _aggregate_row(
     }
 
 
+def test_candidate_ranking_figure_renders_existing_ranking_fields(
+    tmp_path: Path, fast_plot_render: None
+) -> None:
+    """候选排名图只消费既有资格和误差聚合字段。"""
+    candidate = _candidate(0.02, 0.2, 1.0)
+    ranking = protocol.rank_candidates(
+        [_aggregate_row(candidate, stable_runs=2, complete_runs=2, peak=0.2, rmse=0.1)]
+    )
+
+    output = protocol.plot_candidate_ranking(ranking, tmp_path / "ranking.png")
+
+    assert output.is_file()
+    assert output.stat().st_size > 0
+
+
 def test_config_resolves_paths_and_expands_candidates(tmp_path: Path) -> None:
     """配置解析相对路径，并以候选、材料、seed 顺序展开条件。"""
     config_path = tmp_path / "tuning.yaml"

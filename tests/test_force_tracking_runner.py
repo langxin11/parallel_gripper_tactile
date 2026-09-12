@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 from pathlib import Path
 
+import pytest
 import pyarrow as pa
 import pyarrow.parquet as pq
 from parallel_gripper_tactile.experiments.force_tracking import ForceTrackingResult
@@ -15,8 +17,24 @@ from parallel_gripper_tactile.runners import force_tracking
 ROOT = Path(__file__).resolve().parents[1]
 
 
+@pytest.mark.parametrize(
+    ("plot_mode", "stable", "study_failure", "expected_plots"),
+    [
+        ("summary", True, False, {"tracking"}),
+        ("diagnostic", True, False, {"tracking", "tactile", "controller"}),
+        ("none", True, False, set()),
+        ("none", False, False, {"tracking", "tactile", "controller"}),
+        ("none", True, True, {"tracking", "tactile", "controller"}),
+    ],
+)
 def test_execute_force_tracking_writes_complete_run_artifacts(
-    tmp_path: Path, monkeypatch, fast_plot_render: None
+    tmp_path: Path,
+    monkeypatch,
+    fast_plot_render: None,
+    plot_mode: str,
+    stable: bool,
+    study_failure: bool,
+    expected_plots: set[str],
 ) -> None:
     """runner 保存输入快照、结果、trace 及完整 manifest，而无需真实仿真。"""
     result = ForceTrackingResult(
@@ -36,6 +54,8 @@ def test_execute_force_tracking_writes_complete_run_artifacts(
         settling_time_s=0.35,
         simulation_stable=True,
     )
+
+    result = replace(result, simulation_stable=stable)
 
     def fake_run(
         *args: object, output_parquet: Path, on_result, **kwargs: object
@@ -71,6 +91,8 @@ def test_execute_force_tracking_writes_complete_run_artifacts(
         task_path=task,
         output_root=tmp_path,
         run_name="runner-test",
+        plot_mode=plot_mode,
+        diagnostic_on_result=lambda result: study_failure,
         object_material="soft",
         controller_variant="adrc-torque",
         stiffness_estimator_method="window_quadratic",
@@ -95,11 +117,13 @@ def test_execute_force_tracking_writes_complete_run_artifacts(
         "task.yaml",
         "effective_parameters.json",
         "trace.parquet",
-        "plots/tracking.png",
-        "plots/tactile.png",
-        "plots/controller.png",
         "metrics.json",
     } <= set(manifest["artifacts"])
+    assert {path.stem for path in (run.path / "plots").glob("*.png")} == expected_plots
+    assert {name for name in manifest["artifacts"] if name.startswith("plots/")} == {
+        f"plots/{name}.png" for name in expected_plots
+    }
+    assert manifest["parameters"]["plot_mode"] == plot_mode
     assert (run.path / "task.yaml").read_bytes() == task.read_bytes()
     assert (
         pq.ParquetFile(run.path / "trace.parquet").metadata.row_group(0).column(0).compression

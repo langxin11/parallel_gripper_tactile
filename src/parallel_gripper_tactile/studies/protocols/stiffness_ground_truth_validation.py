@@ -8,6 +8,7 @@ from functools import partial
 import json
 import math
 from pathlib import Path
+from typing import Literal
 
 from parallel_gripper_tactile.config.profiles import GripperProfile, load_profile
 from parallel_gripper_tactile.experiments.stiffness_calibration import (
@@ -196,8 +197,10 @@ def _execute_condition(
     resolved_profile: GripperProfile,
     task: StiffnessCalibrationTask,
     study_dir: Path,
+    plot_mode: Literal["summary", "diagnostic"],
 ) -> ConditionExecution:
     """在独立目录执行一个估计器—材料—seed 准静态扫描。"""
+    del plot_mode
     parameters = condition.parameters
     estimator = str(parameters["stiffness_estimator_method"])
     material = str(parameters["object_material"])
@@ -258,6 +261,7 @@ def run_study(
     lifecycle_manifest_fields: Mapping[str, object] | None = None,
     workers: int = 1,
     on_progress: StudyProgressCallback | None = None,
+    plot_mode: Literal["summary", "diagnostic"] = "summary",
 ) -> Path:
     """通过公共生命周期执行准静态真值验证研究。"""
     study_dir = study_directory.resolve()
@@ -284,6 +288,7 @@ def run_study(
         resolved_profile=resolved_profile,
         task=task,
         study_dir=study_dir,
+        plot_mode=plot_mode,
     )
     condition_artifacts: list[Path] = []
 
