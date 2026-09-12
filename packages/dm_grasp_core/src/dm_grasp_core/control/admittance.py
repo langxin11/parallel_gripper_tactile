@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(slots=True)
@@ -16,6 +16,8 @@ class SecondOrderAdmittance:
         stiffness_n_m: 虚拟刚度 (N/m)，不得为负数。
         displacement_m: 当前虚拟闭合位移 (m)。
         velocity_m_s: 当前虚拟闭合速度 (m/s)。
+        deadband_active: 最近一步是否因力误差位于死区而冻结。
+        unloading_blocked: 最近一步是否阻止了反向卸载。
     """
 
     mass_kg: float
@@ -23,11 +25,15 @@ class SecondOrderAdmittance:
     stiffness_n_m: float
     displacement_m: float = 0.0
     velocity_m_s: float = 0.0
+    deadband_active: bool = field(default=False, init=False)
+    unloading_blocked: bool = field(default=False, init=False)
 
     def reset(self) -> None:
         """清零虚拟位移和速度，以当前电机位置作为新的参考点。"""
         self.displacement_m = 0.0
         self.velocity_m_s = 0.0
+        self.deadband_active = False
+        self.unloading_blocked = False
 
     def step(
         self,
@@ -50,6 +56,8 @@ class SecondOrderAdmittance:
         Raises:
             ValueError: 参数或输入不满足有限性、物理符号约束时抛出。
         """
+        self.deadband_active = False
+        self.unloading_blocked = False
         values = (
             self.mass_kg,
             self.damping_ns_m,

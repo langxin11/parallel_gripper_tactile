@@ -34,9 +34,28 @@ def test_yaml_is_overridden_by_tyro(tmp_path: Path, capsys: pytest.CaptureFixtur
     assert record["config"]["control"]["target_force_n"] == 0.6
 
 
+def test_yaml_loads_backlash_aware_hold_switch(tmp_path: Path) -> None:
+    """YAML 应严格读取导纳单向保持布尔开关和力死区。"""
+    path = tmp_path / "cup.yaml"
+    path.write_text(
+        "grip:\n  force_deadband_n: 0.08\n  prevent_unloading: false\n",
+        encoding="utf-8",
+    )
+
+    config = load_cup_config(path)
+
+    assert config.grip.force_deadband_n == pytest.approx(0.08)
+    assert config.grip.prevent_unloading is False
+
+
 @pytest.mark.parametrize(
     "contents",
-    ["execute: true\n", "control:\n  target_force_n: true\n", "grip:\n  unknown: 1\n"],
+    [
+        "execute: true\n",
+        "control:\n  target_force_n: true\n",
+        "grip:\n  unknown: 1\n",
+        "grip:\n  prevent_unloading: 1\n",
+    ],
 )
 def test_yaml_rejects_operations_and_invalid_types(tmp_path: Path, contents: str) -> None:
     """YAML 只能表达已登记的强类型配置。"""

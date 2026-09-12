@@ -310,6 +310,11 @@ def test_run_cup_completes_all_interactive_phases_and_records_trace(
     states = [row["state"] for row in rows]
     assert "takeover" in states and "await_release" in states and "return" in states
     assert max(float(row["target_force_n"]) for row in rows) > 0.5
+    assert all(row["force_deadband_active"] in {"True", "False"} for row in rows)
+    assert all(row["unloading_blocked"] in {"True", "False"} for row in rows)
+    return_positions = [float(row["q_des_rad"]) for row in rows if row["state"] == "return"]
+    assert return_positions[-1] < return_positions[0]
+    assert all(row["unloading_blocked"] == "False" for row in rows if row["state"] == "return")
     manifest = json.loads((tmp_path / "run" / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["status"] == "completed"
 

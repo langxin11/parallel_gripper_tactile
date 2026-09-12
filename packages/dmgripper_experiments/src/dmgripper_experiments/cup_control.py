@@ -47,6 +47,8 @@ class CupForceController:
         self.reference_position = None
         self.previous_target = None
         self.dt = 0.0
+        self.force_deadband_active = False
+        self.unloading_blocked = False
 
     def reset(self, position_rad):
         """接触建立后重置外环和速度限幅参考。"""
@@ -54,6 +56,8 @@ class CupForceController:
         self.normal.reset()
         self.reference_position = self.previous_target = position_rad
         self.command = None
+        self.force_deadband_active = False
+        self.unloading_blocked = False
 
     @property
     def torque_limit_n_m(self):
@@ -132,6 +136,7 @@ class CupForceController:
         if self.reference_position is None:
             self.reset(feedback.position_rad)
         if self.config.controller == "admittance":
+            grip = self.config.grip
             self.command = step_admittance(
                 self.admittance,
                 self.kinematics,
@@ -143,9 +148,15 @@ class CupForceController:
                 right_force_n=tactile.right_force_n,
                 target_force_n=target_force_n,
                 dt_s=dt_s,
+                force_deadband_n=grip.force_deadband_n,
+                prevent_unloading=grip.prevent_unloading,
             )
+            self.force_deadband_active = self.admittance.deadband_active
+            self.unloading_blocked = self.admittance.unloading_blocked
             self.previous_target = self.command.position_rad
         else:
+            self.force_deadband_active = False
+            self.unloading_blocked = False
             # 外部状态机已经确认接触，核心仅复用原有 PID／LADRC 跟踪计算。
             self.normal.step(
                 self,

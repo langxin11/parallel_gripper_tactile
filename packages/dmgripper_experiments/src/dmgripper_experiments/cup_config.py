@@ -69,6 +69,8 @@ class GripConfig:
     filter_tau_s: float = 0.05
     stable_time_s: float = 2.0
     force_tolerance_n: float = 0.15
+    force_deadband_n: float = 0.1
+    prevent_unloading: bool = True
 
     def __post_init__(self) -> None:
         """验证抓握参数。"""
@@ -83,6 +85,10 @@ class GripConfig:
         _finite_number(self.shear_threshold_n, "shear_threshold_n", positive=True)
         if _finite_number(self.force_tolerance_n, "force_tolerance_n") < 0.0:
             raise ValueError("force_tolerance_n 不得为负")
+        if _finite_number(self.force_deadband_n, "force_deadband_n") < 0.0:
+            raise ValueError("force_deadband_n 不得为负")
+        if not isinstance(self.prevent_unloading, bool):
+            raise ValueError("prevent_unloading 必须是布尔值")
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,6 +141,8 @@ class CupConfig:
             raise ValueError("max_target_force_n 必须严格小于 control.force_ceiling_n")
         if not self.control.target_force_n >= self.control.contact_on_n:
             raise ValueError("control.target_force_n 必须不小于 control.contact_on_n")
+        if self.grip.force_deadband_n > self.grip.force_tolerance_n:
+            raise ValueError("grip.force_deadband_n 不得大于 grip.force_tolerance_n")
 
 
 _SCHEMA: dict[str, object] = {
@@ -168,8 +176,13 @@ def _decode_dataclass(data: object, cls: type[Any], name: str) -> object:
         if item.name not in mapping:
             continue
         value = mapping[item.name]
-        # 这些嵌套配置均由数值字段组成。避免依赖 postponed annotations 的运行时表示。
-        kwargs[item.name] = _finite_number(value, f"{name}.{item.name}")
+        # 通过默认值识别布尔开关，避免依赖 postponed annotations 的运行时表示。
+        if isinstance(item.default, bool):
+            if not isinstance(value, bool):
+                raise ValueError(f"{name}.{item.name} 必须是布尔值")
+            kwargs[item.name] = value
+        else:
+            kwargs[item.name] = _finite_number(value, f"{name}.{item.name}")
     return cls(**kwargs)
 
 

@@ -203,6 +203,102 @@ def test_step_admittance_limits_single_step_displacement_rate():
     assert abs(admittance.displacement_m) <= maximum_velocity * dt_s
 
 
+def test_step_admittance_deadband_freezes_existing_closure() -> None:
+    """力误差进入死区时应冻结虚拟闭合量并清除残余速度。"""
+    admittance = SecondOrderAdmittance(1.0, 0.0, 0.0, 0.001, 0.02)
+
+    command = step_admittance(
+        admittance,
+        K,
+        replace(C, torque_limit_nm=100.0),
+        reference_position_rad=0.3,
+        measured_position_rad=0.3,
+        measured_velocity_rad_s=0.0,
+        left_force_n=0.54,
+        right_force_n=0.56,
+        target_force_n=0.6,
+        dt_s=0.01,
+        force_deadband_n=0.1,
+        prevent_unloading=True,
+    )
+
+    assert admittance.displacement_m == pytest.approx(0.001)
+    assert admittance.velocity_m_s == 0.0
+    assert admittance.deadband_active
+    assert not admittance.unloading_blocked
+    assert command.velocity_rad_s == 0.0
+
+
+def test_step_admittance_unidirectional_hold_blocks_reverse_motion() -> None:
+    """抓力偏高时单向保持不得跨越打印传动回差反向卸载。"""
+    admittance = SecondOrderAdmittance(1.0, 0.0, 0.0, 0.001, 0.0)
+
+    command = step_admittance(
+        admittance,
+        K,
+        replace(C, torque_limit_nm=100.0),
+        reference_position_rad=0.3,
+        measured_position_rad=0.3,
+        measured_velocity_rad_s=0.0,
+        left_force_n=0.9,
+        right_force_n=0.9,
+        target_force_n=0.6,
+        dt_s=0.01,
+        force_deadband_n=0.1,
+        prevent_unloading=True,
+    )
+
+    assert admittance.displacement_m == pytest.approx(0.001)
+    assert admittance.velocity_m_s == 0.0
+    assert not admittance.deadband_active
+    assert admittance.unloading_blocked
+    assert command.velocity_rad_s == 0.0
+
+
+def test_step_admittance_unidirectional_hold_still_allows_closure() -> None:
+    """抓力低于死区下沿时单向保持仍应继续闭合。"""
+    admittance = SecondOrderAdmittance(1.0, 0.0, 0.0)
+
+    step_admittance(
+        admittance,
+        K,
+        replace(C, torque_limit_nm=100.0),
+        reference_position_rad=0.3,
+        measured_position_rad=0.3,
+        measured_velocity_rad_s=0.0,
+        left_force_n=0.2,
+        right_force_n=0.2,
+        target_force_n=0.6,
+        dt_s=0.1,
+        force_deadband_n=0.1,
+        prevent_unloading=True,
+    )
+
+    assert admittance.displacement_m > 0.0
+    assert admittance.velocity_m_s > 0.0
+    assert not admittance.deadband_active
+    assert not admittance.unloading_blocked
+
+
+def test_step_admittance_deadband_still_validates_time_step() -> None:
+    """冻结分支不能绕过导纳时间步的安全验证。"""
+    with pytest.raises(ValueError, match="导纳死区"):
+        step_admittance(
+            SecondOrderAdmittance(1.0, 0.0, 0.0),
+            K,
+            C,
+            reference_position_rad=0.3,
+            measured_position_rad=0.3,
+            measured_velocity_rad_s=0.0,
+            left_force_n=0.6,
+            right_force_n=0.6,
+            target_force_n=0.6,
+            dt_s=0.0,
+            force_deadband_n=0.1,
+            prevent_unloading=True,
+        )
+
+
 def test_state_saturation():
     """验证 state saturation。"""
     a = SecondOrderAdmittance(1.0, 0.0, 0.0, 10.0, 10.0)

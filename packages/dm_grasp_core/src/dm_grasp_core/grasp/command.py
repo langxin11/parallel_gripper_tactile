@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 
 from ..control.admittance import SecondOrderAdmittance, limit_mit_position_for_torque
 from ..control.kinematics import CrankSliderKinematics
@@ -155,11 +156,15 @@ def step_admittance(
     right_force_n: float,
     target_force_n: float,
     dt_s: float,
+    force_deadband_n: float = 0.0,
+    prevent_unloading: bool = False,
 ) -> MITCommand:
     """按平均单侧力误差积分、限制导纳状态并构建 MIT 命令。
 
     原地更新 admittance；沿用原节点错误时可能已更新状态的语义。
     调用者负责接触状态、时间步裁剪、目标力上限、复位及设备保护。
+    正的虚拟位移始终表示沿闭合方向运动，与电机安装方向无关。启用单向
+    保持后，力偏高或导纳惯性不得减小已经建立的虚拟闭合量。
 
     Args:
         admittance: 原地更新的二阶导纳状态。
@@ -172,21 +177,58 @@ def step_admittance(
         right_force_n: 右侧法向力 (N)。
         target_force_n: 目标平均单侧力 (N)。
         dt_s: 积分步长 (s)，本函数不裁剪。
+        force_deadband_n: 误差绝对值不超过该值时冻结导纳位置和速度 (N)。
+        prevent_unloading: 是否禁止虚拟闭合量在抓握期间减小。
 
     Returns:
         MITCommand: 此步生成的未量化命令。
 
     Raises:
-        ValueError: 导纳积分、运动学或命令约束失败。
+        ValueError: 死区、导纳积分、运动学或命令约束失败。
     """
     measured_force_n = 0.5 * (float(left_force_n) + float(right_force_n))
+    if (
+        not all(
+            math.isfinite(value)
+            for value in (measured_force_n, target_force_n, dt_s, force_deadband_n)
+        )
+        or dt_s <= 0.0
+        or force_deadband_n < 0.0
+        or not isinstance(prevent_unloading, bool)
+    ):
+        raise ValueError("导纳死区或单向保持配置无效")
     jacobian_m_per_rad = kinematics.closure_jacobian(float(measured_position_rad))
     maximum_velocity_m_s = config.velocity_limit_rad_s * jacobian_m_per_rad
-    displacement_m, velocity_m_s = admittance.step(
-        target_force_n - measured_force_n,
-        dt_s,
-        maximum_velocity_m_s=maximum_velocity_m_s,
-    )
+    force_error_n = target_force_n - measured_force_n
+    previous_displacement_m = admittance.displacement_m
+    admittance.deadband_active = False
+    admittance.unloading_blocked = False
+    if force_deadband_n > 0.0 and abs(force_error_n) <= force_deadband_n:
+        admittance.step(0.0, dt_s, maximum_velocity_m_s=maximum_velocity_m_s)
+        admittance.displacement_m = previous_displacement_m
+        admittance.velocity_m_s = 0.0
+        admittance.deadband_active = True
+        displacement_m, velocity_m_s = admittance.displacement_m, 0.0
+    elif prevent_unloading and force_error_n < -force_deadband_n:
+        admittance.step(0.0, dt_s, maximum_velocity_m_s=maximum_velocity_m_s)
+        admittance.displacement_m = previous_displacement_m
+        admittance.velocity_m_s = 0.0
+        admittance.unloading_blocked = True
+        displacement_m, velocity_m_s = admittance.displacement_m, 0.0
+    else:
+        effective_error_n = force_error_n
+        if force_deadband_n > 0.0:
+            effective_error_n -= math.copysign(force_deadband_n, force_error_n)
+        displacement_m, velocity_m_s = admittance.step(
+            effective_error_n,
+            dt_s,
+            maximum_velocity_m_s=maximum_velocity_m_s,
+        )
+        if prevent_unloading and displacement_m < previous_displacement_m:
+            admittance.displacement_m = previous_displacement_m
+            admittance.velocity_m_s = 0.0
+            admittance.unloading_blocked = True
+            displacement_m, velocity_m_s = previous_displacement_m, 0.0
     closing_direction = config.closing_direction
     reference_closure_m = kinematics.closure(reference_position_rad)
     position_bounds_m = sorted(

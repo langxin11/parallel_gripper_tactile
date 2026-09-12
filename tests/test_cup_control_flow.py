@@ -93,6 +93,42 @@ def test_cup_force_controllers_emit_finite_limited_mit_commands(kind: str) -> No
     assert positions[-1] > positions[0]
 
 
+def test_cup_admittance_holds_position_for_deadband_and_overforce() -> None:
+    """杯实验导纳进入死区或力偏高时均不得反向穿越传动间隙。"""
+    controller = CupForceController(CupConfig(), KINEMATICS, COMMAND_CONFIG)
+    feedback = _feedback()
+    closing = controller.step(
+        feedback=feedback,
+        tactile=_tactile(0.3, 0.3),
+        target_force_n=0.6,
+        time_s=0.01,
+        dt_s=0.01,
+    )
+    assert closing.position_rad > feedback.position_rad
+
+    deadband = controller.step(
+        feedback=MotorFeedback(closing.position_rad, closing.velocity_rad_s, 0.0, STATUS_ENABLED),
+        tactile=_tactile(0.55, 0.55),
+        target_force_n=0.6,
+        time_s=0.02,
+        dt_s=0.01,
+    )
+    assert deadband.position_rad == pytest.approx(closing.position_rad)
+    assert deadband.velocity_rad_s == 0.0
+    assert controller.force_deadband_active
+
+    held = controller.step(
+        feedback=MotorFeedback(deadband.position_rad, 0.0, 0.0, STATUS_ENABLED),
+        tactile=_tactile(0.9, 0.9),
+        target_force_n=0.6,
+        time_s=0.03,
+        dt_s=0.01,
+    )
+    assert held.position_rad == pytest.approx(deadband.position_rad)
+    assert held.velocity_rad_s == 0.0
+    assert controller.unloading_blocked
+
+
 def test_takeover_enables_force_increase_before_ready() -> None:
     """手托稳定后进入 takeover，撤手确认前策略已经可以按切向扰动增力。"""
     flow = CupFlow(CupConfig())

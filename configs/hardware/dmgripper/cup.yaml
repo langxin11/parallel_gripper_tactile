@@ -21,3 +21,6 @@ grip:
   filter_tau_s: 0.05
   stable_time_s: 2.0
   force_tolerance_n: 0.15
+  # 打印传动抓握期间避免小误差触发正反转；只有显式 release 才正常张开。
+  force_deadband_n: 0.1
+  prevent_unloading: true

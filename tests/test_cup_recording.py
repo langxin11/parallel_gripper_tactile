@@ -34,7 +34,7 @@ def test_cup_recorder_writes_config_events_trace_and_manifest(tmp_path: Path) ->
     assert rows[0]["right_fz_n"] == ""
     manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["status"] == "completed"
-    assert manifest["schema_version"] == 1
+    assert manifest["schema_version"] == 2
     assert set(manifest["files"]) == {"config.json", "events.jsonl", "tactile.jsonl", "trace.csv"}
 
 

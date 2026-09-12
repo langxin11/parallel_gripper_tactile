@@ -163,7 +163,7 @@ def run_cup(
             {
                 "event": "state",
                 "state": "zero_check",
-                "message": "请保持传感器空载，正在验证三轴零力。",
+                "message": "请保持传感器空载，正在验证滤波双侧 Fz 零力。",
             }
         )
         _verify_zero(tactile, config.control, clear_bias, clock, sleep)
@@ -413,6 +413,18 @@ def _run_enabled(
             else None,
             trigger_active=policy_command.trigger_active if policy_command else False,
             force_limited=target >= config.grip.max_target_force_n - 1e-9,
+            force_deadband_active=(
+                controller.force_deadband_active
+                if config.controller == "admittance"
+                and phase not in {"approach", "contact_transition", "return"}
+                else False
+            ),
+            unloading_blocked=(
+                controller.unloading_blocked
+                if config.controller == "admittance"
+                and phase not in {"approach", "contact_transition", "return"}
+                else False
+            ),
             position_rad=feedback.position_rad,
             velocity_rad_s=feedback.velocity_rad_s,
             torque_nm=feedback.torque_nm,

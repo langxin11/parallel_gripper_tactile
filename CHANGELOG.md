@@ -9,6 +9,10 @@
 
 ### 新增
 
+- `dmgripper-cup` 导纳路径新增面向打印传动回差的力死区与单向闭合保持：误差进入死区时冻结
+  导纳位移和虚拟速度，力偏高时禁止期望位置反向，正常张开仅由显式 `release` 触发；过力与
+  左右失衡保护保持优先。倒水 trace 升级为 schema v2，新增死区激活与卸载阻止诊断字段。
+
 - 新增 `dmgripper-cup` 真机倒水交互入口及 `dmgripper-cup-plot` 离线重绘命令：配置按 dataclass
   默认值、严格 YAML、Tyro 覆盖合并；默认 dry-run，只有显式 `--execute` 才进入真机运行时。运行记录
   写入配置、事件、触觉、控制 trace、manifest 和 PDF／PNG 诊断图。默认参数尚未经真机验收。

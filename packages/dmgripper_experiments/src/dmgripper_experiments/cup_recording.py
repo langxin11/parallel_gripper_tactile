@@ -30,6 +30,8 @@ TRACE_FIELDS = (
     "measured_tangential_force_n",
     "trigger_active",
     "force_limited",
+    "force_deadband_active",
+    "unloading_blocked",
     "position_rad",
     "velocity_rad_s",
     "torque_nm",
@@ -43,8 +45,8 @@ TRACE_FIELDS = (
     "command_latency_s",
 )
 
-SCHEMA_VERSION = 1
-RECORDER_VERSION = "0.1.0"
+SCHEMA_VERSION = 2
+RECORDER_VERSION = "0.2.0"
 
 
 class CupRecorder:
