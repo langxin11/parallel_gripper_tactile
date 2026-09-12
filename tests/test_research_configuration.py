@@ -62,6 +62,7 @@ def _with_current_dm_supervisor(value: object) -> object:
             if isinstance(force, dict):
                 if restored.get("name") == "dm_gripper_admittance":
                     force["contact_threshold_n"] = 0.15
+                force.setdefault("stiffness_rate", None)
                 force.setdefault(
                     "supervisor",
                     {
@@ -169,6 +170,7 @@ def test_estimator_group_replaces_its_fragment_and_reaches_final_profile() -> No
         "pid_torque_ff",
         "pid_stiffness_ff",
         "pid_stiffness_limit",
+        "pid_stiffness_rate",
         "full",
         "direct_torque",
         "adrc",

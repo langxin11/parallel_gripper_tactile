@@ -87,6 +87,71 @@ MIT 增益、6 s 线性关节接近轨迹、接近前馈、接触阈值和公共
 `position_limit_force_rate_n_s·dt` 的允许预测力变化换算成每周期位置目标增量上限，并通过动态 PID
 输出边界抑制积分 windup。刚度安全系数由 `position_limit_stiffness_safety_factor` 配置。该变体已进入
 当前默认正式比较矩阵，与历史 `pid-stiffness-ff`、`full` 同时保留。
+
+这里的 PID 输出是相对接触位置的**位置修正**，不是速度命令。令
+\(e_k=F_{\mathrm{ref},k}-F_{n,k}\)、外环周期为 \(T_c\)，则未限幅输出可写为
+
+\[
+\delta q_k^\ast=K_p e_k+K_i\sum_{i=0}^{k}e_iT_c-K_d\frac{F_{n,k}-F_{n,k-1}}{T_c}.
+\]
+
+刚度位置限幅先计算
+
+\[
+\Delta F_{\mathrm{allow},k}=\min\!\left(|e_k|,\dot F_{\mathrm{lim}}T_c\right),\qquad
+\Delta q_{\mathrm{lim},k}=\frac{\Delta F_{\mathrm{allow},k}}
+{\gamma\,\hat k_{c,k}\,J_c(q_k)},
+\]
+
+再把 \(\delta q_k^\ast\) 裁剪到
+\([\delta q_{k-1}-\Delta q_{\mathrm{lim},k},\delta q_{k-1}+\Delta q_{\mathrm{lim},k}]\)
+与全局位置修正范围的交集，最终令
+\(q_{\mathrm{ref},k}=q_{\mathrm{contact}}+\delta q_k\)。因此只有积分项、微分项和限幅换算显式使用
+\(T_c\)；不存在“PID 先输出速度，再乘 \(T_c\)”这一步。
+
+`--set controller=dm_gripper/pid_stiffness_rate` 是独立的速率式实验变体，不改变上述位置式 PID。
+它令 PID 输出期望力变化率，再用在线刚度和机构雅可比换算为电机角速度：
+
+\[
+\begin{aligned}
+e_k &= F_{\mathrm{ref},k}-F_{n,k},\\
+\dot F_k^\ast &= K_P e_k+K_I\xi_k-K_D\frac{F_{n,k}-F_{n,k-1}}{T_c},\\
+\xi_k &= \xi_{k-1}+e_kT_c,\\
+\dot q_k &= \operatorname{clip}\!\left(
+\frac{\operatorname{clip}(\dot F_k^\ast,-\dot F_{\max},\dot F_{\max})}
+{\hat k_{c,k}J_c(q_k)},-\dot q_{\max},\dot q_{\max}\right),\\
+\delta q_k &= \operatorname{clip}\!\left(
+\delta q_{k-1}+\dot q_kT_c,-\delta q_{\max},\delta q_{\max}\right).
+\end{aligned}
+\]
+
+此时 \(K_P\) 的单位为 \(\mathrm{s}^{-1}\)，\(K_I\) 为 \(\mathrm{s}^{-2}\)，\(K_D\) 无量纲；
+`T_c` 显式进入积分、微分与位置更新，因此控制律参数不再隐含“每周期位移”的含义。首轮结构验证固定
+\(K_I=K_D=0\)、\(K_P=20\ \mathrm{s}^{-1}\)、\(\dot F_{\max}=50\ \mathrm{N/s}\) 和
+\(\dot q_{\max}=0.5\ \mathrm{rad/s}\)。模型力矩前馈仍保持可比，因此
+\(\dot F_{\max}\) 是反馈支路命令边界，不是实际接触力变化率的硬约束。
+
+### 20 Hz 公共低通的离散延迟
+
+公共法向力滤波器按实际外环周期离散化：
+
+\[
+F_{f,k}=F_{f,k-1}+\alpha(F_{n,k}-F_{f,k-1}),\qquad
+\alpha=1-e^{-2\pi f_cT_c}.
+\]
+
+它不是固定延迟 \(1/f_c\)。其精确离散频率响应为
+
+\[
+H(e^{j\omega})=\frac{\alpha}{1-(1-\alpha)e^{-j\omega}},\qquad
+\omega=2\pi fT_c.
+\]
+
+以 \(f_c=20\ \mathrm{Hz}\)、\(T_c=4\ \mathrm{ms}\) 和已观察到的
+\(f\approx8.3\ \mathrm{Hz}\) 为例，连续模型近似给出 \(-22.6^\circ\) 与 7.5 ms；代码所用离散实现
+给出约 \(-17.1^\circ\) 与 5.7 ms，即约 1.4 个控制周期。因而“20 Hz 滤波增加相位滞后”成立，
+但把它表述为固定 50 ms 延迟或 1.9 个实际控制周期都不准确。
+
 若把 profile 字段 `control.force.torque_feedback_gain` 设为大于 0（`direct-torque` 控制器变体
 即取 1.0，可用 `--set controller=dm_gripper/direct_torque` 运行），跟踪阶段切换为直接力矩式对照：
 力误差直接进入 MIT 前馈力矩，PID 与刚度位置修正置零，MIT 位置环 kp/kd 逐周期覆盖为 0；
@@ -283,6 +348,10 @@ uv run python scripts/research/render.py &lt;run-directory&gt; [--tactile-detail
 | `aperture_m` | 由开度公式计算的当前夹爪开口。 |
 | `stiffness_position_limit_rad` | 刚度感知变体本周期允许的 PID 位置目标最大变化量。 |
 | `stiffness_position_limited` | 本周期 PID 输出是否触及刚度感知动态边界。 |
+| `stiffness_rate_force_command_n_s` | 速率式变体裁剪后的反馈力变化率命令 \(\dot F_k\)。 |
+| `stiffness_rate_joint_velocity_rad_s` | 经 \(\hat k_cJ_c(q)\) 映射后的电机角速度命令 \(\dot q_k\)。 |
+| `stiffness_rate_force_limited` | 本周期是否触及反馈力变化率边界。 |
+| `stiffness_rate_joint_velocity_limited` | 本周期是否触及角速度或累计位置修正边界。 |
 
 ### 4.1 trace schema v2 与时间语义
 

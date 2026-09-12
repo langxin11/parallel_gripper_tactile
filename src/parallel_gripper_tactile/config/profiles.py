@@ -148,6 +148,16 @@ class AdrcControl(_FrozenModel):
     max_closing_velocity_m_s: Annotated[FiniteFloat, Field(gt=0)] = 0.02
 
 
+class StiffnessRateControl(_FrozenModel):
+    """刚度归一化力变化率 PID 参数。"""
+
+    kp_s_inv: Annotated[FiniteFloat, Field(ge=0)] = 20.0
+    ki_s_inv2: Annotated[FiniteFloat, Field(ge=0)] = 0.0
+    kd: Annotated[FiniteFloat, Field(ge=0)] = 0.0
+    max_force_rate_n_s: Annotated[FiniteFloat, Field(gt=0)] = 50.0
+    max_joint_velocity_rad_s: Annotated[FiniteFloat, Field(gt=0)] = 0.5
+
+
 class TorqueAdrcControl(_FrozenModel):
     """二阶直接力矩 LADRC 的控制导向模型与工程约束。
 
@@ -250,6 +260,9 @@ class NormalForceControl(_FrozenModel):
     # 一阶 LADRC 外环参数：非 None 时跟踪阶段以 LADRC 替换 PID 位置修正外环，
     # 输出的闭合速度逐周期积分进位置修正；默认 None 表示不启用。
     adrc: AdrcControl | None = None
+    # 刚度归一化速率外环：PID 输出期望力变化率，经在线刚度和机构雅可比
+    # 换算为电机速度，再按实际控制周期积分为位置修正。
+    stiffness_rate: StiffnessRateControl | None = None
     # 二阶直接力矩 LADRC 参数：非 None 时跟踪阶段旁路 MIT kp/kd，由 LESO
     # 依据在线刚度、机构雅可比和名义惯量调度输入增益并直接输出力矩。
     torque_adrc: TorqueAdrcControl | None = None
@@ -262,8 +275,29 @@ class NormalForceControl(_FrozenModel):
         if self.admittance is not None:
             if self.geometry is None:
                 raise ValueError("admittance requires geometry")
-            if self.adrc is not None or self.torque_adrc is not None or self.torque_feedback_gain:
-                raise ValueError("admittance cannot mix with ADRC or torque feedback")
+            if (
+                self.adrc is not None
+                or self.stiffness_rate is not None
+                or self.torque_adrc is not None
+                or self.torque_feedback_gain
+            ):
+                raise ValueError(
+                    "admittance cannot mix with ADRC, stiffness-rate or torque feedback"
+                )
+        enabled_outer_loops = sum(
+            (
+                self.adrc is not None,
+                self.stiffness_rate is not None,
+                self.torque_adrc is not None,
+                self.torque_feedback_gain > 0,
+            )
+        )
+        if enabled_outer_loops > 1:
+            raise ValueError("force-tracking outer loops are mutually exclusive")
+        if self.stiffness_rate is not None and (
+            self.geometry is None or self.stiffness is None or not self.stiffness.enabled
+        ):
+            raise ValueError("stiffness_rate requires geometry and enabled stiffness estimation")
         if self.release_threshold_n > self.contact_threshold_n:
             raise ValueError("release_threshold_n must not exceed contact_threshold_n")
         if self.stiffness is not None and self.stiffness.enabled and self.geometry is None:

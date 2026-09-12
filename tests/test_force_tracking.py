@@ -171,6 +171,7 @@ def test_force_tracking_trace_downsampling_preserves_events_and_boundaries() -> 
         ("pid-torque-ff", True, 0.0, 1.0, 0.0, False),
         ("pid-stiffness-ff", True, 0.25, 0.0, 0.0, False),
         ("pid-stiffness-limit", True, 0.0, 1.0, 0.0, True),
+        ("pid-stiffness-rate", True, 0.0, 1.0, 0.0, False),
         ("full", True, 0.25, 1.0, 0.0, False),
         ("direct-torque", True, 0.0, 1.0, 1.0, False),
         ("adrc", True, 0.0, 1.0, 0.0, False),

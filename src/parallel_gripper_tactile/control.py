@@ -24,6 +24,7 @@ from dm_grasp_core import (
     NormalForceConfig as _NormalForceConfig,
     NormalForceControlCommand as NormalForceControlCommand,
     SecondOrderTorqueLADRC as _CoreSecondOrderTorqueLADRC,
+    StiffnessRateConfig as _StiffnessRateConfig,
     TorqueAdrcConfig as _TorqueAdrcConfig,
     TorqueAdrcStep as TorqueAdrcStep,
     BilateralContactConfig,
@@ -169,6 +170,17 @@ def _normal_force_config(config: NormalForceControl) -> _NormalForceConfig:
                 max_closing_velocity_m_s=config.adrc.max_closing_velocity_m_s,
             )
             if config.adrc is not None
+            else None
+        ),
+        stiffness_rate=(
+            _StiffnessRateConfig(
+                kp_s_inv=config.stiffness_rate.kp_s_inv,
+                ki_s_inv2=config.stiffness_rate.ki_s_inv2,
+                kd=config.stiffness_rate.kd,
+                max_force_rate_n_s=config.stiffness_rate.max_force_rate_n_s,
+                max_joint_velocity_rad_s=config.stiffness_rate.max_joint_velocity_rad_s,
+            )
+            if config.stiffness_rate is not None
             else None
         ),
         torque_adrc=_adrc_config(config.torque_adrc) if config.torque_adrc is not None else None,

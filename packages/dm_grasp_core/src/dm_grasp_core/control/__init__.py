@@ -39,6 +39,11 @@ from .stiffness import (
     ContactStiffnessEstimator as ContactStiffnessEstimator,
     StiffnessEstimatorMethod as StiffnessEstimatorMethod,
 )
+from .stiffness_rate import (
+    StiffnessRateConfig as StiffnessRateConfig,
+    StiffnessRateController as StiffnessRateController,
+    StiffnessRateStep as StiffnessRateStep,
+)
 from ..grasp.motion import (
     ContactTransition as ContactTransition,
     MinimumJerkTrajectory as MinimumJerkTrajectory,

@@ -9,6 +9,12 @@
 
 ### 新增
 
+- 新增 `pid-stiffness-rate` 实验控制器：PID 输出期望力变化率，经在线 `window_linear` 刚度与机构闭合
+  雅可比映射为关节速度，再按实际外环周期积分为位置修正；同时新增 125／250／500 Hz、三控制器、三 seed
+  的 `force_tracking_stiffness_rate_validation` 配对研究及速率／速度限幅 trace 诊断量。
+- 新增 `force_tracking_stiffness_limit` 三臂配对研究：固定 `window_linear`，比较无位置限幅、在线刚度限幅与
+  准静态参考刚度限幅，并报告接触窗口峰值、最大正力增长率、跟踪误差和限幅介入率；pilot 固定 MuJoCo
+  物理步长 2 ms、外环周期 4 ms，并将允许力变化率提高到 50 N/s。
 - 新增 `stiffness_ground_truth_validation` 正式研究：通过加载／卸载平衡工作点的分支内中心差分建立
   控制器语义下的等效接触刚度参考，并按估计器、接触材料和噪声 seed 聚合对数 RMSE、相对偏差、低估率、
   估计抖动与相邻平衡点加载力增量低估指标；支持条件级 CPU 多进程。

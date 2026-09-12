@@ -75,8 +75,8 @@ uv run python scripts/research/run.py \
 正式 study 的配置相互独立，但从科学决策角度，推荐按以下路线组织新一轮完整实验：
 
 ```text
-刚度参考真值验证 ──────────┐
-估计器下游敏感性 ──────────┤
+刚度参考合理性检查 ────────┐
+刚度位置限幅三臂实验 ──────┤
 PID 模块消融 ──────────────┼→ 人工审查／冻结 PID-ADRC 候选 → 最终控制器比较
 Torque ADRC coarse → confirm ┘
 
@@ -88,8 +88,10 @@ Torque ADRC coarse → confirm ┘
 
 | 阶段 | Study | 决策作用 |
 | --- | --- | --- |
-| 基础组件验证 | `stiffness_ground_truth_validation` | 以准静态中心差分参考比较三种刚度估计器的精度与低估风险。 |
-| 基础组件验证 | `stiffness_estimator_validation` | 检查三种估计器对下游力跟踪的敏感性；不作为估计精度真值。 |
+| 基础组件验证 | `stiffness_ground_truth_validation` | 检查默认 `window_linear` 的量级、有效性与参考边界；不再作为主线选型门。 |
+| 控制结构验证 | `force_tracking_stiffness_limit_pilot` | 比较无限幅、默认在线限幅与准静态参考限幅，回答峰值、力增长率和跟踪误差取舍。 |
+| 控制结构验证 | `force_tracking_stiffness_rate_validation` | 在 125／250／500 Hz 下比较无位置限幅、刚度位置限幅和刚度速率控制，检查极限环与外环频率敏感性。 |
+| 历史敏感性 | `stiffness_estimator_validation` | 只比较估计器接入控制器后的执行指标，不作为刚度精度或默认方法选型依据。 |
 | 基础组件验证 | `force_controller_ablation` | 判断 PID、刚度位置前馈和力矩前馈的贡献。 |
 | 参数调优 | `torque_adrc_tuning` | 先 coarse 搜索可行域，再 confirm 验证前五候选。 |
 | 参数调优 | `dm_admittance_tuning` | 调整共享导纳接近和接触切换参数；作为独立基线。 |
@@ -140,6 +142,10 @@ uv run python scripts/research/study.py \
   research=friction_local_slip_validation/study
 uv run python scripts/research/study.py \
   research=stiffness_ground_truth_validation/study
+uv run python scripts/research/study.py \
+  research=force_tracking_stiffness_limit_pilot/study
+uv run python scripts/research/study.py \
+  research=force_tracking_stiffness_rate_validation/study
 uv run python scripts/research/study.py \
   research=stiffness_estimator_validation/study
 uv run python scripts/research/study.py \

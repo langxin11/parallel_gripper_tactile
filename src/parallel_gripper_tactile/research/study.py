@@ -35,6 +35,7 @@ from ..studies.force_tracking_diagnosis import (
 from ..studies.force_tracking_stiffness_estimator_comparison import (
     ForceTrackingStiffnessEstimatorComparisonConfig,
 )
+from ..studies.force_tracking_stiffness_limit import ForceTrackingStiffnessLimitConfig
 from ..studies.force_tracking_torque_adrc_tuning import (
     ForceTrackingTorqueAdrcTuningConfig,
     TorqueAdrcTuningStageName,
@@ -56,6 +57,9 @@ from ..studies.protocols import (
     force_tracking_stiffness_estimator_comparison as stiffness_comparison_protocol,
 )
 from ..studies.protocols import (
+    force_tracking_stiffness_limit as stiffness_limit_protocol,
+)
+from ..studies.protocols import (
     force_tracking_torque_adrc_tuning as torque_tuning_protocol,
 )
 from ..studies.protocols import dm_admittance_tuning as dm_admittance_tuning_protocol
@@ -75,6 +79,7 @@ StudyKind = Literal[
     "force_tracking_torque_adrc_tuning",
     "friction_estimation_local_slip",
     "force_tracking_stiffness_estimator_comparison",
+    "force_tracking_stiffness_limit",
     "stiffness_ground_truth_validation",
     "dm_admittance_tuning",
     "robotiq_discrete_force",
@@ -175,6 +180,7 @@ StudyDomainConfig = (
     | ForceTrackingTorqueAdrcTuningConfig
     | FrictionEstimationLocalSlipStudyConfig
     | ForceTrackingStiffnessEstimatorComparisonConfig
+    | ForceTrackingStiffnessLimitConfig
     | StiffnessGroundTruthValidationConfig
     | DMAdmittanceTuningConfig
     | RobotiqDiscreteForceStudyConfig
@@ -312,6 +318,32 @@ def _validate_stiffness_ground_truth(
     if profile.normal_force.geometry is None:
         raise ValueError("等效接触刚度真值验证需要 control.force.geometry。")
     StiffnessCalibrationTask.load(config.task)
+
+
+def _validate_stiffness_limit(
+    config: ForceTrackingStiffnessLimitConfig,
+    profile: GripperProfile,
+) -> None:
+    """逐三臂、任务和材料预检限幅实验。"""
+    tasks = {path: ForceTrackingTask.load(path) for path in config.tasks}
+    seed = config.seeds.values()[0]
+    for mode in config.modes:
+        for material in config.materials:
+            configured = stiffness_limit_protocol.configured_mode_profile(
+                profile,
+                mode=mode,
+                material=material,
+                seed=seed,
+                oracle_values=config.oracle_stiffness_n_per_m,
+                force_rate_limit_n_s=config.position_limit_force_rate_n_s,
+            )
+            for task in tasks.values():
+                validate_force_tracking_configuration(
+                    configured,
+                    task=task,
+                    object_material=material,
+                    trace_sample_period_s=task.control_period_s,
+                )
 
 
 def _validate_diagnosis(config: DiagnosisConfig, profile: GripperProfile) -> None:
@@ -492,6 +524,15 @@ def _resolved_domain_config(
                 "output_root": path(config.output_root),
             }
         )
+    if kind == "force_tracking_stiffness_limit":
+        config = ForceTrackingStiffnessLimitConfig.model_validate(definition)
+        return config.model_copy(
+            update={
+                "profile": path(config.profile),
+                "tasks": tuple(path(task) for task in config.tasks),
+                "output_root": path(config.output_root),
+            }
+        )
     if kind == "dm_admittance_tuning":
         config = DMAdmittanceTuningConfig.model_validate(definition)
         return config.model_copy(
@@ -571,6 +612,12 @@ def resolve_research_study(
             _validate_stiffness_ground_truth(domain_config, profile)
             plan = stiffness_ground_truth_protocol.build_plan(
                 domain_config, resolved_profile=profile
+            )
+        elif isinstance(domain_config, ForceTrackingStiffnessLimitConfig):
+            _validate_stiffness_limit(domain_config, profile)
+            plan = stiffness_limit_protocol.build_plan(
+                domain_config,
+                resolved_profile=profile,
             )
         elif isinstance(domain_config, DMAdmittanceTuningConfig):
             _validate_dm_admittance_tuning(domain_config, profile)
@@ -722,6 +769,12 @@ def execute_research_study(
         )
     if isinstance(resolved.domain_config, StiffnessGroundTruthValidationConfig):
         return stiffness_ground_truth_protocol.run_study(
+            resolved.domain_config,
+            resolved_profile=resolved.profile,
+            **common_arguments,
+        )
+    if isinstance(resolved.domain_config, ForceTrackingStiffnessLimitConfig):
+        return stiffness_limit_protocol.run_study(
             resolved.domain_config,
             resolved_profile=resolved.profile,
             **common_arguments,

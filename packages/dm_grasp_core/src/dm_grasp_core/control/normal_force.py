@@ -17,6 +17,7 @@ from .adrc import SecondOrderTorqueLADRC, TorqueAdrcConfig, TorqueAdrcStep
 from .kinematics import CrankSliderKinematics
 from .mit import MITControlCommand
 from .stiffness import ContactStiffnessConfig, ContactStiffnessEstimator
+from .stiffness_rate import StiffnessRateConfig, StiffnessRateController, StiffnessRateStep
 from ..grasp.contact_state import BilateralContactConfig, BilateralContactStateMachine
 
 
@@ -62,6 +63,7 @@ class NormalForceConfig:
         stiffness: 在线接触刚度估计配置；``None`` 表示不启用。
         torque_feedback_gain: 直接力矩路径增益；大于 0 时替代 PID 位置修正。
         adrc: 一阶 LADRC 外环配置；与 PID 及二阶路径互斥。
+        stiffness_rate: 刚度归一化力变化率 PID；与其他可选外环互斥。
         torque_adrc: 二阶直接力矩 LADRC 配置；与前两条路径互斥。
         supervisor: 可选的公共双侧接触阶段机；``None`` 保持历史两阶段行为。
     """
@@ -80,6 +82,7 @@ class NormalForceConfig:
     stiffness: ContactStiffnessConfig | None = None
     torque_feedback_gain: float = 0.0
     adrc: AdrcConfig | None = None
+    stiffness_rate: StiffnessRateConfig | None = None
     torque_adrc: TorqueAdrcConfig | None = None
     supervisor: BilateralContactConfig | None = None
 
@@ -178,6 +181,10 @@ class NormalForceControlCommand:
     stiffness_valid: bool = False
     admittance_displacement_m: float | None = None
     admittance_velocity_m_s: float | None = None
+    stiffness_rate_force_command_n_s: float | None = None
+    stiffness_rate_joint_velocity_rad_s: float | None = None
+    stiffness_rate_force_limited: bool = False
+    stiffness_rate_joint_velocity_limited: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,6 +202,7 @@ class _ForceTrackingStep:
     stiffness_position_limit_rad: float | None = None
     stiffness_position_limited: bool = False
     torque_adrc: TorqueAdrcStep | None = None
+    stiffness_rate: StiffnessRateStep | None = None
 
 
 class NormalForceController:
@@ -222,12 +230,13 @@ class NormalForceController:
             (
                 config.torque_feedback_gain > 0,
                 config.adrc is not None,
+                config.stiffness_rate is not None,
                 config.torque_adrc is not None,
             )
         )
         if enabled_outer_loops > 1:
             raise ValueError(
-                "adrc, torque_adrc and torque_feedback_gain are mutually exclusive; "
+                "adrc, stiffness_rate, torque_adrc and torque_feedback_gain are mutually exclusive; "
                 "enable at most one force-tracking outer loop"
             )
         if config.adrc is not None and config.geometry is None:
@@ -238,6 +247,10 @@ class NormalForceController:
             config.stiffness is None or not config.stiffness.enabled
         ):
             raise ValueError("torque_adrc requires enabled contact stiffness estimation")
+        if config.stiffness_rate is not None and (
+            config.geometry is None or config.stiffness is None or not config.stiffness.enabled
+        ):
+            raise ValueError("stiffness_rate requires geometry and enabled stiffness estimation")
         self._config = config
         self._force_semantics = force_semantics
         self._kinematics = config.geometry
@@ -250,6 +263,14 @@ class NormalForceController:
         )
         self._torque_adrc = (
             SecondOrderTorqueLADRC(config.torque_adrc) if config.torque_adrc is not None else None
+        )
+        self._stiffness_rate = (
+            StiffnessRateController(
+                config.stiffness_rate,
+                max_position_adjustment_rad=config.max_position_adjustment,
+            )
+            if config.stiffness_rate is not None
+            else None
         )
         adjustment = config.max_position_adjustment
         self._pid = PID(
@@ -336,6 +357,8 @@ class NormalForceController:
         self._pid.set_auto_mode(False)
         self._pid.reset()
         self._reset_adrc()
+        if self._stiffness_rate is not None:
+            self._stiffness_rate.reset()
         if self._torque_adrc is not None:
             self._torque_adrc.reset()
 
@@ -412,6 +435,10 @@ class NormalForceController:
         kp/kd 不做 override，位置弹簧阻尼保留——这是与直接力矩路径的本质
         区别；模型力矩前馈照常经 ``torque_feedforward_gain`` 路径进入 MIT
         前馈力矩，刚度估计器照常更新。
+
+        当 ``config.stiffness_rate`` 非 ``None`` 时，PID 输出期望力变化率，
+        再由在线刚度和机构闭合雅可比换算为电机速度，并按实际 ``dt`` 积分为
+        持久位置修正。该路径不复用位置式 PID 的增益或状态。
 
         当 ``config.torque_adrc`` 非 ``None`` 时，二阶 current LESO 直接以实际
         受限电机力矩为输入，按在线刚度、机构雅可比和名义惯量调度 ``b0``。
@@ -559,6 +586,37 @@ class NormalForceController:
                 aperture_m=aperture,
             )
 
+        if config.stiffness_rate is not None:
+            if (
+                self._stiffness_rate is None
+                or stiffness_estimate is None
+                or closure_jacobian is None
+            ):
+                raise RuntimeError("stiffness_rate requires an active stiffness estimate")
+            rate_step = self._stiffness_rate.step(
+                force_error_n=force_error,
+                measured_force_n=measured_force_n,
+                stiffness_n_per_m=stiffness_estimate,
+                closure_jacobian_m_per_rad=closure_jacobian,
+                dt_s=dt,
+            )
+            mit = inner.apply(
+                target_position=self._contact_position + rate_step.position_adjustment_rad,
+                target_velocity=rate_step.joint_velocity_command_rad_s,
+                feedforward_torque=force_feedforward_torque,
+            )
+            return _ForceTrackingStep(
+                mit=mit,
+                position_adjustment=rate_step.position_adjustment_rad,
+                pid_position_adjustment=0.0,
+                stiffness_position_adjustment=0.0,
+                force_feedforward_torque=force_feedforward_torque,
+                estimated_contact_stiffness_n_per_m=stiffness_estimate,
+                closure_jacobian_m_per_rad=closure_jacobian,
+                aperture_m=aperture,
+                stiffness_rate=rate_step,
+            )
+
         if config.adrc is not None:
             # 一阶 LADRC 外环：被控假设 df/dt = f + b0·u（f 为滤波法向力，
             # u 为闭合速度，b0 为名义增益，量级约等于接触等效刚度）。
@@ -698,6 +756,8 @@ class NormalForceController:
                 normal_force_n=measured_force_n,
             )
         self._reset_adrc(measured_force_n)
+        if self._stiffness_rate is not None:
+            self._stiffness_rate.reset(measured_force_n=measured_force_n)
         if self._torque_adrc is not None:
             if self._stiffness_estimator is None:
                 raise RuntimeError("torque_adrc requires an active stiffness estimator")
@@ -765,6 +825,7 @@ class NormalForceController:
         stiffness_position_limit = None
         stiffness_position_limited = False
         torque_adrc_step = None
+        stiffness_rate_step = None
         if self._filtered_force is None:
             self._filtered_force = measured_force
         else:
@@ -845,6 +906,7 @@ class NormalForceController:
                 stiffness_position_limit = tracking.stiffness_position_limit_rad
                 stiffness_position_limited = tracking.stiffness_position_limited
                 torque_adrc_step = tracking.torque_adrc
+                stiffness_rate_step = tracking.stiffness_rate
             else:
                 tracking = self._tracking_command(
                     inner,
@@ -866,6 +928,7 @@ class NormalForceController:
                 stiffness_position_limit = tracking.stiffness_position_limit_rad
                 stiffness_position_limited = tracking.stiffness_position_limited
                 torque_adrc_step = tracking.torque_adrc
+                stiffness_rate_step = tracking.stiffness_rate
 
         elif self._state == "approach":
             both_contacting = min(left_normal_force_n, right_normal_force_n)
@@ -895,6 +958,8 @@ class NormalForceController:
                 # LADRC 外环与刚度估计器同一处复位：z1 对齐当前滤波力，
                 # z2 与积分位置修正清零。
                 self._reset_adrc(self._filtered_force)
+                if self._stiffness_rate is not None:
+                    self._stiffness_rate.reset(measured_force_n=self._filtered_force)
                 if self._torque_adrc is not None:
                     if self._stiffness_estimator is None:
                         raise RuntimeError("torque_adrc requires an active stiffness estimator")
@@ -932,6 +997,7 @@ class NormalForceController:
                 stiffness_position_limit = tracking.stiffness_position_limit_rad
                 stiffness_position_limited = tracking.stiffness_position_limited
                 torque_adrc_step = tracking.torque_adrc
+                stiffness_rate_step = tracking.stiffness_rate
         else:
             both_released = max(left_normal_force_n, right_normal_force_n)
             self._release_steps = (
@@ -965,6 +1031,7 @@ class NormalForceController:
                 stiffness_position_limit = tracking.stiffness_position_limit_rad
                 stiffness_position_limited = tracking.stiffness_position_limited
                 torque_adrc_step = tracking.torque_adrc
+                stiffness_rate_step = tracking.stiffness_rate
 
         reported_filtered_force = (
             measured_force if self._filtered_force is None else self._filtered_force
@@ -1029,5 +1096,19 @@ class NormalForceController:
             ),
             torque_adrc_amplitude_limited=(
                 False if torque_adrc_step is None else torque_adrc_step.amplitude_limited
+            ),
+            stiffness_rate_force_command_n_s=(
+                None if stiffness_rate_step is None else stiffness_rate_step.force_rate_command_n_s
+            ),
+            stiffness_rate_joint_velocity_rad_s=(
+                None
+                if stiffness_rate_step is None
+                else stiffness_rate_step.joint_velocity_command_rad_s
+            ),
+            stiffness_rate_force_limited=(
+                False if stiffness_rate_step is None else stiffness_rate_step.force_rate_limited
+            ),
+            stiffness_rate_joint_velocity_limited=(
+                False if stiffness_rate_step is None else stiffness_rate_step.joint_velocity_limited
             ),
         )

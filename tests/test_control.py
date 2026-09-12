@@ -629,6 +629,41 @@ def test_stiffness_position_limit_bounds_pid_increment_without_position_feedforw
     )
 
 
+def test_stiffness_rate_controller_integrates_velocity_with_control_period() -> None:
+    """刚度速率变体将受限力变化率映射为速度并按 dt 积分位置。"""
+    source = load_profile(ROOT / "configs/dm_gripper.yaml")
+    profile = configure_force_controller(source, variant="pid-stiffness-rate")
+    model = mujoco.MjModel.from_xml_path(str(source.model_path))
+    data = mujoco.MjData(model)
+    controller = NormalForceController.from_profile(model, profile)
+
+    command = None
+    for _ in range(5):
+        command = controller.apply(
+            data,
+            approach_position=0.5,
+            total_normal_force_n=0.4,
+            left_normal_force_n=0.2,
+            right_normal_force_n=0.2,
+            dt=0.004,
+        )
+
+    assert command is not None
+    assert command.state == "force_tracking"
+    assert command.closure_jacobian_m_per_rad is not None
+    expected_velocity = min(
+        50.0 / (3000.0 * command.closure_jacobian_m_per_rad),
+        0.5,
+    )
+    assert command.stiffness_rate_force_command_n_s == pytest.approx(50.0)
+    assert command.stiffness_rate_joint_velocity_rad_s == pytest.approx(expected_velocity)
+    assert command.position_adjustment == pytest.approx(expected_velocity * 0.004)
+    # MIT 协议会对速度字段量化；控制器诊断保留量化前的连续命令。
+    assert command.mit.target_velocity == pytest.approx(expected_velocity, abs=2e-4)
+    assert command.pid_position_adjustment == 0.0
+    assert command.stiffness_position_adjustment == 0.0
+
+
 def _profile_with_adrc(profile: GripperProfile, adrc: AdrcControl | None) -> GripperProfile:
     """返回仅覆盖 force.adrc 的不可变 profile 副本。"""
     assert profile.normal_force is not None

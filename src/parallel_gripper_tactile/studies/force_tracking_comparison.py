@@ -31,6 +31,7 @@ class ForceTrackingComparisonConfig(_ComparisonStudyModel):
     stiffness_estimator_method: StiffnessEstimatorMethod = "window_linear"
     materials: tuple[ObjectMaterial, ...]
     seeds: SeedSweep = SeedSweep()
+    trace_at_control_rate: bool = False
     # 仅供旧的 protocol 直调入口使用；正式研究目录由 execution 组唯一管理。
     output_root: Path = Field(default=Path("outputs/studies"), exclude=True)
 

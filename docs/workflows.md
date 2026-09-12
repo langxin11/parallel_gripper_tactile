@@ -142,8 +142,8 @@ run 目录，只负责 MuJoCo 仿真和条件指标；父进程按计划顺序�
 实际执行；去掉末尾的 `execution=study_run` 即为只生成计划。计划模式不是程序上的必经步骤，但正式运行前
 应先用相同参数生成并审阅计划。
 
-第一阶段验证基础组件。先用独立准静态参考验证估计精度，再检查它对下游力跟踪的敏感性；二者均不依赖
-PID 模块消融：
+第一阶段验证基础组件和控制结构。默认使用 `window_linear`；历史估计器比较只表示控制器执行指标，
+不作为主线前置条件。先检查准静态参考的量级，再依次运行位置限幅和速率控制结构验证，最后执行 PID 模块消融：
 
 ```bash
 uv run python scripts/research/study.py \
@@ -151,7 +151,11 @@ uv run python scripts/research/study.py \
   execution=study_run \
   execution.workers=8
 uv run python scripts/research/study.py \
-  research=stiffness_estimator_validation/study \
+  research=force_tracking_stiffness_limit_pilot/study \
+  execution=study_run \
+  execution.workers=8
+uv run python scripts/research/study.py \
+  research=force_tracking_stiffness_rate_validation/study \
   execution=study_run \
   execution.workers=8
 uv run python scripts/research/study.py \

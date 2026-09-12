@@ -29,6 +29,7 @@ from ..config.profiles import (
     GripperProfile,
     MITTorqueControl,
     StiffnessEstimatorMethod,
+    StiffnessRateControl,
     TorqueAdrcControl,
     load_profile,
     validate_resolved_profile,
@@ -61,6 +62,7 @@ ControllerVariant = Literal[
     "pid-torque-ff",
     "pid-stiffness-ff",
     "pid-stiffness-limit",
+    "pid-stiffness-rate",
     "full",
     "direct-torque",
     "adrc",
@@ -73,6 +75,7 @@ CONTROLLER_VARIANTS: tuple[ControllerVariant, ...] = (
     "pid-torque-ff",
     "pid-stiffness-ff",
     "pid-stiffness-limit",
+    "pid-stiffness-rate",
     "full",
     "direct-torque",
     "adrc",
@@ -124,8 +127,13 @@ def configure_force_controller(
             raise ValueError("admittance does not use stiffness estimation")
         if force.geometry is None:
             raise ValueError("admittance requires control.force.geometry")
-        if force.adrc is not None or force.torque_adrc is not None or force.torque_feedback_gain:
-            raise ValueError("admittance cannot mix with ADRC or torque feedback")
+        if (
+            force.adrc is not None
+            or force.stiffness_rate is not None
+            or force.torque_adrc is not None
+            or force.torque_feedback_gain
+        ):
+            raise ValueError("admittance cannot mix with ADRC, stiffness-rate or torque feedback")
         updates = {
             "admittance": force.admittance or DMAdmittanceControl(),
             "kp": 0.0,
@@ -167,6 +175,17 @@ def configure_force_controller(
                 "position_limit_enabled": True,
             }
         )
+    elif variant == "pid-stiffness-rate" and stiffness is not None:
+        # PID 在力变化率空间工作；在线刚度与机构雅可比连续映射为电机速度，
+        # 不再使用加法位置前馈或动态位置边界。
+        stiffness = stiffness.model_copy(
+            update={
+                "enabled": True,
+                "position_feedforward_gain": 0.0,
+                "torque_feedforward_gain": 1.0,
+                "position_limit_enabled": False,
+            }
+        )
     elif variant == "direct-torque" and stiffness is not None:
         # 直接力矩式对照：保留刚度估计（trace 中刚度曲线可比）并关闭刚度位置前馈，
         # 力矩前馈增益不动。MIT kp/kd 不在 profile 层清零——接近阶段共享同一组
@@ -205,6 +224,8 @@ def configure_force_controller(
         force_updates["adrc"] = AdrcControl()
         force_updates["torque_adrc"] = None
         force_updates["torque_feedback_gain"] = 0.0
+    if variant == "pid-stiffness-rate":
+        force_updates["stiffness_rate"] = force.stiffness_rate or StiffnessRateControl()
     if variant in {"adrc-torque", "adrc-torque-td"}:
         # 跟踪阶段旁路 MIT 阻抗，接近阶段仍使用 profile 中的 kp/kd。
         default_torque_adrc = TorqueAdrcControl(
@@ -223,6 +244,8 @@ def configure_force_controller(
         force_updates["adrc"] = None
     if variant != "direct-torque":
         force_updates["torque_feedback_gain"] = 0.0
+    if variant != "pid-stiffness-rate":
+        force_updates["stiffness_rate"] = None
     force_updates["admittance"] = None
     configured_force = force.model_copy(update=force_updates)
     configured_control = profile.control.model_copy(update={"force": configured_force})
@@ -483,6 +506,8 @@ def _downsample_force_tracking_rows(
                     "torque_adrc_rate_limited",
                     "torque_adrc_amplitude_limited",
                     "stiffness_position_limited",
+                    "stiffness_rate_force_limited",
+                    "stiffness_rate_joint_velocity_limited",
                 )
             ):
                 keep_indices.add(index - 1)
@@ -526,6 +551,8 @@ def _write_force_tracking_parquet(
         "torque_adrc_amplitude_limited",
         "stiffness_position_limited",
         "stiffness_valid",
+        "stiffness_rate_force_limited",
+        "stiffness_rate_joint_velocity_limited",
     )
     parquet_rows = [
         {
@@ -966,6 +993,22 @@ def run_force_tracking(
                     ),
                     "stiffness_position_limited": str(
                         force_command.stiffness_position_limited
+                    ).lower(),
+                    "stiffness_rate_force_command_n_s": (
+                        force_command.stiffness_rate_force_command_n_s
+                        if force_command.stiffness_rate_force_command_n_s is not None
+                        else math.nan
+                    ),
+                    "stiffness_rate_joint_velocity_rad_s": (
+                        force_command.stiffness_rate_joint_velocity_rad_s
+                        if force_command.stiffness_rate_joint_velocity_rad_s is not None
+                        else math.nan
+                    ),
+                    "stiffness_rate_force_limited": str(
+                        force_command.stiffness_rate_force_limited
+                    ).lower(),
+                    "stiffness_rate_joint_velocity_limited": str(
+                        force_command.stiffness_rate_joint_velocity_limited
                     ).lower(),
                     "force_feedforward_torque_n_m": force_command.force_feedforward_torque,
                     "mit_feedforward_torque_n_m": motor_command.feedforward_torque,

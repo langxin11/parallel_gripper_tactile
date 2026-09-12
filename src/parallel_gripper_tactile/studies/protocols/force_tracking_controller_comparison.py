@@ -506,10 +506,11 @@ def build_plan(
             "object_contact_model": "explicit",
             "multiccd_enabled": True,
             "force_semantics": "average_side",
-            "trace_sample_period_s": {
-                "default": 0.01,
-                "adrc-torque": 0.004,
-            },
+            "trace_sample_period_s": (
+                {str(task): ForceTrackingTask.load(task).control_period_s for task in config.tasks}
+                if config.trace_at_control_rate
+                else {"default": 0.01, "adrc-torque": 0.004}
+            ),
             "trace_event_window_s": 0.2,
         },
         "aggregation": "controller_variant,task_name,object_material; finite/nan-aware v1",
@@ -559,6 +560,7 @@ def _execute_condition(
         controller_variant=controller,
         stiffness_estimator_method=config.stiffness_estimator_method,
         sensor_noise_seed=seed,
+        trace_sample_period_s=task.control_period_s if config.trace_at_control_rate else None,
     )
     row = {
         "controller_variant": controller,

@@ -73,6 +73,10 @@ pgt runs clean (--older-than-days N | --all | --cache) [--apply]
 | `pid-stiffness-ff` | 开 | 开 | 关 |
 | `full` | 开 | 开 | 开 |
 
+另有两个刚度控制结构用于验证：`pid-stiffness-limit` 以在线刚度限制位置式 PID 的逐周期增量；
+`pid-stiffness-rate` 令 PID 输出 \(\dot F\)，再经 \(\hat k_cJ_c(q)\) 映射为 \(\dot q\)，并按实际
+外环周期 \(T_c\) 积分为位置修正。
+
 所有变体共享相同的接近阶段和 waypoint 任务。
 
 ## 🧪 Research studies
@@ -109,8 +113,9 @@ PID 与二阶导纳的控制律对比使用后两个 `*_unified` 入口。它们
 推荐路线如下：
 
 ```text
-刚度参考真值验证 ──────────┐
-估计器下游敏感性 ──────────┤
+刚度参考合理性检查 ────────┐
+刚度位置限幅三臂实验 ──────┤
+刚度速率控制频率验证 ──────┤
 PID 模块消融 ──────────────┼→ 人工审查／冻结 PID-ADRC 候选 → 最终控制器比较
 Torque ADRC coarse → confirm ┘
 
@@ -124,7 +129,9 @@ Torque ADRC coarse → confirm ┘
 uv run python scripts/research/study.py \
   research=stiffness_ground_truth_validation/study
 uv run python scripts/research/study.py \
-  research=stiffness_estimator_validation/study
+  research=force_tracking_stiffness_limit_pilot/study
+uv run python scripts/research/study.py \
+  research=force_tracking_stiffness_rate_validation/study
 uv run python scripts/research/study.py research=force_controller_ablation/study
 uv run python scripts/research/study.py \
   research=torque_adrc_tuning/study

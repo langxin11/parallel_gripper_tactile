@@ -22,6 +22,7 @@ from .force_tracking_stiffness_estimator_comparison import (
     ForceTrackingStiffnessEstimatorComparisonConfig,
     load_stiffness_estimator_comparison_config,
 )
+from .force_tracking_stiffness_limit import ForceTrackingStiffnessLimitConfig
 from .force_tracking_torque_adrc_tuning import (
     ForceTrackingTorqueAdrcTuningConfig,
     load_torque_adrc_tuning_config,
@@ -44,6 +45,7 @@ __all__ = [
     "ForceTrackingAblationConfig",
     "ForceTrackingComparisonConfig",
     "ForceTrackingStiffnessEstimatorComparisonConfig",
+    "ForceTrackingStiffnessLimitConfig",
     "ForceTrackingTorqueAdrcTuningConfig",
     "FrictionEstimationLocalSlipStudyConfig",
     "LocalSlipScenario",
