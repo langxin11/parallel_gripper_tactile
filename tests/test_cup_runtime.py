@@ -419,20 +419,37 @@ def test_input_closed_and_disable_failure_preserve_original_error(
     assert "交互输入已关闭" in manifest["error"]["message"]
 
 
-def test_verify_zero_rejects_raw_load_even_when_filtered_force_is_zero() -> None:
-    """零力检查必须依据原始三轴力，而非可被滤波法向量掩盖的值。"""
+def test_verify_zero_uses_filtered_fz_and_tolerates_raw_noise() -> None:
+    """零力门禁与 ROS 一致使用滤波 Fz，原始三轴噪声不应反复清空窗口。"""
     clock = FakeClock()
     actions = PhaseActions()
 
-    class LoadedTactile(FakeTactile):
-        """持续返回滤波力为零、原始法向载荷超阈值的快照。"""
+    class NoisyTactile(FakeTactile):
+        """持续返回滤波力为零、原始三轴合力超过零力阈值的快照。"""
 
         def wait_for_update(self, _previous_received_at_s, _timeout_s) -> TactileSnapshot:
-            """推进时钟并构造原始受载触觉帧。"""
+            """推进时钟并构造含原始噪声尖峰的触觉帧。"""
             self.clock.advance(0.01)
             snapshot = self._snapshot(force_n=0.0)
             return replace(snapshot, raw_left_fz_n=0.2, raw_right_fz_n=0.2)
 
+    tactile = NoisyTactile(None, clock=clock, phase=actions)
+    _verify_zero(tactile, _config().control, False, clock, clock.sleep)
+
+
+def test_verify_zero_reports_filtered_force_timeout_instead_of_snapshot_timeout() -> None:
+    """持续滤波残余力应报告零力统计，期限末端不能误报触觉断流。"""
+    clock = FakeClock()
+    actions = PhaseActions()
+
+    class LoadedTactile(FakeTactile):
+        """持续返回略高于零力阈值的滤波法向力。"""
+
+        def wait_for_update(self, _previous_received_at_s, _timeout_s) -> TactileSnapshot:
+            """推进时钟并构造持续受载触觉帧。"""
+            self.clock.advance(0.01)
+            return self._snapshot(force_n=0.11)
+
     tactile = LoadedTactile(None, clock=clock, phase=actions)
-    with pytest.raises(RuntimeError, match="使能前原始三轴零力验证超时"):
+    with pytest.raises(RuntimeError, match=r"滤波双侧 Fz.*LEFT=\+0\.110N.*最长稳定=0\.000"):
         _verify_zero(tactile, _config().control, False, clock, clock.sleep)

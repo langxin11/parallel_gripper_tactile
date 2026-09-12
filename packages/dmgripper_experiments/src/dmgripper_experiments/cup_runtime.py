@@ -8,7 +8,12 @@ from collections.abc import Callable
 from dataclasses import asdict, replace
 from pathlib import Path
 
-from dm_grasp_core import ContactTransition, CrankSliderKinematics, MITCommandConfig
+from dm_grasp_core import (
+    ContactTransition,
+    CrankSliderKinematics,
+    MITCommandConfig,
+    within_zero_window,
+)
 from dmgripper_hardware import STATUS_DISABLED
 from papillarray_hardware import PapillArraySerialConfig
 
@@ -64,27 +69,52 @@ def _validate_snapshot(snapshot, now_s, config):
 
 
 def _verify_zero(tactile, config, clear_bias, clock, sleep):
-    """使能前验证原始三轴空载窗口，不使用截零后的法向力。"""
+    """按 ROS 2 语义验证滤波双侧法向力的连续空载窗口。"""
     sample = tactile.wait_for_update(None, config.tactile_startup_timeout_s)
     if clear_bias:
         sleep(config.tactile_bias_settle_s)
         sample = tactile.wait_for_update(sample.received_at_s, config.tactile_timeout_s)
     deadline, stable, previous_timestamp = clock() + config.zero_force_timeout_s, None, None
+    last_left_force_n = sample.left_force_n
+    last_right_force_n = sample.right_force_n
+    best_stable_s = 0.0
     while clock() < deadline:
-        axes = _validate_snapshot(sample, clock(), config)
+        _validate_snapshot(sample, clock(), config)
         if previous_timestamp is not None and sample.timestamp_us <= previous_timestamp:
             raise RuntimeError("空载验证期间触觉设备时间未递增")
         previous_timestamp = sample.timestamp_us
-        if max(math.hypot(*axes[:3]), math.hypot(*axes[3:])) <= config.zero_force_threshold_n:
+        last_left_force_n = sample.left_force_n
+        last_right_force_n = sample.right_force_n
+        if within_zero_window(
+            last_left_force_n,
+            last_right_force_n,
+            config.zero_force_threshold_n,
+        ):
             stable = sample.received_at_s if stable is None else stable
+            best_stable_s = max(best_stable_s, sample.received_at_s - stable)
             if sample.received_at_s - stable >= config.zero_force_stable_s:
                 return
         else:
             stable = None
-        sample = tactile.wait_for_update(
-            sample.received_at_s, min(config.tactile_timeout_s, max(1e-6, deadline - clock()))
-        )
-    raise RuntimeError("使能前原始三轴零力验证超时，请保持传感器空载")
+        remaining_s = deadline - clock()
+        if remaining_s <= 0.0:
+            break
+        try:
+            sample = tactile.wait_for_update(
+                sample.received_at_s,
+                min(config.tactile_timeout_s, remaining_s),
+            )
+        except TimeoutError:
+            if clock() >= deadline:
+                break
+            raise
+    raise RuntimeError(
+        "使能前滤波双侧 Fz 零力验证超时："
+        f"阈值=±{config.zero_force_threshold_n:.3f}N，"
+        f"末值 LEFT={last_left_force_n:+.3f}N、RIGHT={last_right_force_n:+.3f}N，"
+        f"最长稳定={best_stable_s:.3f}/{config.zero_force_stable_s:.3f}s；"
+        "请保持传感器空载"
+    )
 
 
 def run_cup(
