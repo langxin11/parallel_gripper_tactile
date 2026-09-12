@@ -19,7 +19,12 @@ from parallel_gripper_tactile.experiments.force_tracking import (
     configure_force_controller,
     run_force_tracking,
 )
-from parallel_gripper_tactile.config.profiles import AdrcControl, TorqueAdrcControl, load_profile
+from parallel_gripper_tactile.config.profiles import (
+    AdrcControl,
+    StiffnessRateControl,
+    TorqueAdrcControl,
+    load_profile,
+)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -203,6 +208,27 @@ def test_controller_variants_apply_reproducible_ablation_settings(
     assert configured.normal_force.stiffness.position_limit_enabled is position_limit_enabled
     assert source.normal_force is not None
     assert source.normal_force.sensor_noise_seed == 20260814
+
+
+def test_stiffness_rate_override_is_scoped_to_rate_controller() -> None:
+    """调优覆盖只改变速率控制器的专用参数。"""
+    source = load_profile(ROOT / "configs/dm_gripper.yaml")
+    override = StiffnessRateControl(kp_s_inv=30.0, max_force_rate_n_s=70.0)
+
+    configured = configure_force_controller(
+        source,
+        variant="pid-stiffness-rate",
+        stiffness_rate_override=override,
+    )
+
+    assert configured.normal_force is not None
+    assert configured.normal_force.stiffness_rate == override
+    with pytest.raises(ValueError, match="requires pid-stiffness-rate"):
+        configure_force_controller(
+            source,
+            variant="pid-torque-ff",
+            stiffness_rate_override=override,
+        )
     assert source.normal_force.torque_feedback_gain == 0.0
 
 

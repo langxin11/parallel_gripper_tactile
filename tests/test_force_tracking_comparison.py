@@ -47,12 +47,14 @@ output_root: results
 
 
 def test_default_comparison_uses_shifted_contact_presets() -> None:
-    """默认正式矩阵排除旧 soft 和位置式 adrc，并锁定割线估计器。"""
+    """默认正式矩阵排除旧 soft、位置限幅和一阶 ADRC，并锁定默认估计器。"""
     config = load_comparison_config(ROOT / "configs/research/force_controller_selection/study.yaml")
 
     assert config.materials == ("medium", "hard", "stiff")
-    assert config.stiffness_estimator_method == "secant_ewma"
+    assert config.stiffness_estimator_method == "window_linear"
     assert "adrc" not in config.controllers
+    assert "pid-stiffness-limit" not in config.controllers
+    assert "pid-stiffness-rate" in config.controllers
     assert "adrc-torque" in config.controllers
     assert len(config.conditions()) == 162
 

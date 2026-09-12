@@ -17,6 +17,7 @@ study:
     exclusions:
       direct-torque: 历史 135-run 证据显示跨任务 RMSE 分别恶化约 37.7%、204.5% 与 121%，仅保留独立复现。
       adrc: 一阶位置式模型阶次不匹配，仅保留独立复现。
+      pid-stiffness-limit: 250 Hz stiff Step 出现约 0.326 N 平台标准差和明显极限环，不进入最终比较。
   definition:
     name: force_tracking_controller_comparison
     tasks:
@@ -31,12 +32,12 @@ study:
       # direct-torque 为位置式 MIT 力控的直接力矩式对照；矩阵由 108 扩至 135 条。
       # 2026-09-01 历史 108-run 基准的复现以当时 manifest 与本文件 git 历史为准。
       #- direct-torque
-      - pid-stiffness-limit
+      - pid-stiffness-rate
       # 一阶位置式 adrc 因模型阶次不匹配，不再参加默认正式矩阵；保留 CLI 供历史复现。
       # adrc-torque 为二阶直接力矩 MB-ADRC；默认矩阵为 162 条。
       - adrc-torque
-    # 2026-09-01 的 108-run 基准使用相邻点割线估计；显式锁定以保证结果可复现。
-    stiffness_estimator_method: secant_ewma
+    # 当前控制结构验证与调优统一固定 window_linear；历史基准按其 manifest 解释。
+    stiffness_estimator_method: window_linear
     materials:
       - medium
       - hard

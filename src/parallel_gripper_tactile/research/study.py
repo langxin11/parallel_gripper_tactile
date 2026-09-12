@@ -9,7 +9,7 @@ from typing import Literal, Mapping, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from ..config.profiles import GripperProfile, TorqueAdrcControl, load_profile
+from ..config.profiles import GripperProfile, StiffnessRateControl, TorqueAdrcControl, load_profile
 from ..experiments.force_tracking import (
     ForceTrackingTask,
     configure_force_controller,
@@ -36,6 +36,9 @@ from ..studies.force_tracking_stiffness_estimator_comparison import (
     ForceTrackingStiffnessEstimatorComparisonConfig,
 )
 from ..studies.force_tracking_stiffness_limit import ForceTrackingStiffnessLimitConfig
+from ..studies.force_tracking_stiffness_rate_tuning import (
+    ForceTrackingStiffnessRateTuningConfig,
+)
 from ..studies.force_tracking_torque_adrc_tuning import (
     ForceTrackingTorqueAdrcTuningConfig,
     TorqueAdrcTuningStageName,
@@ -60,6 +63,9 @@ from ..studies.protocols import (
     force_tracking_stiffness_limit as stiffness_limit_protocol,
 )
 from ..studies.protocols import (
+    force_tracking_stiffness_rate_tuning as stiffness_rate_tuning_protocol,
+)
+from ..studies.protocols import (
     force_tracking_torque_adrc_tuning as torque_tuning_protocol,
 )
 from ..studies.protocols import dm_admittance_tuning as dm_admittance_tuning_protocol
@@ -80,6 +86,7 @@ StudyKind = Literal[
     "friction_estimation_local_slip",
     "force_tracking_stiffness_estimator_comparison",
     "force_tracking_stiffness_limit",
+    "force_tracking_stiffness_rate_tuning",
     "stiffness_ground_truth_validation",
     "dm_admittance_tuning",
     "robotiq_discrete_force",
@@ -181,6 +188,7 @@ StudyDomainConfig = (
     | FrictionEstimationLocalSlipStudyConfig
     | ForceTrackingStiffnessEstimatorComparisonConfig
     | ForceTrackingStiffnessLimitConfig
+    | ForceTrackingStiffnessRateTuningConfig
     | StiffnessGroundTruthValidationConfig
     | DMAdmittanceTuningConfig
     | RobotiqDiscreteForceStudyConfig
@@ -338,6 +346,45 @@ def _validate_stiffness_limit(
                 force_rate_limit_n_s=config.position_limit_force_rate_n_s,
             )
             for task in tasks.values():
+                validate_force_tracking_configuration(
+                    configured,
+                    task=task,
+                    object_material=material,
+                    trace_sample_period_s=task.control_period_s,
+                )
+
+
+def _validate_stiffness_rate_tuning(
+    config: ForceTrackingStiffnessRateTuningConfig,
+    profile: GripperProfile,
+) -> None:
+    """逐候选、任务和材料预检速率控制调优。"""
+    tasks = {path: ForceTrackingTask.load(path) for path in config.tasks}
+    seed = config.seeds.values()[0]
+    controllers = [("pid-torque-ff", None)]
+    controllers.extend(
+        (
+            "pid-stiffness-rate",
+            StiffnessRateControl(
+                kp_s_inv=candidate.kp_s_inv,
+                ki_s_inv2=0.0,
+                kd=0.0,
+                max_force_rate_n_s=candidate.max_force_rate_n_s,
+                max_joint_velocity_rad_s=config.max_joint_velocity_rad_s,
+            ),
+        )
+        for candidate in config.candidates()
+    )
+    for controller, override in controllers:
+        configured = configure_force_controller(
+            profile,
+            variant=controller,
+            stiffness_estimator_method=config.stiffness_estimator_method,
+            sensor_noise_seed=seed,
+            stiffness_rate_override=override,
+        )
+        for task in tasks.values():
+            for material in config.materials:
                 validate_force_tracking_configuration(
                     configured,
                     task=task,
@@ -533,6 +580,15 @@ def _resolved_domain_config(
                 "output_root": path(config.output_root),
             }
         )
+    if kind == "force_tracking_stiffness_rate_tuning":
+        config = ForceTrackingStiffnessRateTuningConfig.model_validate(definition)
+        return config.model_copy(
+            update={
+                "profile": path(config.profile),
+                "tasks": tuple(path(task) for task in config.tasks),
+                "output_root": path(config.output_root),
+            }
+        )
     if kind == "dm_admittance_tuning":
         config = DMAdmittanceTuningConfig.model_validate(definition)
         return config.model_copy(
@@ -616,6 +672,12 @@ def resolve_research_study(
         elif isinstance(domain_config, ForceTrackingStiffnessLimitConfig):
             _validate_stiffness_limit(domain_config, profile)
             plan = stiffness_limit_protocol.build_plan(
+                domain_config,
+                resolved_profile=profile,
+            )
+        elif isinstance(domain_config, ForceTrackingStiffnessRateTuningConfig):
+            _validate_stiffness_rate_tuning(domain_config, profile)
+            plan = stiffness_rate_tuning_protocol.build_plan(
                 domain_config,
                 resolved_profile=profile,
             )
@@ -775,6 +837,12 @@ def execute_research_study(
         )
     if isinstance(resolved.domain_config, ForceTrackingStiffnessLimitConfig):
         return stiffness_limit_protocol.run_study(
+            resolved.domain_config,
+            resolved_profile=resolved.profile,
+            **common_arguments,
+        )
+    if isinstance(resolved.domain_config, ForceTrackingStiffnessRateTuningConfig):
+        return stiffness_rate_tuning_protocol.run_study(
             resolved.domain_config,
             resolved_profile=resolved.profile,
             **common_arguments,

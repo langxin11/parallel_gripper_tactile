@@ -12,6 +12,9 @@
 - 新增 `pid-stiffness-rate` 实验控制器：PID 输出期望力变化率，经在线 `window_linear` 刚度与机构闭合
   雅可比映射为关节速度，再按实际外环周期积分为位置修正；同时新增 125／250／500 Hz、三控制器、三 seed
   的 `force_tracking_stiffness_rate_validation` 配对研究及速率／速度限幅 trace 诊断量。
+- 新增 `force_tracking_stiffness_rate_tuning` 小规模调优：固定 250 Hz stiff Step、`K_I=K_D=0` 和
+  `window_linear`，比较九组 `K_P × 最大力变化率` 候选及 `pid-torque-ff` 性能基线，按平台力标准差、
+  超调约束和 RMSE 排名，并生成物理符号参数热图。
 - 新增 `force_tracking_stiffness_limit` 三臂配对研究：固定 `window_linear`，比较无位置限幅、在线刚度限幅与
   准静态参考刚度限幅，并报告接触窗口峰值、最大正力增长率、跟踪误差和限幅介入率；pilot 固定 MuJoCo
   物理步长 2 ms、外环周期 4 ms，并将允许力变化率提高到 50 N/s。
@@ -73,6 +76,10 @@
   冻结为字面量。
 
 ### 变更
+
+- 最终控制器比较移除出现 stiff Step 平台极限环的 `pid-stiffness-limit`，加入
+  `pid-stiffness-rate`；`pid-torque-ff` 继续作为性能基线，矩阵规模保持 162 条，并统一固定
+  `window_linear` 刚度估计器。
 
 - 科研报告改为围绕“目标力跟踪 → 轻柔接触 → 自适应持握 → 防滑搬运与稳定放置”组织证据；运行编号与
   Git 提交退出正文，正式报告数据由 Python 汇总后冻结，Typst 编译不直接读取原始研究产物。

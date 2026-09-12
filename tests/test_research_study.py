@@ -58,6 +58,10 @@ STUDY_GROUPS = {
         "force_tracking_stiffness_rate_validation/study",
         [],
     ),
+    "force_tracking_stiffness_rate_tuning": (
+        "force_tracking_stiffness_rate_tuning/study",
+        [],
+    ),
     "dm_admittance_tuning": ("dm_admittance_tuning/study", []),
     "robotiq_discrete_force": ("robotiq_discrete_force_validation/study", []),
     "force_tracking_torque_adrc_tuning_coarse": ("torque_adrc_tuning/study", []),
@@ -78,6 +82,7 @@ STUDY_GROUPS = {
         "stiffness_ground_truth_validation/study",
         "force_tracking_stiffness_limit_pilot/study",
         "force_tracking_stiffness_rate_validation/study",
+        "force_tracking_stiffness_rate_tuning/study",
         "dm_admittance_tuning/study",
         "robotiq_discrete_force_validation/study",
         "torque_adrc_tuning/study",
@@ -213,7 +218,7 @@ def test_formal_comparison_preserves_the_complete_ordered_matrix() -> None:
         "pid-torque-ff",
         "pid-stiffness-ff",
         "full",
-        "pid-stiffness-limit",
+        "pid-stiffness-rate",
         "adrc-torque",
     )
 
@@ -262,6 +267,21 @@ def test_stiffness_rate_validation_preserves_frequency_matrix() -> None:
     assert len({row["pair_key"] for row in resolved.conditions}) == 9
     assert resolved.profile.control.force.stiffness_rate is not None
     assert resolved.profile.control.force.stiffness_rate.max_force_rate_n_s == pytest.approx(50.0)
+
+
+def test_stiffness_rate_tuning_preserves_candidate_and_baseline_matrix() -> None:
+    """小规模调优包含九个候选及性能基线，并保持三 seed 配对。"""
+    resolved = _resolved("force_tracking_stiffness_rate_tuning")
+    config = resolved.domain_config
+
+    assert len(config.candidates()) == 9
+    assert len(resolved.conditions) == 30
+    assert len({row["pair_key"] for row in resolved.conditions}) == 3
+    assert sum(row["baseline_role"] == "performance-baseline" for row in resolved.conditions) == 3
+    assert {row["controller_variant"] for row in resolved.conditions} == {
+        "pid-torque-ff",
+        "pid-stiffness-rate",
+    }
 
 
 def test_formal_ablation_preserves_pairing_and_complete_matrix() -> None:

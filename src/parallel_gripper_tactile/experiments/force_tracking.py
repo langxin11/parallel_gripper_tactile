@@ -93,6 +93,7 @@ def configure_force_controller(
     stiffness_estimator_method: StiffnessEstimatorMethod | None = None,
     sensor_noise_seed: int | None = None,
     torque_adrc_override: TorqueAdrcControl | None = None,
+    stiffness_rate_override: StiffnessRateControl | None = None,
 ) -> GripperProfile:
     """返回用于公平消融的力控 profile 副本，不修改磁盘源配置。
 
@@ -102,6 +103,7 @@ def configure_force_controller(
         stiffness_estimator_method: 可选的刚度估计方法覆盖。
         sensor_noise_seed: 可选的传感器噪声随机种子覆盖。
         torque_adrc_override: 仅 ``adrc-torque`` 变体使用的二阶 LADRC 参数覆盖。
+        stiffness_rate_override: 仅 ``pid-stiffness-rate`` 变体使用的速率 PID 参数覆盖。
 
     Raises:
         ValueError: 变体、种子或覆盖参数与当前控制器不兼容时抛出。
@@ -113,6 +115,8 @@ def configure_force_controller(
         raise ValueError("sensor_noise_seed must be non-negative")
     if torque_adrc_override is not None and variant not in {"adrc-torque", "adrc-torque-td"}:
         raise ValueError("torque_adrc_override requires a torque ADRC controller variant")
+    if stiffness_rate_override is not None and variant != "pid-stiffness-rate":
+        raise ValueError("stiffness_rate_override requires pid-stiffness-rate")
     if (
         stiffness_estimator_method is not None
         and stiffness_estimator_method not in STIFFNESS_ESTIMATOR_METHODS
@@ -225,7 +229,9 @@ def configure_force_controller(
         force_updates["torque_adrc"] = None
         force_updates["torque_feedback_gain"] = 0.0
     if variant == "pid-stiffness-rate":
-        force_updates["stiffness_rate"] = force.stiffness_rate or StiffnessRateControl()
+        force_updates["stiffness_rate"] = (
+            stiffness_rate_override or force.stiffness_rate or StiffnessRateControl()
+        )
     if variant in {"adrc-torque", "adrc-torque-td"}:
         # 跟踪阶段旁路 MIT 阻抗，接近阶段仍使用 profile 中的 kp/kd。
         default_torque_adrc = TorqueAdrcControl(
@@ -718,6 +724,7 @@ def run_force_tracking(
     stiffness_estimator_method: StiffnessEstimatorMethod | None = None,
     sensor_noise_seed: int | None = None,
     torque_adrc_override: TorqueAdrcControl | None = None,
+    stiffness_rate_override: StiffnessRateControl | None = None,
     output_csv: Path | None = None,
     output_parquet: Path | None = None,
     output_plot: Path | None = None,
@@ -744,6 +751,7 @@ def run_force_tracking(
             stiffness_estimator_method=stiffness_estimator_method,
             sensor_noise_seed=sensor_noise_seed,
             torque_adrc_override=torque_adrc_override,
+            stiffness_rate_override=stiffness_rate_override,
         )
     )
     if profile.normal_force is None or profile.mit is None:

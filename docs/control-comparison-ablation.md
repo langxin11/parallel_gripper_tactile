@@ -70,7 +70,7 @@ study 级对比图。2026-09-02 起 `direct-torque` 与 `adrc` 变体均已实�
 `control.force.torque_feedback_gain` 与 `control.force.adrc`）。2026-09-03 新增二阶直接力矩
 `adrc-torque`（profile 字段 `control.force.torque_adrc`）。一阶位置式 `adrc` 保留为历史复现入口，
 但因外包在 MIT 阻抗位置环外造成模型阶次不匹配，不再进入默认正式矩阵；当前默认矩阵由四个 PID 2×2
-变体、`pid-stiffness-limit` 与 `adrc-torque` 组成，共 6 个变体、162 条。
+变体、`pid-stiffness-rate` 与 `adrc-torque` 组成，共 6 个变体、162 条。
 
 正式批量研究的接触 preset 已整体上移一档：使用 `medium=(-650,-8)`、`hard=(-1200,-10)` 和
 `stiff=(-2500,-15)`。其中日常语义依次更接近 compliant、firm 与 stiff；这些参数是单个显式
@@ -114,9 +114,16 @@ controller command -> 达妙电机 CAN/串口命令
 | No stiffness position FF | `position_feedforward_gain: 0.0` | 评估刚度估计用于位置前馈的贡献 |
 | No stiffness estimator | `stiffness.enabled: false` | 评估在线刚度估计整体贡献 |
 
-`pid-stiffness-limit` 已进入当前默认矩阵。它与 `pid-torque-ff` 保持相同的 PID 和机构力矩前馈，
-只增加由在线刚度换算的周期位置增量边界，用配对实验检验“刚度估计作为约束”是否比历史
-`pid-stiffness-ff` 的加法位置修正更稳健。旧结果仍按其运行时保存的矩阵解释，不回溯改写。
+`pid-stiffness-limit` 与 `pid-torque-ff` 保持相同的 PID 和机构力矩前馈，只增加由在线刚度换算的
+周期位置增量边界。频率验证在 stiff Step 上发现明显平台极限环，因此该变体退出当前最终矩阵，
+只保留专项复现。`pid-stiffness-rate` 以连续刚度映射替代动态位置边界，进入小规模参数调优；旧结果仍按
+其运行时保存的矩阵解释，不回溯改写。
+
+首轮 250 Hz stiff Step 调优扫描
+\(K_P\in\{10,20,30\}\ \mathrm{s}^{-1}\) 与
+\(\dot F_{\max}\in\{30,50,70\}\ \mathrm{N/s}\)。在平台标准差不超过 0.03 N、超调比不超过
+0.10 的约束下，\((30\ \mathrm{s}^{-1},70\ \mathrm{N/s})\) 排名第一：三个 seed 的平均 RMSE 为
+0.650 N，平台标准差为 0.011 N。该候选仍需跨频率、跨材料确认；在冻结候选前不启动最终控制器比较。
 
 第二批实验再做算法对比：
 
@@ -182,7 +189,7 @@ controller command -> 达妙电机 CAN/串口命令
 
 ### 6.1 当前控制器对比结论
 
-当前权威配置矩阵覆盖四个 PID 2×2 变体、`pid-stiffness-limit` 与二阶直接力矩 `adrc-torque`，并在
+当前权威配置矩阵覆盖四个 PID 2×2 变体、`pid-stiffness-rate` 与二阶直接力矩 `adrc-torque`，并在
 三类目标、三种接触 preset 和三个噪声 seed 下比较。以下关于 `direct-torque` 的条目来自此前包含该
 独立对照的历史 study，不应误认为当前矩阵已经执行；所有对应已完成条件均未出现力矩或位置饱和。
 
@@ -329,7 +336,7 @@ uv run python scripts/research/study.py \
   research=force_controller_selection/study execution=study_run
 </code></pre>
 
-默认配置展开 6 个控制器变体（四个 PID 2×2 变体、`pid-stiffness-limit` 与二阶
+默认配置展开 6 个控制器变体（四个 PID 2×2 变体、`pid-stiffness-rate` 与二阶
 `adrc-torque`）× 3 个 task × 3 个正式接触 preset × 3 个 seed，共 162 个条件。
 `direct-torque` 与一阶位置式 `adrc` 只保留为独立/历史复现入口；历史 study 应按自身保存的配置解释。
 每个条件保留独立

@@ -214,14 +214,16 @@ Hydra study 入口的输出位置。归档的模型 bug 诊断不属于上述路
 ## 多条件研究与产物约定
 
 默认矩阵为 6 个控制器变体 × 3 个任务 × 3 个正式接触 preset × 3 个 seed，共 162 个条件；其中包含
-四个 PID 2×2 变体、`pid-stiffness-limit` 与二阶直接力矩 `adrc-torque`。`direct-torque` 和一阶位置式
+四个 PID 2×2 变体、`pid-stiffness-rate` 与二阶直接力矩 `adrc-torque`。`pid-stiffness-limit` 因
+stiff Step 平台极限环退出最终矩阵，只保留专项复现；`direct-torque` 和一阶位置式
 `adrc` 均保留为独立/历史复现入口，不参加当前默认正式对比；后者因控制导向模型
 阶次不匹配而保留为历史复现入口，不再参加默认正式对比。三个 preset 为
 `medium=(-650,-8)`、`hard=(-1200,-10)` 与 `stiff=(-2500,-15)`。原
 `soft=(-250,-5)` 不进入默认矩阵。study 完成后会同时输出 `summary.csv`、`summary.parquet`，以及适用时的
 `aggregate.csv`、`aggregate.parquet`；diagnosis study 只有 summary。图默认以 PNG 保存在 `figures/` 中。
 
-图表按 study 的科学问题组织：控制器对比展示误差、饱和、相对 Full 增量和同 seed 轨迹；PID 消融展示
+图表按 study 的科学问题组织：控制器对比展示误差、饱和、相对 Full 增量和同 seed 轨迹；速率调优展示
+\(K_P\)、\(\dot F_{\max}\) 与 RMSE、\(\sigma_F\)、超调之间的热图；PID 消融展示
 材料分组指标以及完整 2×2 配对的主效应/交互作用；ADRC 调参展示候选排序、约束可行域和参数—性能关系；
 刚度估计器对比展示相对 secant 的增量和力/刚度轨迹；因果诊断展示扫描变量—诊断指标曲线与有效轨迹叠加。
 所有 study 图默认输出一份 600 DPI PNG。

@@ -132,6 +132,8 @@ uv run python scripts/research/study.py \
   research=force_tracking_stiffness_limit_pilot/study
 uv run python scripts/research/study.py \
   research=force_tracking_stiffness_rate_validation/study
+uv run python scripts/research/study.py \
+  research=force_tracking_stiffness_rate_tuning/study
 uv run python scripts/research/study.py research=force_controller_ablation/study
 uv run python scripts/research/study.py \
   research=torque_adrc_tuning/study
@@ -147,7 +149,8 @@ uv run python scripts/research/study.py \
 按 `StudyPlan` 顺序写入。计划模式不会创建 worker。
 
 控制器对比矩阵为 `pid-only`、`pid-torque-ff`、`pid-stiffness-ff`、`full`、
-`pid-stiffness-limit`、`adrc-torque` × 3 个任务 × 3 个正式材料 × 3 个 seed，共 162 条；
+`pid-stiffness-rate`、`adrc-torque` × 3 个任务 × 3 个正式材料 × 3 个 seed，共 162 条；
+`pid-stiffness-limit` 因 stiff Step 平台极限环退出最终矩阵，只保留专项复现实验；
 消融矩阵为四个 PID 2×2 变体 × 3 个材料 × 3 个 seed，共 36 条。正式 study 明确拒绝 Hydra
 外层 Multirun，避免重复展开。Torque coarse 为 102 条；confirm 严格校验 coarse manifest、科学配置
 哈希和排名摘要后，按“可行前五＋缺席时追加基线”的规则生成确认矩阵。

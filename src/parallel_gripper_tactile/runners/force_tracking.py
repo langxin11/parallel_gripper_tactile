@@ -21,6 +21,7 @@ from ..config.profiles import (
     GripperProfile,
     StiffnessEstimatorMethod,
     TorqueAdrcControl,
+    StiffnessRateControl,
     load_profile,
     validate_resolved_profile,
 )
@@ -47,6 +48,7 @@ def execute_force_tracking(
     stiffness_estimator_method: StiffnessEstimatorMethod | None = None,
     sensor_noise_seed: int | None = None,
     torque_adrc_override: TorqueAdrcControl | None = None,
+    stiffness_rate_override: StiffnessRateControl | None = None,
     trace_sample_period_s: float | None = None,
     trace_event_window_s: float = 0.2,
     viewer: bool = False,
@@ -63,6 +65,7 @@ def execute_force_tracking(
             stiffness_estimator_method=stiffness_estimator_method,
             sensor_noise_seed=sensor_noise_seed,
             torque_adrc_override=torque_adrc_override,
+            stiffness_rate_override=stiffness_rate_override,
         )
         if resolved_profile is not None
         else configure_force_controller(
@@ -71,6 +74,7 @@ def execute_force_tracking(
             stiffness_estimator_method=stiffness_estimator_method,
             sensor_noise_seed=sensor_noise_seed,
             torque_adrc_override=torque_adrc_override,
+            stiffness_rate_override=stiffness_rate_override,
         )
     )
     core_metadata = {}
@@ -125,6 +129,11 @@ def execute_force_tracking(
                 None
                 if torque_adrc_override is None
                 else torque_adrc_override.model_dump(mode="json")
+            ),
+            "stiffness_rate_override": (
+                None
+                if stiffness_rate_override is None
+                else stiffness_rate_override.model_dump(mode="json")
             ),
         },
         run_name=run_name,
@@ -183,6 +192,11 @@ def execute_force_tracking(
                             if torque_adrc_override is None
                             else torque_adrc_override.model_dump(mode="json")
                         ),
+                        "stiffness_rate_override": (
+                            None
+                            if stiffness_rate_override is None
+                            else stiffness_rate_override.model_dump(mode="json")
+                        ),
                     },
                 },
                 indent=2,
@@ -230,6 +244,7 @@ def execute_force_tracking(
             stiffness_estimator_method=stiffness_estimator_method,
             sensor_noise_seed=sensor_noise_seed,
             torque_adrc_override=torque_adrc_override,
+            stiffness_rate_override=stiffness_rate_override,
         )
         run.register_artifact(parquet_path)
         metrics_path.write_text(
