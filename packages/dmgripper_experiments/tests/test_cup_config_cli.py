@@ -71,3 +71,7 @@ def test_cross_field_constraints_are_checked(tmp_path: Path) -> None:
     path.write_text("control:\n  target_force_n: 0.1\n", encoding="utf-8")
     with pytest.raises(ValueError, match="contact_on"):
         load_cup_config(path)
+
+    path.write_text("control:\n  zero_force_threshold_n: 0.2\n", encoding="utf-8")
+    with pytest.raises(ValueError, match="zero_force_threshold_n.*contact_on_n"):
+        load_cup_config(path)

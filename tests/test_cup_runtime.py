@@ -442,6 +442,59 @@ def test_verify_zero_uses_filtered_fz_and_tolerates_raw_noise() -> None:
     _verify_zero(tactile, _config().control, False, clock, clock.sleep)
 
 
+def test_verify_zero_accepts_noise_crossing_mean_threshold() -> None:
+    """滤波噪声可越过均值阈值，但窗口均值合格且未达接触峰值时应通过。"""
+    clock = FakeClock()
+    actions = PhaseActions()
+
+    class MeanStableTactile(FakeTactile):
+        """交替返回位于均值阈值两侧的空载噪声。"""
+
+        def wait_for_update(self, _previous_received_at_s, _timeout_s) -> TactileSnapshot:
+            """推进时钟并构造均值低于阈值的滤波噪声。"""
+            self.clock.advance(0.01)
+            force_n = 0.11 if self.counter % 2 == 0 else 0.08
+            return self._snapshot(force_n=force_n)
+
+    tactile = MeanStableTactile(None, clock=clock, phase=actions)
+    _verify_zero(
+        tactile,
+        replace(_config().control, zero_force_stable_s=0.04),
+        False,
+        clock,
+        clock.sleep,
+    )
+
+
+def test_verify_zero_contact_peak_restarts_window() -> None:
+    """达到接触阈值的滤波峰值必须持续清空零力窗口。"""
+    clock = FakeClock()
+    actions = PhaseActions()
+
+    class ContactPeakTactile(FakeTactile):
+        """每三个采样注入一次达到接触阈值的峰值。"""
+
+        def wait_for_update(self, _previous_received_at_s, _timeout_s) -> TactileSnapshot:
+            """推进时钟并构造周期性接触峰值。"""
+            self.clock.advance(0.01)
+            force_n = 0.2 if self.counter % 3 == 0 else 0.0
+            return self._snapshot(force_n=force_n)
+
+    tactile = ContactPeakTactile(None, clock=clock, phase=actions)
+    with pytest.raises(RuntimeError, match=r"逐样本峰值上限=0\.200N"):
+        _verify_zero(
+            tactile,
+            replace(
+                _config().control,
+                zero_force_stable_s=0.04,
+                zero_force_timeout_s=0.12,
+            ),
+            False,
+            clock,
+            clock.sleep,
+        )
+
+
 def test_verify_zero_reports_filtered_force_timeout_instead_of_snapshot_timeout() -> None:
     """持续滤波残余力应报告零力统计，期限末端不能误报触觉断流。"""
     clock = FakeClock()
@@ -456,5 +509,5 @@ def test_verify_zero_reports_filtered_force_timeout_instead_of_snapshot_timeout(
             return self._snapshot(force_n=0.11)
 
     tactile = LoadedTactile(None, clock=clock, phase=actions)
-    with pytest.raises(RuntimeError, match=r"滤波双侧 Fz.*LEFT=\+0\.110N.*最长稳定=0\.000"):
+    with pytest.raises(RuntimeError, match=r"滤波双侧 Fz.*均值 LEFT=0\.110N"):
         _verify_zero(tactile, _config().control, False, clock, clock.sleep)

@@ -141,6 +141,8 @@ class CupConfig:
             raise ValueError("max_target_force_n 必须严格小于 control.force_ceiling_n")
         if not self.control.target_force_n >= self.control.contact_on_n:
             raise ValueError("control.target_force_n 必须不小于 control.contact_on_n")
+        if not self.control.zero_force_threshold_n < self.control.contact_on_n:
+            raise ValueError("control.zero_force_threshold_n 必须小于 control.contact_on_n")
         if self.grip.force_deadband_n > self.grip.force_tolerance_n:
             raise ValueError("grip.force_deadband_n 不得大于 grip.force_tolerance_n")
 
