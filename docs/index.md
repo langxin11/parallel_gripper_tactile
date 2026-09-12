@@ -13,6 +13,7 @@
 9. [控制算法对比与消融](control-comparison-ablation.md)：在一致任务下比较结果。
 
 工程状态与电机/执行器基线见[DM_Gripper 配置基线与状态](custom-gripper-next-phase.md)。
+文献指南、近期实验与研究合集的目录及编译入口见[科研报告的组织与维护](reports.md)。
 配置目录与目的导向研究的设计、验收和迁移记录见[配置重构 Goal](configuration-refactor-goal.md)。
 
 下一阶段的目录整理、分夹爪控制核与真机接入见[纯 Python 真机联调计划](python-hardware-roadmap.md)。

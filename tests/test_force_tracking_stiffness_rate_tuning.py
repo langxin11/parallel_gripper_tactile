@@ -2,12 +2,22 @@
 
 from pathlib import Path
 
+import pytest
+
+from parallel_gripper_tactile.experiments.force_tracking import ForceTrackingTask
 from parallel_gripper_tactile.studies.force_tracking_stiffness_rate_tuning import (
     ForceTrackingStiffnessRateTuningConfig,
 )
 from parallel_gripper_tactile.studies.protocols.force_tracking_stiffness_rate_tuning import (
+    _platform_metrics,
+    _render_confirmation_maps,
+    _worst_case_candidate_metric,
     rank_candidates,
 )
+from parallel_gripper_tactile.studies.tabular import write_rows_csv
+
+
+REPOSITORY_ROOT = Path(__file__).resolve().parents[1]
 
 
 def _config() -> ForceTrackingStiffnessRateTuningConfig:
@@ -31,6 +41,103 @@ def test_candidate_grid_adds_one_paired_performance_baseline() -> None:
     assert sum(candidate is None for candidate, *_ in config.conditions()) == 3
 
 
+def test_confirmation_mode_requires_no_second_configuration_type() -> None:
+    """确认阶段复用同一候选定义，并允许将网格收缩为单一冻结候选。"""
+    config = ForceTrackingStiffnessRateTuningConfig(
+        name="force_tracking_stiffness_rate_confirmation",
+        analysis_mode="confirmation",
+        tasks=(Path("step.yaml"), Path("step_250hz.yaml"), Path("step_125hz.yaml")),
+        materials=("medium", "hard", "stiff"),
+        kp_s_inv=(30.0,),
+        max_force_rate_n_s=(70.0,),
+    )
+
+    assert len(config.candidates()) == 1
+    assert len(config.conditions()) == 54
+
+
+def test_force_rate_metric_deduplicates_physics_rows_at_each_control_time(
+    tmp_path: Path,
+) -> None:
+    """事件窗口内的物理步不能把一次控制更新误判为更高力增长率。"""
+    rows = [
+        {
+            "phase": "track_reference",
+            "tracking_time_s": tracking_time_s,
+            "control_time_s": control_time_s,
+            "filtered_normal_force_n": force_n,
+        }
+        for tracking_time_s, control_time_s, force_n in (
+            (0.0, 0.0, 0.0),
+            (0.09, 0.1, 0.0),
+            (0.1, 0.1, 1.0),
+            (0.2, 0.2, 2.0),
+            (0.3, 0.3, 3.0),
+        )
+    ]
+    write_rows_csv(tmp_path / "trace.csv", rows)
+
+    metrics = _platform_metrics(tmp_path, steady_window_s=(0.0, 0.3))
+
+    assert metrics["max_positive_force_rate_n_s"] == pytest.approx(10.0)
+
+
+def test_confirmation_figure_renders_frequency_material_matrix(tmp_path: Path) -> None:
+    """单一确认候选按三种频率和材料生成可读矩阵图。"""
+    task_paths = tuple(
+        REPOSITORY_ROOT / f"configs/task/force_tracking/{name}.yaml"
+        for name in ("step", "step_250hz", "step_125hz")
+    )
+    config = ForceTrackingStiffnessRateTuningConfig(
+        analysis_mode="confirmation",
+        tasks=task_paths,
+        materials=("medium", "hard", "stiff"),
+        kp_s_inv=(30.0,),
+        max_force_rate_n_s=(70.0,),
+    )
+    aggregates = []
+    for task_path in task_paths:
+        task_name = ForceTrackingTask.load(task_path).name
+        for material in config.materials:
+            for candidate_id, controller, rmse in (
+                ("pid-torque-ff", "pid-torque-ff", 0.4),
+                ("kp30-rate70", "pid-stiffness-rate", 0.6),
+            ):
+                aggregates.append(
+                    {
+                        "candidate_id": candidate_id,
+                        "controller_variant": controller,
+                        "task_name": task_name,
+                        "object_material": material,
+                        "rmse_n_mean": rmse,
+                        "plateau_force_std_n_mean": 0.01,
+                        "overshoot_ratio_mean": 0.05,
+                        "dominant_oscillation_amplitude_n_mean": 0.005,
+                    }
+                )
+
+    output = _render_confirmation_maps(aggregates, config, tmp_path / "confirmation.png")
+
+    assert output.is_file()
+    assert output.stat().st_size > 0
+
+
+def test_tuning_heatmap_uses_worst_case_across_materials() -> None:
+    """多材料调优图与候选排名统一使用最坏工况口径。"""
+    rows = [
+        {
+            "kp_s_inv": 20.0,
+            "max_force_rate_n_s": 50.0,
+            "rmse_n_mean": value,
+        }
+        for value in (0.5, 0.7)
+    ]
+
+    lookup = _worst_case_candidate_metric(rows, "rmse_n_mean")
+
+    assert lookup[(20.0, 50.0)] == pytest.approx(0.7)
+
+
 def test_ranking_applies_plateau_and_overshoot_constraints_before_rmse() -> None:
     """低 RMSE 但振荡超限的候选不能排在可行候选之前。"""
     config = _config()
@@ -42,6 +149,7 @@ def test_ranking_applies_plateau_and_overshoot_constraints_before_rmse() -> None
             "passed_runs": 3,
             "rmse_n_mean": 0.4,
             "overshoot_ratio_mean": 0.05,
+            "max_positive_force_rate_n_s_mean": 80.0,
             "plateau_force_std_n_mean": 0.05,
             "dominant_oscillation_amplitude_n_mean": 0.04,
         },
@@ -51,6 +159,7 @@ def test_ranking_applies_plateau_and_overshoot_constraints_before_rmse() -> None
             "passed_runs": 3,
             "rmse_n_mean": 0.5,
             "overshoot_ratio_mean": 0.04,
+            "max_positive_force_rate_n_s_mean": 60.0,
             "plateau_force_std_n_mean": 0.01,
             "dominant_oscillation_amplitude_n_mean": 0.005,
         },

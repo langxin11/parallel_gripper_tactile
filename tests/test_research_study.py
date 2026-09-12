@@ -62,6 +62,14 @@ STUDY_GROUPS = {
         "force_tracking_stiffness_rate_tuning/study",
         [],
     ),
+    "force_tracking_stiffness_rate_refinement": (
+        "force_tracking_stiffness_rate_refinement/study",
+        [],
+    ),
+    "force_tracking_stiffness_rate_confirmation": (
+        "force_tracking_stiffness_rate_confirmation/study",
+        [],
+    ),
     "dm_admittance_tuning": ("dm_admittance_tuning/study", []),
     "robotiq_discrete_force": ("robotiq_discrete_force_validation/study", []),
     "force_tracking_torque_adrc_tuning_coarse": ("torque_adrc_tuning/study", []),
@@ -83,6 +91,8 @@ STUDY_GROUPS = {
         "force_tracking_stiffness_limit_pilot/study",
         "force_tracking_stiffness_rate_validation/study",
         "force_tracking_stiffness_rate_tuning/study",
+        "force_tracking_stiffness_rate_refinement/study",
+        "force_tracking_stiffness_rate_confirmation/study",
         "dm_admittance_tuning/study",
         "robotiq_discrete_force_validation/study",
         "torque_adrc_tuning/study",
@@ -282,6 +292,41 @@ def test_stiffness_rate_tuning_preserves_candidate_and_baseline_matrix() -> None
         "pid-torque-ff",
         "pid-stiffness-rate",
     }
+
+
+def test_stiffness_rate_confirmation_preserves_frequency_material_matrix() -> None:
+    """确认研究固定胜出候选，并完整覆盖频率、材料和配对 seed。"""
+    resolved = _resolved("force_tracking_stiffness_rate_confirmation")
+    config = resolved.domain_config
+
+    assert config.analysis_mode == "confirmation"
+    assert tuple(ForceTrackingTask.load(task).control_period_s for task in config.tasks) == (
+        0.002,
+        0.004,
+        0.008,
+    )
+    assert config.materials == ("medium", "hard", "stiff")
+    assert config.kp_s_inv == (30.0,)
+    assert config.max_force_rate_n_s == (70.0,)
+    assert resolved.plan.study_kind == "force_tracking_stiffness_rate_confirmation"
+    assert len(resolved.conditions) == 54
+    assert len({row["pair_key"] for row in resolved.conditions}) == 27
+    assert sum(row["baseline_role"] == "performance-baseline" for row in resolved.conditions) == 27
+
+
+def test_stiffness_rate_refinement_preserves_targeted_matrix() -> None:
+    """二次调优只覆盖 500 Hz medium／hard 和六个候选。"""
+    resolved = _resolved("force_tracking_stiffness_rate_refinement")
+    config = resolved.domain_config
+
+    assert config.analysis_mode == "tuning"
+    assert len(config.tasks) == 1
+    assert ForceTrackingTask.load(config.tasks[0]).control_period_s == pytest.approx(0.002)
+    assert config.materials == ("medium", "hard")
+    assert config.kp_s_inv == (20.0, 25.0, 30.0)
+    assert config.max_force_rate_n_s == (50.0, 70.0)
+    assert len(resolved.conditions) == 42
+    assert len({row["pair_key"] for row in resolved.conditions}) == 6
 
 
 def test_formal_ablation_preserves_pairing_and_complete_matrix() -> None:

@@ -134,6 +134,10 @@ uv run python scripts/research/study.py \
   research=force_tracking_stiffness_rate_validation/study
 uv run python scripts/research/study.py \
   research=force_tracking_stiffness_rate_tuning/study
+uv run python scripts/research/study.py \
+  research=force_tracking_stiffness_rate_refinement/study
+uv run python scripts/research/study.py \
+  research=force_tracking_stiffness_rate_confirmation/study
 uv run python scripts/research/study.py research=force_controller_ablation/study
 uv run python scripts/research/study.py \
   research=torque_adrc_tuning/study

@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from itertools import product
 from pathlib import Path
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -36,6 +37,7 @@ class ForceTrackingStiffnessRateTuningConfig(_TuningModel):
     """按候选、任务、材料和 seed 展开的速率控制调优方案。"""
 
     name: str = Field(default="force_tracking_stiffness_rate_tuning", min_length=1)
+    analysis_mode: Literal["tuning", "confirmation"] = "tuning"
     profile: Path = Field(default=Path("configs/dm_gripper.yaml"), exclude=True)
     tasks: tuple[Path, ...]
     stiffness_estimator_method: StiffnessEstimatorMethod = "window_linear"

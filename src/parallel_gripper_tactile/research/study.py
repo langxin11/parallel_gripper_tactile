@@ -87,6 +87,7 @@ StudyKind = Literal[
     "force_tracking_stiffness_estimator_comparison",
     "force_tracking_stiffness_limit",
     "force_tracking_stiffness_rate_tuning",
+    "force_tracking_stiffness_rate_confirmation",
     "stiffness_ground_truth_validation",
     "dm_admittance_tuning",
     "robotiq_discrete_force",
@@ -580,7 +581,10 @@ def _resolved_domain_config(
                 "output_root": path(config.output_root),
             }
         )
-    if kind == "force_tracking_stiffness_rate_tuning":
+    if kind in {
+        "force_tracking_stiffness_rate_tuning",
+        "force_tracking_stiffness_rate_confirmation",
+    }:
         config = ForceTrackingStiffnessRateTuningConfig.model_validate(definition)
         return config.model_copy(
             update={
@@ -680,6 +684,7 @@ def resolve_research_study(
             plan = stiffness_rate_tuning_protocol.build_plan(
                 domain_config,
                 resolved_profile=profile,
+                study_kind=selection.study.kind,
             )
         elif isinstance(domain_config, DMAdmittanceTuningConfig):
             _validate_dm_admittance_tuning(domain_config, profile)
@@ -845,6 +850,7 @@ def execute_research_study(
         return stiffness_rate_tuning_protocol.run_study(
             resolved.domain_config,
             resolved_profile=resolved.profile,
+            study_kind=resolved.selection.study.kind,
             **common_arguments,
         )
     if isinstance(resolved.domain_config, DMAdmittanceTuningConfig):

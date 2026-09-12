@@ -54,11 +54,14 @@ from parallel_gripper_tactile.visualization import (
 
 
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
-_STUDY_KIND = "force_tracking_stiffness_rate_tuning"
+_TUNING_STUDY_KIND = "force_tracking_stiffness_rate_tuning"
+_CONFIRMATION_STUDY_KIND = "force_tracking_stiffness_rate_confirmation"
+_STUDY_KINDS = {_TUNING_STUDY_KIND, _CONFIRMATION_STUDY_KIND}
 _METRICS = (
     "rmse_n",
     "overshoot_ratio",
     "settling_time_s",
+    "max_positive_force_rate_n_s",
     "plateau_force_std_n",
     "plateau_force_peak_to_peak_n",
     "dominant_oscillation_amplitude_n",
@@ -72,14 +75,19 @@ def _platform_metrics(
 ) -> dict[str, float]:
     """计算指定高力平台内的波动和 2～20 Hz 主谱线。"""
     start_s, end_s = steady_window_s
-    samples = []
+    tracking_by_control_time: dict[float, tuple[float, float]] = {}
     for row in read_trace_rows(run_directory):
         if row.get("phase") != "track_reference":
             continue
         time_s = float(row["tracking_time_s"])
+        control_time_s = float(row["control_time_s"])
         force_n = float(row["filtered_normal_force_n"])
-        if start_s <= time_s <= end_s and math.isfinite(force_n):
-            samples.append((time_s, force_n))
+        if all(math.isfinite(value) for value in (time_s, control_time_s, force_n)):
+            # 事件窗口可能保留多个物理步；按控制时刻去重，避免将一次控制更新
+            # 错当成物理步周期内的力跳变而高估力增长率。
+            tracking_by_control_time[control_time_s] = (time_s, force_n)
+    tracking_samples = list(tracking_by_control_time.values())
+    samples = [item for item in tracking_samples if start_s <= item[0] <= end_s]
     if len(samples) < 3:
         raise ValueError(f"稳态窗口内有效样本不足：{run_directory}")
     times = np.asarray([item[0] for item in samples], dtype=np.float64)
@@ -94,7 +102,15 @@ def _platform_metrics(
     if len(band) == 0:
         raise ValueError(f"稳态窗口不足以分析 2～20 Hz：{run_directory}")
     dominant = int(band[np.argmax(spectrum[band])])
+    tracking_times = np.asarray([item[0] for item in tracking_samples], dtype=np.float64)
+    tracking_forces = np.asarray([item[1] for item in tracking_samples], dtype=np.float64)
+    tracking_dt = np.diff(tracking_times)
+    valid_rate = tracking_dt > 0.0
+    positive_rates = np.maximum(np.diff(tracking_forces)[valid_rate] / tracking_dt[valid_rate], 0.0)
     return {
+        "max_positive_force_rate_n_s": (
+            float(np.max(positive_rates)) if positive_rates.size else math.nan
+        ),
         "plateau_force_std_n": float(np.std(forces)),
         "plateau_force_peak_to_peak_n": float(np.ptp(forces)),
         "dominant_oscillation_frequency_hz": float(frequencies[dominant]),
@@ -153,6 +169,10 @@ def rank_candidates(
                 "feasible": str(feasible).lower(),
                 "rmse_n": rmse,
                 "overshoot_ratio": overshoot,
+                "max_positive_force_rate_n_s": max(
+                    (float(row["max_positive_force_rate_n_s_mean"]) for row in rows),
+                    default=math.inf,
+                ),
                 "plateau_force_std_n": force_std,
                 "dominant_oscillation_amplitude_n": amplitude,
             }
@@ -173,10 +193,13 @@ def build_plan(
     config: ForceTrackingStiffnessRateTuningConfig,
     *,
     resolved_profile: GripperProfile | None = None,
+    study_kind: str = _TUNING_STUDY_KIND,
 ) -> StudyPlan:
     """生成性能基线与速率参数网格的唯一有序计划。"""
     if resolved_profile is None:
         raise ValueError("resolved_profile is required")
+    if study_kind not in _STUDY_KINDS:
+        raise ValueError(f"unsupported stiffness-rate study kind: {study_kind}")
     conditions = []
     for candidate, task, material, seed in config.conditions():
         identifier = "pid-torque-ff" if candidate is None else candidate.identifier
@@ -202,7 +225,7 @@ def build_plan(
         )
     definition = {
         "hash_schema_version": 1,
-        "protocol_revision": "force_tracking_stiffness_rate_tuning.v1",
+        "protocol_revision": f"{study_kind}.v2",
         "study": config.model_dump(mode="python", exclude={"output_root"}),
         "resources": {
             "profile_sha256": model_configuration_sha256(
@@ -235,7 +258,7 @@ def build_plan(
         repository_root=_REPOSITORY_ROOT,
     )
     return StudyPlan(
-        study_kind=_STUDY_KIND,
+        study_kind=study_kind,
         study_definition_sha256=definition_hash,
         scientific_configuration_sha256=plan_hash,
         conditions=tuple(conditions),
@@ -304,22 +327,17 @@ def _render_heatmaps(
     candidate_rows = [
         row for row in aggregates if row["controller_variant"] == "pid-stiffness-rate"
     ]
-    lookup = {
-        (float(row["kp_s_inv"]), float(row["max_force_rate_n_s"])): row for row in candidate_rows
-    }
     metrics = (
-        ("rmse_n_mean", r"RMSE $\;\mathrm{(N)}$"),
-        ("plateau_force_std_n_mean", r"$\sigma_F\;\mathrm{(N)}$"),
-        ("overshoot_ratio_mean", r"$M_p$"),
+        ("rmse_n_mean", r"$\max_{\mathcal{C}}\,\mathrm{RMSE}\;\mathrm{(N)}$"),
+        ("plateau_force_std_n_mean", r"$\max_{\mathcal{C}}\,\sigma_F\;\mathrm{(N)}$"),
+        ("overshoot_ratio_mean", r"$\max_{\mathcal{C}}\,M_p$"),
     )
     plt = science_pyplot()
     figure, axes = plt.subplots(1, 3, figsize=paper_figsize(3.0, columns=2), layout="constrained")
     for axis, (metric, title) in zip(axes, metrics, strict=True):
+        lookup = _worst_case_candidate_metric(candidate_rows, metric)
         values = np.asarray(
-            [
-                [float(lookup[(kp, rate)][metric]) for rate in config.max_force_rate_n_s]
-                for kp in config.kp_s_inv
-            ]
+            [[lookup[(kp, rate)] for rate in config.max_force_rate_n_s] for kp in config.kp_s_inv]
         )
         image = axis.imshow(values, origin="lower", aspect="auto", cmap="viridis")
         axis.set_xticks(range(len(config.max_force_rate_n_s)), config.max_force_rate_n_s)
@@ -346,6 +364,99 @@ def _render_heatmaps(
     return path
 
 
+def _worst_case_candidate_metric(
+    rows: list[dict[str, object]], metric: str
+) -> dict[tuple[float, float], float]:
+    """按候选返回全部任务和材料中的最坏指标。"""
+    grouped: dict[tuple[float, float], list[float]] = {}
+    for row in rows:
+        candidate = (float(row["kp_s_inv"]), float(row["max_force_rate_n_s"]))
+        grouped.setdefault(candidate, []).append(float(row[metric]))
+    return {candidate: max(values) for candidate, values in grouped.items()}
+
+
+def _render_confirmation_maps(
+    aggregates: list[dict[str, object]],
+    config: ForceTrackingStiffnessRateTuningConfig,
+    output: Path,
+) -> Path:
+    """按材料和控制频率绘制单一候选相对基线的确认矩阵。"""
+    candidates = config.candidates()
+    if len(candidates) != 1:
+        raise ValueError("confirmation analysis requires exactly one stiffness-rate candidate")
+    candidate_id = candidates[0].identifier
+    tasks = [ForceTrackingTask.load(path) for path in config.tasks]
+    lookup = {
+        (str(row["candidate_id"]), str(row["task_name"]), str(row["object_material"])): row
+        for row in aggregates
+    }
+
+    def candidate_value(task_name: str, material: str, metric: str) -> float:
+        return float(lookup[(candidate_id, task_name, material)][metric])
+
+    matrices = []
+    rmse_ratio = []
+    for material in config.materials:
+        ratio_row = []
+        for task in tasks:
+            candidate = candidate_value(task.name, material, "rmse_n_mean")
+            baseline = float(lookup[("pid-torque-ff", task.name, material)]["rmse_n_mean"])
+            ratio_row.append(candidate / baseline if baseline > 0.0 else math.nan)
+        rmse_ratio.append(ratio_row)
+    matrices.append(
+        (np.asarray(rmse_ratio), r"$\mathrm{RMSE}_{\mathrm{rate}}/\mathrm{RMSE}_{\mathrm{base}}$")
+    )
+    for metric, title in (
+        ("plateau_force_std_n_mean", r"$\sigma_F\;\mathrm{(N)}$"),
+        ("overshoot_ratio_mean", r"$M_p$"),
+        ("dominant_oscillation_amplitude_n_mean", r"$A_{\mathrm{osc}}\;\mathrm{(N)}$"),
+    ):
+        matrices.append(
+            (
+                np.asarray(
+                    [
+                        [candidate_value(task.name, material, metric) for task in tasks]
+                        for material in config.materials
+                    ]
+                ),
+                title,
+            )
+        )
+
+    plt = science_pyplot()
+    figure, axes = plt.subplots(
+        2,
+        2,
+        figsize=paper_figsize(4.0, columns=2),
+        layout="constrained",
+    )
+    frequencies_hz = [1.0 / task.control_period_s for task in tasks]
+    for axis, (values, title) in zip(axes.flat, matrices, strict=True):
+        image = axis.imshow(values, origin="upper", aspect="auto", cmap="viridis")
+        axis.set_xticks(range(len(tasks)), [f"{value:g}" for value in frequencies_hz])
+        axis.set_yticks(range(len(config.materials)), config.materials)
+        axis.set_xlabel(r"$f_c\;\mathrm{(Hz)}$")
+        axis.set_ylabel("material")
+        axis.set_title(title)
+        midpoint = float(np.nanmean(values))
+        for row_index in range(values.shape[0]):
+            for column_index in range(values.shape[1]):
+                value = values[row_index, column_index]
+                axis.text(
+                    column_index,
+                    row_index,
+                    f"{value:.3f}",
+                    ha="center",
+                    va="center",
+                    color="white" if value > midpoint else "black",
+                    fontsize=7,
+                )
+        figure.colorbar(image, ax=axis, shrink=0.78)
+    path = save_publication_figure(figure, output)
+    plt.close(figure)
+    return path
+
+
 def run_study(
     config: ForceTrackingStiffnessRateTuningConfig,
     *,
@@ -356,6 +467,7 @@ def run_study(
     additional_artifacts: Sequence[Path] = (),
     lifecycle_manifest_fields: Mapping[str, object] | None = None,
     workers: int = 1,
+    study_kind: str = _TUNING_STUDY_KIND,
 ) -> Path:
     """执行调优、生成聚合表、候选排名和参数热图。"""
     tasks = {path: ForceTrackingTask.load(path) for path in config.tasks}
@@ -363,7 +475,11 @@ def run_study(
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "study.yaml").write_bytes(config_source.read_bytes())
     resolved_config = write_resolved_config(directory / "study.resolved.json", config)
-    expected_plan = build_plan(config, resolved_profile=resolved_profile)
+    expected_plan = build_plan(
+        config,
+        resolved_profile=resolved_profile,
+        study_kind=study_kind,
+    )
     plan = require_matching_study_plan(expected_plan, study_plan)
     execute = partial(
         _execute_condition,
@@ -413,6 +529,14 @@ def run_study(
     ) -> tuple[Path, ...]:
         del rows
         aggregates = list(payload) if isinstance(payload, list) else []
+        if config.analysis_mode == "confirmation":
+            return (
+                _render_confirmation_maps(
+                    aggregates,
+                    config,
+                    output_directory / "figures/stiffness_rate_confirmation.png",
+                ),
+            )
         return (
             _render_heatmaps(
                 aggregates,

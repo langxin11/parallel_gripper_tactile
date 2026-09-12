@@ -1,0 +1,30 @@
+# @package _global_
+study:
+  kind: force_tracking_stiffness_rate_tuning
+  source: configs/research/force_tracking_stiffness_rate_refinement/study.yaml
+  profile:
+    experiment: dm_gripper/force_tracking_default
+    overrides: [controller=dm_gripper/pid_stiffness_rate, estimator=window_linear]
+  rationale:
+    question: 哪组速率比例增益与力变化率边界能消除 500 Hz medium／hard 下超过 10% 的超调？
+    decision: 选择一个候选重新进入三频率、三材料确认。
+    inclusion_criteria: [固定 KI=KD=0, 固定 500 Hz Step, medium 与 hard, 三 seed 配对, 保留位置式 PID 性能基线]
+    task_rationale: 500 Hz medium／hard 是首轮确认中超调门槛失败最明显且成本最低的反证工况。
+    primary_metrics: [最坏工况 RMSE, 最坏工况超调, 平台力标准差, 最大正力增长率, 主振荡幅值]
+    stop_conditions: [完成一条性能基线和六个候选在两种材料、三 seed 下的 42 条条件]
+    exclusions:
+      stiff: 首轮调优和确认均已满足超调与平台波动门槛，本轮不重复执行。
+      多频率确认: 本轮只筛选候选，胜出参数仍须回到 54 条确认矩阵复验。
+  definition:
+    name: force_tracking_stiffness_rate_refinement
+    analysis_mode: tuning
+    tasks: [configs/task/force_tracking/step.yaml]
+    stiffness_estimator_method: window_linear
+    materials: [medium, hard]
+    seeds: {start: 0, count: 3}
+    kp_s_inv: [20.0, 25.0, 30.0]
+    max_force_rate_n_s: [50.0, 70.0]
+    max_joint_velocity_rad_s: 0.5
+    max_plateau_force_std_n: 0.03
+    max_overshoot_ratio: 0.10
+    steady_window_s: [1.4, 2.9]

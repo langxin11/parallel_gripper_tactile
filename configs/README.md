@@ -115,6 +115,8 @@ uv run python scripts/research/study.py research=force_controller_ablation/study
 
 # 参数调优；速率调优保留 pid-torque-ff 性能基线，ADRC confirm 必须绑定已完成 coarse 的绝对目录。
 uv run python scripts/research/study.py research=force_tracking_stiffness_rate_tuning/study
+uv run python scripts/research/study.py research=force_tracking_stiffness_rate_refinement/study
+uv run python scripts/research/study.py research=force_tracking_stiffness_rate_confirmation/study
 uv run python scripts/research/study.py research=torque_adrc_tuning/study
 uv run python scripts/research/study.py \
   research=torque_adrc_tuning/study study.stage=confirm \

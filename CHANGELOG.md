@@ -9,12 +9,26 @@
 
 ### 新增
 
+- 文献指南补入 DENSE 采集与弱标签边界，限定 Tactile Genesis 的背景借鉴范围，并按用户实际可用性排除 DIFFTACTILE。
+
+- 文献指南改以轻柔抓取和目标法向力调节为主线，新增 Liu 2025 及变化量比值验证建议；按输入约束排除依赖触觉图像或稠密视觉重建的候选。
+
+- 优化研究合集的旧图取舍：移除标签密集的控制器九宫格与 ADRC 排名图，保留数值表及结论，
+  并明确旧摩擦曲线对应历史残差检测器。
+- 新增 Typst 报告总目录、文献指南与近期实验入口；报告正文按文献和实验拆入 `reports/chapters/`，
+  Markdown 正文迁移为原生 Typst，编译维护说明移至 `docs/reports.md`，保留既有合集与冻结数据。
 - 新增 `pid-stiffness-rate` 实验控制器：PID 输出期望力变化率，经在线 `window_linear` 刚度与机构闭合
   雅可比映射为关节速度，再按实际外环周期积分为位置修正；同时新增 125／250／500 Hz、三控制器、三 seed
   的 `force_tracking_stiffness_rate_validation` 配对研究及速率／速度限幅 trace 诊断量。
 - 新增 `force_tracking_stiffness_rate_tuning` 小规模调优：固定 250 Hz stiff Step、`K_I=K_D=0` 和
   `window_linear`，比较九组 `K_P × 最大力变化率` 候选及 `pid-torque-ff` 性能基线，按平台力标准差、
   超调约束和 RMSE 排名，并生成物理符号参数热图。
+- 新增 `force_tracking_stiffness_rate_confirmation` 参数确认：固定调优胜出的
+  `K_P=30 s^-1`、`max_force_rate_n_s=70 N/s`，覆盖 500／250／125 Hz 与三种正式材料的 54 条
+  配对条件，并登记实测最大正力增长率。
+- 新增 `force_tracking_stiffness_rate_refinement` 二次调优：针对首轮确认中 500 Hz medium／hard 的
+  超调失败，以 42 条配对条件扫描 `K_P={20,25,30} s^-1` 与 `max_force_rate_n_s={50,70} N/s`；
+  多材料热图与候选排名统一采用最坏工况口径。
 - 新增 `force_tracking_stiffness_limit` 三臂配对研究：固定 `window_linear`，比较无位置限幅、在线刚度限幅与
   准静态参考刚度限幅，并报告接触窗口峰值、最大正力增长率、跟踪误差和限幅介入率；pilot 固定 MuJoCo
   物理步长 2 ms、外环周期 4 ms，并将允许力变化率提高到 50 N/s。

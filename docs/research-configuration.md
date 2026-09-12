@@ -92,6 +92,8 @@ Torque ADRC coarse → confirm ┘
 | 控制结构验证 | `force_tracking_stiffness_limit_pilot` | 比较无限幅、默认在线限幅与准静态参考限幅，回答峰值、力增长率和跟踪误差取舍。 |
 | 控制结构验证 | `force_tracking_stiffness_rate_validation` | 在 125／250／500 Hz 下比较无位置限幅、刚度位置限幅和刚度速率控制，检查极限环与外环频率敏感性。 |
 | 参数调优 | `force_tracking_stiffness_rate_tuning` | 固定 250 Hz stiff Step 和 `window_linear`，以九组 \(K_P\times\dot F_{\max}\) 候选改善瞬态并约束平台波动。 |
+| 参数再调优 | `force_tracking_stiffness_rate_refinement` | 针对 500 Hz medium／hard 的超调失败，以六组候选和性能基线选择最坏工况可行参数。 |
+| 参数确认 | `force_tracking_stiffness_rate_confirmation` | 固定调优胜出的 \(K_P=30\ \mathrm{s^{-1}}\)、\(\dot F_{\max}=70\ \mathrm{N/s}\)，在三种频率和三种材料上与性能基线配对复验。 |
 | 历史敏感性 | `stiffness_estimator_validation` | 只比较估计器接入控制器后的执行指标，不作为刚度精度或默认方法选型依据。 |
 | 基础组件验证 | `force_controller_ablation` | 判断 PID、刚度位置前馈和力矩前馈的贡献。 |
 | 参数调优 | `torque_adrc_tuning` | 先 coarse 搜索可行域，再 confirm 验证前五候选。 |
@@ -146,9 +148,13 @@ uv run python scripts/research/study.py \
 uv run python scripts/research/study.py \
   research=force_tracking_stiffness_limit_pilot/study
 uv run python scripts/research/study.py \
+  research=force_tracking_stiffness_rate_validation/study
+uv run python scripts/research/study.py \
   research=force_tracking_stiffness_rate_tuning/study
 uv run python scripts/research/study.py \
-  research=force_tracking_stiffness_rate_validation/study
+  research=force_tracking_stiffness_rate_refinement/study
+uv run python scripts/research/study.py \
+  research=force_tracking_stiffness_rate_confirmation/study
 uv run python scripts/research/study.py \
   research=stiffness_estimator_validation/study
 uv run python scripts/research/study.py \

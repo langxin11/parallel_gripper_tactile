@@ -163,10 +163,23 @@ uv run python scripts/research/study.py \
   execution=study_run
 ```
 
-第二阶段调优二阶直接力矩 ADRC。`confirm` 是唯一具有强制谱系依赖的阶段，必须使用已完成 coarse 后
-终端打印的绝对目录：
+第二阶段先调优并确认刚度速率控制器，再调优二阶直接力矩 ADRC。刚度速率确认固定调优排名第一的
+\(K_P=30\ \mathrm{s^{-1}}\)、\(\dot F_{\max}=70\ \mathrm{N/s}\)，以 54 条条件检查频率和材料泛化；
+ADRC 的 `confirm` 是唯一具有强制谱系依赖的阶段，必须使用已完成 coarse 后终端打印的绝对目录：
 
 ```bash
+uv run python scripts/research/study.py \
+  research=force_tracking_stiffness_rate_tuning/study \
+  execution=study_run \
+  execution.workers=8
+uv run python scripts/research/study.py \
+  research=force_tracking_stiffness_rate_refinement/study \
+  execution=study_run \
+  execution.workers=8
+uv run python scripts/research/study.py \
+  research=force_tracking_stiffness_rate_confirmation/study \
+  execution=study_run \
+  execution.workers=8
 uv run python scripts/research/study.py \
   research=torque_adrc_tuning/study \
   execution=study_run
@@ -187,7 +200,8 @@ uv run python scripts/research/study.py \
   execution=study_run
 ```
 
-完成上述研究后必须设置人工决策门：检查 `study_manifest.json` 的生命周期状态、科学失败与执行异常，
+速率调优只负责筛选候选，确认结果通过后才能冻结到最终比较。完成上述研究后必须设置人工决策门：
+检查 `study_manifest.json` 的生命周期状态、科学失败与执行异常，
 审阅 `summary.csv`、聚合表、候选排名和图表。若最优估计器或控制参数不同于当前 YAML，应先更新配置、
 测试和文档并形成提交；Study 不会自动把最优参数传给下一项研究。配置冻结后再运行最终控制器比较：
 
@@ -295,13 +309,16 @@ trace、metrics 或 run manifest。PDF 仅在显式请求时生成。
 研究产物中，不进入正文。数值先由 Python 校验、汇总并冻结，Typst 编译不直接读取 `outputs/`；`docs/`
 只保留已经稳定的方法、接口与适用边界，报告结论经人工决策后才进入文档和配置。
 
-在仓库根编译研究合集（单一编译入口产出一份合集 PDF）：
+在仓库根编译报告总目录、文献指南、近期实验和既有研究合集：
 
 <pre><code class="language-bash">
+typst compile --root . reports/index.typ
+typst compile --root . reports/literature.typ
+typst compile --root . reports/experiments.typ
 typst compile --root . reports/combined.typ
 </code></pre>
 
-产物为 `reports/combined.pdf`，不入库（`reports/*.pdf` 已加入 `.gitignore`）。
+产物与各入口同名，从 `reports/index.pdf` 可打开其他三份 PDF；预览不入库（`reports/*.pdf` 已加入 `.gitignore`）。
 前置要求：Typst CLI ≥ 0.14（0.15.0 已验证）；Noto Serif/Sans CJK SC 简体中文字体，
 缺字体渲染成方框但编译不报错；首次编译需联网下载 `@preview/mitex` 包，之后走本地缓存。
 
@@ -312,7 +329,8 @@ typst compile --root . reports/combined.typ
 报告内的 LaTeX 公式经 `mitex` 兼容，Typst 字符串中反斜杠须双写（如 `"\\rho"`），否则
 `\r`、`\t` 会被当转义符吃掉。`tests/test_report_typst.py` 用 `tests/fixtures/` 迷你数据
 编译 fixture 报告做冒烟测试，本机装有 Typst CLI 时才执行、CI 无 CLI 环境自动跳过。
-模板组件说明详见 [`reports/README.md`](../reports/README.md)。
+报告正文统一使用 `.typ`，文献和近期实验章节分别放在 `reports/chapters/literature/` 与
+`reports/chapters/experiments/`。目录、迁移关系与模板组件详见[报告维护说明](reports.md)。
 
 ## 演示视频录制
 
