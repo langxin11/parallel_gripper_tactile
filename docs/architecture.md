@@ -146,7 +146,7 @@ Hydra 拥有科研调用的外层目录和组合溯源，`RunDirectory` 拥有�
 增加一层父目录；每个条件仍使用相同 runner：
 
 ```text
-outputs/studies/<study>/<UTC timestamp>-<id>/
+outputs/research/studies/<study>/<UTC timestamp>-<id>/
 ├── study.yaml
 ├── study.resolved.json
 ├── runs/

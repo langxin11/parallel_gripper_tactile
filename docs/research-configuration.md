@@ -70,6 +70,40 @@ uv run python scripts/research/run.py \
 
 ## 正式研究
 
+### 推荐执行路线与决策门
+
+正式 study 的配置相互独立，但从科学决策角度，推荐按以下路线组织新一轮完整实验：
+
+```text
+刚度参考真值验证 ──────────┐
+估计器下游敏感性 ──────────┤
+PID 模块消融 ──────────────┼→ 人工审查／冻结 PID-ADRC 候选 → 最终控制器比较
+Torque ADRC coarse → confirm ┘
+
+共享导纳调优 → 冻结共享导纳基线（不进入上述选型）
+局部起滑验证、Robotiq 离散力验证：独立研究
+```
+
+各阶段含义如下：
+
+| 阶段 | Study | 决策作用 |
+| --- | --- | --- |
+| 基础组件验证 | `stiffness_ground_truth_validation` | 以准静态中心差分参考比较三种刚度估计器的精度与低估风险。 |
+| 基础组件验证 | `stiffness_estimator_validation` | 检查三种估计器对下游力跟踪的敏感性；不作为估计精度真值。 |
+| 基础组件验证 | `force_controller_ablation` | 判断 PID、刚度位置前馈和力矩前馈的贡献。 |
+| 参数调优 | `torque_adrc_tuning` | 先 coarse 搜索可行域，再 confirm 验证前五候选。 |
+| 参数调优 | `dm_admittance_tuning` | 调整共享导纳接近和接触切换参数；作为独立基线。 |
+| 决策门 | 人工审查 | 审查摘要、配对统计和失败记录；必要时更新配置、测试和文档并提交。 |
+| 最终比较 | `force_controller_selection` | 只比较决策门之后已经冻结在配置中的控制器。 |
+| 独立研究 | `friction_local_slip_validation` | 验证局部起滑检测，不阻塞力控制器选型。 |
+| 独立研究 | `robotiq_discrete_force_validation` | 验证另一夹爪的整数命令控制，不依赖 DM 研究。 |
+
+这一路线中只有 Torque ADRC 的 `coarse → confirm` 是入口强制校验的硬依赖；其他箭头是推荐的
+科学决策顺序，不是程序调用依赖。计划模式也不是执行模式的前置文件依赖，但正式运行前应先审阅计划。
+Study 不会把排名第一的参数自动写入另一个 Study；如果前置结果改变候选配置，必须先人工更新并冻结，
+再启动最终控制器比较，否则最终矩阵仍会使用当前 YAML 中的固定参数。归档的模型 bug 诊断已经完成使命，
+不进入这条路线。
+
 控制器对比计划固定为当前权威 study YAML 中的 6 个控制器 × 3 个任务 × 3 个材料 × 3 个 seed，
 共 162 个有序条件：
 
@@ -96,13 +130,16 @@ uv run python scripts/research/study.py \
   execution=study_run
 ```
 
-局部起滑验证、刚度估计器对比、DM 导纳调参与 Robotiq 离散力 study 用法相同，矩阵分别为
-5 场景 × 3 seed（15 条）、3 估计器 × 3 任务 × 3 材料 × 3 seed（81 条）、16 候选 × 1 材料 × 2 seed
+局部起滑验证、刚度参考真值、估计器下游敏感性、DM 导纳调参与 Robotiq 离散力 study 用法相同，矩阵分别为
+5 场景 × 3 seed（15 条）、3 估计器 × 3 材料 × 3 seed（27 条）、3 估计器 × 3 任务 × 3 材料 × 3 seed
+（81 条）、16 候选 × 1 材料 × 2 seed
 （32 条）与 5 控制器 × 4 材料 × 3 噪声 × 1 seed（60 条）：
 
 ```bash
 uv run python scripts/research/study.py \
   research=friction_local_slip_validation/study
+uv run python scripts/research/study.py \
+  research=stiffness_ground_truth_validation/study
 uv run python scripts/research/study.py \
   research=stiffness_estimator_validation/study
 uv run python scripts/research/study.py \
@@ -220,7 +257,7 @@ Hydra 拥有一次科研调用的外层目录，其中保存组合来源、选�
 ## 迁移边界
 
 本阶段已贯通 DM 单次力跟踪、DM 共享导纳、正式控制器对比、PID 模块消融、Torque ADRC 两阶段调参、
-摩擦局部起滑、刚度估计器对比、DM 导纳调参、Robotiq 离散力和因果诊断（单 phase 入口）。原
+摩擦局部起滑、刚度参考真值、刚度估计器下游敏感性、DM 导纳调参、Robotiq 离散力和因果诊断（单 phase 入口）。原
 `scripts/experiments/` 研究入口已删除，统一使用 Hydra 正式入口；可复用矩阵展开与聚合实现仍位于包内
 protocol。
 

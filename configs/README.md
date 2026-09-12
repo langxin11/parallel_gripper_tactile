@@ -101,25 +101,37 @@ uv run pgt compare tactile \
 因此 `study.definition` 不再重复保存完整 profile 路径或 `output_root`。归档模型诊断是唯一例外：它必须
 保留历史 profile 来源，才能改写旧碰撞模型并复现诊断端点。
 
+推荐的科学决策顺序是“刚度估计器验证与 PID 模块消融 → Torque ADRC coarse／confirm 和独立导纳调优
+→ 人工审查并冻结配置 → 最终控制器比较”。局部起滑与 Robotiq 离散力属于独立研究。这个顺序不改变
+配置所有权：各 Study 不会自动回写优胜参数，只有 Torque ADRC 的 `coarse → confirm` 构成程序强制的
+谱系依赖。
+
 ```bash
-# 默认控制器选型，计划为 162 条；direct-torque 与一阶 ADRC 已有证据退出。
-uv run python scripts/research/study.py
-
-# PID 模块消融、刚度估计器验证、局部起滑验证。
-uv run python scripts/research/study.py research=force_controller_ablation/study
+# 基础组件验证。
 uv run python scripts/research/study.py research=stiffness_estimator_validation/study
-uv run python scripts/research/study.py research=friction_local_slip_validation/study
+uv run python scripts/research/study.py research=stiffness_ground_truth_validation/study
+uv run python scripts/research/study.py research=force_controller_ablation/study
 
-# 两阶段 Torque ADRC 共用一个权威定义，confirm 必须绑定 coarse 谱系。
+# 参数调优；confirm 必须绑定已完成 coarse 的绝对目录。
 uv run python scripts/research/study.py research=torque_adrc_tuning/study
 uv run python scripts/research/study.py \
   research=torque_adrc_tuning/study study.stage=confirm \
   study.coarse_study_dir=/absolute/path/to/coarse-study
+uv run python scripts/research/study.py research=dm_admittance_tuning/study
 
-# 显式执行时选择统一 execution 组。
-uv run python scripts/research/study.py \
-  research=robotiq_discrete_force_validation/study execution=study_run
+# 人工冻结候选配置后再生成最终控制器比较计划。
+uv run python scripts/research/study.py research=force_controller_selection/study
+
+# 独立研究。
+uv run python scripts/research/study.py research=friction_local_slip_validation/study
+uv run python scripts/research/study.py research=robotiq_discrete_force_validation/study
 ```
+
+以上命令默认只生成计划；显式追加 `execution=study_run` 才执行仿真。执行时可再追加
+`execution.workers=8`，按条件使用 MuJoCo CPU 多进程；计划、manifest、聚合和绘图仍由父进程统一管理。
+完整命令顺序与决策门见
+[`docs/workflows.md`](../docs/workflows.md#推荐的正式研究执行顺序)，硬依赖、配置冻结和生命周期语义见
+[`docs/research-configuration.md`](../docs/research-configuration.md#推荐执行路线与决策门)。
 
 已完成使命的碰撞／接触模型诊断只保留在
 `research/archive/model_bug_diagnosis/study.yaml`，默认入口和正式控制器矩阵都不引用它。迁移基线、字段

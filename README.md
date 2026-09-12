@@ -101,21 +101,43 @@ PID 与二阶导纳的控制律对比使用后两个 `*_unified` 入口。它们
 `1→3→6→1 N` Ramp、4 ms 外环、MIT 内环、接近轨迹和公共接触状态机；原
 `force_tracking_admittance` 继续保留 ROS 共享导纳基线语义。
 
-正式控制器对比、PID 模块消融和 Torque ADRC 两阶段调参由 study 入口内部展开唯一矩阵。默认是计划模式，确认后用
-`execution=study_run` 执行：
+正式研究建议按“基础组件验证 → 参数调优 → 人工审查并冻结候选配置 → 最终控制器比较”推进；
+局部起滑和 Robotiq 离散力属于独立研究，不阻塞 DM 力控制器选型。只有 Torque ADRC 的
+`coarse → confirm` 是程序强制的阶段依赖，其余顺序是科学决策建议。Study 之间不会自动回写最优参数，
+因此最终控制器比较前必须先审查前置结果，必要时更新配置并形成可追溯提交。
+
+推荐路线如下：
+
+```text
+刚度参考真值验证 ──────────┐
+估计器下游敏感性 ──────────┤
+PID 模块消融 ──────────────┼→ 人工审查／冻结 PID-ADRC 候选 → 最终控制器比较
+Torque ADRC coarse → confirm ┘
+
+共享导纳调优 → 冻结共享导纳基线（不进入上述选型）
+局部起滑验证、Robotiq 离散力验证：独立研究
+```
+
+默认是计划模式；确认计划后增加 `execution=study_run` 执行。常用入口为：
 
 ```bash
 uv run python scripts/research/study.py \
-  research=force_controller_selection/study
+  research=stiffness_ground_truth_validation/study
 uv run python scripts/research/study.py \
-  research=force_controller_selection/study execution=study_run
+  research=stiffness_estimator_validation/study
 uv run python scripts/research/study.py research=force_controller_ablation/study
 uv run python scripts/research/study.py \
   research=torque_adrc_tuning/study
 uv run python scripts/research/study.py \
   research=torque_adrc_tuning/study study.stage=confirm \
   study.coarse_study_dir=/absolute/path/to/coarse-study
+uv run python scripts/research/study.py \
+  research=force_controller_selection/study
 ```
+
+执行模式可用 `execution.workers=N` 在 CPU 上并行运行相互独立的 MuJoCo 条件；例如本机先从
+`execution.workers=8` 开始。该参数只改变调度，不进入科学配置哈希；manifest、聚合与绘图仍由父进程
+按 `StudyPlan` 顺序写入。计划模式不会创建 worker。
 
 控制器对比矩阵为 `pid-only`、`pid-torque-ff`、`pid-stiffness-ff`、`full`、
 `pid-stiffness-limit`、`adrc-torque` × 3 个任务 × 3 个正式材料 × 3 个 seed，共 162 条；
@@ -127,7 +149,8 @@ Hydra 负责外层科研调用目录和组合溯源，现有 artifacts 继续管
 与图。公共 study manifest 区分计划、运行中、部分完成、完成与失败状态，也区分科学验收失败、执行异常
 和聚合／绘图异常；稳定科学哈希不包含 cwd、时间或输出目录。恢复功能本阶段只生成兼容性报告，不会
 自动续跑。计划/执行、配置组所有权、覆盖规则、输出结构与兼容入口详见
-[Hydra 科研配置与实验编排](docs/research-configuration.md)。
+[Hydra 科研配置与实验编排](docs/research-configuration.md)，可直接执行的推荐顺序见
+[工作流](docs/workflows.md#推荐的正式研究执行顺序)。
 
 ## 🧩 Profiles
 
@@ -139,8 +162,8 @@ Hydra 负责外层科研调用目录和组合溯源，现有 artifacts 继续管
 | `dm_gripper.yaml` | MIT 力矩 + 法向力外环 | `contact_geom` |
 
 DM_Gripper 的 Pillars 有意使用等效软接触，而非独立的可变形硅胶体：
-`solref="-1200 -10"`、`solimp="0.75 0.95 0.0025 0.5 2"`。当前仿真接触响应约为
-`1200 N/m`；产品量程换算只能作为设计背景，不能替代仓库模型参数。
+`solref="-1200 -10"`、`solimp="0.75 0.95 0.0025 0.5 2"`。
+这些求解器参数不能直接解释为整条接触链路的 N/m 刚度；等效刚度需通过独立力—闭合扫描测量。
 
 ## 📦 运行产物
 

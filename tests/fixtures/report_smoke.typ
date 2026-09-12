@@ -27,6 +27,27 @@
   include-rest: true,
 )
 
+= 字面量数据表
+
+`data-table` 直接渲染写在文件里的字面量记录（数值列右对齐、布尔转中文、空值占位）：
+
+#let rows = (
+  (variant: "pid", material: "hard", rmse: 0.0407, passed: true, runs: 2),
+  (variant: "adrc", material: "hard", rmse: none, passed: false, runs: 1),
+)
+
+#data-table(
+  rows,
+  columns: (
+    ("variant", "变体"),
+    ("material", "材料"),
+    ("rmse", "RMSE（N）"),
+    ("passed", "通过"),
+    ("runs", "条件数", 0),
+  ),
+  caption: [字面量记录三线表],
+)
+
 = 元信息与图
 
 #run-header("/tests/fixtures/mini_run", [smoke])

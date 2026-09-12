@@ -136,6 +136,77 @@ run 目录，只负责 MuJoCo 仿真和条件指标；父进程按计划顺序�
 统一聚合和绘图。并行完成顺序不会改变 `condition_results`、配对关系或统计输入顺序。建议先比较
 `N=1,4,8` 的耗时与内存占用，不要直接使用全部逻辑核。
 
+## 推荐的正式研究执行顺序
+
+新一轮完整研究建议逐项执行并在阶段之间审查产物，不要把全部命令串联为一个长任务。下列命令均为
+实际执行；去掉末尾的 `execution=study_run` 即为只生成计划。计划模式不是程序上的必经步骤，但正式运行前
+应先用相同参数生成并审阅计划。
+
+第一阶段验证基础组件。先用独立准静态参考验证估计精度，再检查它对下游力跟踪的敏感性；二者均不依赖
+PID 模块消融：
+
+```bash
+uv run python scripts/research/study.py \
+  research=stiffness_ground_truth_validation/study \
+  execution=study_run \
+  execution.workers=8
+uv run python scripts/research/study.py \
+  research=stiffness_estimator_validation/study \
+  execution=study_run \
+  execution.workers=8
+uv run python scripts/research/study.py \
+  research=force_controller_ablation/study \
+  execution=study_run
+```
+
+第二阶段调优二阶直接力矩 ADRC。`confirm` 是唯一具有强制谱系依赖的阶段，必须使用已完成 coarse 后
+终端打印的绝对目录：
+
+```bash
+uv run python scripts/research/study.py \
+  research=torque_adrc_tuning/study \
+  execution=study_run
+
+COARSE_DIR=/absolute/path/to/completed-coarse-study
+uv run python scripts/research/study.py \
+  research=torque_adrc_tuning/study \
+  study.stage=confirm \
+  study.coarse_study_dir="$COARSE_DIR" \
+  execution=study_run
+```
+
+共享导纳调优不进入默认 PID／ADRC 选型矩阵，可作为独立基线在同一阶段运行：
+
+```bash
+uv run python scripts/research/study.py \
+  research=dm_admittance_tuning/study \
+  execution=study_run
+```
+
+完成上述研究后必须设置人工决策门：检查 `study_manifest.json` 的生命周期状态、科学失败与执行异常，
+审阅 `summary.csv`、聚合表、候选排名和图表。若最优估计器或控制参数不同于当前 YAML，应先更新配置、
+测试和文档并形成提交；Study 不会自动把最优参数传给下一项研究。配置冻结后再运行最终控制器比较：
+
+```bash
+uv run python scripts/research/study.py \
+  research=force_controller_selection/study \
+  execution=study_run
+```
+
+局部起滑和 Robotiq 离散力不阻塞 DM 控制器选型，最后按各自研究问题独立运行：
+
+```bash
+uv run python scripts/research/study.py \
+  research=friction_local_slip_validation/study \
+  execution=study_run
+uv run python scripts/research/study.py \
+  research=robotiq_discrete_force_validation/study \
+  execution=study_run
+```
+
+所有正式产物写入 `outputs/research/studies/`。旧 `outputs/studies/` 只包含兼容时期的历史结果，不是当前
+Hydra study 入口的输出位置。归档的模型 bug 诊断不属于上述路线，只在复现历史接触问题时显式运行。
+
 ## 多条件研究与产物约定
 
 默认矩阵为 6 个控制器变体 × 3 个任务 × 3 个正式接触 preset × 3 个 seed，共 162 个条件；其中包含
@@ -214,24 +285,23 @@ trace、metrics 或 run manifest。PDF 仅在显式请求时生成。
 
 ## 实验报告与论文工作稿（Typst）
 
-`reports/` 目录用 Typst 编写实验报告与论文工作稿。两者都是时点性交付物：头部记录所引用
-run 的 ID 与 git 提交，数值全部程序化读取自 `outputs/` 产物，与 docs/ 只保留可复现定性
-结论的约定互补；不回写 docs/。
+`reports/` 目录用 Typst 编写实验报告与论文工作稿。报告按科研问题组织证据，运行编号与 Git 提交保留在
+研究产物中，不进入正文。数值先由 Python 校验、汇总并冻结，Typst 编译不直接读取 `outputs/`；`docs/`
+只保留已经稳定的方法、接口与适用边界，报告结论经人工决策后才进入文档和配置。
 
-在仓库根编译《摩擦感知目标力调度》论文工作稿：
+在仓库根编译研究合集（单一编译入口产出一份合集 PDF）：
 
 <pre><code class="language-bash">
-typst compile --root . reports/wired_demo.typ
+typst compile --root . reports/combined.typ
 </code></pre>
 
-产物为 `reports/wired_demo.pdf`，不入库（`reports/*.pdf` 已加入 `.gitignore`）。
+产物为 `reports/combined.pdf`，不入库（`reports/*.pdf` 已加入 `.gitignore`）。
 前置要求：Typst CLI ≥ 0.14（0.15.0 已验证）；Noto Serif/Sans CJK SC 简体中文字体，
 缺字体渲染成方框但编译不报错；首次编译需联网下载 `@preview/mitex` 包，之后走本地缓存。
 
-工作稿的数据源是 `friction-estimate` 与 `force-schedule` 两次运行的产物目录，路径写在
-文件头部常量里。更换数据源时改头部的 `#let …-run = "/outputs/…"` 常量，并把新 run 的
-`plot.png` 复制到 `reports/figures/` 替换入库快照（插图不直接引用 `outputs/`，图像资产
-固定、不随 `pgt runs clean` 丢失）；产物不存在则先重跑对应实验（命令见上文）。
+数值先通过 `scripts/reports/study_results_data.py` 校验并冻结到合集数据块，插图固定在
+`reports/figures/`。原独立报告、论文工作稿与 Markdown 初步证据已并入合集，论文工作稿编译期
+直读的数字也已冻结为字面量；新增报告内容一律使用字面量数据块。
 
 报告内的 LaTeX 公式经 `mitex` 兼容，Typst 字符串中反斜杠须双写（如 `"\\rho"`），否则
 `\r`、`\t` 会被当转义符吃掉。`tests/test_report_typst.py` 用 `tests/fixtures/` 迷你数据
