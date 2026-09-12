@@ -9,6 +9,16 @@
 
 ### 新增
 
+- 新增 `stiffness_ground_truth_validation` 正式研究：通过加载／卸载平衡工作点的分支内中心差分建立
+  控制器语义下的等效接触刚度参考，并按估计器、接触材料和噪声 seed 聚合对数 RMSE、相对偏差、低估率、
+  估计抖动与相邻平衡点加载力增量低估指标；支持条件级 CPU 多进程。
+  扫描检查双侧接触、末段力／闭合波动及估计有效比例，未激励初值不计为合格估计。
+- 新增研究报告合集 `reports/combined.typ`：单一编译入口产出一份便于连续阅读的 IEEE 双栏合集 PDF，
+  按方法说明、研究证据汇总、论文工作稿与初步证据四部分组织；研究证据部分每项正式研究一节，给出
+  科学问题、三线表、关键产物图与结论表述，覆盖控制器选型、PID 2×2 消融、Torque ADRC 两阶段调参、
+  刚度估计器对比、DM 导纳整定、Robotiq 离散力控制与已退出的摩擦局部起滑矩阵。报告数据以字面量写在
+  文件内的数据块中，编译不读取 `outputs/`；`scripts/reports/study_results_data.py` 从 study 产物生成并
+  校验该数据块，报告模板同步新增渲染字面量记录的 `data-table()` 组件。
 - 正式 study 新增统一的 `execution.workers`：执行模式可用 `spawn` 条件级 MuJoCo CPU 多进程，父进程
   独占 manifest、聚合与绘图，并保持 `StudyPlan` 结果顺序；默认值 `1` 保持原串行行为。
 - 新增 force-track 单次绘图层与重绘命令：runner 通过 `on_result(full_rows, result)` 生成
@@ -51,9 +61,17 @@
 - 移除 `dm_admittance_tuning` 的 `max_workers` 字段与 `robotiq_discrete_force` 的 `--jobs`/
   `--dry-run` 参数：并行度改由公共 `execution.workers` 负责，计划审阅改用默认的
   `execution=study_plan`。
+- 移除已并入合集 `reports/combined.typ` 的独立文档入口：`force_control_comparison.typ`、
+  `study_results.typ`、`wired_demo.typ` 与 `stiffness_reference_pilot.md`；`template.typ`、
+  `wired_demo.bib` 与 `reports/figures/` 快照继续由合集使用，论文工作稿编译期直读产物的数字
+  冻结为字面量。
 
 ### 变更
 
+- 科研报告改为围绕“目标力跟踪 → 轻柔接触 → 自适应持握 → 防滑搬运与稳定放置”组织证据；运行编号与
+  Git 提交退出正文，正式报告数据由 Python 汇总后冻结，Typst 编译不直接读取原始研究产物。
+- 报告模板的 `fmt-float()` 补足有效数字尾零（`0.15` 与 `0.213` 并排时显示为 `0.150` 与 `0.213`），
+  整数按整数显示，既有报告的数字与结论不变，只是表格内同一列的显示更整齐。
 - DMgripper 单次力跟踪默认改为三张 600 DPI PNG：目标／滤波力、双侧触觉力和控制器状态；复用
   SciencePlots／MathText，默认不再生成误差、滞回、limits 或 state 面板，也不自动生成 PDF。waypoint 仅在线性
   参考曲线上使用 marker，关键接触事件使用细灰竖线；既有指标、控制律、study 级图表和其他实验的 `plot.png`

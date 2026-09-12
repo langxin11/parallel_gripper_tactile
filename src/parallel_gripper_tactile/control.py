@@ -300,6 +300,11 @@ class ContactStiffnessEstimator:
         self._core = _CoreContactStiffnessEstimator(_stiffness_config(config), kinematics)
 
     @property
+    def is_valid(self) -> bool:
+        """返回估计器是否已由有效接触激励更新，而非仅持有初值。"""
+        return self._core.is_valid
+
+    @property
     def estimate_n_per_m(self) -> float:
         """返回当前滤波后的等效接触刚度估计。"""
         return self._core.estimate_n_per_m

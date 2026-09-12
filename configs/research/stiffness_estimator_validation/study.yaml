@@ -9,12 +9,13 @@ study:
     overrides: [controller=dm_gripper/full, estimator=window_linear]
   rationale:
     question: 三种刚度估计器对位置前馈力跟踪的影响是什么？
-    decision: 选择默认在线刚度估计方法。
+    decision: 判断估计器差异是否会显著改变下游力跟踪；估计精度由独立真值研究决定。
     inclusion_criteria: [同一控制器, 同一任务材料 seed 配对, 仅替换估计器]
     task_rationale: Step、Ramp 与 Mixed 覆盖估计器对瞬态和连续变化的响应。
-    primary_metrics: [RMSE, 刚度估计误差, 限幅占比]
+    primary_metrics: [力跟踪 RMSE, MAE, 峰值误差, 输出限幅占比]
     stop_conditions: [完成三估计器乘三任务乘三材料乘三 seed]
-    exclusions: {}
+    exclusions:
+      估计精度: 本研究没有独立 k_ref，不用于判断哪种估计器最准确。
   definition:
     name: force_tracking_stiffness_estimator_comparison
     # 刚度估计器消融研究：仅比较 secant_ewma / window_linear / window_quadratic 三套估计器。

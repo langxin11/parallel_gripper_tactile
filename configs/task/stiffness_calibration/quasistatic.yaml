@@ -1,0 +1,13 @@
+name: quasistatic_stiffness_calibration
+control_period_s: 0.002
+approach_velocity_rad_s: 0.25
+contact_threshold_n: 0.05
+approach_timeout_s: 8.0
+# 连续移动提供接触激励；以有效比例和末段波动判据检验，不预先保证估计有效。
+ramp_duration_s: 0.05
+settle_duration_s: 1.5
+sample_duration_s: 0.10
+max_closure_span_m: 0.000001
+max_force_span_n: 0.01
+# 相对初次稳定接触的总闭合行程；加载与卸载使用同一组工作点。
+closure_offsets_m: [0.0, 0.00025, 0.00050, 0.00075, 0.00100, 0.00125, 0.00150]

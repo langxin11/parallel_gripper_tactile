@@ -35,6 +35,7 @@ from .robotiq_discrete_force import (
     RobotiqDiscreteForceStudyConfig,
     load_robotiq_discrete_force_study_config,
 )
+from .stiffness_ground_truth_validation import StiffnessGroundTruthValidationConfig
 
 __all__ = [
     "ALL_PHASES",
@@ -47,6 +48,7 @@ __all__ = [
     "FrictionEstimationLocalSlipStudyConfig",
     "LocalSlipScenario",
     "SeedSweep",
+    "StiffnessGroundTruthValidationConfig",
     "load_dm_admittance_tuning_config",
     "load_comparison_config",
     "load_diagnosis_config",

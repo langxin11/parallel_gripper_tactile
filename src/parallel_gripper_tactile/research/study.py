@@ -39,6 +39,9 @@ from ..studies.force_tracking_torque_adrc_tuning import (
     ForceTrackingTorqueAdrcTuningConfig,
     TorqueAdrcTuningStageName,
 )
+from ..studies.stiffness_ground_truth_validation import (
+    StiffnessGroundTruthValidationConfig,
+)
 from ..studies.lifecycle import StudyPlan, assess_recovery, write_planned_study_manifest
 from ..studies.robotiq_discrete_force import (
     RobotiqDiscreteForceStudyConfig,
@@ -59,6 +62,9 @@ from ..studies.protocols import dm_admittance_tuning as dm_admittance_tuning_pro
 from ..studies.protocols import (
     robotiq_discrete_force as robotiq_discrete_force_protocol,
 )
+from ..studies.protocols import (
+    stiffness_ground_truth_validation as stiffness_ground_truth_protocol,
+)
 from .configuration import REPOSITORY_ROOT, ResearchConfigurationError
 from .composition import compose_research_run
 
@@ -69,6 +75,7 @@ StudyKind = Literal[
     "force_tracking_torque_adrc_tuning",
     "friction_estimation_local_slip",
     "force_tracking_stiffness_estimator_comparison",
+    "stiffness_ground_truth_validation",
     "dm_admittance_tuning",
     "robotiq_discrete_force",
     "force_tracking_diagnosis",
@@ -168,6 +175,7 @@ StudyDomainConfig = (
     | ForceTrackingTorqueAdrcTuningConfig
     | FrictionEstimationLocalSlipStudyConfig
     | ForceTrackingStiffnessEstimatorComparisonConfig
+    | StiffnessGroundTruthValidationConfig
     | DMAdmittanceTuningConfig
     | RobotiqDiscreteForceStudyConfig
     | DiagnosisConfig
@@ -290,6 +298,20 @@ def _validate_stiffness_estimator_comparison(
         for task in tasks.values():
             for material in config.materials:
                 validate_force_tracking_configuration(profile, task=task, object_material=material)
+
+
+def _validate_stiffness_ground_truth(
+    config: StiffnessGroundTruthValidationConfig,
+    profile: GripperProfile,
+) -> None:
+    """预检准静态任务和刚度估计器所需的 profile 组件。"""
+    from ..experiments.stiffness_calibration import StiffnessCalibrationTask
+
+    if profile.normal_force is None or profile.normal_force.stiffness is None:
+        raise ValueError("等效接触刚度真值验证需要 control.force.stiffness。")
+    if profile.normal_force.geometry is None:
+        raise ValueError("等效接触刚度真值验证需要 control.force.geometry。")
+    StiffnessCalibrationTask.load(config.task)
 
 
 def _validate_diagnosis(config: DiagnosisConfig, profile: GripperProfile) -> None:
@@ -461,6 +483,15 @@ def _resolved_domain_config(
                 "output_root": path(config.output_root),
             }
         )
+    if kind == "stiffness_ground_truth_validation":
+        config = StiffnessGroundTruthValidationConfig.model_validate(definition)
+        return config.model_copy(
+            update={
+                "profile": path(config.profile),
+                "task": path(config.task),
+                "output_root": path(config.output_root),
+            }
+        )
     if kind == "dm_admittance_tuning":
         config = DMAdmittanceTuningConfig.model_validate(definition)
         return config.model_copy(
@@ -536,6 +567,11 @@ def resolve_research_study(
         elif isinstance(domain_config, ForceTrackingStiffnessEstimatorComparisonConfig):
             _validate_stiffness_estimator_comparison(domain_config, profile)
             plan = stiffness_comparison_protocol.build_plan(domain_config, resolved_profile=profile)
+        elif isinstance(domain_config, StiffnessGroundTruthValidationConfig):
+            _validate_stiffness_ground_truth(domain_config, profile)
+            plan = stiffness_ground_truth_protocol.build_plan(
+                domain_config, resolved_profile=profile
+            )
         elif isinstance(domain_config, DMAdmittanceTuningConfig):
             _validate_dm_admittance_tuning(domain_config, profile)
             plan = dm_admittance_tuning_protocol.build_plan(
@@ -680,6 +716,12 @@ def execute_research_study(
         )
     if isinstance(resolved.domain_config, ForceTrackingStiffnessEstimatorComparisonConfig):
         return stiffness_comparison_protocol.run_study(
+            resolved.domain_config,
+            resolved_profile=resolved.profile,
+            **common_arguments,
+        )
+    if isinstance(resolved.domain_config, StiffnessGroundTruthValidationConfig):
+        return stiffness_ground_truth_protocol.run_study(
             resolved.domain_config,
             resolved_profile=resolved.profile,
             **common_arguments,

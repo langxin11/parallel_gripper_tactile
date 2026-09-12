@@ -43,6 +43,10 @@ STUDY_GROUPS = {
         "stiffness_estimator_validation/study",
         [],
     ),
+    "stiffness_ground_truth_validation": (
+        "stiffness_ground_truth_validation/study",
+        [],
+    ),
     "dm_admittance_tuning": ("dm_admittance_tuning/study", []),
     "robotiq_discrete_force": ("robotiq_discrete_force_validation/study", []),
     "force_tracking_torque_adrc_tuning_coarse": ("torque_adrc_tuning/study", []),
@@ -60,6 +64,7 @@ STUDY_GROUPS = {
         "force_controller_ablation/study",
         "friction_local_slip_validation/study",
         "stiffness_estimator_validation/study",
+        "stiffness_ground_truth_validation/study",
         "dm_admittance_tuning/study",
         "robotiq_discrete_force_validation/study",
         "torque_adrc_tuning/study",
