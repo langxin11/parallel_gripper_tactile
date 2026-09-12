@@ -52,7 +52,7 @@ uv run python scripts/research/study.py research=force_controller_ablation/study
 uv run python scripts/research/study.py research=torque_adrc_tuning/study
 ```
 
-Hydra/OmegaConf 位于 `research` 依赖组，完整开发安装已包含该组。不要将 Hydra 引入共享控制核或
+Hydra/OmegaConf 属于主包运行依赖，CLI 与科研入口共用组合服务；`research` 组名仅保留兼容。不要将 Hydra 引入共享控制核或
 硬件包，也不要用外层 Multirun 执行正式 study。新增或修改正式 study 时，领域 protocol 必须独占条件
 生成，计划和执行传递同一个 `StudyPlan`；不得把科学失败与 Python 异常混为同一失败字段，也不得绕过
 产物摘要或 coarse／confirm 谱系校验。

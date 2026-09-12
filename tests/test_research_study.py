@@ -504,9 +504,20 @@ def test_formal_local_slip_preserves_scenario_and_seed_matrix() -> None:
     assert len({row["condition_id"] for row in resolved.conditions}) == 15
 
 
-def test_local_slip_plan_registers_expected_condition_count(tmp_path: Path) -> None:
-    """局部起滑 plan 产物登记 15 条条件且不创建任何 run。"""
-    resolved = _resolved("friction_estimation_local_slip")
+@pytest.mark.parametrize(
+    ("study_name", "condition_count"),
+    [
+        ("friction_estimation_local_slip", 15),
+        ("force_tracking_stiffness_estimator_comparison", 81),
+        ("dm_admittance_tuning", 32),
+        ("robotiq_discrete_force", 60),
+    ],
+)
+def test_plan_registers_expected_condition_count(
+    tmp_path: Path, study_name: str, condition_count: int
+) -> None:
+    """各正式 study 的静态计划登记条件数且不创建任何 run。"""
+    resolved = _resolved(study_name)
     result = execute_research_study(
         resolved,
         hydra_output_directory=tmp_path,
@@ -514,8 +525,8 @@ def test_local_slip_plan_registers_expected_condition_count(tmp_path: Path) -> N
     )
 
     plan = json.loads((result / "plan.json").read_text(encoding="utf-8"))
-    assert plan["study"] == "friction_estimation_local_slip"
-    assert plan["condition_count"] == 15
+    assert plan["study"] == study_name
+    assert plan["condition_count"] == condition_count
     manifest = json.loads((result / "study_manifest.json").read_text(encoding="utf-8"))
     assert manifest["state"] == "planned"
     assert not (result / "runs").exists()
@@ -554,23 +565,6 @@ def test_formal_stiffness_comparison_preserves_matrix() -> None:
     )
 
 
-def test_stiffness_comparison_plan_registers_expected_condition_count(tmp_path: Path) -> None:
-    """刚度估计器对比 plan 产物登记 81 条条件且不创建任何 run。"""
-    resolved = _resolved("force_tracking_stiffness_estimator_comparison")
-    result = execute_research_study(
-        resolved,
-        hydra_output_directory=tmp_path,
-        provenance={"choices": {}, "overrides": []},
-    )
-
-    plan = json.loads((result / "plan.json").read_text(encoding="utf-8"))
-    assert plan["study"] == "force_tracking_stiffness_estimator_comparison"
-    assert plan["condition_count"] == 81
-    manifest = json.loads((result / "study_manifest.json").read_text(encoding="utf-8"))
-    assert manifest["state"] == "planned"
-    assert not (result / "runs").exists()
-
-
 def test_formal_dm_admittance_tuning_preserves_matrix() -> None:
     """迁移后的 32 条导纳调参条件与旧 study 配置逐项一致且无基线角色。"""
     from parallel_gripper_tactile.studies.dm_admittance_tuning import (
@@ -592,23 +586,6 @@ def test_formal_dm_admittance_tuning_preserves_matrix() -> None:
     assert actual == expected
     assert len({row["condition_id"] for row in resolved.conditions}) == 32
     assert all(row["baseline_role"] is None for row in resolved.conditions)
-
-
-def test_dm_admittance_tuning_plan_registers_expected_condition_count(tmp_path: Path) -> None:
-    """导纳调参 plan 产物登记 32 条条件且不创建任何 run。"""
-    resolved = _resolved("dm_admittance_tuning")
-    result = execute_research_study(
-        resolved,
-        hydra_output_directory=tmp_path,
-        provenance={"choices": {}, "overrides": []},
-    )
-
-    plan = json.loads((result / "plan.json").read_text(encoding="utf-8"))
-    assert plan["study"] == "dm_admittance_tuning"
-    assert plan["condition_count"] == 32
-    manifest = json.loads((result / "study_manifest.json").read_text(encoding="utf-8"))
-    assert manifest["state"] == "planned"
-    assert not (result / "runs").exists()
 
 
 def test_formal_robotiq_discrete_force_preserves_matrix() -> None:
@@ -637,23 +614,6 @@ def test_formal_robotiq_discrete_force_preserves_matrix() -> None:
         (row["baseline_role"] == "quantized_pi") == (row["controller_variant"] == "quantized-pi")
         for row in resolved.conditions
     )
-
-
-def test_robotiq_discrete_force_plan_registers_expected_condition_count(tmp_path: Path) -> None:
-    """离散力 plan 产物登记 60 条条件且不创建任何 run。"""
-    resolved = _resolved("robotiq_discrete_force")
-    result = execute_research_study(
-        resolved,
-        hydra_output_directory=tmp_path,
-        provenance={"choices": {}, "overrides": []},
-    )
-
-    plan = json.loads((result / "plan.json").read_text(encoding="utf-8"))
-    assert plan["study"] == "robotiq_discrete_force"
-    assert plan["condition_count"] == 60
-    manifest = json.loads((result / "study_manifest.json").read_text(encoding="utf-8"))
-    assert manifest["state"] == "planned"
-    assert not (result / "runs").exists()
 
 
 def test_local_slip_protocol_preserves_validation_semantics(
@@ -978,14 +938,19 @@ def test_execution_passes_the_exact_resolved_plan_to_protocol(
         return Path(str(kwargs["study_directory"]))
 
     monkeypatch.setattr(protocol, "run_study", fake_run)
+    updates = []
+    on_progress = updates.append
     execute_research_study(
         runnable,
         hydra_output_directory=tmp_path,
         provenance={"choices": {}, "overrides": []},
+        on_progress=on_progress,
     )
     assert captured["study_plan"] is resolved.plan
     assert captured["resolved_profile"] is resolved.profile
     assert captured["workers"] == 3
+    assert captured["on_progress"] is on_progress
+    assert updates == []
     assert {Path(path).name for path in captured["additional_artifacts"]} == {
         "effective_study_configuration.json",
         "composition_provenance.json",

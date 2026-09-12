@@ -15,9 +15,17 @@
 uv sync --all-packages --all-groups --locked
 ```
 
-Hydra 与 OmegaConf 位于独立的 `research` 依赖组；`dev` 包含该组，因此完整开发环境无需另行选择。
+Hydra 与 OmegaConf 属于主包运行依赖，普通 CLI 与科研入口都可直接使用组合服务。
+仅运行实验可执行 `uv sync --locked --no-default-groups`；上面的完整安装还包含测试和文档工具。
+`research` 依赖组名保留为空的兼容入口，旧 `--group research` 安装命令仍可使用。
 
 ## 单次实验
+
+可先用 `uv run pgt configs list` 查看配置，或用 `pgt configs list controller --search pid`
+过滤名称与用途。配置名对应组目录下的相对路径，例如 `dm_gripper/pid_only`；
+在科研入口中写为 `controller=dm_gripper/pid_only`，在 `pgt run` 中写为
+`--set controller=dm_gripper/pid_only`。目录发现只读取 YAML 元数据，不组合配置或推进仿真；
+列表不保证任意跨组组合都兼容，仍须用计划模式校验。
 
 默认 DM 力跟踪组合：
 
@@ -93,7 +101,7 @@ Torque ADRC coarse → confirm ┘
 | 控制结构验证 | `force_tracking_stiffness_rate_validation` | 在 125／250／500 Hz 下比较无位置限幅、刚度位置限幅和刚度速率控制，检查极限环与外环频率敏感性。 |
 | 参数调优 | `force_tracking_stiffness_rate_tuning` | 固定 250 Hz stiff Step 和 `window_linear`，以九组 \(K_P\times\dot F_{\max}\) 候选改善瞬态并约束平台波动。 |
 | 参数再调优 | `force_tracking_stiffness_rate_refinement` | 针对 500 Hz medium／hard 的超调失败，以六组候选和性能基线选择最坏工况可行参数。 |
-| 参数确认 | `force_tracking_stiffness_rate_confirmation` | 固定调优胜出的 \(K_P=30\ \mathrm{s^{-1}}\)、\(\dot F_{\max}=70\ \mathrm{N/s}\)，在三种频率和三种材料上与性能基线配对复验。 |
+| 参数确认 | `force_tracking_stiffness_rate_confirmation` | 固定二次调优选出的 \(K_P=20\ \mathrm{s^{-1}}\)、\(\dot F_{\max}=50\ \mathrm{N/s}\)，在三种频率和三种材料上与性能基线配对复验。 |
 | 历史敏感性 | `stiffness_estimator_validation` | 只比较估计器接入控制器后的执行指标，不作为刚度精度或默认方法选型依据。 |
 | 基础组件验证 | `force_controller_ablation` | 判断 PID、刚度位置前馈和力矩前馈的贡献。 |
 | 参数调优 | `torque_adrc_tuning` | 先 coarse 搜索可行域，再 confirm 验证前五候选。 |
@@ -229,6 +237,12 @@ profile 摘要来自实际冻结的组合对象，而不是兼容 profile 文件
 `failed_runs`。所有登记产物同时保存 SHA-256 摘要。
 
 ## 配置组及所有权
+
+正式执行默认输出逐条件进度：已处理／总条件数、科学失败数、执行异常数、状态与绝对目录。
+“已处理”包含三类条件结果，不能当作科学验收通过数；`completed` 也仍允许存在科学失败。
+计划模式只显示条件总数和计划目录，不发送运行进度。Python 调用可传入可选 `on_progress` 观察
+不可变 `StudyProgress`；通知只发生在父进程完成 manifest 写入之后，不发送至 worker，不进入科学哈希
+或产物格式。观察回调异常会告警，研究继续运行。
 
 | 配置组 | 负责参数 | 不负责参数 |
 | --- | --- | --- |

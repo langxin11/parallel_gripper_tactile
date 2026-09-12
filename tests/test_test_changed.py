@@ -58,6 +58,7 @@ def test_research_entry_and_config_map_to_complete_research_tests() -> None:
         "tests/test_research_execution.py",
         "tests/test_research_study.py",
         "tests/test_study_lifecycle.py",
+        "tests/test_study_progress.py",
     )
 
     assert module.select_tests(["scripts/research/run.py"]) == expected
@@ -81,3 +82,13 @@ def test_documentation_only_change_needs_no_pytest() -> None:
     module = _module()
 
     assert module.select_tests(["docs/testing.md"]) == ()
+
+
+def test_config_discovery_maps_to_catalog_and_cli_tests() -> None:
+    """配置目录和展示入口改动不会漏掉发现命令的行为覆盖。"""
+    module = _module()
+    selected = module.select_tests(["src/parallel_gripper_tactile/research/catalog.py"])
+    assert "tests/test_config_catalog.py" in selected
+    selected = module.select_tests(["src/parallel_gripper_tactile/cli/configs.py"])
+    assert "tests/test_config_catalog.py" in selected
+    assert "tests/test_cli.py" in selected

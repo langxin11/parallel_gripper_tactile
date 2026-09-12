@@ -8,7 +8,7 @@ from rich.console import Console
 import typer
 
 from .. import __version__
-from . import assets, experiments, runs, validate
+from . import assets, configs, experiments, runs, validate
 from .common import CliState
 
 
@@ -40,6 +40,7 @@ app.add_typer(experiments.run_app, name="run")
 app.add_typer(experiments.compare_app, name="compare")
 app.add_typer(runs.app, name="runs")
 app.add_typer(experiments.view_app, name="view")
+app.add_typer(configs.app, name="configs")
 
 
 def main() -> None:

@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
 import json
 from pathlib import Path
-from typing import Literal, Mapping, get_args
+from types import ModuleType
+from typing import Any, Literal, Mapping, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
@@ -46,7 +48,12 @@ from ..studies.force_tracking_torque_adrc_tuning import (
 from ..studies.stiffness_ground_truth_validation import (
     StiffnessGroundTruthValidationConfig,
 )
-from ..studies.lifecycle import StudyPlan, assess_recovery, write_planned_study_manifest
+from ..studies.lifecycle import (
+    StudyPlan,
+    StudyProgressCallback,
+    assess_recovery,
+    write_planned_study_manifest,
+)
 from ..studies.robotiq_discrete_force import (
     RobotiqDiscreteForceStudyConfig,
 )
@@ -502,129 +509,167 @@ def _resolved_selection(
     )
 
 
-def _resolved_domain_config(
-    selection: StudySelection,
-    *,
-    repository_root: Path,
-) -> StudyDomainConfig:
-    """从同一 research 组中的领域定义构造并解析全部路径。"""
+def _profile_options(selection: StudySelection, profile: GripperProfile) -> dict[str, object]:
+    """标准研究向计划和执行传入同一冻结 profile。"""
+    return {"resolved_profile": profile}
 
-    def path(value: Path) -> Path:
-        return _repository_path(value, repository_root=repository_root)
 
-    kind = selection.kind
-    definition = selection.definition
-    if kind == "force_tracking_controller_comparison":
-        config = ForceTrackingComparisonConfig.model_validate(definition)
-        return config.model_copy(
-            update={
-                "profile": path(config.profile),
-                "tasks": tuple(path(task) for task in config.tasks),
-                "output_root": path(config.output_root),
+def _diagnosis_options(selection: StudySelection, profile: GripperProfile) -> dict[str, object]:
+    """历史诊断保留专属 phase 与模型来源语义。"""
+    return {"phase": selection.phase}
+
+
+def _torque_options(selection: StudySelection, profile: GripperProfile) -> dict[str, object]:
+    """Torque 调参在建计划和执行时都携带完整阶段谱系。"""
+    return {
+        "resolved_profile": profile,
+        "stage": selection.stage,
+        "coarse_study_dir": selection.coarse_study_dir,
+    }
+
+
+def _rate_options(selection: StudySelection, profile: GripperProfile) -> dict[str, object]:
+    """共享速率协议显式区分调优与确认研究身份。"""
+    return {"resolved_profile": profile, "study_kind": selection.kind}
+
+
+@dataclass(frozen=True, slots=True)
+class _StudyAdapter:
+    """集中登记研究 schema、路径字段、预检及协议，矩阵仍由协议独占。"""
+
+    model: type[BaseModel]
+    protocol: ModuleType
+    validate: Callable[[Any, GripperProfile], None] | None
+    scalar_paths: tuple[str, ...] = ("profile", "output_root")
+    sequence_paths: tuple[str, ...] = ("tasks",)
+    nested_paths: tuple[tuple[str, str], ...] = ()
+    options: Callable[[StudySelection, GripperProfile], dict[str, object]] = _profile_options
+    validate_plan: Callable[[Any, StudyPlan, GripperProfile], None] | None = None
+
+    def resolve(self, selection: StudySelection, repository_root: Path) -> StudyDomainConfig:
+        """只规范此研究明确声明的路径字段，保持历史解析顺序和内容。"""
+        config = self.model.model_validate(selection.definition)
+
+        def path(value: Path) -> Path:
+            """以本次解析指定的仓库根规范路径。"""
+            return _repository_path(value, repository_root=repository_root)
+
+        updates: dict[str, object] = {
+            name: path(getattr(config, name)) for name in self.scalar_paths
+        }
+        updates.update(
+            {
+                name: tuple(path(value) for value in getattr(config, name))
+                for name in self.sequence_paths
             }
         )
-    if kind == "force_tracking_ablation":
-        config = ForceTrackingAblationConfig.model_validate(definition)
-        return config.model_copy(
-            update={
-                "profile": path(config.profile),
-                "task": path(config.task),
-                "output_root": path(config.output_root),
-            }
-        )
-    if kind == "force_tracking_torque_adrc_tuning":
-        config = ForceTrackingTorqueAdrcTuningConfig.model_validate(definition)
-        return config.model_copy(
-            update={
-                "profile": path(config.profile),
-                "tasks": tuple(path(task) for task in config.tasks),
-                "output_root": path(config.output_root),
-            }
-        )
-    if kind == "friction_estimation_local_slip":
-        config = FrictionEstimationLocalSlipStudyConfig.model_validate(definition)
-        scenarios = tuple(
-            scenario.model_copy(update={"task": path(scenario.task)})
-            for scenario in config.scenarios
-        )
-        return config.model_copy(
-            update={
-                "profile": path(config.profile),
-                "scenarios": scenarios,
-                "output_root": path(config.output_root),
-            }
-        )
-    if kind == "force_tracking_stiffness_estimator_comparison":
-        config = ForceTrackingStiffnessEstimatorComparisonConfig.model_validate(definition)
-        return config.model_copy(
-            update={
-                "profile": path(config.profile),
-                "tasks": tuple(path(task) for task in config.tasks),
-                "output_root": path(config.output_root),
-            }
-        )
-    if kind == "stiffness_ground_truth_validation":
-        config = StiffnessGroundTruthValidationConfig.model_validate(definition)
-        return config.model_copy(
-            update={
-                "profile": path(config.profile),
-                "task": path(config.task),
-                "output_root": path(config.output_root),
-            }
-        )
-    if kind == "force_tracking_stiffness_limit":
-        config = ForceTrackingStiffnessLimitConfig.model_validate(definition)
-        return config.model_copy(
-            update={
-                "profile": path(config.profile),
-                "tasks": tuple(path(task) for task in config.tasks),
-                "output_root": path(config.output_root),
-            }
-        )
-    if kind in {
-        "force_tracking_stiffness_rate_tuning",
-        "force_tracking_stiffness_rate_confirmation",
-    }:
-        config = ForceTrackingStiffnessRateTuningConfig.model_validate(definition)
-        return config.model_copy(
-            update={
-                "profile": path(config.profile),
-                "tasks": tuple(path(task) for task in config.tasks),
-                "output_root": path(config.output_root),
-            }
-        )
-    if kind == "dm_admittance_tuning":
-        config = DMAdmittanceTuningConfig.model_validate(definition)
-        return config.model_copy(
-            update={
-                "task": path(config.task),
-                "output_root": path(config.output_root),
-            }
-        )
-    if kind == "robotiq_discrete_force":
-        config = RobotiqDiscreteForceStudyConfig.model_validate(definition)
-        return config.model_copy(
-            update={
-                "profile": path(config.profile),
-                "task": path(config.task),
-                "output_root": path(config.output_root),
-            }
-        )
-    if kind == "force_tracking_diagnosis":
-        config = DiagnosisConfig.model_validate(definition)
-        models = tuple(
-            condition.model_copy(update={"model": path(condition.model)})
-            for condition in config.collision_geometry_models
-        )
-        return config.model_copy(
-            update={
-                "profile": path(config.profile),
-                "task": path(config.task),
-                "output_root": path(config.output_root),
-                "collision_geometry_models": models,
-            }
-        )
-    raise ValueError(f"unsupported study kind: {kind}")
+        for collection, field in self.nested_paths:
+            updates[collection] = tuple(
+                item.model_copy(update={field: path(getattr(item, field))})
+                for item in getattr(config, collection)
+            )
+        return config.model_copy(update=updates)
+
+    def build_plan(
+        self, config: StudyDomainConfig, selection: StudySelection, profile: GripperProfile
+    ) -> StudyPlan:
+        """保留普通研究先预检、Torque 先校验谱系再按候选预检的顺序。"""
+        if self.validate is not None:
+            self.validate(config, profile)
+        plan = self.protocol.build_plan(config, **self.options(selection, profile))
+        if self.validate_plan is not None:
+            self.validate_plan(config, plan, profile)
+        return plan
+
+
+_STUDY_ADAPTERS: dict[StudyKind, _StudyAdapter] = {
+    "force_tracking_controller_comparison": _StudyAdapter(
+        ForceTrackingComparisonConfig,
+        comparison_protocol,
+        _validate_comparison,
+    ),
+    "force_tracking_ablation": _StudyAdapter(
+        ForceTrackingAblationConfig,
+        ablation_protocol,
+        _validate_ablation,
+        scalar_paths=("profile", "task", "output_root"),
+        sequence_paths=(),
+    ),
+    "force_tracking_torque_adrc_tuning": _StudyAdapter(
+        ForceTrackingTorqueAdrcTuningConfig,
+        torque_tuning_protocol,
+        None,
+        options=_torque_options,
+        validate_plan=_validate_torque_tuning,
+    ),
+    "friction_estimation_local_slip": _StudyAdapter(
+        FrictionEstimationLocalSlipStudyConfig,
+        friction_local_slip_protocol,
+        _validate_local_slip,
+        sequence_paths=(),
+        nested_paths=(("scenarios", "task"),),
+    ),
+    "force_tracking_stiffness_estimator_comparison": _StudyAdapter(
+        ForceTrackingStiffnessEstimatorComparisonConfig,
+        stiffness_comparison_protocol,
+        _validate_stiffness_estimator_comparison,
+    ),
+    "stiffness_ground_truth_validation": _StudyAdapter(
+        StiffnessGroundTruthValidationConfig,
+        stiffness_ground_truth_protocol,
+        _validate_stiffness_ground_truth,
+        scalar_paths=("profile", "task", "output_root"),
+        sequence_paths=(),
+    ),
+    "force_tracking_stiffness_limit": _StudyAdapter(
+        ForceTrackingStiffnessLimitConfig,
+        stiffness_limit_protocol,
+        _validate_stiffness_limit,
+    ),
+    "force_tracking_stiffness_rate_tuning": _StudyAdapter(
+        ForceTrackingStiffnessRateTuningConfig,
+        stiffness_rate_tuning_protocol,
+        _validate_stiffness_rate_tuning,
+        options=_rate_options,
+    ),
+    "force_tracking_stiffness_rate_confirmation": _StudyAdapter(
+        ForceTrackingStiffnessRateTuningConfig,
+        stiffness_rate_tuning_protocol,
+        _validate_stiffness_rate_tuning,
+        options=_rate_options,
+    ),
+    "dm_admittance_tuning": _StudyAdapter(
+        DMAdmittanceTuningConfig,
+        dm_admittance_tuning_protocol,
+        _validate_dm_admittance_tuning,
+        scalar_paths=("task", "output_root"),
+        sequence_paths=(),
+    ),
+    "robotiq_discrete_force": _StudyAdapter(
+        RobotiqDiscreteForceStudyConfig,
+        robotiq_discrete_force_protocol,
+        _validate_robotiq_discrete_force,
+        scalar_paths=("profile", "task", "output_root"),
+        sequence_paths=(),
+    ),
+    "force_tracking_diagnosis": _StudyAdapter(
+        DiagnosisConfig,
+        diagnosis_protocol,
+        _validate_diagnosis,
+        scalar_paths=("profile", "task", "output_root"),
+        sequence_paths=(),
+        nested_paths=(("collision_geometry_models", "model"),),
+        options=_diagnosis_options,
+    ),
+}
+
+
+def _study_adapter(kind: StudyKind) -> _StudyAdapter:
+    """拒绝未登记的研究，不把未知类型默认为 Torque 调参。"""
+    try:
+        return _STUDY_ADAPTERS[kind]
+    except KeyError as error:
+        raise ValueError(f"unsupported study kind: {kind}") from error
 
 
 def resolve_research_study(
@@ -640,7 +685,8 @@ def resolve_research_study(
             repository_root=root,
         )
         source = selection.study.source
-        domain_config = _resolved_domain_config(selection.study, repository_root=root)
+        adapter = _study_adapter(selection.study.kind)
+        domain_config = adapter.resolve(selection.study, root)
         composed = compose_research_run(
             experiment=selection.study.profile.experiment,
             overrides=selection.study.profile.overrides,
@@ -656,60 +702,7 @@ def resolve_research_study(
         raise ResearchStudySetupError(str(error), stage="configuration") from error
 
     try:
-        if isinstance(domain_config, ForceTrackingComparisonConfig):
-            _validate_comparison(domain_config, profile)
-            plan = comparison_protocol.build_plan(domain_config, resolved_profile=profile)
-        elif isinstance(domain_config, ForceTrackingAblationConfig):
-            _validate_ablation(domain_config, profile)
-            plan = ablation_protocol.build_plan(domain_config, resolved_profile=profile)
-        elif isinstance(domain_config, FrictionEstimationLocalSlipStudyConfig):
-            _validate_local_slip(domain_config, profile)
-            plan = friction_local_slip_protocol.build_plan(domain_config, resolved_profile=profile)
-        elif isinstance(domain_config, ForceTrackingStiffnessEstimatorComparisonConfig):
-            _validate_stiffness_estimator_comparison(domain_config, profile)
-            plan = stiffness_comparison_protocol.build_plan(domain_config, resolved_profile=profile)
-        elif isinstance(domain_config, StiffnessGroundTruthValidationConfig):
-            _validate_stiffness_ground_truth(domain_config, profile)
-            plan = stiffness_ground_truth_protocol.build_plan(
-                domain_config, resolved_profile=profile
-            )
-        elif isinstance(domain_config, ForceTrackingStiffnessLimitConfig):
-            _validate_stiffness_limit(domain_config, profile)
-            plan = stiffness_limit_protocol.build_plan(
-                domain_config,
-                resolved_profile=profile,
-            )
-        elif isinstance(domain_config, ForceTrackingStiffnessRateTuningConfig):
-            _validate_stiffness_rate_tuning(domain_config, profile)
-            plan = stiffness_rate_tuning_protocol.build_plan(
-                domain_config,
-                resolved_profile=profile,
-                study_kind=selection.study.kind,
-            )
-        elif isinstance(domain_config, DMAdmittanceTuningConfig):
-            _validate_dm_admittance_tuning(domain_config, profile)
-            plan = dm_admittance_tuning_protocol.build_plan(
-                domain_config,
-                resolved_profile=profile,
-            )
-        elif isinstance(domain_config, RobotiqDiscreteForceStudyConfig):
-            _validate_robotiq_discrete_force(domain_config, profile)
-            plan = robotiq_discrete_force_protocol.build_plan(
-                domain_config, resolved_profile=profile
-            )
-        elif isinstance(domain_config, DiagnosisConfig):
-            assert selection.study.phase is not None
-            _validate_diagnosis(domain_config, profile)
-            plan = diagnosis_protocol.build_plan(domain_config, phase=selection.study.phase)
-        else:
-            assert selection.study.stage is not None
-            plan = torque_tuning_protocol.build_plan(
-                domain_config,
-                stage=selection.study.stage,
-                coarse_study_dir=selection.study.coarse_study_dir,
-                resolved_profile=profile,
-            )
-            _validate_torque_tuning(domain_config, plan, profile)
+        plan = adapter.build_plan(domain_config, selection.study, profile)
         plan = plan.model_copy(
             update={
                 "preflight": {
@@ -734,6 +727,7 @@ def execute_research_study(
     *,
     hydra_output_directory: Path,
     provenance: Mapping[str, object],
+    on_progress: StudyProgressCallback | None = None,
 ) -> Path:
     """保存计划或把同一个已校验 ``StudyPlan`` 交给研究协议执行。"""
     output_directory = hydra_output_directory.resolve()
@@ -810,74 +804,12 @@ def execute_research_study(
         "lifecycle_manifest_fields": lifecycle_fields,
         "workers": resolved.selection.execution.workers,
     }
-    if isinstance(resolved.domain_config, ForceTrackingComparisonConfig):
-        return comparison_protocol.run_study(
-            resolved.domain_config,
-            resolved_profile=resolved.profile,
-            **common_arguments,
-        )
-    if isinstance(resolved.domain_config, ForceTrackingAblationConfig):
-        return ablation_protocol.run_study(
-            resolved.domain_config,
-            resolved_profile=resolved.profile,
-            **common_arguments,
-        )
-    if isinstance(resolved.domain_config, FrictionEstimationLocalSlipStudyConfig):
-        return friction_local_slip_protocol.run_study(
-            resolved.domain_config,
-            resolved_profile=resolved.profile,
-            **common_arguments,
-        )
-    if isinstance(resolved.domain_config, ForceTrackingStiffnessEstimatorComparisonConfig):
-        return stiffness_comparison_protocol.run_study(
-            resolved.domain_config,
-            resolved_profile=resolved.profile,
-            **common_arguments,
-        )
-    if isinstance(resolved.domain_config, StiffnessGroundTruthValidationConfig):
-        return stiffness_ground_truth_protocol.run_study(
-            resolved.domain_config,
-            resolved_profile=resolved.profile,
-            **common_arguments,
-        )
-    if isinstance(resolved.domain_config, ForceTrackingStiffnessLimitConfig):
-        return stiffness_limit_protocol.run_study(
-            resolved.domain_config,
-            resolved_profile=resolved.profile,
-            **common_arguments,
-        )
-    if isinstance(resolved.domain_config, ForceTrackingStiffnessRateTuningConfig):
-        return stiffness_rate_tuning_protocol.run_study(
-            resolved.domain_config,
-            resolved_profile=resolved.profile,
-            study_kind=resolved.selection.study.kind,
-            **common_arguments,
-        )
-    if isinstance(resolved.domain_config, DMAdmittanceTuningConfig):
-        return dm_admittance_tuning_protocol.run_study(
-            resolved.domain_config,
-            resolved_profile=resolved.profile,
-            **common_arguments,
-        )
-    if isinstance(resolved.domain_config, RobotiqDiscreteForceStudyConfig):
-        return robotiq_discrete_force_protocol.run_study(
-            resolved.domain_config,
-            resolved_profile=resolved.profile,
-            **common_arguments,
-        )
-    if isinstance(resolved.domain_config, DiagnosisConfig):
-        assert resolved.selection.study.phase is not None
-        return diagnosis_protocol.run_study(
-            resolved.domain_config,
-            phase=resolved.selection.study.phase,
-            **common_arguments,
-        )
-    assert resolved.selection.study.stage is not None
-    return torque_tuning_protocol.run_study(
+    if on_progress is not None:
+        common_arguments["on_progress"] = on_progress
+    adapter = _study_adapter(resolved.selection.study.kind)
+    return adapter.protocol.run_study(
         resolved.domain_config,
-        stage=resolved.selection.study.stage,
-        coarse_study_dir=resolved.selection.study.coarse_study_dir,
-        resolved_profile=resolved.profile,
+        **adapter.options(resolved.selection.study, resolved.profile),
         **common_arguments,
     )
 

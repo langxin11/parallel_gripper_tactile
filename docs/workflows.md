@@ -1,8 +1,8 @@
 # 🚀 常用工作流
 
 演示、查看和设备检查使用 `pgt`；科研组合、探索运行与正式研究统一使用 `scripts/research`。
-控制器对比、PID 消融与 Torque ADRC 调参的旧脚本保留为薄兼容包装。所有入口共享 Python runner
-与产物格式，不会通过子进程调用 `pgt`。
+旧的控制器对比、PID 消融与 Torque ADRC 调参研究脚本已经删除，当前请使用对应的 Hydra study 入口。
+所有入口共享 Python runner 与产物格式，不会通过子进程调用 `pgt`。
 
 ## 单次运行与交互检查
 

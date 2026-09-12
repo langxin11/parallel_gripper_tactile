@@ -12,6 +12,11 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
+      - name: 检查最小运行依赖下的 CLI
+        run: |
+          uv sync --locked --no-default-groups
+          uv run --locked --no-default-groups pgt --help
+          uv run --locked --no-default-groups pgt configs list experiment
       - run: uv sync --locked --all-groups --all-packages
       - run: uv run ruff check .
       - run: uv run ruff format --check .

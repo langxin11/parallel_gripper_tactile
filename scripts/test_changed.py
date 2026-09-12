@@ -17,26 +17,35 @@ FULL_SUITE_FILES = {
 }
 NON_CODE_PREFIXES = ("docs/", "reports/", "CHANGELOG.md", "AGENTS.md", "CONTRIBUTING.md")
 RELATED_PREFIXES = {
+    "src/parallel_gripper_tactile/cli/": (
+        "tests/test_cli.py",
+        "tests/test_config_catalog.py",
+    ),
+    "src/parallel_gripper_tactile/research/catalog.py": ("tests/test_config_catalog.py",),
     "configs/": (
         "tests/test_research_configuration.py",
         "tests/test_research_execution.py",
         "tests/test_research_study.py",
         "tests/test_study_lifecycle.py",
+        "tests/test_study_progress.py",
     ),
     "scripts/research/": (
         "tests/test_research_configuration.py",
         "tests/test_research_execution.py",
         "tests/test_research_study.py",
         "tests/test_study_lifecycle.py",
+        "tests/test_study_progress.py",
     ),
     "src/parallel_gripper_tactile/research/": (
         "tests/test_research_configuration.py",
         "tests/test_research_execution.py",
         "tests/test_research_study.py",
         "tests/test_study_lifecycle.py",
+        "tests/test_study_progress.py",
     ),
     "src/parallel_gripper_tactile/studies/lifecycle.py": (
         "tests/test_study_lifecycle.py",
+        "tests/test_study_progress.py",
         "tests/test_research_study.py",
         "tests/test_force_tracking_ablation.py",
         "tests/test_force_tracking_controller_comparison_script.py",
@@ -44,6 +53,7 @@ RELATED_PREFIXES = {
     ),
     "src/parallel_gripper_tactile/studies/protocols/": (
         "tests/test_study_lifecycle.py",
+        "tests/test_study_progress.py",
         "tests/test_research_study.py",
         "tests/test_study_aggregation.py",
         "tests/test_force_tracking_ablation.py",

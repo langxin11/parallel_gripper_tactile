@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from copy import deepcopy
 import csv
 import json
 from pathlib import Path
@@ -10,6 +12,7 @@ import pytest
 
 from parallel_gripper_tactile.experiments.friction_estimation import (
     FrictionEstimationConfigError,
+    FrictionEstimationResult,
     FrictionEstimationTask,
     run_friction_estimation,
 )
@@ -29,6 +32,24 @@ STANDARD_TASKS = tuple(
     )
 )
 HARDWARE_SCALE_TASK = TASK_ROOT / "hardware_scale_nominal.yaml"
+
+
+@pytest.fixture(scope="module")
+def standard_scenario_result() -> Callable[
+    [Path], tuple[FrictionEstimationTask, FrictionEstimationResult]
+]:
+    """缓存标准场景仿真，并为调用方隔离其中的可变诊断字段。"""
+    cache: dict[Path, tuple[FrictionEstimationTask, FrictionEstimationResult]] = {}
+
+    def get_result(task_path: Path) -> tuple[FrictionEstimationTask, FrictionEstimationResult]:
+        """同一进程中复用仿真，每次返回独立的任务和结果副本。"""
+        resolved_path = task_path.resolve()
+        if resolved_path not in cache:
+            task = FrictionEstimationTask.load(resolved_path)
+            cache[resolved_path] = (task, run_friction_estimation(PROFILE, task=task))
+        return deepcopy(cache[resolved_path])
+
+    return get_result
 
 
 @pytest.mark.parametrize("task_path", STANDARD_TASKS)
@@ -63,11 +84,14 @@ downward_load:
 
 
 @pytest.mark.parametrize("task_path", STANDARD_TASKS)
-def test_standard_scenarios_estimate_conservatively_and_hold(task_path: Path) -> None:
+def test_standard_scenarios_estimate_conservatively_and_hold(
+    task_path: Path,
+    standard_scenario_result: Callable[
+        [Path], tuple[FrictionEstimationTask, FrictionEstimationResult]
+    ],
+) -> None:
     """标准场景都以保守估计完成探测，并用估计值稳定抵抗后续载荷。"""
-    task = FrictionEstimationTask.load(task_path)
-
-    result = run_friction_estimation(PROFILE, task=task)
+    task, result = standard_scenario_result(task_path)
 
     assert result.passed
     assert result.slip_detected
@@ -128,10 +152,13 @@ def test_uninformative_probe_uses_explicit_fallback() -> None:
     assert result.local_slip_detected_taxel_count == 0
 
 
-def test_legacy_load_detection_settings_do_not_affect_online_result() -> None:
+def test_legacy_load_detection_settings_do_not_affect_online_result(
+    standard_scenario_result: Callable[
+        [Path], tuple[FrictionEstimationTask, FrictionEstimationResult]
+    ],
+) -> None:
     """旧载荷门限和残差参数即使改变，也不能影响纯触觉检测。"""
-    task = FrictionEstimationTask.load(TASK_ROOT / "nominal_friction.yaml")
-    baseline = run_friction_estimation(PROFILE, task=task)
+    task, baseline = standard_scenario_result(TASK_ROOT / "nominal_friction.yaml")
     changed = task.model_copy(
         update={
             "estimator": task.estimator.model_copy(

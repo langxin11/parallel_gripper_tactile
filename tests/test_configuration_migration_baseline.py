@@ -17,17 +17,12 @@ def _baseline() -> dict[str, object]:
     return json.loads(BASELINE.read_text(encoding="utf-8"))
 
 
-def test_migration_baseline_is_immutable() -> None:
-    """基线内容不能被新实现悄悄重写。"""
+def test_migration_baseline_static_snapshot_integrity() -> None:
+    """静态历史快照保持完整；这些断言不代表当前实现行为。"""
     assert hashlib.sha256(BASELINE.read_bytes()).hexdigest() == EXPECTED_SHA256
     baseline = _baseline()
     assert baseline["git_commit"] == "65201b5f711c9aafbdec28a14bc8a76db5a3d59f"
     assert len(baseline["yaml_sources"]) == 80
-
-
-def test_migration_baseline_covers_profiles_and_tasks() -> None:
-    """六个 profile 与十五个 task 均有完整领域值。"""
-    baseline = _baseline()
     assert len(baseline["model_resources"]) == 7
     assert len(baseline["profiles"]) == 6
     tasks = baseline["tasks"]
@@ -37,11 +32,7 @@ def test_migration_baseline_covers_profiles_and_tasks() -> None:
         "force_tracking": 6,
         "friction_estimation": 6,
     }
-
-
-def test_migration_baseline_preserves_admittance_differences() -> None:
-    """导纳专用 MIT、接触、滤波和估计器差异均被基线捕获。"""
-    profiles = _baseline()["profiles"]
+    profiles = baseline["profiles"]
     default = profiles["configs/dm_gripper.yaml"]["effective"]
     admittance = profiles["configs/dm_gripper_admittance.yaml"]["effective"]
     assert (default["control"]["mit"]["kp"], admittance["control"]["mit"]["kp"]) == (
@@ -56,11 +47,7 @@ def test_migration_baseline_preserves_admittance_differences() -> None:
     assert admittance["control"]["force"]["filter_cutoff_hz"] == 2.0
     assert admittance["control"]["force"]["stiffness"]["enabled"] is False
     assert admittance["control"]["force"]["admittance"] is not None
-
-
-def test_migration_baseline_preserves_study_matrices() -> None:
-    """静态正式矩阵与诊断各 phase 的有序条件数保持可审计。"""
-    studies = _baseline()["studies"]
+    studies = baseline["studies"]
     expected = {
         "force_tracking_controller_comparison": 162,
         "force_tracking_ablation": 36,

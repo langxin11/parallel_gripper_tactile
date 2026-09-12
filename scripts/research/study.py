@@ -17,6 +17,7 @@ from parallel_gripper_tactile.research.hydra_support import (
     resolved_mapping,
 )
 from parallel_gripper_tactile.research.configuration import ResearchConfigurationError
+from parallel_gripper_tactile.research.progress import report_study_progress
 from parallel_gripper_tactile.research.study import (
     ResearchStudySetupError,
     execute_research_study,
@@ -72,7 +73,10 @@ def main(config: DictConfig) -> None:
         resolved,
         hydra_output_directory=output_directory,
         provenance=provenance,
+        on_progress=report_study_progress,
     )
+    if resolved.selection.execution.mode == "plan":
+        print(f"研究计划：条件数 {len(resolved.conditions)}，目录：{result.resolve()}", flush=True)
     print(f"Study {resolved.selection.execution.mode}: {result}")
 
 

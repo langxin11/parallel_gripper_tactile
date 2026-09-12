@@ -73,6 +73,12 @@ manifest。
 | `scripts/research/` | 提供轻薄的 Hydra 原生科研入口 | 复制 runner、矩阵或实验物理逻辑 |
 | `cli/` | 参数适配、面向人的诊断和结果展示 | 作为包内模块的反向依赖 |
 
+正式研究的入口适配在 `research/study.py` 的 `_STUDY_ADAPTERS` 显式登记：每个研究类型关联
+领域 schema、需要规范的路径字段、预检函数和 protocol。新增研究时登记一次适配关系，并验证对应配置
+可建计划、执行仍接收同一 `StudyPlan`；不再分别扩展解析、计划和执行的类型分支。
+普通研究先预检再建计划；Torque 调参仍先由 protocol 校验 coarse／confirm 谱系并生成候选计划，
+再按实际候选预检。诊断的 phase 和速率确认的研究身份继续显式传给原协议。
+
 ## 仿真循环所有权
 
 任一实验运行中只能有一个组件推进对应的 `MjData`。`SimulationSession` 提供物理、控制与采样时钟
@@ -219,7 +225,7 @@ DM 核心命令经显式适配后才进入协议量化；Robotiq 硬件单步只
 5. 任何新增结果文件必须先写入独占 run 目录，再登记到 manifest。
 6. 正式 study 的条件只由领域 protocol 展开；计划与执行必须共享同一个 `StudyPlan`，Hydra 外层不得再次展开。
 
-Hydra 与 OmegaConf 仅属于主包的 `research` 依赖组和科研编排层。共享 DM/Robotiq 控制核、硬件基础包
+Hydra 与 OmegaConf 属于主包运行依赖，供 CLI 与科研入口共用 `research/` 组合服务。共享 DM/Robotiq 控制核、硬件基础包
 和夹爪专属真机组合包均不依赖 Hydra 或仿真主包。科研配置解析可以读取、校验和编译模型，但不会创建
 设备连接或发送命令。完整的配置组、路径和目录所有权见
 [Hydra 科研配置与实验编排](research-configuration.md)。

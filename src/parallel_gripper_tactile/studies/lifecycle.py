@@ -11,6 +11,7 @@ import math
 import multiprocessing
 from pathlib import Path
 from typing import Any, Literal
+import warnings
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -26,6 +27,21 @@ FailureStage = Literal[
     "rendering",
     "manifest",
 ]
+
+
+@dataclass(frozen=True, slots=True)
+class StudyProgress:
+    """仅供父进程观察的研究进度，不参与科学配置和持久化格式。"""
+
+    study_directory: Path
+    total: int
+    finished: int
+    scientific_failures: int
+    execution_errors: int
+    state: StudyState
+
+
+StudyProgressCallback = Callable[[StudyProgress], None]
 
 
 class _LifecycleModel(BaseModel):
@@ -407,6 +423,7 @@ def execute_study_lifecycle(
     legacy_manifest_fields: Mapping[str, object] | None = None,
     workers: int = 1,
     record_condition_execution: Callable[[ConditionExecution], None] | None = None,
+    on_progress: StudyProgressCallback | None = None,
 ) -> Path:
     """执行公共 study 生命周期，并在所有可恢复边界保存 manifest。
 
@@ -431,6 +448,31 @@ def execute_study_lifecycle(
             if condition.condition_id in outcomes_by_id
         ]
 
+    def notify_progress(state: StudyState) -> None:
+        """在 manifest 落盘后通知观察者，回调异常不参与研究失败分类。"""
+        if on_progress is None:
+            return
+        outcomes = ordered_outcomes()
+        progress = StudyProgress(
+            study_directory=directory,
+            total=len(plan.conditions),
+            finished=len(outcomes),
+            scientific_failures=sum(item.status == "scientific_failure" for item in outcomes),
+            execution_errors=sum(item.status == "execution_error" for item in outcomes),
+            state=state,
+        )
+        try:
+            on_progress(progress)
+        except Exception as error:
+            # 即使调用者将警告配置成异常，观察失败也不能中断研究。
+            with warnings.catch_warnings():
+                warnings.simplefilter("always", RuntimeWarning)
+                warnings.warn(
+                    f"研究进度回调失败：{type(error).__name__}：{error}",
+                    RuntimeWarning,
+                    stacklevel=2,
+                )
+
     def persist_progress() -> None:
         """只由父进程原子更新运行中 manifest。"""
         _write_json(
@@ -445,6 +487,7 @@ def execute_study_lifecycle(
                 legacy_fields=legacy,
             ),
         )
+        notify_progress("running")
 
     _write_json(
         manifest_path,
@@ -458,6 +501,8 @@ def execute_study_lifecycle(
             legacy_fields=legacy,
         ),
     )
+
+    notify_progress("running")
 
     if workers == 1:
         for condition in plan.conditions:
@@ -540,6 +585,7 @@ def execute_study_lifecycle(
                 legacy_fields=legacy,
             ),
         )
+        notify_progress("failed")
         raise StudyLifecycleError(failure) from error
 
     try:
@@ -564,6 +610,7 @@ def execute_study_lifecycle(
                 legacy_fields=legacy,
             ),
         )
+        notify_progress("failed")
         raise StudyLifecycleError(failure) from error
 
     completed_count = sum(outcome.status != "execution_error" for outcome in outcomes)
@@ -583,6 +630,7 @@ def execute_study_lifecycle(
             legacy_fields=legacy,
         ),
     )
+    notify_progress(state)
     return directory
 
 
@@ -724,6 +772,8 @@ __all__ = [
     "StudyManifest",
     "StudyPlan",
     "StudyPostprocessResult",
+    "StudyProgress",
+    "StudyProgressCallback",
     "assess_recovery",
     "execute_study_lifecycle",
     "execution_failure_rows",

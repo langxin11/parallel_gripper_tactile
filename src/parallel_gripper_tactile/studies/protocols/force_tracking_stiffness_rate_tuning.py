@@ -32,6 +32,7 @@ from parallel_gripper_tactile.studies.lifecycle import (
     ConditionOutcome,
     StudyCondition,
     StudyPlan,
+    StudyProgressCallback,
     StudyPostprocessResult,
     execute_study_lifecycle,
     execution_failure_rows,
@@ -467,6 +468,7 @@ def run_study(
     additional_artifacts: Sequence[Path] = (),
     lifecycle_manifest_fields: Mapping[str, object] | None = None,
     workers: int = 1,
+    on_progress: StudyProgressCallback | None = None,
     study_kind: str = _TUNING_STUDY_KIND,
 ) -> Path:
     """执行调优、生成聚合表、候选排名和参数热图。"""
@@ -561,6 +563,7 @@ def run_study(
         initial_artifacts=(directory / "study.yaml", resolved_config, *additional_artifacts),
         legacy_manifest_fields=manifest_fields,
         workers=workers,
+        on_progress=on_progress,
     )
 
 

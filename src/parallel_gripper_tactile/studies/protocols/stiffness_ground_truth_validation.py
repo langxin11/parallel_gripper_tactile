@@ -27,6 +27,7 @@ from parallel_gripper_tactile.studies.lifecycle import (
     ConditionOutcome,
     StudyCondition,
     StudyPlan,
+    StudyProgressCallback,
     StudyPostprocessResult,
     execute_study_lifecycle,
     execution_failure_rows,
@@ -256,6 +257,7 @@ def run_study(
     additional_artifacts: Sequence[Path] = (),
     lifecycle_manifest_fields: Mapping[str, object] | None = None,
     workers: int = 1,
+    on_progress: StudyProgressCallback | None = None,
 ) -> Path:
     """通过公共生命周期执行准静态真值验证研究。"""
     study_dir = study_directory.resolve()
@@ -354,6 +356,7 @@ def run_study(
         ),
         legacy_manifest_fields=manifest_fields,
         workers=workers,
+        on_progress=on_progress,
         record_condition_execution=record_condition,
     )
 

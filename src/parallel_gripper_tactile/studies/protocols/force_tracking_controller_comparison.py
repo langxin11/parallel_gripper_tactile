@@ -45,6 +45,7 @@ from parallel_gripper_tactile.studies.lifecycle import (
     ConditionOutcome,
     StudyCondition,
     StudyPlan,
+    StudyProgressCallback,
     StudyPostprocessResult,
     execute_study_lifecycle,
     execution_failure_rows,
@@ -590,6 +591,7 @@ def run_study(
     additional_artifacts: Sequence[Path] = (),
     lifecycle_manifest_fields: Mapping[str, object] | None = None,
     workers: int = 1,
+    on_progress: StudyProgressCallback | None = None,
 ) -> Path:
     """通过公共生命周期执行 comparison protocol 并返回 study 目录。"""
     tasks = validate_inputs(config, resolved_profile=resolved_profile)
@@ -676,6 +678,7 @@ def run_study(
         initial_artifacts=(study_dir / "study.yaml", resolved_config, *additional_artifacts),
         legacy_manifest_fields=manifest_fields,
         workers=workers,
+        on_progress=on_progress,
     )
 
 

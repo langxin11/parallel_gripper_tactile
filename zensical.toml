@@ -2,7 +2,8 @@
 site_name = "平行夹爪指尖触觉仿真"
 docs_dir = "docs"
 nav = [
-  { "开始阅读" = "index.md" },
+  { "快速开始" = "index.md" },
+  { "常用工作流" = "workflows.md" },
   { "推荐路线" = [
     { "1. 触觉读数约定" = "tactile-conventions.md" },
     { "2. Onshape 导出" = "onshape-export-upgrade.md" },
@@ -17,7 +18,9 @@ nav = [
     { "DM_Gripper 配置基线与状态" = "custom-gripper-next-phase.md" },
     { "项目架构" = "architecture.md" },
     { "纯 Python 真机联调计划" = "python-hardware-roadmap.md" },
-    { "常用工作流" = "workflows.md" },
+    { "科研配置" = "research-configuration.md" },
+    { "测试规范" = "testing.md" },
+    { "科研报告" = "reports.md" },
     { "代码与注释规范" = "coding-conventions.md" },
   ] },
 ]
