@@ -6,14 +6,14 @@ import threading
 import time
 import math
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 
 from papillarray_hardware import PapillArraySerialClient, PapillArraySerialConfig, PtsReadTimeout
 
 
 @dataclass(frozen=True, slots=True)
 class TactileSnapshot:
-    """一次双侧法向力快照。"""
+    """一次双侧三轴力快照，缺失切向数据不伪造为零。"""
 
     received_at_s: float
     packet_counter: int
@@ -22,6 +22,10 @@ class TactileSnapshot:
     right_force_n: float
     raw_left_fz_n: float
     raw_right_fz_n: float
+    raw_left_fx_n: float | None = None
+    raw_left_fy_n: float | None = None
+    raw_right_fx_n: float | None = None
+    raw_right_fy_n: float | None = None
 
 
 class _FirstOrderLowPassFilter:
@@ -72,8 +76,10 @@ class TactileWorker:
         clock: Callable[[], float] = time.monotonic,
         cutoff_hz: float = 10.0,
         filter_reset_gap_s: float = 0.1,
+        sample_sink: Callable[[dict[str, object]], None] | None = None,
     ) -> None:
         """保存配置，不打开设备。"""
+        self._sample_sink = sample_sink
         self._config = config
         self._clear_bias = clear_bias
         self._client_factory = client_factory
@@ -133,7 +139,7 @@ class TactileWorker:
             return self._snapshot
 
     def _run(self) -> None:
-        """打开、配置并持续读取双侧全局 Fz。"""
+        """打开、配置并持续读取双侧三轴全局力。"""
         try:
             with self._client_factory(self._config) as client:
                 client.configure_stream()
@@ -171,7 +177,13 @@ class TactileWorker:
                         ),
                         raw_left_fz_n=raw_left_fz_n,
                         raw_right_fz_n=raw_right_fz_n,
+                        raw_left_fx_n=float(packet.global_forces[0][0]),
+                        raw_left_fy_n=float(packet.global_forces[0][1]),
+                        raw_right_fx_n=float(packet.global_forces[1][0]),
+                        raw_right_fy_n=float(packet.global_forces[1][1]),
                     )
+                    if self._sample_sink is not None:
+                        self._sample_sink(asdict(snapshot))
                     with self._condition:
                         self._snapshot = snapshot
                         self._last_timeout = None

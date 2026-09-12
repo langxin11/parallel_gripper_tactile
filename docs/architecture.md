@@ -61,7 +61,7 @@ manifest。
 | `scenes/` | 装配 MJCF、物体材料、碰撞几何和求解选项 | 控制算法、指标统计 |
 | `tactile.py`、`contact_taxels.py` | 把不同后端统一为局部 `(3, rows, cols)` 力数组 | 决定目标力或控制状态 |
 | `force_scheduling.py` | 由切向载荷和摩擦系数生成受限的平均单侧目标力 | 读取 MuJoCo 状态或直接写执行器 |
-| `tangential_disturbance.py` | 从触觉历史生成只增不减的法向目标策略，不消费外载或物体运动真值 | 估计摩擦系数或证明微滑移 |
+| `tangential_disturbance.py` | 保留 Pydantic 仿真配置兼容，并再导出共享的纯触觉增力策略 | 估计摩擦系数或证明微滑移 |
 | `packages/robotiq_grasp_core` | 在整数命令空间执行稳定判定、单 tick 增益估计、HOLD 与安全动作决策 | 推进仿真、读取 oracle 刚度或依赖 DM 控制核 |
 | `perception/slip.py` | 仅由触觉时序生成变化评分，持续确认后冻结摩擦候选 | 读取外部载荷、探测命令、真值 `μ` 或物体运动 |
 | `perception/friction.py` | 保留历史估计器和估计结果结构 | 被当前实验实例化以使用残差检测 |
@@ -211,6 +211,9 @@ USB2CAN 协议、传输、状态刷新和当前夹爪部署边界；`packages/ro
 纯 Python 真机实验由夹爪专属的组合包承载：`dmgripper_experiments` 可依赖
 `dmgripper_hardware`、`papillarray_hardware` 和 DM 控制核，但不得依赖 Robotiq 硬件或控制核。
 它只负责试验流程、设备调度、时间对齐与记录，不定义新的 MIT 或触觉控制公式。
+切向触觉增力策略已移入 `dm_grasp_core.grasp.disturbance`，使仿真与 DMgripper 真机共用同一纯计算
+实现；仿真主包的 `tangential_disturbance.py` 仅保留 Pydantic 配置兼容并再导出该策略。倒水实验的
+`dmgripper-cup` 是 Tyro 独立入口，不依赖 Hydra、MuJoCo 或仿真主包。
 后续 `robotiq_experiments` 以相同层次单独组合 Robotiq 链路；两者不共享命令类型、
 控制状态机或调度周期。
 所有设备对象均要求显式打开或调用才发生 I/O，当前不会自动连接、激活或驱动执行器。

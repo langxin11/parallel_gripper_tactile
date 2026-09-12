@@ -260,7 +260,7 @@ stiff Step 平台极限环退出最终矩阵，只保留专项复现；`direct-t
 刚度估计器对比展示误差指标和力/刚度轨迹；因果诊断展示扫描变量—诊断指标曲线与有效轨迹叠加。
 所有 study 图默认输出一份 600 DPI PNG。控制器／估计器比较的简单基线差值图与 MAE 补充面板仅在
 `execution.plot_mode=diagnostic` 下生成，且差值图必须有有效基线。ADRC 参数关系图在 coarse 阶段
-保留，在 confirm 阶段转为诊断图。出图模式和逐次图选择见[科研出图模式](research-configuration.md#出图模式)。
+保留，在 confirm 阶段转为诊断图。出图模式和逐次图选择见[科研出图模式](research-configuration.md#_7)。
 
 二阶直接力矩 ADRC 的测量轻滤波和控制／观测器带宽采用两阶段调参：粗扫先固定 `medium` 与一个 seed，
 确认阶段再在三种 preset 与三个 seed 上复验。计划、coarse 执行与 confirm 都使用 Hydra 正式入口：

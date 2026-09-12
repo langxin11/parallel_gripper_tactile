@@ -19,6 +19,7 @@ nav = [
     { "DM_Gripper 配置基线与状态" = "custom-gripper-next-phase.md" },
     { "项目架构" = "architecture.md" },
     { "纯 Python 真机联调计划" = "python-hardware-roadmap.md" },
+    { "DMgripper 真机倒水实验" = "dmgripper-cup.md" },
     { "科研配置" = "research-configuration.md" },
     { "测试规范" = "testing.md" },
     { "科研报告" = "reports.md" },

@@ -36,3 +36,19 @@ PapillArray 首次收到采样率配置或清零命令后可能短暂无输出�
 `0.012 m/s`，可用 `--return-closure-velocity` 调整。回位阶段单独使用 `kp=10`、`kd=0.5`
 和 `2 N·m` 合成力矩上限，以克服零位附近的静摩擦。总截止时间不会短于轨迹规划时长；轨迹结束后
 继续保持零位，直到实际位置进入 `0.02 rad` 容差，默认额外允许 `2 s` 收敛，通过后才失能。
+
+## 倒水实验
+
+`dmgripper-cup` 提供一个独立的真机倒水交互流程。默认模式只输出配置和输出目录，不导入运行时或
+访问设备；显式加入 `--execute` 才会使能真机。它使用 Tyro dataclass 默认值、严格 YAML、Tyro
+命令行覆盖的顺序解析配置：
+
+```sh
+uv run --package dmgripper-experiments dmgripper-cup \
+  --config configs/hardware/dmgripper/cup.yaml \
+  --controller pid --control.target-force-n 0.6
+```
+
+完整操作顺序、`ready`／`release`／`status` 交互命令、输出记录和重绘方法见
+[`docs/dmgripper-cup.md`](../../docs/dmgripper-cup.md)。默认数值尚未经真机验证；执行前必须准备急停和
+承接容器。

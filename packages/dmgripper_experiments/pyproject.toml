@@ -12,10 +12,16 @@ dependencies = [
     "dm-grasp-core==0.1.0",
     "dmgripper-hardware==0.1.0",
     "papillarray-hardware==0.1.0",
+    "PyYAML>=6.0",
+    "tyro>=0.9.0",
+    "matplotlib>=3.8",
+    "SciencePlots>=2.1",
 ]
 
 [project.scripts]
 dmgripper-force-demo = "dmgripper_experiments.cli:main"
+dmgripper-cup = "dmgripper_experiments.cup_cli:main"
+dmgripper-cup-plot = "dmgripper_experiments.cup_plot:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

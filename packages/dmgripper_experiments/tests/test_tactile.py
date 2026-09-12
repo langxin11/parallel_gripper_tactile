@@ -98,3 +98,34 @@ def test_overall_timeout_keeps_last_protocol_diagnostics() -> None:
             raise AssertionError("预期触觉总等待超时")
     finally:
         worker.stop()
+
+
+def test_worker_preserves_all_axes_in_snapshot_and_record() -> None:
+    """控制快照和原始记录必须保留有符号三轴力，不能伪造零切向力。"""
+    from dataclasses import asdict
+
+    class ThreeAxisClient(_RetryClient):
+        def read_packet(self):
+            packet = super().read_packet()
+            packet.global_forces = ([0.12, -0.34, 0.56], [-0.78, 0.9, -0.12])
+            return packet
+
+    records = []
+    worker = TactileWorker(
+        PapillArraySerialConfig(timeout_s=0.05, packet_timeout_s=0.2),
+        clear_bias=False,
+        client_factory=ThreeAxisClient,
+        sample_sink=records.append,
+    )
+    worker.start()
+    try:
+        snapshot = worker.wait_for_update(None, 0.5)
+        assert snapshot.raw_left_fx_n == 0.12
+        assert snapshot.raw_left_fy_n == -0.34
+        assert snapshot.raw_right_fx_n == -0.78
+        assert snapshot.raw_right_fy_n == 0.9
+        assert snapshot.raw_right_fz_n == -0.12
+        assert snapshot.right_force_n == 0.0
+        assert asdict(snapshot) in records
+    finally:
+        worker.stop()

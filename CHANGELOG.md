@@ -9,6 +9,10 @@
 
 ### 新增
 
+- 新增 `dmgripper-cup` 真机倒水交互入口及 `dmgripper-cup-plot` 离线重绘命令：配置按 dataclass
+  默认值、严格 YAML、Tyro 覆盖合并；默认 dry-run，只有显式 `--execute` 才进入真机运行时。运行记录
+  写入配置、事件、触觉、控制 trace、manifest 和 PDF／PNG 诊断图。默认参数尚未经真机验收。
+
 - 新增 DM 纯仿真 `tangential-disturbance` 单次实验：稳定预载、撤支撑和初始保持合格后施加 ramp／step／pulse
   切向载荷；支持 `full`／`pid-only` 的 MIT 法向 PID 路径、constant／fixed_step／dynamic_step 只增目标策略及
   shear_increase／force_ratio 检测器。runner 保存全频 CSV、指标及同 stem PNG／PDF；Hydra 支持单次计划与探索性
