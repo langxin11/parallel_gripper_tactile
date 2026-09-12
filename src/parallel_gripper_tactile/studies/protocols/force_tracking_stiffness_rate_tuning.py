@@ -162,12 +162,17 @@ def rank_candidates(
             and force_std <= max_plateau_force_std_n
             and overshoot <= max_overshoot_ratio
         )
+        constraint_violation = max(
+            max(0.0, force_std / max_plateau_force_std_n - 1.0),
+            max(0.0, overshoot / max_overshoot_ratio - 1.0),
+        )
         ranking.append(
             {
                 "candidate_id": candidate.identifier,
                 "kp_s_inv": candidate.kp_s_inv,
                 "max_force_rate_n_s": candidate.max_force_rate_n_s,
                 "feasible": str(feasible).lower(),
+                "constraint_violation": constraint_violation,
                 "rmse_n": rmse,
                 "overshoot_ratio": overshoot,
                 "max_positive_force_rate_n_s": max(
@@ -181,6 +186,7 @@ def rank_candidates(
     ranking.sort(
         key=lambda row: (
             row["feasible"] != "true",
+            float(row["constraint_violation"]),
             float(row["rmse_n"]),
             float(row["plateau_force_std_n"]),
         )
@@ -226,7 +232,7 @@ def build_plan(
         )
     definition = {
         "hash_schema_version": 1,
-        "protocol_revision": f"{study_kind}.v2",
+        "protocol_revision": f"{study_kind}.v3",
         "study": config.model_dump(mode="python", exclude={"output_root"}),
         "resources": {
             "profile_sha256": model_configuration_sha256(
@@ -247,7 +253,7 @@ def build_plan(
                 "max_plateau_force_std_n": config.max_plateau_force_std_n,
                 "max_overshoot_ratio": config.max_overshoot_ratio,
             },
-            "ordering": "feasible,rmse,plateau_force_std; stable v1",
+            "ordering": "feasible,constraint_violation,rmse,plateau_force_std; stable v2",
         },
     }
     definition_hash = scientific_configuration_hash(definition, repository_root=_REPOSITORY_ROOT)

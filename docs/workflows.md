@@ -164,7 +164,7 @@ uv run python scripts/research/study.py \
 ```
 
 第二阶段先调优并确认刚度速率控制器，再调优二阶直接力矩 ADRC。刚度速率确认固定调优排名第一的
-\(K_P=30\ \mathrm{s^{-1}}\)、\(\dot F_{\max}=70\ \mathrm{N/s}\)，以 54 条条件检查频率和材料泛化；
+\(K_P=20\ \mathrm{s^{-1}}\)、\(\dot F_{\max}=50\ \mathrm{N/s}\)，以 54 条条件检查频率和材料泛化；
 ADRC 的 `confirm` 是唯一具有强制谱系依赖的阶段，必须使用已完成 coarse 后终端打印的绝对目录：
 
 ```bash

@@ -25,8 +25,8 @@ study:
     stiffness_estimator_method: window_linear
     materials: [medium, hard, stiff]
     seeds: {start: 0, count: 3}
-    kp_s_inv: [30.0]
-    max_force_rate_n_s: [70.0]
+    kp_s_inv: [20.0]
+    max_force_rate_n_s: [50.0]
     max_joint_velocity_rad_s: 0.5
     max_plateau_force_std_n: 0.03
     max_overshoot_ratio: 0.10

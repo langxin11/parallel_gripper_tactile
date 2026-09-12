@@ -27,8 +27,8 @@
 - 新增 `force_tracking_stiffness_rate_tuning` 小规模调优：固定 250 Hz stiff Step、`K_I=K_D=0` 和
   `window_linear`，比较九组 `K_P × 最大力变化率` 候选及 `pid-torque-ff` 性能基线，按平台力标准差、
   超调约束和 RMSE 排名，并生成物理符号参数热图。
-- 新增 `force_tracking_stiffness_rate_confirmation` 参数确认：固定调优胜出的
-  `K_P=30 s^-1`、`max_force_rate_n_s=70 N/s`，覆盖 500／250／125 Hz 与三种正式材料的 54 条
+- 新增 `force_tracking_stiffness_rate_confirmation` 参数确认：固定二次调优选出的
+  `K_P=20 s^-1`、`max_force_rate_n_s=50 N/s`，覆盖 500／250／125 Hz 与三种正式材料的 54 条
   配对条件，并登记实测最大正力增长率。
 - 新增 `force_tracking_stiffness_rate_refinement` 二次调优：针对首轮确认中 500 Hz medium／hard 的
   超调失败，以 42 条配对条件扫描 `K_P={20,25,30} s^-1` 与 `max_force_rate_n_s={50,70} N/s`；

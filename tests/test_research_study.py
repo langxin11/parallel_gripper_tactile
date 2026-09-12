@@ -306,8 +306,8 @@ def test_stiffness_rate_confirmation_preserves_frequency_material_matrix() -> No
         0.008,
     )
     assert config.materials == ("medium", "hard", "stiff")
-    assert config.kp_s_inv == (30.0,)
-    assert config.max_force_rate_n_s == (70.0,)
+    assert config.kp_s_inv == (20.0,)
+    assert config.max_force_rate_n_s == (50.0,)
     assert resolved.plan.study_kind == "force_tracking_stiffness_rate_confirmation"
     assert len(resolved.conditions) == 54
     assert len({row["pair_key"] for row in resolved.conditions}) == 27

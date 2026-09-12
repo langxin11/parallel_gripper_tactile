@@ -175,3 +175,41 @@ def test_ranking_applies_plateau_and_overshoot_constraints_before_rmse() -> None
     assert ranking[0]["candidate_id"] == candidates[1].identifier
     assert ranking[0]["feasible"] == "true"
     assert ranking[1]["feasible"] == "false"
+
+
+def test_ranking_prefers_smaller_constraint_violation_when_all_candidates_fail() -> None:
+    """没有可行候选时，轻微越界候选应排在低 RMSE 但严重越界候选之前。"""
+    config = _config()
+    candidates = config.candidates()[:2]
+    aggregates = [
+        {
+            "candidate_id": candidates[0].identifier,
+            "runs": 3,
+            "passed_runs": 3,
+            "rmse_n_mean": 0.4,
+            "overshoot_ratio_mean": 0.13,
+            "max_positive_force_rate_n_s_mean": 80.0,
+            "plateau_force_std_n_mean": 0.01,
+            "dominant_oscillation_amplitude_n_mean": 0.005,
+        },
+        {
+            "candidate_id": candidates[1].identifier,
+            "runs": 3,
+            "passed_runs": 3,
+            "rmse_n_mean": 0.6,
+            "overshoot_ratio_mean": 0.105,
+            "max_positive_force_rate_n_s_mean": 60.0,
+            "plateau_force_std_n_mean": 0.01,
+            "dominant_oscillation_amplitude_n_mean": 0.005,
+        },
+    ]
+
+    ranking = rank_candidates(
+        aggregates,
+        candidates,
+        max_plateau_force_std_n=0.03,
+        max_overshoot_ratio=0.10,
+    )
+
+    assert ranking[0]["candidate_id"] == candidates[1].identifier
+    assert float(ranking[0]["constraint_violation"]) == pytest.approx(0.05)
