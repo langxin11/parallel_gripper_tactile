@@ -1,19 +1,28 @@
-"""记录真机倒水实验的可恢复运行产物。"""
+"""通用抓取实验的运行目录、trace、事件与 manifest。
+
+记录器刻意不对控制时钟与触觉时钟作同步推断：每个控制周期只写入
+调用方提供的实际值，缺失量保持为空。数据写入失败必须向上传播，
+不得为了保护终端显示而吞掉。
+"""
 
 from __future__ import annotations
 
 import csv
 import json
 import threading
+import uuid
 from collections.abc import Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Self
 
+from .config import ExperimentConfig, experiment_config_record, sanitize_directory_component
 
 TRACE_FIELDS = (
     "time_s",
-    "state",
+    "phase",
+    "task_time_s",
+    "contact_segment",
     "tactile_received_at_s",
     "tactile_timestamp_us",
     "packet_counter",
@@ -26,10 +35,19 @@ TRACE_FIELDS = (
     "left_fz_n",
     "right_fz_n",
     "measured_force_n",
+    "control_force_n",
+    "target_source",
     "target_force_n",
+    "target_raw_force_n",
+    "target_force_rate_n_s",
+    "target_force_acceleration_n_s2",
+    "target_trigger_active",
+    "target_increase_count",
     "measured_tangential_force_n",
-    "trigger_active",
-    "force_limited",
+    "stiffness_n_per_m",
+    "stiffness_valid",
+    "stiffness_updated",
+    "stiffness_reason",
     "force_deadband_active",
     "unloading_blocked",
     "position_rad",
@@ -45,36 +63,82 @@ TRACE_FIELDS = (
     "command_latency_s",
 )
 
-SCHEMA_VERSION = 2
-RECORDER_VERSION = "0.2.0"
+SCHEMA_NAME = "dmgripper-experiment/v1"
+RECORDER_VERSION = "1.0.0"
 
 
-class CupRecorder:
-    """将一趟真机倒水实验写入一个独占目录。
+def create_run_directory(root: Path | str, config: ExperimentConfig) -> Path:
+    """创建 ``<root>/<task>/<object>/<UTC时间戳>-<run_id>`` 的独占目录。
 
-    记录器刻意不对控制时钟与触觉时钟作同步推断。每个控制周期只写入调用方
-    提供的实际值，缺失值保持为空，方便离线分析辨认数据缺口。
+    目录组件使用清理后的名称；原始名称保留在配置与 manifest 中。
+    run_id 为随机短标识，同名任务连续运行不会覆盖。
 
     Args:
-        output_directory: 本趟实验专用且尚不存在的输出目录。
-        config: 本趟实验使用的可 JSON 序列化配置。
+        root: 输出根目录（相对路径按调用 cwd 解析）。
+        config: 冻结实验配置。
+
+    Returns:
+        新创建且不存在的运行目录。
+
+    Raises:
+        FileExistsError: 碰撞后重试仍命中已有目录。
+    """
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    task = sanitize_directory_component(config.metadata.task_name)
+    obj = sanitize_directory_component(config.metadata.object_name)
+    for _ in range(8):
+        run_id = uuid.uuid4().hex[:8]
+        directory = Path(root) / task / obj / f"{timestamp}-{run_id}"
+        try:
+            directory.mkdir(parents=True, exist_ok=False)
+            return directory
+        except FileExistsError:
+            continue
+    raise FileExistsError(f"无法创建独占运行目录：{directory}")
+
+
+class ExperimentRecorder:
+    """把一趟通用抓取实验写入一个独占目录。
+
+    Args:
+        directory: 本趟实验专用且尚不存在的输出目录。
+        config: 本趟实验使用的冻结配置。
+        input_config_path: 原始 YAML 路径；Python 构造可为 ``None``。
+        code_version: 记录代码版本标识。
     """
 
-    def __init__(self, output_directory: Path, config: dict[str, Any]) -> None:
-        """构造记录器并立即创建输出目录和基础文件。"""
-        self.directory = Path(output_directory)
-        self.directory.mkdir(parents=True, exist_ok=False)
+    def __init__(
+        self,
+        directory: Path,
+        config: ExperimentConfig,
+        *,
+        input_config_path: Path | None = None,
+        code_version: str = RECORDER_VERSION,
+    ) -> None:
+        """构造记录器并立即创建基础文件。"""
+        self.directory = Path(directory)
+        self.directory.mkdir(parents=True, exist_ok=True)
+        if any(self.directory.iterdir()):
+            raise FileExistsError(f"运行目录不为空，拒绝覆盖：{self.directory}")
         self._started_at = _utc_now()
         self._closed = False
         self._lock = threading.RLock()
+        self._extra_artifacts: dict[str, str] = {}
         self._config_path = self.directory / "config.json"
         self._events_path = self.directory / "events.jsonl"
         self._trace_path = self.directory / "trace.csv"
         self._tactile_path = self.directory / "tactile.jsonl"
         self._manifest_path = self.directory / "manifest.json"
-
+        record: dict[str, Any] = {
+            "schema": SCHEMA_NAME,
+            "input_config_path": (
+                str(input_config_path) if input_config_path is not None else None
+            ),
+            "metadata": experiment_config_record(config)["metadata"],
+            "effective": experiment_config_record(config),
+        }
         with self._config_path.open("w", encoding="utf-8") as handle:
-            json.dump(config, handle, ensure_ascii=False, indent=2, sort_keys=True)
+            json.dump(record, handle, ensure_ascii=False, indent=2, sort_keys=True, default=str)
             handle.write("\n")
         self._events_handle = self._events_path.open("a", encoding="utf-8")
         self._tactile_handle = self._tactile_path.open("a", encoding="utf-8")
@@ -82,6 +146,7 @@ class CupRecorder:
         self._writer = csv.DictWriter(self._trace_handle, fieldnames=TRACE_FIELDS)
         self._writer.writeheader()
         self._trace_handle.flush()
+        self._code_version = code_version
 
     def __enter__(self) -> Self:
         """返回当前记录器。"""
@@ -103,9 +168,6 @@ class CupRecorder:
     def append(self, event: Mapping[str, Any]) -> None:
         """追加一个结构化事件并立即刷新到磁盘。
 
-        Args:
-            event: 可 JSON 序列化的事件字典。
-
         Raises:
             RuntimeError: 记录器已经关闭。
         """
@@ -120,12 +182,6 @@ class CupRecorder:
 
         该方法可由触觉工作线程调用；它与控制 trace、事件和关闭操作共享锁，
         因而不会使 JSONL 行相互交错。
-
-        Args:
-            record: 单个设备触觉包的完整可 JSON 序列化记录。
-
-        Raises:
-            RuntimeError: 记录器已经关闭。
         """
         with self._lock:
             self._ensure_open()
@@ -135,9 +191,6 @@ class CupRecorder:
 
     def write(self, row: Mapping[str, Any]) -> None:
         """写入一个控制周期 trace，并立即刷新以保留异常前的数据。
-
-        Args:
-            row: 控制周期数据。未提供的固定字段写为空，额外字段会被拒绝。
 
         Raises:
             KeyError: 行中包含未定义的字段。
@@ -152,12 +205,32 @@ class CupRecorder:
             self._writer.writerow({field: row.get(field, "") for field in TRACE_FIELDS})
             self._trace_handle.flush()
 
-    def close(self, status: str = "completed", error: BaseException | str | None = None) -> None:
+    def register_artifacts(self, names: Mapping[str, str]) -> None:
+        """登记后处理产物（如绘图文件）的名称与路径。"""
+        with self._lock:
+            if self._closed:
+                raise RuntimeError("ExperimentRecorder 已关闭。")
+            self._extra_artifacts.update(dict(names))
+
+    def close(
+        self,
+        status: str = "completed",
+        error: BaseException | str | None = None,
+        *,
+        disable_confirmed: bool | str = "not_applicable",
+        cleanup_errors: list[str] | None = None,
+        post_processing_error: BaseException | str | None = None,
+        input_config_path: Path | None = None,
+    ) -> None:
         """关闭数据文件并写入最终 manifest。
 
         Args:
-            status: 运行最终状态，正常结束时为 `completed`。
-            error: 失败原因；异常会保留其类型和消息。
+            status: 运行最终状态（completed／failed／cancelled）。
+            error: 原始失败原因；异常保留类型与消息。
+            disable_confirmed: 失能确认结果；使能前取消记 ``not_applicable``。
+            cleanup_errors: 退出清理阶段的次要故障列表。
+            post_processing_error: 设备正常结束后的绘图等后处理失败。
+            input_config_path: 原始输入 YAML 路径。
         """
         with self._lock:
             if self._closed:
@@ -166,13 +239,17 @@ class CupRecorder:
             self._tactile_handle.close()
             self._trace_handle.close()
             manifest: dict[str, Any] = {
-                "schema_version": SCHEMA_VERSION,
-                "version": RECORDER_VERSION,
-                "started_at": self._started_at,
+                "schema": SCHEMA_NAME,
+                "version": self._code_version,
+                "created_at": self._started_at,
                 "ended_at": _utc_now(),
                 "status": status,
-                "files": [
-                    path.name
+                "disable_confirmed": disable_confirmed,
+                "input_config_path": (
+                    str(input_config_path) if input_config_path is not None else None
+                ),
+                "files": {
+                    path.name: path.name
                     for path in (
                         self._config_path,
                         self._events_path,
@@ -180,10 +257,15 @@ class CupRecorder:
                         self._trace_path,
                     )
                     if path.is_file()
-                ],
+                },
             }
+            manifest["files"].update(self._extra_artifacts)
             if error is not None:
                 manifest["error"] = _error_details(error)
+            if cleanup_errors:
+                manifest["cleanup_errors"] = list(cleanup_errors)
+            if post_processing_error is not None:
+                manifest["post_processing_error"] = _error_details(post_processing_error)
             with self._manifest_path.open("w", encoding="utf-8") as handle:
                 json.dump(manifest, handle, ensure_ascii=False, indent=2, sort_keys=True)
                 handle.write("\n")
@@ -192,7 +274,7 @@ class CupRecorder:
     def _ensure_open(self) -> None:
         """拒绝关闭后的写入。"""
         if self._closed:
-            raise RuntimeError("CupRecorder 已关闭。")
+            raise RuntimeError("ExperimentRecorder 已关闭。")
 
 
 def _utc_now() -> str:

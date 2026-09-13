@@ -1,159 +1,211 @@
-"""最小纯 Python 真机力跟踪命令行。"""
+"""DMgripper 通用抓取实验命令行。
+
+默认只验证配置并输出计划（dry-run），不导入运行时、不打开设备；
+``--execute`` 是访问真机的显式开关。交互执行会按终端能力选择 Rich
+或纯文本展示，非交互执行要求明确的自动启动与自动结束组合。
+"""
 
 from __future__ import annotations
 
-import argparse
 import json
+import queue
 import sys
+import threading
 from collections.abc import Sequence
-from datetime import datetime
+from dataclasses import dataclass
 from pathlib import Path
-from typing import NoReturn
+from typing import NoReturn, TextIO
 
-from dmgripper_hardware import DEFAULT_USB2CAN_PORT
-from papillarray_hardware import DEFAULT_PAPILLARRAY_PORT
-
-from .config import ForceDemoConfig
-from .runtime import config_record, run_force_demo
+from .config import ExperimentConfig, experiment_config_record, load_experiment_config
+from .recording import create_run_directory
 
 
-def build_parser() -> argparse.ArgumentParser:
-    """创建命令行参数解析器。"""
-    parser = argparse.ArgumentParser(
-        description="DM4310P 轨迹预接触与 PapillArray 导纳力跟踪（默认 dry-run）",
-        allow_abbrev=False,
-    )
-    parser.add_argument("--execute", action="store_true", help="显式许可使能电机并执行实验")
-    parser.add_argument("--bias", action="store_true", help="使能前向无负载触觉传感器发送清零命令")
-    parser.add_argument("--dm-port", default=DEFAULT_USB2CAN_PORT)
-    parser.add_argument("--tactile-port", default=DEFAULT_PAPILLARRAY_PORT)
-    parser.add_argument("--target-force", type=float, default=0.5, metavar="N")
-    parser.add_argument("--duration", type=float, default=10.0, metavar="S")
-    parser.add_argument(
-        "--return-closure-velocity",
-        type=float,
-        default=0.012,
-        metavar="M/S",
-        help="回位闭合量轨迹最大速度，默认 0.012 m/s",
-    )
-    parser.add_argument(
-        "--zero-force-threshold",
-        type=float,
-        default=0.1,
-        metavar="N",
-        help="使能前每侧允许的零力绝对值，默认 0.1 N",
-    )
-    parser.add_argument(
-        "--bias-settle",
-        type=float,
-        default=2.0,
-        metavar="S",
-        help="bias 后保持无负载的等待时间，默认与 ROS 2 一致为 2 秒",
-    )
-    parser.add_argument(
-        "--zero-force-stable",
-        type=float,
-        default=0.5,
-        metavar="S",
-        help="零力窗口连续稳定时间，默认 0.5 秒",
-    )
-    parser.add_argument(
-        "--zero-force-timeout",
-        type=float,
-        default=5.0,
-        metavar="S",
-        help="零力验证总时限，默认 5 秒",
-    )
-    parser.add_argument(
-        "--skip-zero-check",
-        action="store_true",
-        help="显式跳过零力稳定验证；仅在已独立确认清零后使用",
-    )
-    parser.add_argument(
-        "--tactile-startup-timeout",
-        type=float,
-        default=5.0,
-        metavar="S",
-        help="首次连接触觉并等待有效包的总时限，默认 5 秒",
-    )
-    parser.add_argument("--output", type=Path, default=None, metavar="CSV")
-    return parser
+def _bootstrap(argv: Sequence[str]) -> tuple[Path | None, bool, bool, Path | None, list[str]]:
+    """提取不属于 YAML 或 Tyro 配置的操作参数。"""
+    config_path: Path | None = None
+    execute = False
+    bias = False
+    output: Path | None = None
+    remaining: list[str] = []
+    index = 0
+    while index < len(argv):
+        argument = argv[index]
+        if argument in {"--config", "--output"}:
+            if index + 1 >= len(argv):
+                raise ValueError(f"{argument} 需要路径")
+            value = Path(argv[index + 1])
+            if argument == "--config":
+                config_path = value
+            else:
+                output = value
+            index += 2
+        elif argument == "--execute":
+            execute = True
+            index += 1
+        elif argument == "--bias":
+            bias = True
+            index += 1
+        else:
+            remaining.append(argument)
+            index += 1
+    return config_path, execute, bias, output, remaining
+
+
+@dataclass(frozen=True, slots=True)
+class _InputFailure:
+    """把后台输入异常安全地传回运行线程。"""
+
+    error: Exception
+
+
+_INPUT_CLOSED = object()
+
+
+def _action_source(stream: TextIO | None = None):
+    """创建非阻塞的交互命令来源；输入线程不访问串口。
+
+    完整输入行会去除首尾空白并按 Unicode 规则折叠大小写；空行忽略。
+    后台读取异常不会静默丢失，而是在运行线程下次轮询时明确抛出。
+    """
+    input_stream = sys.stdin if stream is None else stream
+    actions: queue.SimpleQueue[object] = queue.SimpleQueue()
+
+    def read_stdin() -> None:
+        """持续读取完整命令行。"""
+        try:
+            for line in input_stream:
+                action = line.strip().casefold()
+                if action:
+                    actions.put(action)
+        except Exception as error:  # noqa: BLE001
+            actions.put(_InputFailure(error))
+        else:
+            actions.put(_INPUT_CLOSED)
+
+    threading.Thread(target=read_stdin, name="dmgripper-input", daemon=True).start()
+
+    def next_action() -> str | None:
+        """返回当前已有的一条命令。"""
+        try:
+            action = actions.get_nowait()
+        except queue.Empty:
+            return None
+        if isinstance(action, _InputFailure):
+            raise RuntimeError(f"交互输入读取失败：{action.error}") from action.error
+        if action is _INPUT_CLOSED:
+            raise RuntimeError("交互输入已关闭")
+        assert isinstance(action, str)
+        return action
+
+    return next_action
+
+
+def _emit(event: dict[str, object]) -> None:
+    """输出一条 JSON 事件。"""
+    print(json.dumps(event, ensure_ascii=False, allow_nan=False), flush=True)
+
+
+def _print_exception_notes(error: BaseException) -> None:
+    """把运行时附加的清理警告与记录目录醒目输出。"""
+    for note in getattr(error, "__notes__", ()):
+        print(note, file=sys.stderr)
 
 
 def run(argv: Sequence[str] | None = None) -> int:
-    """解析参数；dry-run 只显示计划，execute 才访问设备。"""
-    args = build_parser().parse_args(argv)
+    """解析配置；默认只输出计划，显式 execute 才导入运行时。"""
     try:
-        config = ForceDemoConfig(
-            target_force_n=args.target_force,
-            tracking_duration_s=args.duration,
-            tactile_startup_timeout_s=args.tactile_startup_timeout,
-            tactile_bias_settle_s=args.bias_settle,
-            return_closure_velocity_m_s=args.return_closure_velocity,
-            zero_force_threshold_n=args.zero_force_threshold,
-            zero_force_stable_s=args.zero_force_stable,
-            zero_force_timeout_s=args.zero_force_timeout,
+        config_path, execute, bias, output, remaining = _bootstrap(
+            list(sys.argv[1:] if argv is None else argv)
         )
-        output = args.output or Path(
-            f"outputs/real/dm_force_demo_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        default = (
+            load_experiment_config(config_path) if config_path is not None else ExperimentConfig()
         )
-        if not args.execute:
-            print(
-                json.dumps(
-                    {
-                        "mode": "dry-run",
-                        "dm_port": args.dm_port,
-                        "tactile_port": args.tactile_port,
-                        "clear_bias": args.bias,
-                        "verify_zero_force": not args.skip_zero_check,
-                        "output": str(output),
-                        "config": config_record(config),
-                    },
-                    ensure_ascii=False,
-                    allow_nan=False,
-                )
+        import tyro
+
+        config = tyro.cli(
+            ExperimentConfig,
+            args=remaining,
+            default=default,
+            description=(
+                "DMgripper 通用抓取实验。默认只检查配置；--config PATH 加载严格 YAML，"
+                "--output PATH 指定输出根目录，--bias 请求空载清零，--execute 在终端执行。"
+                "运行时输入 start、status 或 release，并按 Enter 提交。"
+            ),
+        )
+        record = experiment_config_record(config)
+        if not execute:
+            _emit(
+                {
+                    "mode": "dry-run",
+                    "dm_port": config.hardware.dm_port,
+                    "tactile_port": config.hardware.tactile_port,
+                    "clear_bias": bias,
+                    "config": record,
+                }
             )
             return 0
 
-        def emit(event: dict[str, object]) -> None:
-            print(json.dumps(event, ensure_ascii=False, allow_nan=False), flush=True)
+        interactive = sys.stdin.isatty()
+        if not interactive:
+            if not config.lifecycle.auto_start or config.lifecycle.on_finished != "return":
+                raise ValueError(
+                    "非交互 --execute 要求 lifecycle.auto_start=true 且 on_finished=return；"
+                    "交互实验请在终端运行"
+                )
 
-        result = run_force_demo(
+        output_root = output if output is not None else Path(config.output.root)
+        output_directory = create_run_directory(output_root, config)
+
+        from .runtime import run_experiment
+        from .terminal import TerminalDisplay
+
+        terminal_mode = config.terminal.mode
+        if terminal_mode == "auto" and not interactive and not sys.stdout.isatty():
+            terminal_mode = "plain"
+        terminal = TerminalDisplay(terminal_mode, refresh_hz=config.terminal.refresh_hz)
+
+        def event_sink(event: dict[str, object]) -> None:
+            """Rich 正常时由面板显示；降级后立即恢复 JSON 事件输出。"""
+            if not terminal.uses_rich:
+                _emit(event)
+
+        action_source = _action_source() if interactive else lambda: None
+        result = run_experiment(
             config,
-            dm_port=args.dm_port,
-            tactile_port=args.tactile_port,
-            output_path=output,
-            clear_bias=args.bias,
-            verify_zero_force=not args.skip_zero_check,
-            event_sink=emit,
+            output_directory=output_directory,
+            clear_bias=bias,
+            action_source=action_source,
+            event_sink=event_sink,
+            terminal=terminal,
+            input_config_path=config_path,
         )
-        print(
-            json.dumps(
-                {"event": "complete", **as_result_dict(result)},
-                ensure_ascii=False,
-                allow_nan=False,
+        if not terminal.uses_rich:
+            _emit({"event": "complete", **result})
+        else:
+            disable_confirmed = result["disable_confirmed"]
+            if disable_confirmed is True:
+                disable_label = "已确认"
+            elif disable_confirmed is False:
+                disable_label = "未确认"
+            else:
+                disable_label = "未曾使能"
+            print(
+                "实验结束："
+                f"状态={result['status']}；电机失能={disable_label}；"
+                f"运行目录={result['output_directory']}",
+                flush=True,
             )
-        )
         return 0
-    except KeyboardInterrupt:
-        print("真机力跟踪已中断，已执行退出失能流程。", file=sys.stderr)
+    except KeyboardInterrupt as error:
+        print("实验已中断；若设备运行已经开始，退出清理已尝试完成。", file=sys.stderr)
+        _print_exception_notes(error)
         return 130
     except Exception as error:  # noqa: BLE001
-        print(f"真机力跟踪失败：{error}", file=sys.stderr)
+        print(f"实验失败：{error}", file=sys.stderr)
+        _print_exception_notes(error)
         return 1
 
 
-def as_result_dict(result: object) -> dict[str, object]:
-    """将带 slots 的结果对象转换为稳定 JSON 字段。"""
-    return {
-        "completed": getattr(result, "completed"),
-        "disable_confirmed": getattr(result, "disable_confirmed"),
-        "final_state": getattr(result, "final_state"),
-        "final_position_rad": getattr(result, "final_position_rad"),
-        "csv_path": getattr(result, "csv_path"),
-    }
-
-
 def main(argv: Sequence[str] | None = None) -> NoReturn:
-    """运行命令行并返回进程状态。"""
+    """运行通用抓取实验命令行。"""
     raise SystemExit(run(argv))

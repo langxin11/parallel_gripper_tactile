@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dmgripper-experiments"
-version = "0.1.0"
+version = "0.2.0"
 description = "DM4310P 与 PapillArray 的纯 Python 真机实验入口"
 readme = "README.md"
 requires-python = ">=3.12"
@@ -16,12 +16,15 @@ dependencies = [
     "tyro>=0.9.0",
     "matplotlib>=3.8",
     "SciencePlots>=2.1",
+    "rich>=13.0",
 ]
 
 [project.scripts]
-dmgripper-force-demo = "dmgripper_experiments.cli:main"
-dmgripper-cup = "dmgripper_experiments.cup_cli:main"
-dmgripper-cup-plot = "dmgripper_experiments.cup_plot:main"
+dmgripper-run = "dmgripper_experiments.cli:main"
+dmgripper-plot = "dmgripper_experiments.plot_cli:main"
+dmgripper-force-demo = "dmgripper_experiments.legacy:force_demo_main"
+dmgripper-cup = "dmgripper_experiments.legacy:cup_main"
+dmgripper-cup-plot = "dmgripper_experiments.legacy:cup_plot_main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
