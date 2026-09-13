@@ -14,6 +14,41 @@ from .kinematics import CrankSliderKinematics
 
 StiffnessEstimatorMethod = Literal["secant_ewma", "window_linear", "window_quadratic"]
 
+# 快照状态原因：区分初值、样本不足、激励不足、拟合退化与保持旧值。
+StiffnessSnapshotReason = Literal[
+    "initial",
+    "insufficient_samples",
+    "insufficient_excitation",
+    "degenerate_fit",
+    "holding_previous",
+    "updated",
+]
+
+
+@dataclass(frozen=True, slots=True)
+class StiffnessSnapshot:
+    """一次控制周期内的刚度估计诊断快照。
+
+    Attributes:
+        value_n_per_m: 当前滤波后的等效接触刚度估计 (N/m)；尚未有效
+            估计时为配置初值。
+        valid: 本次接触重置后是否接受过有效估计（沿用 ``is_valid`` 含义，
+            不是置信度，也不表示本周期有新更新）。
+        updated: 本周期估计器是否真实接受了新样本／拟合结果；仅当
+            ``updated=True`` 时 ``value_n_per_m`` 相对上一周期可能变化。
+        last_update_time_s: 最近一次接受估计时调用方提供的时刻；从未
+            更新时为 ``None``。
+        sample_id: 最近一次接受估计对应的观测编号；不可用时为 ``None``。
+        reason: 本周期快照状态原因。
+    """
+
+    value_n_per_m: float
+    valid: bool
+    updated: bool
+    last_update_time_s: float | None
+    sample_id: int | None
+    reason: StiffnessSnapshotReason
+
 
 @dataclass(frozen=True, slots=True)
 class ContactStiffnessConfig:
@@ -86,6 +121,9 @@ class ContactStiffnessEstimator:
         self._config = config
         self._kinematics = kinematics
         self._samples: deque[tuple[float, float]] = deque(maxlen=config.window_size)
+        self._last_update_accepted = False
+        self._last_reject_reason: StiffnessSnapshotReason = "initial"
+        self._last_update_time_s: float | None = None
         self.reset()
 
     @property
@@ -101,6 +139,47 @@ class ContactStiffnessEstimator:
         """
         return self._is_valid
 
+    def snapshot(
+        self,
+        *,
+        time_s: float | None = None,
+        sample_id: int | None = None,
+    ) -> StiffnessSnapshot:
+        """返回当前估计的诊断快照。
+
+        ``updated`` 只来自估计器真实接受样本／拟合结果的事件，且每次
+        接受只被第一次快照消费；重复快照不会重复报告更新，无新观测的
+        周期报 ``updated=False``。未接受时的 ``reason`` 区分样本不足、
+        激励不足、拟合退化与保持旧值。
+
+        Args:
+            time_s: 调用方时钟下的当前时刻，仅用于在本次接受时登记
+                ``last_update_time_s``。
+            sample_id: 本次 ``update`` 对应的观测编号，用于跨模块对账。
+
+        Returns:
+            不可变的诊断快照。
+        """
+        if self._last_update_accepted:
+            reason: StiffnessSnapshotReason = "updated"
+            self._last_update_time_s = time_s
+            self._last_accepted_sample_id = sample_id
+            self._last_update_accepted = False
+        else:
+            specific = self._last_reject_reason
+            if specific in {"updated", "holding_previous", "initial"}:
+                reason = "holding_previous" if self._is_valid else "initial"
+            else:
+                reason = specific
+        return StiffnessSnapshot(
+            value_n_per_m=self._estimate_n_per_m,
+            valid=self._is_valid,
+            updated=reason == "updated",
+            last_update_time_s=self._last_update_time_s,
+            sample_id=self._last_accepted_sample_id,
+            reason=reason,
+        )
+
     def reset(
         self,
         *,
@@ -111,6 +190,10 @@ class ContactStiffnessEstimator:
         self._estimate_n_per_m = float(self._config.initial_n_per_m)
         self._is_valid = False
         self._samples.clear()
+        self._last_update_accepted = False
+        self._last_reject_reason = "initial"
+        self._last_update_time_s = None
+        self._last_accepted_sample_id = None
         if position_rad is None or normal_force_n is None:
             self._last_closure_m = None
             self._last_force_n = None
@@ -128,10 +211,20 @@ class ContactStiffnessEstimator:
 
     def update(self, *, position_rad: float, normal_force_n: float) -> float:
         """用新的接触样本更新刚度估计，并返回当前估计值。"""
+        self._last_update_accepted = False
+        self._last_reject_reason = "holding_previous"
         if self._config.method != "secant_ewma":
             return self._update_window(position_rad=position_rad, normal_force_n=normal_force_n)
 
         return self._update_secant(position_rad=position_rad, normal_force_n=normal_force_n)
+
+    def _accept(self, value_n_per_m: float) -> float:
+        """登记一次被接受的估计更新并返回新估计值。"""
+        self._estimate_n_per_m = value_n_per_m
+        self._is_valid = math.isfinite(value_n_per_m)
+        self._last_update_accepted = True
+        self._last_reject_reason = "updated"
+        return self._estimate_n_per_m
 
     def _update_secant(self, *, position_rad: float, normal_force_n: float) -> float:
         """用相邻有效样本的割线更新刚度，保留历史算法行为。"""
@@ -140,6 +233,7 @@ class ContactStiffnessEstimator:
         if self._last_closure_m is None or self._last_force_n is None:
             self._last_closure_m = closure_m
             self._last_force_n = force_n
+            self._last_reject_reason = "insufficient_samples"
             return self._estimate_n_per_m
 
         delta_closure = closure_m - self._last_closure_m
@@ -148,14 +242,16 @@ class ContactStiffnessEstimator:
             abs(delta_closure) < self._config.min_delta_closure_m
             or abs(delta_force) < self._config.min_delta_force_n
         ):
+            self._last_reject_reason = "insufficient_excitation"
             return self._estimate_n_per_m
 
         if delta_closure * delta_force > 0:
             sample = abs(delta_force / delta_closure)
             sample = float(np.clip(sample, self._config.min_n_per_m, self._config.max_n_per_m))
             alpha = float(self._config.filter_alpha)
-            self._estimate_n_per_m += alpha * (sample - self._estimate_n_per_m)
-            self._is_valid = math.isfinite(self._estimate_n_per_m)
+            self._accept(self._estimate_n_per_m + alpha * (sample - self._estimate_n_per_m))
+        else:
+            self._last_reject_reason = "degenerate_fit"
 
         self._last_closure_m = closure_m
         self._last_force_n = force_n
@@ -171,6 +267,7 @@ class ContactStiffnessEstimator:
 
         self._samples.append((closure_m, force_n))
         if len(self._samples) < self._config.min_samples:
+            self._last_reject_reason = "insufficient_samples"
             return self._estimate_n_per_m
 
         closures = np.asarray([sample[0] for sample in self._samples], dtype=float)
@@ -183,6 +280,7 @@ class ContactStiffnessEstimator:
             or closure_span < self._config.min_delta_closure_m
             or force_span < self._config.min_delta_force_n
         ):
+            self._last_reject_reason = "insufficient_excitation"
             return self._estimate_n_per_m
 
         degree = 1 if self._config.method == "window_linear" else 2
@@ -192,16 +290,18 @@ class ContactStiffnessEstimator:
         try:
             coefficients, _, rank, _ = np.linalg.lstsq(design, forces, rcond=None)
         except (np.linalg.LinAlgError, ValueError):
+            self._last_reject_reason = "degenerate_fit"
             return self._estimate_n_per_m
         if rank < degree + 1:
+            self._last_reject_reason = "degenerate_fit"
             return self._estimate_n_per_m
 
         slope = float(coefficients[1] / scale)
         if not math.isfinite(slope) or slope <= 0.0:
+            self._last_reject_reason = "degenerate_fit"
             return self._estimate_n_per_m
 
         sample = float(np.clip(slope, self._config.min_n_per_m, self._config.max_n_per_m))
         alpha = float(self._config.filter_alpha)
-        self._estimate_n_per_m += alpha * (sample - self._estimate_n_per_m)
-        self._is_valid = math.isfinite(self._estimate_n_per_m)
+        self._accept(self._estimate_n_per_m + alpha * (sample - self._estimate_n_per_m))
         return self._estimate_n_per_m

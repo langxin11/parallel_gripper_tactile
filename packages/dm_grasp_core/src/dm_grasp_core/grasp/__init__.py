@@ -8,7 +8,18 @@ from .contact_state import (
     ContactStateUpdate,
     ReleasePolicy,
 )
+from .disturbance import (
+    DisturbanceCommand,
+    DisturbancePolicyParameters,
+    TactileDisturbancePolicy,
+)
 from .motion import ContactTransition, MinimumJerkTrajectory, quintic_blend
+from .reference import (
+    ForceInterpolation,
+    ForceReferenceCurve,
+    ForceWaypoint,
+    sample_force_reference,
+)
 
 
 __all__ = [
@@ -17,11 +28,18 @@ __all__ = [
     "ContactTransition",
     "ContactState",
     "ContactStateUpdate",
+    "DisturbanceCommand",
+    "DisturbancePolicyParameters",
+    "ForceInterpolation",
+    "ForceReferenceCurve",
+    "ForceWaypoint",
     "MITCommand",
     "MITCommandConfig",
     "MinimumJerkTrajectory",
     "ReleasePolicy",
+    "TactileDisturbancePolicy",
     "build_mit_command",
     "quintic_blend",
+    "sample_force_reference",
     "step_admittance",
 ]

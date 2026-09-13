@@ -38,6 +38,8 @@ from .stiffness import (
     ContactStiffnessConfig as ContactStiffnessConfig,
     ContactStiffnessEstimator as ContactStiffnessEstimator,
     StiffnessEstimatorMethod as StiffnessEstimatorMethod,
+    StiffnessSnapshot as StiffnessSnapshot,
+    StiffnessSnapshotReason as StiffnessSnapshotReason,
 )
 from .stiffness_rate import (
     StiffnessRateConfig as StiffnessRateConfig,

@@ -385,6 +385,227 @@ class NormalForceController:
             target_force_acceleration_n_s2=reference.target_force_acceleration_n_s2,
         )
 
+    def _filter_measurements(
+        self,
+        *,
+        left_normal_force_n: float,
+        right_normal_force_n: float,
+        dt: float,
+    ) -> float:
+        """更新公共一阶低通与 ADRC 专用滤波，并返回语义力。
+
+        输入应为未滤波的原始双侧力；本方法是控制器唯一的力滤波所有者，
+        仿真 ``apply`` 与外部生命周期 ``begin_tracking``／``step_tracking``
+        共享同一滤波状态，避免外层滤波后再次无意滤波。
+        """
+        total_force = max(0.0, float(left_normal_force_n)) + max(0.0, float(right_normal_force_n))
+        measured_force = (
+            0.5 * total_force if self._force_semantics == "average_side" else total_force
+        )
+        if self._filtered_force is None:
+            self._filtered_force = measured_force
+        else:
+            alpha = 1.0 - np.exp(-2.0 * np.pi * self._config.filter_cutoff_hz * dt)
+            self._filtered_force += float(alpha) * (measured_force - self._filtered_force)
+        if self._config.torque_adrc is not None:
+            # ADRC 只做独立的轻度预处理；公共滤波器继续服务于 PID、刚度估计
+            # 和评价指标，不能把它的额外相位滞后带入 LESO。
+            if self._torque_adrc_measurement is None:
+                self._torque_adrc_measurement = measured_force
+            else:
+                adrc_alpha = 1.0 - np.exp(
+                    -2.0 * np.pi * self._config.torque_adrc.measurement_filter_cutoff_hz * dt
+                )
+                self._torque_adrc_measurement += float(adrc_alpha) * (
+                    measured_force - self._torque_adrc_measurement
+                )
+        return measured_force
+
+    def _validate_external_stiffness(self, external_stiffness_n_per_m: float | None) -> None:
+        """校验外部刚度消费与控制器配置互斥规则。"""
+        if external_stiffness_n_per_m is None:
+            return
+        if self._stiffness_estimator is not None:
+            raise RuntimeError(
+                "external stiffness snapshot conflicts with the internal estimator; "
+                "disable internal estimation when consuming an external snapshot"
+            )
+        if self._config.stiffness is None:
+            raise RuntimeError(
+                "external stiffness consumption requires stiffness gain configuration"
+            )
+        if not math.isfinite(external_stiffness_n_per_m) or external_stiffness_n_per_m <= 0.0:
+            raise ValueError("external stiffness snapshot must be finite and positive")
+
+    def begin_tracking(
+        self,
+        inner: MITTorqueInner,
+        *,
+        observation: ForceControlObservation,
+        reference: ForceControlReference,
+        external_stiffness_n_per_m: float | None = None,
+    ) -> NormalForceControlCommand:
+        """外部生命周期模式：以当前观测初始化跟踪控制律并生成首个命令。
+
+        接触参考取当前内环位置，内部估计器（若启用）、LADRC 状态与 PID
+        历史在此一次性重置；阶段归属由外部 lifecycle 决定，本方法不切回
+        接近或决定释放。
+
+        输入力语义：``observation`` 中的双侧力应为未滤波原始力，控制器内部
+        按 ``filter_cutoff_hz`` 做一阶低通；调用方若已在外层滤波，将叠加
+        额外时延，需在记录中如实登记滤波配置。
+
+        Args:
+            inner: 电机内环适配。
+            observation: 当前周期观测；``dt`` 必须为正。
+            reference: 首个跟踪参考。
+            external_stiffness_n_per_m: 外部刚度快照值；``None`` 表示本周期
+                不消费外部估计。提供时内部估计必须关闭，避免双重更新。
+
+        Returns:
+            首个跟踪周期的命令与诊断。
+
+        Raises:
+            RuntimeError: 外部刚度与内部估计器同时启用，或控制器配置为
+                仅内部生命周期支持的路径（直接力矩、二阶力矩 LADRC、
+                刚度速率）。
+        """
+        if observation.dt <= 0:
+            raise ValueError("dt must be positive")
+        self._reject_internal_only_paths("begin_tracking")
+        self._validate_external_stiffness(external_stiffness_n_per_m)
+        self._filter_measurements(
+            left_normal_force_n=observation.left_normal_force_n,
+            right_normal_force_n=observation.right_normal_force_n,
+            dt=observation.dt,
+        )
+        self._state = "force_tracking"
+        self._contact_position = inner.position()
+        if self._stiffness_estimator is not None:
+            self._stiffness_estimator.reset(
+                position_rad=self._contact_position,
+                normal_force_n=self._filtered_force,
+            )
+        self._reset_adrc(self._filtered_force)
+        if self._stiffness_rate is not None:
+            self._stiffness_rate.reset(measured_force_n=self._filtered_force)
+        self._pid.reset()
+        self._pid.set_auto_mode(True, last_output=0.0)
+        step = self._tracking_command(
+            inner,
+            measured_force_n=self._filtered_force,
+            torque_adrc_measurement_n=self._torque_adrc_measurement,
+            target_force_n=max(0.0, float(reference.target_force_n)),
+            target_force_rate_n_s=reference.target_force_rate_n_s,
+            target_force_acceleration_n_s2=reference.target_force_acceleration_n_s2,
+            dt=observation.dt,
+            external_stiffness_n_per_m=external_stiffness_n_per_m,
+        )
+        return self._command_from_step(
+            step,
+            measured_force_n=self._raw_semantic_force(
+                observation.left_normal_force_n, observation.right_normal_force_n
+            ),
+            target_force_n=max(0.0, float(reference.target_force_n)),
+        )
+
+    def step_tracking(
+        self,
+        inner: MITTorqueInner,
+        *,
+        observation: ForceControlObservation,
+        reference: ForceControlReference,
+        external_stiffness_n_per_m: float | None = None,
+    ) -> NormalForceControlCommand:
+        """外部生命周期模式：执行一次跟踪计算，不推进任何接触状态。
+
+        必须先调用 :meth:`begin_tracking`；内部滤波按真实 ``dt`` 更新，
+        阶段切换、失接触处理与释放决策完全由外部 lifecycle 拥有。
+
+        Args:
+            inner: 电机内环适配。
+            observation: 当前周期观测；``dt`` 必须为正。
+            reference: 当前跟踪参考（含解析导数，缺失导数以 0 传入）。
+            external_stiffness_n_per_m: 外部刚度快照值；语义同
+                :meth:`begin_tracking`。
+
+        Returns:
+            本周期的命令与诊断。
+
+        Raises:
+            RuntimeError: 尚未调用 ``begin_tracking``，或配置为仅内部
+                生命周期支持的路径。
+        """
+        if observation.dt <= 0:
+            raise ValueError("dt must be positive")
+        if self._state != "force_tracking" or self._filtered_force is None:
+            raise RuntimeError("step_tracking requires a prior begin_tracking call")
+        self._reject_internal_only_paths("step_tracking")
+        self._validate_external_stiffness(external_stiffness_n_per_m)
+        self._filter_measurements(
+            left_normal_force_n=observation.left_normal_force_n,
+            right_normal_force_n=observation.right_normal_force_n,
+            dt=observation.dt,
+        )
+        step = self._tracking_command(
+            inner,
+            measured_force_n=self._filtered_force,
+            torque_adrc_measurement_n=self._torque_adrc_measurement,
+            target_force_n=max(0.0, float(reference.target_force_n)),
+            target_force_rate_n_s=reference.target_force_rate_n_s,
+            target_force_acceleration_n_s2=reference.target_force_acceleration_n_s2,
+            dt=observation.dt,
+            external_stiffness_n_per_m=external_stiffness_n_per_m,
+        )
+        return self._command_from_step(
+            step,
+            measured_force_n=self._raw_semantic_force(
+                observation.left_normal_force_n, observation.right_normal_force_n
+            ),
+            target_force_n=max(0.0, float(reference.target_force_n)),
+        )
+
+    def _raw_semantic_force(self, left_normal_force_n: float, right_normal_force_n: float) -> float:
+        """按目标力语义计算未滤波的原始语义力。"""
+        total = max(0.0, float(left_normal_force_n)) + max(0.0, float(right_normal_force_n))
+        return 0.5 * total if self._force_semantics == "average_side" else total
+
+    def _reject_internal_only_paths(self, entry: str) -> None:
+        """拒绝外部生命周期尚未支持的控制器路径。"""
+        if self._config.torque_feedback_gain > 0 or self._config.torque_adrc is not None:
+            raise RuntimeError(
+                f"{entry} does not support torque-feedback or torque-adrc outer loops"
+            )
+        if self._config.stiffness_rate is not None:
+            raise RuntimeError(f"{entry} does not support the stiffness-rate outer loop")
+
+    def _command_from_step(
+        self,
+        step: _ForceTrackingStep,
+        *,
+        measured_force_n: float,
+        target_force_n: float,
+    ) -> NormalForceControlCommand:
+        """把一次跟踪计算组装为外部生命周期命令。"""
+        self._last_mit_torque_n_m = step.mit.torque
+        return NormalForceControlCommand(
+            state=self._state,
+            target_force_n=target_force_n,
+            measured_force_n=measured_force_n,
+            filtered_force_n=self._filtered_force,
+            force_error_n=target_force_n - self._filtered_force,
+            position_adjustment=step.position_adjustment,
+            mit=step.mit,
+            pid_position_adjustment=step.pid_position_adjustment,
+            stiffness_position_adjustment=step.stiffness_position_adjustment,
+            force_feedforward_torque=step.force_feedforward_torque,
+            estimated_contact_stiffness_n_per_m=step.estimated_contact_stiffness_n_per_m,
+            closure_jacobian_m_per_rad=step.closure_jacobian_m_per_rad,
+            aperture_m=step.aperture_m,
+            stiffness_position_limit_rad=step.stiffness_position_limit_rad,
+            stiffness_position_limited=step.stiffness_position_limited,
+        )
+
     def _force_feedforward_torque(
         self,
         *,
@@ -418,6 +639,7 @@ class NormalForceController:
         target_force_rate_n_s: float,
         target_force_acceleration_n_s2: float,
         dt: float,
+        external_stiffness_n_per_m: float | None = None,
     ) -> _ForceTrackingStep:
         """生成力跟踪阶段的组合位置修正和力矩前馈。
 
@@ -471,6 +693,26 @@ class NormalForceController:
             closure_jacobian = self._kinematics.closure_jacobian(current_position)
 
         if (
+            external_stiffness_n_per_m is not None
+            and self._kinematics is not None
+            and closure_jacobian is not None
+            and closure_jacobian > 1e-12
+            and config.stiffness is not None
+        ):
+            # 外部刚度快照：估计由唯一所有者更新，此处仅消费；增益仍来自
+            # 配置，保证诊断估计不改变控制命令，除非显式启用前馈消费。
+            stiffness_estimate = float(external_stiffness_n_per_m)
+            joint_stiffness = stiffness_estimate * closure_jacobian
+            stiffness_adjustment = (
+                float(config.stiffness.position_feedforward_gain)
+                * force_error
+                / max(joint_stiffness, 1e-12)
+            )
+            force_feedforward_torque, closure_jacobian, aperture = self._force_feedforward_torque(
+                position_rad=current_position,
+                target_force_n=target_force_n,
+            )
+        elif (
             self._stiffness_estimator is not None
             and self._kinematics is not None
             and closure_jacobian is not None
@@ -812,9 +1054,10 @@ class NormalForceController:
         if dt <= 0:
             raise ValueError("dt must be positive")
         config = self._config
-        total_force = max(0.0, float(left_normal_force_n)) + max(0.0, float(right_normal_force_n))
-        measured_force = (
-            0.5 * total_force if self._force_semantics == "average_side" else total_force
+        measured_force = self._filter_measurements(
+            left_normal_force_n=left_normal_force_n,
+            right_normal_force_n=right_normal_force_n,
+            dt=dt,
         )
         stiffness_adjustment = 0.0
         pid_adjustment = 0.0
@@ -826,23 +1069,6 @@ class NormalForceController:
         stiffness_position_limited = False
         torque_adrc_step = None
         stiffness_rate_step = None
-        if self._filtered_force is None:
-            self._filtered_force = measured_force
-        else:
-            alpha = 1.0 - np.exp(-2.0 * np.pi * config.filter_cutoff_hz * dt)
-            self._filtered_force += float(alpha) * (measured_force - self._filtered_force)
-        if config.torque_adrc is not None:
-            # ADRC 只做独立的轻度预处理；公共滤波器继续服务于 PID、刚度估计
-            # 和评价指标，不能把它的额外相位滞后带入 LESO。
-            if self._torque_adrc_measurement is None:
-                self._torque_adrc_measurement = measured_force
-            else:
-                adrc_alpha = 1.0 - np.exp(
-                    -2.0 * np.pi * config.torque_adrc.measurement_filter_cutoff_hz * dt
-                )
-                self._torque_adrc_measurement += float(adrc_alpha) * (
-                    measured_force - self._torque_adrc_measurement
-                )
         active_target_force = (
             float(config.target_n) if target_force_n is None else max(0.0, float(target_force_n))
         )
