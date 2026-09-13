@@ -12,6 +12,7 @@ from typing import Annotated, Literal
 
 import mujoco
 import numpy as np
+from dm_grasp_core import sample_force_reference
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 import yaml
 
@@ -303,25 +304,16 @@ class ForceReference(_TaskModel):
         return self.sample_at(tracking_time_s)[0]
 
     def sample_at(self, tracking_time_s: float) -> tuple[float, float, float]:
-        """返回指定时刻的目标力及其一、二阶时间导数。"""
-        time_s = max(0.0, float(tracking_time_s))
-        if time_s <= self.waypoints[0].t_s:
-            return (float(self.waypoints[0].force_n), 0.0, 0.0)
-        for start, end in zip(self.waypoints, self.waypoints[1:]):
-            if time_s <= end.t_s:
-                if self.interpolation == "hold":
-                    return (float(start.force_n), 0.0, 0.0)
-                span = end.t_s - start.t_s
-                u = (time_s - start.t_s) / span
-                delta = float(end.force_n - start.force_n)
-                rate = delta / span
-                acceleration = 0.0
-                if self.interpolation == "smoothstep":
-                    rate *= 6.0 * u * (1.0 - u)
-                    acceleration = delta * (6.0 - 12.0 * u) / span**2
-                    u = u * u * (3.0 - 2.0 * u)
-                return (float(start.force_n + u * delta), rate, acceleration)
-        return (float(self.waypoints[-1].force_n), 0.0, 0.0)
+        """返回指定时刻的目标力及其一、二阶时间导数。
+
+        插值与导数计算委托共享核 ``sample_force_reference``，本类只保留
+        Pydantic schema 与调用接口；数值语义以既有测试为准。
+        """
+        return sample_force_reference(
+            self.interpolation,
+            self.waypoints,
+            float(tracking_time_s),
+        )
 
 
 class ForceTrackingApproach(_TaskModel):
