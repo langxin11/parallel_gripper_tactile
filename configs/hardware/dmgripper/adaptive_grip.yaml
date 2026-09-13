@@ -1,0 +1,65 @@
+# DMgripper 通用抓取实验：触觉动态增力任务的保守默认配置。
+# preload 建立 0.5 N 初始抓力并学习切向基线；active 起切向增长驱动增力。
+metadata:
+  task_name: adaptive-grip
+  object_name: object
+hardware:
+  # 端口使用 udev 固定别名（/etc/udev/rules.d/99-gripper-devices.rules），
+  # 避免插拔顺序改变 ttyACM 编号。
+  dm_port: /dev/dmj4310_can
+  tactile_port: /dev/papillarray
+timing:
+  control_rate_hz: 100.0
+  max_control_gap_s: 0.1
+  tactile_timeout_s: 0.2
+lifecycle:
+  verify_zero_force: true
+  contact_on_n: 0.2
+  contact_off_n: 0.1
+  contact_transition_s: 0.15
+  # 动态模式只接受失接触 fault；重接近的基线语义尚未定义。
+  lost_contact_scope: any_side
+  lost_contact_action: fault
+  # 低侧仍用默认 0.15 N；高侧允许接触过渡后的温和过冲，实测约 0.73 N 可进入 active。
+  preload_overforce_tolerance_n: 0.3
+  preload_stable_time_s: 2.0
+  preload_timeout_s: 30.0
+  on_finished: hold
+reference:
+  adaptive:
+    initial_force_n: 0.5
+    duration_s: 10.0
+    max_force_n: 1.5
+    max_force_rate_n_s: 0.5
+    filter_tau_s: 0.05
+    shear_threshold_n: 0.06
+    shear_gain: 1.0
+controller:
+  kind: admittance
+  admittance:
+    # 抓握期间避免小误差触发正反转；只有显式 release 才正常张开。
+    force_deadband_n: 0.1
+    prevent_unloading: true
+  pid:
+    kp: 0.016
+    ki: 0.2
+    kd: 0.0
+    max_position_adjustment_rad: 0.15
+  adrc:
+    b0_n_per_m: 1000.0
+    controller_bandwidth_rad_s: 5.0
+    observer_bandwidth_rad_s: 20.0
+    max_closing_velocity_m_s: 0.002
+  stiffness_consumption: none
+estimation:
+  enabled: true
+  method: window_linear
+safety:
+  max_target_force_n: 1.5
+  force_ceiling_n: 2.0
+output:
+  root: outputs/real
+  plots: true
+terminal:
+  mode: auto
+  refresh_hz: 5.0
