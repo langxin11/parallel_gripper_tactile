@@ -1,6 +1,6 @@
-# 📌 DM_Gripper 配置基线与状态
+# 📌 DMgripper 配置基线与状态
 
-DM_Gripper 完全由 `configs/dm_gripper.yaml` 配置：MJCF 来源、法兰安装、MIT 限幅、
+DMgripper 完全由 `configs/dm_gripper.yaml` 配置：MJCF 来源、法兰安装、MIT 限幅、
 法向力控制器，以及 3×3 接触几何触觉布局。
 
 <pre><code class="language-bash">

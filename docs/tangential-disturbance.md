@@ -1,6 +1,6 @@
 # 切向扰动下的触觉增力
 
-`tangential-disturbance` 是 DM_Gripper 的纯仿真实验。它检验在稳定夹持后，控制器能否只依据触觉力的变化提高法向目标，以抵抗世界 `YZ` 接触平面内的外加载荷。它不是在线摩擦估计实验，也不把外载、物体位移、速度或真实摩擦系数输入控制律。
+`tangential-disturbance` 是 DMgripper 的纯仿真实验。它检验在稳定夹持后，控制器能否只依据触觉力的变化提高法向目标，以抵抗世界 `YZ` 接触平面内的外加载荷。它不是在线摩擦估计实验，也不把外载、物体位移、速度或真实摩擦系数输入控制律。
 
 本实现参考了 [Gentle Grasping: A Method With Low-Cost Magnetic Tactile Sensors 的原文](https://imec-publications.be/server/api/core/bitstreams/1a8e6d21-1ce1-4a84-aa50-8a44aaaf28a7/content) 中的变化量比值判据，但没有声称完整复现论文。传感器类型、力学模型、采样与滤波、控制器和阈值都不同；`force_ratio` 只是显式的论文判据适配对照，不能沿用磁传感器实机的数值阈值，也不构成微滑移已经被证明的证据。
 

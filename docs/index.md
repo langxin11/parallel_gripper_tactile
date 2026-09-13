@@ -26,7 +26,7 @@ uv run pgt runs list
 - [Onshape to Robot：曲柄滑块夹爪 MJCF 导出](onshape-export-upgrade.md)：CAD 命名、闭环与导出验收；
 - [曲柄滑块力控模型](crank-slider-force-control.md)：`f_n`、`k_pair`、雅可比和限幅。
 
-工程状态与电机/执行器基线见[DM_Gripper 配置基线与状态](custom-gripper-next-phase.md)。
+工程状态与电机/执行器基线见[DMgripper 配置基线与状态](custom-gripper-next-phase.md)。
 文献指南、近期实验与研究合集的目录及编译入口见[科研报告的组织与维护](reports.md)。
 配置目录与目的导向研究的设计、验收和迁移记录见[配置重构 Goal](configuration-refactor-goal.md)。
 

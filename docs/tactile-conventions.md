@@ -31,9 +31,9 @@ taxel 合力仅代表这些离散触觉单元传递的力，不等同于整个 p
 `touch_grid` 的 FOV 是以触觉 site 为中心的半角。修改 pad 尺寸、site 位置或朝向时，必须
 重新检查 FOV 是否覆盖整个接触面，否则物理接触存在但部分力不会进入插件输出。
 
-## DM_Gripper Pillars
+## DMgripper Pillars
 
-DM_Gripper 的左右指尖各有 3×3 个 Pillars STL。每个 Pillar 的 mesh geom 是唯一的主动指尖
+DMgripper 的左右指尖各有 3×3 个 Pillars STL。每个 Pillar 的 mesh geom 是唯一的主动指尖
 碰撞面，同时也是一个触觉通道。`ContactTaxelReader` 遍历 `data.contact`，通过
 `mj_contactForce` 读取接触坐标系力，转换到世界系后再转换到对应触觉 site 局部系，并按
 `left/right_taxel_geom_00` 至 `22` 聚合。
@@ -87,7 +87,7 @@ pillar 阵列，每个阵列单元可测 3D displacement、3D force 和 vibratio
 `f_n=(F_L+F_R)/2`。仿真中的 taxel/Pillar 读取是 MuJoCo 接触力的聚合，不能与实机传感器的
 内部信号处理混为一谈。
 
-抓取验收中的仿真触觉观测在理想接触力之上加入依据空载记录建立的测量噪声模型。当前 DM_Gripper
+抓取验收中的仿真触觉观测在理想接触力之上加入依据空载记录建立的测量噪声模型。当前 DMgripper
 profile 使用 2026-08-14 Contactile/PapillArray 空载记录的指尖总力噪声，并按 9 个 taxel 独立同分布
 假设除以 `sqrt(9)`：左右单 taxel 法向 `sigma=0.0067/0.0133 N`，左右单 taxel 切向
 `sigma=0.0033/0.0100 N`。汇总后的法向测量再以 `20 Hz` 一阶低通进入 PID。
