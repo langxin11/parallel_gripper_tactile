@@ -135,5 +135,5 @@ uv run --package dmgripper-experiments dmgripper-plot --repaint <运行目录>
 ## 迁移
 
 旧入口 `dmgripper-force-demo` 与 `dmgripper-cup` 打印迁移提示并拒绝执行；旧场景交互不会
-映射成自动阶段推进。`dmgripper-cup-plot` 是通用历史读取器的薄别名。旧倒水文档保留在
-[`dmgripper-cup.md`](dmgripper-cup.md)，仅用于解释历史数据。
+映射成自动阶段推进。`dmgripper-cup-plot` 是通用历史读取器的薄别名。旧 cup trace 的字段与阶段
+语义见[历史数据说明](archive/dmgripper-cup.md)。

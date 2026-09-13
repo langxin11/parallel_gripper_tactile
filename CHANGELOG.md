@@ -124,6 +124,9 @@
   `outputs/research/studies/<kind>/`（诊断多一层 phase 目录）。
 - 因果诊断新增 `study.phase` 选择字段（仅诊断研究可用、必填），一次调用执行一个 phase 并使 phase
   进入科学配置哈希；原 `--phase all` 由逐 phase 调用替代。
+- 文档站点导航补充通用抓取实验、DMgripper 共享控制核与执行器基线，推荐路线编号顺延补齐；
+  删除已被实现取代的纯 Python 真机联调路线图和通用抓取重构实施计划，将配置迁移快照与旧 cup
+  trace 说明明确标为历史资料，并修正控制核归属、viewer 参数和 Onshape 模型组合等过时描述。
 
 ### 修复
 

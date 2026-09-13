@@ -138,5 +138,5 @@ uv run python scripts/research/study.py research=robotiq_discrete_force_validati
 [`docs/research-configuration.md`](../docs/research-configuration.md#推荐执行路线与决策门)。
 
 已完成使命的碰撞／接触模型诊断只保留在
-`research/archive/model_bug_diagnosis/study.yaml`，默认入口和正式控制器矩阵都不引用它。迁移基线、字段
-所有权和完整新旧映射见 `docs/configuration-migration-baseline.md`。
+`research/archive/model_bug_diagnosis/study.yaml`，默认入口和正式控制器矩阵都不引用它。当前字段所有权、
+组合规则和执行语义见 `docs/research-configuration.md`；历史迁移快照仅用于兼容回归。

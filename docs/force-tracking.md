@@ -8,7 +8,7 @@ uv run pgt run force-track \
   --set task=force_tracking/default_waypoints
 </code></pre>
 
-需要实时观察 MuJoCo 场景时加 `--viewer`：
+需要实时观察 MuJoCo 场景时选择 viewer 配置：
 
 <pre><code class="language-bash">
 uv run pgt run force-track \
@@ -16,8 +16,8 @@ uv run pgt run force-track \
   --set execution.viewer=true
 </code></pre>
 
-默认 viewer 按 1 倍实时速度播放。若需要慢放或改变刷新率，可使用 `--realtime-factor`
-和 `--render-fps`。
+默认 viewer 按 1 倍实时速度播放。若需要慢放或改变刷新率，使用
+`--set execution.realtime_factor=<倍速>` 和 `--set execution.render_fps=<帧率>`。
 
 `--set execution.multiccd_enabled=false` 只用于碰撞流形诊断：它保留 model 组指向的碰撞模型，但将 MuJoCo 的
 `multiccd` 求解选项关闭。默认 profile 已采用共面球体碰撞近似，常规力跟踪不需要这个开关。

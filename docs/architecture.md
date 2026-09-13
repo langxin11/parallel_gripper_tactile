@@ -192,7 +192,8 @@ manifest 的 `failed_runs` 中保留，
 
 DMgripper 的二阶导纳基线另由 `packages/dm_grasp_core` 独立包提供，与 ROS 2 共用；
 包内按 `control`、`grasp` 与 `tactile` 子域组织，同时保留旧导入路径。
-`dm_admittance.py` 只负责把共享算法接入 MuJoCo；既有 PID/ADRC 暂保留历史实现。
+`control.py` 与 `dm_admittance.py` 都只负责把共享算法接入 MuJoCo；PID、ADRC、导纳和刚度估计的算法本体
+统一维护在 `dm_grasp_core`。
 `dm-grasp-core` 的公共双侧接触状态机可由 PID 与导纳共同使用，统一入口据此共享接近、接触确认、
 速度过渡和掉力重接近语义；未显式选择该状态机的历史实验保持原阶段行为。
 共享核无 ROS、MuJoCo 或 profile 依赖，安装 ROS 侧时不需要安装仿真主包。

@@ -1,22 +1,18 @@
-# 🧪 控制算法对比与消融实验规划
+# 🧪 控制算法对比与消融实验
 
-本文说明 DM gripper 后续控制算法验证应放在哪个项目中推进，以及如何组织 force tracking
-对比实验和消融实验。
-
-当前结论是：短期在 `parallel_gripper_tactile` 中完成 benchmark、viewer、指标与配置化实验；
-长期将稳定后的控制器核心沉淀到 `tactile-contact-control`，使其成为不依赖 MuJoCo 资产的算法库。
+本文规定 DMgripper force tracking 的对比矩阵、统计口径和当前结论。纯控制算法维护在
+`packages/dm_grasp_core`，仿真主包负责 MuJoCo 适配、实验执行与研究产物，真机实验包负责设备调度和记录。
 
 ## 1. 项目分工
 
-| 项目 | 推荐角色 | 不建议承担的内容 |
+| 区域 | 负责内容 | 不负责内容 |
 | --- | --- | --- |
 | `parallel_gripper_tactile` | 真实 MJCF、profile、触觉读取、force tracking 任务、viewer、Parquet/CSV、plot/metrics 产物、消融配置 | 维护大量与仿真无关的通用控制算法抽象 |
-| `tactile-contact-control` | PID、ADRC、自适应刚度、扰动观测器等纯控制器实现与单元测试 | 作为当前真实夹爪 MJCF benchmark 的主入口 |
-| 硬件/ROS 适配层 | 传感器读取、电机协议、实时通信、安全限位 | 直接承载算法逻辑或实验指标统计 |
+| `packages/dm_grasp_core` | PID、ADRC、导纳、刚度估计、机构运动学等纯算法与单元测试 | 读取 MuJoCo、串口、ROS 消息或模型路径 |
+| `packages/dmgripper_experiments` 与硬件包 | 传感器读取、电机协议、真机生命周期、安全边界与实验记录 | 重复实现共享控制律或承载仿真研究矩阵 |
 
-当前 `parallel_gripper_tactile` 已经具备真实夹爪模型、触觉读数、结构化运行产物和
-`pgt run force-track`，因此更适合作为近期算法对比平台。`tactile-contact-control`
-更适合在控制器接口稳定后接收算法核心。
+`src/parallel_gripper_tactile/control.py` 只把 profile 转为核心配置并绑定 MuJoCo 执行器；算法修改应先落在
+`dm_grasp_core`，再由仿真和真机适配层共同验证。
 
 ## 2. 术语
 
@@ -29,41 +25,31 @@
 
 论文或报告中可以写作“控制算法对比与模块消融实验”。
 
-## 3. 推荐推进路线
+## 3. 实验与接口基线
 
-### 阶段一：在当前项目固定 benchmark
-
-先保持实验环境统一，把真实 MJCF、触觉读数、目标力曲线和指标统计固定下来。
-这一阶段重点不是引入很多算法，而是保证每次运行都能复现。
-
-应优先完成：
+当前 benchmark 固定以下输入和产物：
 
 1. 固定一组 `configs/task/force_tracking/*.yaml` 目标力曲线；
 2. 固定每组实验的 profile 或 controller 配置快照；
-3. 保留 `trace.parquet`、`plots/tracking.png`、`plots/tactile.png`、`plots/controller.png`、`metrics.json` 和
-   `manifest.json`，并为每个 force-track run 保存 `effective_parameters.json`；
-4. 支持 `--viewer` 观察接触过程，默认仍 headless 批量运行；
+3. 保留 `trace.parquet`、`metrics.json`、`manifest.json` 和 `effective_parameters.json`；summary 模式
+   生成 `plots/tracking.png`，diagnostic 模式或科学失败再保留三张诊断图；
+4. 支持 `--set execution.viewer=true` 观察接触过程，默认仍 headless 批量运行；
 5. 明确每个指标的统计时间窗，例如使用 `metrics.ignore_initial_s` 跳过初始过渡。
 
-### 阶段二：稳定控制器接口
-
-当 force tracking 任务稳定后，再把控制器抽象成统一接口：
+控制器使用统一的纯计算接口：
 
 ```text
 observation + reference + dt -> command
 ```
 
-当前项目中这一层接口由 `ForceControlObservation`、`ForceControlReference` 和
-`ForceTrackingController.step(...)` 表达。`NormalForceController` 是第一个实现；
-后续 ADRC 控制器应实现同一个 `step(...)` 入口（2026-09-02 已以 `adrc` 变体落地）。
+这一层接口由 `ForceControlObservation`、`ForceControlReference` 和
+`ForceTrackingController.step(...)` 表达；PID、ADRC、导纳与刚度相关控制路径均由共享核维护。
 
 其中 observation 至少包含当前法向力、双侧法向力、接近目标位置和控制周期；
 reference 至少包含目标法向力和接近阶段前馈力；command 至少包含目标位置修正、
 MIT 前馈力矩、测量力、滤波力和诊断量。
 
-这一层接口稳定后，PID、ADRC、自适应刚度控制器就可以在同一个仿真任务里互换。
-
-当前第一阶段已经落地：`step.yaml`、`ramp.yaml`、`mixed.yaml` 三类标准任务，以及
+当前已落地 `step.yaml`、`ramp.yaml`、`mixed.yaml` 三类标准任务，以及
 `controller × task × material × seed` 的显式 comparison schema、计划模式条件审阅、结构化聚合和
 study 级对比图。2026-09-02 起 `direct-torque` 与 `adrc` 变体均已实现（入口分别为
 `--set controller=dm_gripper/direct_torque` 与 `--set controller=dm_gripper/adrc`，profile 字段
@@ -76,29 +62,6 @@ study 级对比图。2026-09-02 起 `direct-torque` 与 `adrc` 变体均已实�
 `stiff=(-2500,-15)`。其中日常语义依次更接近 compliant、firm 与 stiff；这些参数是单个显式
 contact pair 的求解器参数，不是物体弹性模量或整套系统的实测等效刚度。旧 `soft=(-250,-5)` 只为历史
 配置和专项接触建立标定保留，不进入默认消融、控制器对比或诊断矩阵。
-
-### 阶段三：把纯算法沉淀回 `tactile-contact-control`
-
-当控制器接口不再频繁变化时，把与 MuJoCo、MJCF、profile 路径、viewer、plot 无关的算法代码迁回
-`tactile-contact-control`。当前项目只保留适配层：
-
-```text
-MuJoCo + tactile reader -> controller observation
-controller command -> DM/MIT actuator command
-```
-
-这样做的好处是：算法可以独立单元测试，仿真项目仍专注于真实模型验证。
-
-### 阶段四：迁移到硬件闭环
-
-硬件阶段不要重新写算法，只替换输入输出适配：
-
-```text
-真实触觉传感器 -> controller observation
-controller command -> 达妙电机 CAN/串口命令
-```
-
-同时保留与仿真相同的 target schedule、日志字段和指标计算方式，便于 sim-to-real 对比。
 
 ## 4. 推荐实验矩阵
 
@@ -366,13 +329,3 @@ uv run python scripts/research/study.py \
   research=stiffness_estimator_validation/study \
   execution=study_run
 </code></pre>
-
-## 9. 决策原则
-
-只要问题和真实 MJCF、触觉读数、viewer、run artifacts 或 force tracking 指标有关，就放在
-`parallel_gripper_tactile` 中做。
-
-只要问题可以脱离 MuJoCo，只依赖观测、参考目标和控制输出，就应逐步迁移到
-`tactile-contact-control` 中做。
-
-这样可以避免两个项目职责混在一起：当前项目负责“实验台是否可信”，旧项目负责“控制算法是否干净可复用”。

@@ -39,25 +39,17 @@ uv run pgt run force-track \
   --experiment dm_gripper/force_tracking_admittance
 ```
 
-需要查看动画时添加 `--viewer`。示例为 4 ms 外环、1 N 平均单侧目标和 1 N
-双侧接触进入阈值；MIT 使用 ROS 当前参考值 kp=10、kd=5。平均单侧力经过 2 Hz
-一阶低通后进入导纳，原始双侧力仍用于接触与释放判定。原 `CONTROLLER_VARIANTS`
-默认实验矩阵不含本变体。
+需要查看动画时显式选择 viewer：
 
-接触进入和退出使用滞回：两侧达到 1 N 后进入接触过渡；跟踪阶段只有任一侧
-连续 `release_confirm_steps` 个周期不高于 `release_threshold_n` 才重新接近。示例中
-释放阈值为 0.05 N，25 个 4 ms 周期对应 100 ms，瞬时单侧掉力不会重置导纳。
+```bash
+uv run pgt run force-track \
+  --experiment dm_gripper/force_tracking_admittance \
+  --set execution.viewer=true
+```
 
-示例导纳参数为 `M=0.20 kg`、`B=15 N·s/m`、`K=1 N/m`，接近速度和跟踪速度
-上限均为 `0.05 rad/s`，接触过渡为 50 ms，接近前馈为 0.5 N。参数由
-1.0→1.4→1.0 N 的 Ramp 任务筛选，最低目标与接触阈值一致。调参排序使用物理步进后
-左右触觉侧力的平均值，并包含切入跟踪的首个瞬态，避免低通或忽略窗口掩盖冲击。
-在 hard/explicit 接触、固定噪声种子 0 和 1 下，物理力峰值绝对误差平均为
-0.086 N，忽略最初 0.2 s 后的物理力 RMSE 为 0.022 N，滤波跟踪 RMSE 为
-0.007 N；Ramp 阶段的 `force_tracking` 占比为 100%，且未触发位置或力矩饱和。
-低峰值的代价是该场景从全开位置建立 1 N 接触约需 41.5 s；这仍是仿真调参结果，
-不代表已通过实机安全验收。
-可用下列 Hydra 正式入口重跑候选；执行命令可追加 `execution.workers=8` 使用 CPU 多进程：
+接触阈值、MIT 增益、导纳参数和任务曲线分别以当前 controller、platform 与 task 组合为准，
+不要沿用历史单次实验中的数值。可用下列 Hydra 正式入口审阅或执行当前导纳候选；执行命令可追加
+`execution.workers=8` 使用 CPU 多进程：
 
 ```bash
 uv run python scripts/research/study.py \
@@ -67,15 +59,9 @@ uv run python scripts/research/study.py \
   execution=study_run
 ```
 
-`control.force.admittance` 只由 `admittance` 入口使用，和 ADRC/直接力矩反馈互斥。
-接近轨迹、前馈和接触过渡由此段配置；任务的接近超时、参考曲线、控制周期和接触后
-等待仍有效。`control.force.geometry` 及 `control.mit` 提供机构几何与内环参数。
-使用不带导纳配置的普通 profile 时，该变体注入导纳默认值，但沿用该 profile 的
-MIT 参数；要重现实机基线，应使用专门的示例 profile。
-
 ## PID／导纳统一对比
 
-控制律隔离对比不改写上述 ROS 对齐基线，而使用两条独立组合：
+PID／导纳控制律隔离对比使用两条独立组合：
 
 ```bash
 uv run python scripts/research/run.py \

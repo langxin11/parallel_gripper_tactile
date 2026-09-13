@@ -1,12 +1,13 @@
-# 📌 DMgripper 配置基线与状态
+# 📌 DMgripper 配置与执行器基线
 
-DMgripper 完全由 `configs/dm_gripper.yaml` 配置：MJCF 来源、法兰安装、MIT 限幅、
-法向力控制器，以及 3×3 接触几何触觉布局。
+DMgripper 仿真实验由 `platform`、`model`、`controller`、`estimator`、`task`、`material` 与
+`execution` 配置组组合；`configs/dm_gripper.yaml` 只保留为独立 profile schema 示例和底层
+Python API 的兼容默认值，不是实验组合入口。
 
 <pre><code class="language-bash">
 uv run pgt validate configs/dm_gripper.yaml
-uv run pgt run grasp
-uv run pgt view grasp
+uv run python scripts/research/run.py execution=plan
+uv run pgt view grasp --set model=dm_gripper/height_spheres
 </code></pre>
 
 Pillars 使用等效接触参数 `solref="-1200 -10"` 与

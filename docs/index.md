@@ -26,12 +26,13 @@ uv run pgt runs list
 - [Onshape to Robot：曲柄滑块夹爪 MJCF 导出](onshape-export-upgrade.md)：CAD 命名、闭环与导出验收；
 - [曲柄滑块力控模型](crank-slider-force-control.md)：`f_n`、`k_pair`、雅可比和限幅。
 
-工程状态与电机/执行器基线见[DMgripper 配置基线与状态](custom-gripper-next-phase.md)。
-文献指南、近期实验与研究合集的目录及编译入口见[科研报告的组织与维护](reports.md)。
-配置目录与目的导向研究的设计、验收和迁移记录见[配置重构 Goal](configuration-refactor-goal.md)。
+DMgripper 的仿真配置与电机边界见[DMgripper 配置与执行器基线](dmgripper-configuration.md)，
+纯控制算法边界见[DMgripper 共享控制核](dm-shared-control.md)，真机操作见
+[DMgripper 通用抓取实验](dmgripper-experiments.md)。文献指南、近期实验与研究合集的目录及编译入口见
+[科研报告的组织与维护](reports.md)。
 
-下一阶段的目录整理、分夹爪控制核与真机接入见[纯 Python 真机联调计划](python-hardware-roadmap.md)。
-基础力跟踪与动态增力已收敛为通用抓取实验，操作方法见[DMgripper 通用抓取实验](dmgripper-experiments.md)；重构过程与验收记录见[DMgripper 通用抓取实验重构实施计划](dmgripper-unified-experiments-plan.md)。
+配置重构快照和旧 cup trace 语义仍保留在“归档”栏目，只用于回归与历史数据解释；当前操作不引用
+已完成的实施计划。
 
 <pre><code class="language-bash">
 uv sync

@@ -1,6 +1,11 @@
-# 配置重构迁移基线
+# 配置重构历史基线
 
-本文记录 `docs/configuration-refactor-goal.md` 迭代 1 的迁移基线。机器可读权威快照为
+> **状态：历史兼容基线。** 本文冻结配置重构实施时的输入、入口和研究矩阵，供回归测试解释；
+> 当前配置方法以 [`../research-configuration.md`](../research-configuration.md) 和仓库
+> `configs/README.md` 为准。
+
+本文记录 [`configuration-refactor-goal.md`](configuration-refactor-goal.md) 迭代 1 的迁移基线。
+机器可读权威快照为
 `tests/baselines/configuration_refactor_v1.json`，其 SHA-256 为
 `555e1d0945c5628b01cb6ed7ec494a0f04b3e047044d2b9728b81637fbaace96`。快照由重构前实现生成，
 固定在 Git 提交 `65201b5f711c9aafbdec28a14bc8a76db5a3d59f`；其中 `${REPOSITORY_ROOT}` 表示捕获时的
@@ -82,9 +87,9 @@ Robotiq 三个旧 profile 分别迁为 `model/robotiq_2f85/sphere_force_sensor`�
 model 能力校验解释，不能在切换模型时静默沿用。前两者是 `force_sensor` 3×3 前缀布局，后者是
 由 MJCF 推导行列的 `touch_grid` 双传感器布局。
 
-## 新旧路径映射
+## 重构时的新旧路径映射
 
-目标路径是后续迭代的稳定命名。旧文件在新组合及引用全部迁移且等价测试通过前不得删除。
+下表记录重构实施时采用的新旧路径映射，不表示旧路径仍可用于当前入口。
 
 | 旧路径 | 目标路径或处置 |
 | --- | --- |
@@ -112,9 +117,9 @@ model 能力校验解释，不能在切换模型时静默沿用。前两者是 `
 原先未有 Hydra preset 的力调度、摩擦估计、Robotiq 离散力、查看、抓取、接触比较和视频入口均已新增
 `experiment/<device>/<purpose>` 组合；原 CLI 路径参数已移除。
 
-## 入口与引用盘点
+## 重构前入口与引用盘点
 
-| 类别 | 当前入口／引用 | 迁移要求 |
+| 类别 | 快照时入口／引用 | 迁移要求 |
 | --- | --- | --- |
 | Hydra 单次 | `scripts/research/run.py`，仅 `dm_force_track`、`dm_admittance` | 改为 `--config-name run experiment=...` |
 | Hydra 正式研究 | `scripts/research/study.py` 与 9 个根 preset | 改为 `--config-name study research=...` |
