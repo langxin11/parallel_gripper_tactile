@@ -1,4 +1,9 @@
-# DMgripper 真机倒水实验
+# DMgripper 真机倒水实验（历史文档）
+
+> **状态：历史文档。** `dmgripper-cup` 入口已被通用抓取实验 `dmgripper-run` 取代并拒绝执行。
+> 本文仅用于解释历史 v1／v2 cup 运行记录（阶段名、交互语义与 trace 字段）；当前操作方法见
+> [`dmgripper-experiments.md`](dmgripper-experiments.md)。历史 `pour` 时间不应解释为新
+> `active` 任务时间。
 
 `dmgripper-cup` 是 DM4310P 平行夹爪与双侧 PapillArray 的真机倒水流程入口。它不使用
 Hydra，也不运行 MuJoCo；Hydra 配置和 `pgt` 入口仍只用于仿真研究。倒水流程的默认数值只是便于

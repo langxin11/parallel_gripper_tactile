@@ -212,8 +212,11 @@ USB2CAN 协议、传输、状态刷新和当前夹爪部署边界；`packages/ro
 `dmgripper_hardware`、`papillarray_hardware` 和 DM 控制核，但不得依赖 Robotiq 硬件或控制核。
 它只负责试验流程、设备调度、时间对齐与记录，不定义新的 MIT 或触觉控制公式。
 切向触觉增力策略已移入 `dm_grasp_core.grasp.disturbance`，使仿真与 DMgripper 真机共用同一纯计算
-实现；仿真主包的 `tangential_disturbance.py` 仅保留 Pydantic 配置兼容并再导出该策略。倒水实验的
-`dmgripper-cup` 是 Tyro 独立入口，不依赖 Hydra、MuJoCo 或仿真主包。
+实现；仿真主包的 `tangential_disturbance.py` 仅保留 Pydantic 配置兼容并再导出该策略。
+通用抓取实验的 `dmgripper-run` 是 Tyro 独立入口，不依赖 Hydra、MuJoCo 或仿真主包；它与
+`dmgripper-plot` 共享唯一的运行时与历史读取器，输出按任务／物体／运行编号组织。
+仿真 `ForceReference` 的 waypoint 插值委托共享核 `dm_grasp_core.grasp.reference` 的纯计算，
+两侧保持同一数值语义。
 后续 `robotiq_experiments` 以相同层次单独组合 Robotiq 链路；两者不共享命令类型、
 控制状态机或调度周期。
 所有设备对象均要求显式打开或调用才发生 I/O，当前不会自动连接、激活或驱动执行器。

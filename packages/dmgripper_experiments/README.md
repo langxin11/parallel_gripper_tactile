@@ -1,54 +1,70 @@
-# dmgripper-experiments 0.1.0
+# dmgripper-experiments 0.2.0
 
-DM4310P 与双侧 PapillArray 的最小纯 Python 真机实验入口。它不依赖 ROS 或 MuJoCo，预接触阶段
-跟踪由速度、加速度和加加速度约束生成的 minimum-jerk 闭合量轨迹，每个控制周期通过
-曲柄滑块运动学逆解为关节位置与速度；双侧 `+Fz` 稳定接触后先平滑衰减期望速度，再进入
-二阶导纳力跟踪。正常结束回到机械零位并失能，异常或 Ctrl-C 直接尽力失能。
+DM4310P 与双侧 PapillArray 的通用纯 Python 真机抓取实验包。它不依赖 ROS 或 MuJoCo，把基础
+力跟踪与原倒水实验收敛为同一条生命周期：预检、就绪、受限接近、接触确认、速度过渡、初始抓力
+稳定、正式运行、保持抓握、显式释放回位和结束。目标力来自给定时间曲线或触觉动态增力，控制器
+在二阶导纳、PID 与一阶位置型 LADRC 中独立选择，互不绑定。
 
-先审阅默认计划：
-
-```sh
-uv run --package dmgripper-experiments dmgripper-force-demo
-```
-
-确认传感器完全无负载、急停可用后，执行一次 0.5 N、10 s 的基本实验：
+先审阅计划（默认 dry-run，不导入运行时、不打开设备）：
 
 ```sh
-uv run --package dmgripper-experiments dmgripper-force-demo \
-  --target-force 0.5 --duration 10 --bias --execute
+uv run --package dmgripper-experiments dmgripper-run \
+  --config configs/hardware/dmgripper/force_curve.yaml
+uv run --package dmgripper-experiments dmgripper-run \
+  --config configs/hardware/dmgripper/adaptive_grip.yaml
 ```
 
-若刚刚已经可靠完成触觉清零，可以省略 `--bias`；程序仍会在使能前要求双侧力位于零力窗口。
-CSV 默认写入带时间戳的 `outputs/real/dm_force_demo_*.csv`，可用 `--output` 指定路径。
-
-PapillArray 首次收到采样率配置或清零命令后可能短暂无输出。CLI 会重复尝试读取，默认最多等待
-`5 s` 获得首个有效包；可用 `--tactile-startup-timeout` 放宽首次连接时限。开始控制后仍以
-`0.2 s` 判断触觉数据是否过期。使用 `--bias` 时先配置采样并以首个有效包确认数据流，再由同一
-采集线程发送清零命令；随后按 ROS 2 流程保持无负载等待 `2 s`。
-
-零力验证默认要求双侧 `|Fz|≤0.1 N` 连续 `0.5 s`，可用 `--zero-force-threshold`、
-`--zero-force-stable` 和 `--zero-force-timeout` 按真机残余噪声调整。若已经独立确认清零，可显式
-使用 `--skip-zero-check`；程序仍会等待首个有效触觉包，并保留运行中的数据过期和超力保护。
-控制和零力验证使用与 ROS 2 接触处理器一致的 `10 Hz` 一阶低通非负法向力，CSV 同时保留原始
-`Fz` 与滤波后的控制力。
-
-正常回位使用从当前闭合量到机械零位 `0 rad` 的 minimum-jerk 轨迹。默认闭合量最大速度为
-`0.012 m/s`，可用 `--return-closure-velocity` 调整。回位阶段单独使用 `kp=10`、`kd=0.5`
-和 `2 N·m` 合成力矩上限，以克服零位附近的静摩擦。总截止时间不会短于轨迹规划时长；轨迹结束后
-继续保持零位，直到实际位置进入 `0.02 rad` 容差，默认额外允许 `2 s` 收敛，通过后才失能。
-
-## 倒水实验
-
-`dmgripper-cup` 提供一个独立的真机倒水交互流程。默认模式只输出配置和输出目录，不导入运行时或
-访问设备；显式加入 `--execute` 才会使能真机。它使用 Tyro dataclass 默认值、严格 YAML、Tyro
-命令行覆盖的顺序解析配置：
+确认传感器完全无负载、急停可用后，在交互终端执行（运行时输入 `start`、`status`、`release`，
+每条命令都需按 `Enter` 提交）：
 
 ```sh
-uv run --package dmgripper-experiments dmgripper-cup \
-  --config configs/hardware/dmgripper/cup.yaml \
-  --controller pid --control.target-force-n 0.6
+uv run --package dmgripper-experiments dmgripper-run \
+  --config configs/hardware/dmgripper/adaptive_grip.yaml --bias --execute
 ```
 
-完整操作顺序、`ready`／`release`／`status` 交互命令、输出记录和重绘方法见
-[`docs/dmgripper-cup.md`](../../docs/dmgripper-cup.md)。默认数值尚未经真机验证；执行前必须准备急停和
-承接容器。
+使能前的零力验证以 `lifecycle.zero_force_stable_s` 窗口中双侧滤波 `Fz` 绝对值的均值为门禁：左右
+均值均不大于 `lifecycle.zero_force_threshold_n` 才会进入 `ready`。均值门禁通过后，若整个验证期内任一
+滤波峰值达到 `lifecycle.contact_on_n`，终端和 `events.jsonl` 会输出一次结构化 `warning`（最大峰值、
+触发侧、告警阈值），不会重置窗口或单独阻止使能；这不是带载运行许可，仍应检查传感器是否完全空载。
+触觉有效性／新鲜度、原始法向力上限和双侧不平衡保护，以及运行期的接触、过力、失接触和尽力失能保护
+均不受影响。
+
+非交互执行只允许明确的无人值守组合：`lifecycle.auto_start=true` 且 `lifecycle.on_finished=return`。
+正常结束默认保持抓握（`on_finished: hold`），等待用户显式 `release` 后才受限张开回位并失能；
+任何故障路径都会尽力失能、关闭串口和采集，并把原始故障与清理故障分开写入 manifest。
+控制过程即使已经结束，只要失能、设备关闭、采集停止或终端收尾失败，本次运行仍标记为
+`failed` 并返回非零状态；失能确认只由真实设备操作结果决定，不受事件显示失败影响。
+
+输出按 `outputs/real/<task_name>/<object_name>/<UTC时间戳>-<run_id>/` 组织，包含有效配置、
+事件 JSONL、原始触觉 JSONL、控制 trace CSV 与 manifest；正常结束后自动生成 `plot.pdf`／
+`plot.png`。离线重绘不覆盖历史原件：
+
+```sh
+uv run --package dmgripper-experiments dmgripper-plot --repaint <运行目录>
+```
+
+`terminal.mode=auto` 只在 Rich 判定为兼容且非 dumb 的交互终端中启用动态面板，否则自动使用
+纯文本；`terminal.mode=json` 输出无 ANSI 的 JSON 行。Rich 面板展示阶段、任务时间、左右法向力、
+目标力、切向力、刚度估计及有效性、开度、限幅状态、控制周期与触觉年龄。界面明确显示可用命令，
+收到 `start` 后会先显示并记录确认，再进行电机连接、检查和使能；未知命令会给出警告。Rich 由单一
+刷新线程驱动，预检与 `ready` 使用不移动光标的静态面板，产生首个控制快照后才启动 Live；纯文本
+快照也按 `terminal.refresh_hz` 合并输出。
+Rich 面板停止后会额外输出一行稳定摘要，包含最终状态、失能确认和运行目录；若主故障或 `Ctrl+C`
+同时伴随清理失败，终端会直接显示清理警告和 manifest 所在目录。终端刷新不参与控制时钟。
+
+等效接触刚度估计默认启用但只诊断：估计量、有效性、更新时刻与原因写入 trace，不改变控制命令。
+控制器显式配置 `stiffness_consumption: feedforward`（仅 PID／LADRC）时才消费估计前馈。
+估计初值与门限沿用仿真验证起点，尚不是真机辨识值。
+
+PID／LADRC 路径把原始力交给共享核，由核心内部做唯一一次低通（trace 同时记录原始力、外层
+滤波力与控制使用力）；导纳路径沿用外层滤波力，死区与单向闭合是导纳专属参数。曲线模式含下降
+段时与导纳 `prevent_unloading` 互斥，计划阶段直接报错。
+预载稳定区间支持独立的低侧 `preload_tolerance_n` 与高侧
+`preload_overforce_tolerance_n`；动态抓取真机配置只放宽高侧，以接纳温和过冲而不降低最低抓力要求。
+
+## 迁移说明
+
+旧入口 `dmgripper-force-demo` 与 `dmgripper-cup` 已被取代：调用时打印迁移提示并拒绝执行，
+不会把旧场景交互映射成自动阶段推进。`dmgripper-cup-plot` 保留为通用历史读取器的薄别名，
+可重绘历史 v1／v2 cup trace（`state` 列自动按 `phase` 解释）。历史运行目录继续可读、可重绘。
+操作细节见 [`docs/dmgripper-experiments.md`](../../docs/dmgripper-experiments.md)。

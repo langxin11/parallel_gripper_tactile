@@ -31,6 +31,7 @@ uv run pgt runs list
 配置目录与目的导向研究的设计、验收和迁移记录见[配置重构 Goal](configuration-refactor-goal.md)。
 
 下一阶段的目录整理、分夹爪控制核与真机接入见[纯 Python 真机联调计划](python-hardware-roadmap.md)。
+基础力跟踪与动态增力已收敛为通用抓取实验，操作方法见[DMgripper 通用抓取实验](dmgripper-experiments.md)；重构过程与验收记录见[DMgripper 通用抓取实验重构实施计划](dmgripper-unified-experiments-plan.md)。
 
 <pre><code class="language-bash">
 uv sync
