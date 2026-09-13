@@ -21,6 +21,19 @@ RELATED_PREFIXES = {
         "tests/test_cli.py",
         "tests/test_config_catalog.py",
     ),
+    # 共享核改动的消费者映射：核心自身、真机实验包与仿真力跟踪回归。
+    "packages/dm_grasp_core/": (
+        "packages/dm_grasp_core/tests",
+        "packages/dmgripper_experiments/tests",
+        "tests/test_force_tracking.py",
+    ),
+    # 真机实验包改动的消费者映射：本包测试与共享核回归（跟踪接口契约）。
+    "packages/dmgripper_experiments/": (
+        "packages/dmgripper_experiments/tests",
+        "packages/dm_grasp_core/tests",
+    ),
+    "packages/dmgripper_hardware/": ("packages/dmgripper_experiments/tests",),
+    "packages/papillarray_hardware/": ("packages/dmgripper_experiments/tests",),
     "src/parallel_gripper_tactile/research/catalog.py": ("tests/test_config_catalog.py",),
     "configs/": (
         "tests/test_research_configuration.py",
@@ -145,12 +158,13 @@ def select_tests(paths: list[str]) -> tuple[str, ...] | None:
             parts = Path(path).parts
             if len(parts) >= 2:
                 selected.add(f"packages/{parts[1]}/tests")
-                continue
         matched = False
         for prefix, tests in RELATED_PREFIXES.items():
             if path.startswith(prefix):
                 selected.update(tests)
                 matched = True
+        if path.startswith("packages/"):
+            matched = True
         if not matched and path.startswith(("src/", "scripts/")) and path.endswith(".py"):
             same_name_tests = _matching_root_tests(Path(path).stem)
             selected.update(same_name_tests)

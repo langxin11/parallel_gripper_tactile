@@ -38,8 +38,51 @@ def test_changed_package_maps_to_its_workspace_tests() -> None:
     """workspace 包改动应落到该包自己的测试目录。"""
     module = _module()
 
-    assert module.select_tests(["packages/dm_grasp_core/src/dm_grasp_core/control.py"]) == (
+    assert module.select_tests(["packages/robotiq_grasp_core/src/robotiq_grasp_core/core.py"]) == (
+        "packages/robotiq_grasp_core/tests",
+    )
+
+
+def test_changed_dm_core_maps_to_real_and_simulation_consumers() -> None:
+    """共享核改动应同时覆盖核心、真机实验包与仿真力跟踪回归。"""
+    module = _module()
+
+    selected = module.select_tests(
+        ["packages/dm_grasp_core/src/dm_grasp_core/control/normal_force.py"]
+    )
+
+    assert selected == (
         "packages/dm_grasp_core/tests",
+        "packages/dmgripper_experiments/tests",
+        "tests/test_force_tracking.py",
+    )
+
+
+def test_changed_experiment_package_maps_to_core_contract_tests() -> None:
+    """真机实验包改动应同时运行本包测试与共享核契约回归。"""
+    module = _module()
+
+    selected = module.select_tests(
+        ["packages/dmgripper_experiments/src/dmgripper_experiments/runtime.py"]
+    )
+
+    assert selected == (
+        "packages/dm_grasp_core/tests",
+        "packages/dmgripper_experiments/tests",
+    )
+
+
+def test_changed_hardware_package_maps_to_experiment_consumers() -> None:
+    """DM 与 PapillArray 硬件包改动应覆盖真机实验包测试。"""
+    module = _module()
+
+    selected = module.select_tests(
+        ["packages/papillarray_hardware/src/papillarray_hardware/sensor.py"]
+    )
+
+    assert selected == (
+        "packages/dmgripper_experiments/tests",
+        "packages/papillarray_hardware/tests",
     )
 
 
