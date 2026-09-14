@@ -36,6 +36,9 @@ class _SerialPort(Protocol):
     def read(self, size: int) -> bytes:
         """读取至多指定数量的字节。"""
 
+    def reset_input_buffer(self) -> None:
+        """丢弃操作系统串口接收队列中尚未读取的字节。"""
+
     def write(self, data: bytes) -> int:
         """写入字节并返回接受的字节数。"""
 
@@ -171,6 +174,7 @@ class PapillArraySerialClient:
         调用前必须让传感器完全无负载；本方法不会自行等待或判断无负载条件。
         """
         self._write_command(_CLEAR_BIAS_COMMAND)
+        self._require_open().reset_input_buffer()
         reader = self._require_reader()
         reader.reset_buffer()
 

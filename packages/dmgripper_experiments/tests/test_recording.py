@@ -43,7 +43,14 @@ def test_recorder_writes_config_events_trace_and_manifest(tmp_path: Path):
     directory = create_run_directory(tmp_path, config)
     recorder = ExperimentRecorder(directory, config)
     recorder.append({"event": "state", "phase": "preparing"})
-    recorder.sample({"counter": 1, "timestamp_us": 1000})
+    recorder.sample(
+        {
+            "counter": 1,
+            "timestamp_us": 1000,
+            "left_taxel_forces_n": [[0.0, 0.0, 0.1]],
+            "right_taxel_forces_n": [[0.0, 0.0, 0.2]],
+        }
+    )
     recorder.write({"time_s": 0.0, "phase": "preparing", "target_force_n": 0.5})
     recorder.close()
     stored = json.loads((directory / "config.json").read_text(encoding="utf-8"))
@@ -52,6 +59,9 @@ def test_recorder_writes_config_events_trace_and_manifest(tmp_path: Path):
     manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["status"] == "completed"
     assert manifest["disable_confirmed"] == "not_applicable"
+    assert manifest["cleanup_errors"] == []
+    tactile_record = json.loads((directory / "tactile.jsonl").read_text(encoding="utf-8"))
+    assert tactile_record["left_taxel_forces_n"][0][2] == pytest.approx(0.1)
     assert set(manifest["files"]) >= {
         "config.json",
         "events.jsonl",
@@ -90,9 +100,20 @@ def test_recorder_keeps_trace_and_marks_failure(tmp_path: Path):
     assert manifest["status"] == "failed"
     assert manifest["error"]["type"] == "RuntimeError"
     assert manifest["error"]["message"] == "控制周期超时"
+    assert manifest["primary_error"] == manifest["error"]
     assert manifest["disable_confirmed"] is False
     assert manifest["cleanup_errors"] == ["失能失败：模拟"]
     assert "trace.csv" in manifest["files"]
+
+
+def test_recorder_rejects_nonfinite_tactile_without_writing_partial_json(tmp_path: Path):
+    """非有限原始触觉值不得形成带 NaN/Infinity 的 JSONL 行。"""
+    directory = create_run_directory(tmp_path, _config())
+    recorder = ExperimentRecorder(directory, _config())
+    with pytest.raises(ValueError, match="JSON"):
+        recorder.sample({"left_taxel_forces_n": [[float("nan"), 0.0, 0.0]]})
+    recorder.close(status="failed", error="非有限触觉")
+    assert (directory / "tactile.jsonl").read_text(encoding="utf-8") == ""
 
 
 def test_trace_fields_cover_target_stiffness_and_timing_diagnostics():

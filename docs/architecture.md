@@ -204,14 +204,19 @@ DMgripper 的二阶导纳基线另由 `packages/dm_grasp_core` 独立包提供�
 Robotiq 离散力控制由独立 workspace 成员 `packages/robotiq_grasp_core` 提供；仿真主包直接依赖该 workspace 成员。该核心仅依赖 NumPy，不依赖 ROS、MuJoCo、profile、DM 核或仿真主包。
 DM 与 Robotiq 分别维护控制算法、命令类型和状态机。
 
-纯 Python 真机基础层同样按夹爪隔离。`packages/dmgripper_hardware` 提供 DM4310P
-USB2CAN 协议、传输、状态刷新和当前夹爪部署边界；`packages/robotiq_hardware` 提供 `0～255`
-位置命令边界与 `pyrobotiqgripper==3.3.12` 薄适配。两包互不依赖，也不依赖仿真主包。
-`packages/papillarray_hardware` 是独立的商业触觉设备包，只负责 PTS v2.0 解析、同步串口读取和
-显式设备命令；实验运行时把它与所选夹爪后端组合，不让共享采集代码变成共享控制逻辑。
-纯 Python 真机实验由夹爪专属的组合包承载：`dmgripper_experiments` 可依赖
-`dmgripper_hardware`、`papillarray_hardware` 和 DM 控制核，但不得依赖 Robotiq 硬件或控制核。
-它只负责试验流程、设备调度、时间对齐与记录，不定义新的 MIT 或触觉控制公式。
+纯 Python 真机基础层同样按夹爪隔离。DMgripper 真机链路的四包职责如下：
+
+| 包 | 拥有的职责 | 不拥有的职责 |
+| --- | --- | --- |
+| `papillarray_hardware` | PapillArray 串口与 PTS v2.0 协议、原始包、bias 基础命令、可复用采集会话，以及包级、传感器级和逐 taxel 完整性诊断 | 接触、预载、零力是否通过、实验阶段、运行目录或 manifest |
+| `dmgripper_hardware` | USB2CAN 与 DM 协议、反馈状态与命令／反馈范围校验，以及显式 `open`、`inspect`、`require_disabled`、`enable`、`command`、`hold`、`disable`、`close` 会话 | 自动回零、实验故障分类、何时保持或释放、实验记录 |
+| `dm_grasp_core` | 曲柄滑块运动学、受限轨迹与 MIT 请求，以及导纳、PID、LADRC 和刚度估计等纯计算 | 设备访问、实验生命周期和文件记录 |
+| `dmgripper_experiments` | 冻结配置、人工命令、零力门禁、接触／预载／动态任务、自动回零、故障分类与故障保持，以及 `config.json`、`events.jsonl`、`tactile.jsonl`、`trace.csv`、manifest 和绘图 | 重新实现 PTS、USB2CAN、DM 协议或共享控制公式 |
+
+`packages/robotiq_hardware` 仍独立提供 `0～255` 位置命令边界与
+`pyrobotiqgripper==3.3.12` 薄适配；它与 DMgripper 四包链路互不混用，也不依赖仿真主包。
+硬件包只向上提供结构化原始数据、诊断和显式设备动作，实验专用的数据目录与结果语义始终由
+`dmgripper_experiments` 拥有。
 切向触觉增力策略已移入 `dm_grasp_core.grasp.disturbance`，使仿真与 DMgripper 真机共用同一纯计算
 实现；仿真主包的 `tangential_disturbance.py` 仅保留 Pydantic 配置兼容并再导出该策略。
 通用抓取实验的 `dmgripper-run` 是 Tyro 独立入口，不依赖 Hydra、MuJoCo 或仿真主包；它与
@@ -220,7 +225,7 @@ USB2CAN 协议、传输、状态刷新和当前夹爪部署边界；`packages/ro
 两侧保持同一数值语义。
 后续 `robotiq_experiments` 以相同层次单独组合 Robotiq 链路；两者不共享命令类型、
 控制状态机或调度周期。
-所有设备对象均要求显式打开或调用才发生 I/O，当前不会自动连接、激活或驱动执行器。
+所有设备对象均要求显式打开或调用才发生 I/O，构造配置或会话不会自动连接、激活或驱动执行器。
 `papillarray-probe` 只配置采样率并输出有限个触觉包；`dmgripper-state-probe` 只发送状态查询帧。
 两者用于分别核对数据链路，均不是闭环运行时、安全互锁或急停实现。
 DM 核心命令经显式适配后才进入协议量化；Robotiq 硬件单步只调用自身离散控制核心，且仅在

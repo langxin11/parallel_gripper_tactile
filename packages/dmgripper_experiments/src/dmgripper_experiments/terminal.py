@@ -18,14 +18,14 @@ from .lifecycle import LifecyclePhase
 
 _MESSAGES = {
     LifecyclePhase.PREPARING: "正在预检：建立采集并验证空载零力。",
-    LifecyclePhase.READY: (
-        "预检完成。电机未使能；输入 start 后按 Enter 开始闭合，输入 release 取消。"
-    ),
+    LifecyclePhase.READY: ("预检完成。电机未使能；输入 start 后可能先自动回零，再开始闭合。"),
+    LifecyclePhase.HOMING: "正在执行受限自动回零。",
     LifecyclePhase.APPROACH: "正在受限闭合接近，等待双侧接触。",
     LifecyclePhase.CONTACT_TRANSITION: "双侧接触已确认，正在平滑衰减接近速度。",
     LifecyclePhase.PRELOAD: "正在建立初始抓力并学习基线。",
     LifecyclePhase.ACTIVE: "目标策略已启用，运行中。",
     LifecyclePhase.HOLDING: "任务计时完成，保持抓握；输入 release 后按 Enter 结束。",
+    LifecyclePhase.FAULT_HOLDING: "实验已失败并保持当前位置；承接物体后输入 release。",
     LifecyclePhase.RETURNING: "已收到 release，正在受限张开回位。",
     LifecyclePhase.COMPLETED: "回位完成，实验结束。",
     LifecyclePhase.CANCELLED: "使能前取消，未发送运动命令。",
@@ -120,6 +120,8 @@ class TerminalDisplay:
         self._event_phase = ""
         self._event_kind = ""
         self._event_action = ""
+        self._command_input = ""
+        self._input_revision = 0
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
         self._stopped = threading.Event()
@@ -197,6 +199,12 @@ class TerminalDisplay:
             if action:
                 self._event_action = action
 
+    def set_command_input(self, text: str) -> None:
+        """更新 Rich 面板底部的固定命令输入区。"""
+        with self._lock:
+            self._command_input = text
+            self._input_revision += 1
+
     def _run(self) -> None:
         """刷新循环：按配置模式消费快照。"""
         if self._mode == "json":
@@ -249,30 +257,16 @@ class TerminalDisplay:
                 next_write_s = now_s + interval_s
 
     def _run_rich(self) -> None:
-        """先静态展示 ready，产生控制快照后再由单线程启动 Live。"""
+        """由单一 Live 区域同时维护状态面板与固定输入行。"""
         from rich.live import Live
+        from rich.text import Text
 
         console = self._get_rich_console()
         rendered_event_revision = -1
-        first_snapshot: RunSnapshot | None = None
-        while first_snapshot is None:
-            first_snapshot = self._drain_latest()
-            with self._lock:
-                event_revision = self._event_revision
-            if event_revision != rendered_event_revision:
-                preflight = self._render_preflight_events()
-                if preflight is not None:
-                    # ready 期间不启用 Live，避免光标回退干扰内核的输入回显。
-                    console.print(preflight)
-                rendered_event_revision = event_revision
-            if self._stopped.is_set():
-                if first_snapshot is not None:
-                    console.print(self._render_rich(first_snapshot))
-                return
-            if first_snapshot is None:
-                self._stopped.wait(1.0 / self._refresh_hz)
-
+        rendered_input_revision = -1
+        latest_snapshot: RunSnapshot | None = None
         with Live(
+            renderable=self._with_command_input(Text("正在初始化…")),
             console=console,
             auto_refresh=False,
             redirect_stdout=False,
@@ -281,27 +275,39 @@ class TerminalDisplay:
             transient=False,
             vertical_overflow="ellipsis",
         ) as live:
-            # Live 默认隐藏光标；本程序同时接受行输入，必须让输入位置可见。
-            console.show_cursor(True)
-            pending_snapshot: RunSnapshot | None = first_snapshot
             while True:
                 snapshot = self._drain_latest()
                 if snapshot is not None:
-                    pending_snapshot = snapshot
+                    latest_snapshot = snapshot
                 with self._lock:
                     event_revision = self._event_revision
-                if pending_snapshot is not None or (
-                    event_revision != rendered_event_revision and self._latest is not None
+                    input_revision = self._input_revision
+                if (
+                    snapshot is not None
+                    or event_revision != rendered_event_revision
+                    or input_revision != rendered_input_revision
                 ):
-                    live.update(
-                        self._render_rich(pending_snapshot or self._latest),
-                        refresh=True,
+                    body = (
+                        self._render_rich(latest_snapshot)
+                        if latest_snapshot is not None
+                        else self._render_preflight_events() or Text("正在初始化…")
                     )
-                    pending_snapshot = None
+                    live.update(self._with_command_input(body), refresh=True)
                     rendered_event_revision = event_revision
+                    rendered_input_revision = input_revision
                 if self._stopped.is_set():
                     break
                 self._stopped.wait(1.0 / self._refresh_hz)
+
+    def _with_command_input(self, body):
+        """把状态内容与不受重绘干扰的底部输入行组合。"""
+        from rich.console import Group
+        from rich.text import Text
+
+        with self._lock:
+            command_input = self._command_input
+        prompt = Text.assemble(("命令> ", "bold cyan"), command_input, ("█", "bold white"))
+        return Group(body, prompt)
 
     def _get_rich_console(self):
         """返回用于能力判断与 Live 的同一个 Rich Console。"""
@@ -328,7 +334,7 @@ class TerminalDisplay:
             subtitle = "正在连接、检查并使能电机；请勿重复输入"
         elif phase == LifecyclePhase.READY.value:
             title = "DMgripper 等待命令"
-            subtitle = "命令：start 开始 · status 状态 · release 取消（输入后按 Enter）"
+            subtitle = "命令：s/start 开始 · status 状态 · r/release 取消（按 Enter）"
         elif phase == LifecyclePhase.CANCELLED.value:
             title = "DMgripper 已取消"
             subtitle = "使能前取消，未发送运动命令"
@@ -338,6 +344,12 @@ class TerminalDisplay:
         elif phase == LifecyclePhase.FAULT.value:
             title = "DMgripper 故障"
             subtitle = "退出清理已尝试完成"
+        elif phase == LifecyclePhase.HOMING.value:
+            title = "DMgripper 自动回零"
+            subtitle = "仅接受 status；紧急停止请按 Ctrl+C"
+        elif phase == LifecyclePhase.FAULT_HOLDING.value:
+            title = "DMgripper 故障保持"
+            subtitle = "请承接物体后输入 release；紧急停止请按 Ctrl+C"
         elif phase == LifecyclePhase.PREPARING.value or not phase:
             title = "DMgripper 正在准备"
             subtitle = "请等待预检完成"
@@ -475,14 +487,19 @@ class TerminalDisplay:
 
 def _command_hint(phase: LifecyclePhase) -> str:
     """返回与当前生命周期实际允许动作一致的命令提示。"""
-    if phase in {LifecyclePhase.ACTIVE, LifecyclePhase.HOLDING}:
-        return "status 查看状态 · release 回位（输入后按 Enter）"
     if phase in {
+        LifecyclePhase.ACTIVE,
+        LifecyclePhase.HOLDING,
+        LifecyclePhase.FAULT_HOLDING,
+    }:
+        return "status 查看状态 · r/release 回位（按 Enter）"
+    if phase in {
+        LifecyclePhase.HOMING,
         LifecyclePhase.APPROACH,
         LifecyclePhase.CONTACT_TRANSITION,
         LifecyclePhase.PRELOAD,
     }:
-        return "status 查看状态 · release 暂不可用 · 紧急停止 Ctrl+C"
+        return "status 查看状态 · r/release 暂不可用 · 紧急停止 Ctrl+C"
     if phase is LifecyclePhase.RETURNING:
         return "正在回位 · status 查看状态 · 紧急停止 Ctrl+C"
     return "实验已结束"

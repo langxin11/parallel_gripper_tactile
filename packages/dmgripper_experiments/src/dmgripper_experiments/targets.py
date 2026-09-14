@@ -134,6 +134,7 @@ class AdaptiveTargetSource(TargetSource):
         self,
         config: AdaptiveReferenceConfig,
         *,
+        max_target_force_n: float,
         control_rate_hz: float,
         contact_floor_n: float,
     ) -> None:
@@ -142,7 +143,7 @@ class AdaptiveTargetSource(TargetSource):
         self.policy = TactileDisturbancePolicy(
             DisturbancePolicyParameters(
                 initial_force_n=config.initial_force_n,
-                max_force_n=config.max_force_n,
+                max_force_n=max_target_force_n,
                 max_force_rate_n_s=config.max_force_rate_n_s,
                 update_period_s=1.0 / control_rate_hz,
                 filter_tau_s=config.filter_tau_s,
@@ -211,6 +212,7 @@ def build_target_source(
     *,
     curve: ForceReferenceCurve | None,
     adaptive: AdaptiveReferenceConfig | None,
+    max_target_force_n: float,
     control_rate_hz: float,
     contact_floor_n: float,
 ) -> TargetSource:
@@ -219,6 +221,7 @@ def build_target_source(
     Args:
         curve: 曲线模式共享核曲线。
         adaptive: 动态模式配置。
+        max_target_force_n: 所有目标来源共用的目标力上限。
         control_rate_hz: 控制频率，用于策略动作周期。
         contact_floor_n: 有效接触的力下限。
 
@@ -235,6 +238,7 @@ def build_target_source(
     assert adaptive is not None
     return AdaptiveTargetSource(
         adaptive,
+        max_target_force_n=max_target_force_n,
         control_rate_hz=control_rate_hz,
         contact_floor_n=contact_floor_n,
     )

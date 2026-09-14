@@ -26,7 +26,6 @@ def build_adaptive_task() -> ExperimentConfig:
             adaptive=AdaptiveReferenceConfig(
                 initial_force_n=0.5,
                 duration_s=8.0,
-                max_force_n=1.2,
             )
         ),
     )

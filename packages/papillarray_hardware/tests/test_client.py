@@ -22,6 +22,7 @@ class FakeSerial:
         self.read_chunks = list(read_chunks or [])
         self.writes: list[bytes] = []
         self.flush_count = 0
+        self.reset_input_buffer_count = 0
         self.close_count = 0
 
     def read(self, _size: int) -> bytes:
@@ -36,6 +37,10 @@ class FakeSerial:
     def flush(self) -> None:
         """记录 flush 调用。"""
         self.flush_count += 1
+
+    def reset_input_buffer(self) -> None:
+        """记录接收队列清空调用。"""
+        self.reset_input_buffer_count += 1
 
     def close(self) -> None:
         """关闭 fake 串口。"""
@@ -99,6 +104,7 @@ def test_open_and_commands_are_explicit_and_use_expected_wire_values() -> None:
     assert calls == [(DEFAULT_PAPILLARRAY_PORT, 115200, 1.0)]
     assert serial_port.writes == [b"f500\n", b"z\n", b"S\n", b"s\n"]
     assert serial_port.flush_count == 4
+    assert serial_port.reset_input_buffer_count == 1
     assert serial_port.close_count == 1
 
 

@@ -17,11 +17,13 @@ class LifecyclePhase(StrEnum):
 
     PREPARING = "preparing"
     READY = "ready"
+    HOMING = "homing"
     APPROACH = "approach"
     CONTACT_TRANSITION = "contact_transition"
     PRELOAD = "preload"
     ACTIVE = "active"
     HOLDING = "holding"
+    FAULT_HOLDING = "fault_holding"
     RETURNING = "returning"
     COMPLETED = "completed"
     CANCELLED = "cancelled"
@@ -51,9 +53,12 @@ class Lifecycle:
     转换表（箭头表示允许的显式转换）：
 
     ```text
-    preparing → ready → approach ⇄ preload → active → holding
-                       ↓            ↓           ↓        ↓
-                    cancelled   returning ← release（active／holding）
+    preparing → ready → homing（必要时）→ approach → contact_transition
+                       └────────────────→ approach
+    contact_transition → preload → active → holding
+    active／holding → returning → completed
+    任一使能后可保持阶段 → fault_holding → returning → completed
+    ready → cancelled
     approach → contact_transition → preload
     任意非终态 → fault
     ```
@@ -69,6 +74,8 @@ class Lifecycle:
         self.reason = "配置已验证，等待预检"
         self.contact_segment = 0
         self.fault_reason: str | None = None
+        self.fault_phase: LifecyclePhase | None = None
+        self.fault_holding_started_s: float | None = None
 
     @property
     def is_terminal(self) -> bool:
@@ -89,10 +96,20 @@ class Lifecycle:
         self._require(LifecyclePhase.PREPARING)
         self._enter(LifecyclePhase.READY, now_s, reason)
 
-    def start(self, now_s: float) -> None:
-        """响应用户 start，进入接近阶段。"""
+    def start(self, now_s: float, *, needs_homing: bool = False) -> None:
+        """响应用户 start，按初始位置进入回零或接近阶段。"""
         self._require(LifecyclePhase.READY)
-        self._enter(LifecyclePhase.APPROACH, now_s, "收到 start，电机已确认使能")
+        if needs_homing:
+            self._enter(LifecyclePhase.HOMING, now_s, "电机已确认使能，启动位置不在 home 容差内")
+        else:
+            self._enter(
+                LifecyclePhase.APPROACH, now_s, "收到 start，电机已确认使能且位于 home 附近"
+            )
+
+    def finish_homing(self, now_s: float) -> None:
+        """回零轨迹结束且实际位置达标，进入接近阶段。"""
+        self._require(LifecyclePhase.HOMING)
+        self._enter(LifecyclePhase.APPROACH, now_s, "受限回零完成，开始接近")
 
     def cancel_before_enable(self, now_s: float) -> None:
         """使能前收到取消，直接进入 cancelled 终态。"""
@@ -122,9 +139,33 @@ class Lifecycle:
 
     def begin_return(self, now_s: float, reason: str) -> None:
         """响应用户 release，进入受限张开回位。"""
-        if self.phase not in {LifecyclePhase.ACTIVE, LifecyclePhase.HOLDING}:
+        if self.phase not in {
+            LifecyclePhase.ACTIVE,
+            LifecyclePhase.HOLDING,
+            LifecyclePhase.FAULT_HOLDING,
+        }:
             raise RuntimeError(f"阶段 {self.phase.value} 不允许开始回位")
         self._enter(LifecyclePhase.RETURNING, now_s, reason)
+
+    def hold_fault(self, now_s: float, reason: str) -> None:
+        """保存首个使能后故障并进入非终态故障保持。"""
+        if self.is_terminal or self.phase in {
+            LifecyclePhase.PREPARING,
+            LifecyclePhase.READY,
+            LifecyclePhase.FAULT_HOLDING,
+        }:
+            raise RuntimeError(f"阶段 {self.phase.value} 不允许进入故障保持")
+        self.fault_phase = self.phase
+        self.fault_reason = reason
+        self.fault_holding_started_s = now_s
+        self._enter(LifecyclePhase.FAULT_HOLDING, now_s, reason)
+
+    def resume_fault_holding(self, now_s: float, reason: str) -> None:
+        """故障释放回位未达标时恢复保持，不覆盖首个故障。"""
+        self._require(LifecyclePhase.RETURNING)
+        if self.fault_reason is None or self.fault_phase is None:
+            raise RuntimeError("没有首个故障上下文，不能恢复故障保持")
+        self._enter(LifecyclePhase.FAULT_HOLDING, now_s, reason)
 
     def complete_return(self, now_s: float) -> None:
         """回位轨迹结束且实际位置达标，进入 completed 终态。"""
@@ -141,6 +182,7 @@ class Lifecycle:
         """进入故障终态并保留失败原因。"""
         if self.is_terminal:
             raise RuntimeError(f"终态 {self.phase.value} 不能再次转入故障")
+        self.fault_phase = self.phase
         self._enter(LifecyclePhase.FAULT, now_s, reason)
         self.fault_reason = reason
 

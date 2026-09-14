@@ -171,6 +171,7 @@ def test_adaptive_source_activates_only_after_preload_baseline() -> None:
     config = _config("admittance")
     source = AdaptiveTargetSource(
         AdaptiveReferenceConfig(),
+        max_target_force_n=config.safety.max_target_force_n,
         control_rate_hz=config.timing.control_rate_hz,
         contact_floor_n=config.lifecycle.contact_off_n,
     )

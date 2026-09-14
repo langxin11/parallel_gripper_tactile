@@ -37,6 +37,36 @@ def test_verify_zero_uses_filtered_fz_and_tolerates_raw_noise() -> None:
     _verify_zero(tactile, _zero_config(), False, clock, clock.sleep)
 
 
+def test_verify_zero_waits_for_a_new_packet_after_bias_settle() -> None:
+    """settle 完成时重新划定边界，验证窗口不得复用 settle 期间的旧包。"""
+    clock = FakeClock()
+    actions = PhaseActions()
+
+    class BoundaryTactile(FakeTactile):
+        def __init__(self, *args, **kwargs) -> None:
+            super().__init__(*args, **kwargs)
+            self.previous_boundaries: list[float | None] = []
+
+        def wait_for_update(self, previous_received_at_s, _timeout_s) -> TactileSnapshot:
+            self.previous_boundaries.append(previous_received_at_s)
+            self.clock.advance(0.01)
+            return self._snapshot(force_n=0.0)
+
+    tactile = BoundaryTactile(None, clock=clock, phase=actions)
+    config = _zero_config(zero_force_stable_s=0.02)
+    _verify_zero(
+        tactile,
+        config,
+        True,
+        clock,
+        clock.sleep,
+    )
+    assert tactile.previous_boundaries[0] is None
+    assert tactile.previous_boundaries[1] == pytest.approx(
+        0.01 + config.timing.tactile_bias_settle_s
+    )
+
+
 def test_verify_zero_accepts_noise_crossing_mean_threshold() -> None:
     """滤波噪声可越过均值阈值，但窗口均值合格且未达接触峰值时应通过。"""
     clock = FakeClock()
@@ -85,7 +115,10 @@ def test_verify_zero_contact_peak_emits_warning_without_resetting_window() -> No
         clock.sleep,
         warning_sink=warnings.append,
     )
-    assert warnings == [
+    assert warnings[0]["event"] == "zero_force_diagnostics"
+    assert warnings[0]["taxels"]["left"]["maximum_abs_residual_n"] == pytest.approx(0.2)
+    assert warnings[0]["taxels"]["left"]["maximum_residual_taxel_index"] == 0
+    assert warnings[1:] == [
         {
             "event": "warning",
             "code": "zero_force_peak",
@@ -142,3 +175,70 @@ def test_verify_zero_reports_filtered_force_timeout_instead_of_snapshot_timeout(
     tactile = LoadedTactile(None, clock=clock, phase=actions)
     with pytest.raises(RuntimeError, match=r"滤波双侧 Fz.*均值 LEFT=0\.110N"):
         _verify_zero(tactile, _zero_config(), False, clock, clock.sleep)
+
+
+@pytest.mark.parametrize("bad_value", [float("nan"), float("inf")])
+def test_verify_zero_rejects_nonfinite_taxel(bad_value: float) -> None:
+    """任一逐 taxel 分量非有限时必须阻断使能前验证。"""
+    clock = FakeClock()
+    actions = PhaseActions()
+
+    class BadTaxelTactile(FakeTactile):
+        def wait_for_update(self, _previous_received_at_s, _timeout_s) -> TactileSnapshot:
+            self.clock.advance(0.01)
+            return replace(
+                self._snapshot(force_n=0.0),
+                left_taxel_forces_n=((bad_value, 0.0, 0.0),),
+            )
+
+    tactile = BadTaxelTactile(None, clock=clock, phase=actions)
+    with pytest.raises(RuntimeError, match="taxel 0.*非有限"):
+        _verify_zero(tactile, _zero_config(), False, clock, clock.sleep)
+
+
+def test_verify_zero_rejects_taxel_count_change() -> None:
+    """同次零力窗口内任一侧 taxel 数变化必须阻断启动。"""
+    clock = FakeClock()
+    actions = PhaseActions()
+
+    class ChangingTaxelTactile(FakeTactile):
+        def wait_for_update(self, _previous_received_at_s, _timeout_s) -> TactileSnapshot:
+            self.clock.advance(0.01)
+            snapshot = self._snapshot(force_n=0.0)
+            if self.counter >= 2:
+                return replace(
+                    snapshot,
+                    left_taxel_forces_n=((0.0, 0.0, 0.0), (0.0, 0.0, 0.0)),
+                )
+            return snapshot
+
+    tactile = ChangingTaxelTactile(None, clock=clock, phase=actions)
+    with pytest.raises(RuntimeError, match="taxel 数量变化"):
+        _verify_zero(tactile, _zero_config(), False, clock, clock.sleep)
+
+
+def test_local_taxel_residual_is_diagnostic_not_zero_gate() -> None:
+    """未配置逐 taxel 幅值门限时，局部残余只诊断且全局均值仍决定通过。"""
+    clock = FakeClock()
+    actions = PhaseActions()
+    events: list[dict[str, object]] = []
+
+    class ResidualTaxelTactile(FakeTactile):
+        def wait_for_update(self, _previous_received_at_s, _timeout_s) -> TactileSnapshot:
+            self.clock.advance(0.01)
+            return replace(
+                self._snapshot(force_n=0.0),
+                left_taxel_forces_n=((0.0, 0.0, 5.0),),
+            )
+
+    tactile = ResidualTaxelTactile(None, clock=clock, phase=actions)
+    _verify_zero(
+        tactile,
+        _zero_config(zero_force_stable_s=0.02),
+        False,
+        clock,
+        clock.sleep,
+        warning_sink=events.append,
+    )
+    diagnostic = next(event for event in events if event["event"] == "zero_force_diagnostics")
+    assert diagnostic["taxels"]["left"]["maximum_abs_residual_n"] == pytest.approx(5.0)

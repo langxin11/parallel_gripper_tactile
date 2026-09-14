@@ -64,7 +64,7 @@ TRACE_FIELDS = (
 )
 
 SCHEMA_NAME = "dmgripper-experiment/v1"
-RECORDER_VERSION = "1.0.0"
+RECORDER_VERSION = "1.1.0"
 
 
 def create_run_directory(root: Path | str, config: ExperimentConfig) -> Path:
@@ -185,8 +185,13 @@ class ExperimentRecorder:
         """
         with self._lock:
             self._ensure_open()
-            json.dump(dict(record), self._tactile_handle, ensure_ascii=False, sort_keys=True)
-            self._tactile_handle.write("\n")
+            payload = json.dumps(
+                dict(record),
+                ensure_ascii=False,
+                sort_keys=True,
+                allow_nan=False,
+            )
+            self._tactile_handle.write(payload + "\n")
             self._tactile_handle.flush()
 
     def write(self, row: Mapping[str, Any]) -> None:
@@ -221,6 +226,10 @@ class ExperimentRecorder:
         cleanup_errors: list[str] | None = None,
         post_processing_error: BaseException | str | None = None,
         input_config_path: Path | None = None,
+        fault_phase: str | None = None,
+        fault_holding_entered: bool = False,
+        fault_holding_duration_s: float = 0.0,
+        fault_resolution: str | None = None,
     ) -> None:
         """关闭数据文件并写入最终 manifest。
 
@@ -231,6 +240,10 @@ class ExperimentRecorder:
             cleanup_errors: 退出清理阶段的次要故障列表。
             post_processing_error: 设备正常结束后的绘图等后处理失败。
             input_config_path: 原始输入 YAML 路径。
+            fault_phase: 首个可保持故障发生时的运行阶段。
+            fault_holding_entered: 是否实际进入过故障保持。
+            fault_holding_duration_s: 故障保持持续时间。
+            fault_resolution: ``released``／``forced_disable``／``hold_lost`` 等处置结果。
         """
         with self._lock:
             if self._closed:
@@ -245,6 +258,11 @@ class ExperimentRecorder:
                 "ended_at": _utc_now(),
                 "status": status,
                 "disable_confirmed": disable_confirmed,
+                "fault_phase": fault_phase,
+                "fault_holding_entered": fault_holding_entered,
+                "fault_holding_duration_s": fault_holding_duration_s,
+                "fault_resolution": fault_resolution,
+                "cleanup_errors": list(cleanup_errors or []),
                 "input_config_path": (
                     str(input_config_path) if input_config_path is not None else None
                 ),
@@ -261,9 +279,9 @@ class ExperimentRecorder:
             }
             manifest["files"].update(self._extra_artifacts)
             if error is not None:
-                manifest["error"] = _error_details(error)
-            if cleanup_errors:
-                manifest["cleanup_errors"] = list(cleanup_errors)
+                details = _error_details(error)
+                manifest["error"] = details
+                manifest["primary_error"] = details
             if post_processing_error is not None:
                 manifest["post_processing_error"] = _error_details(post_processing_error)
             with self._manifest_path.open("w", encoding="utf-8") as handle:

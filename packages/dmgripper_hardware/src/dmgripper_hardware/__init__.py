@@ -49,6 +49,7 @@ from .motion import (
     MotionStageTimeoutError,
 )
 from .serial_transport import PySerialTransport, SerialFactory
+from .session import DmSession
 from .transport import ByteTransport, FakeTransport, TransportClosedError
 
 __version__ = "0.1.0"
@@ -69,6 +70,7 @@ __all__ = [
     "DmStateRefresher",
     "DmRegisterReader",
     "DmResponseReceiver",
+    "DmSession",
     "DmSafeMotionProbe",
     "DmMitCommandAdapter",
     "FakeTransport",

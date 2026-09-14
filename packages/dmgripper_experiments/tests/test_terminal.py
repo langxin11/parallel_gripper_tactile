@@ -164,7 +164,7 @@ def test_rich_preflight_panel_keeps_recent_warning_without_snapshot():
     rendered = stream.getvalue()
     assert "检测到峰值" in rendered
     assert "等待 start" in rendered
-    assert "输入后按 Enter" in rendered
+    assert "按 Enter" in rendered
 
 
 def test_rich_command_hint_matches_phase_permissions() -> None:
@@ -249,11 +249,13 @@ def test_rich_live_has_one_refresh_owner_and_idles_without_redraw(
     display.show_event("state | ready | 等待 start", phase="ready")
     display.start()
     display.publish(_snapshot())
-    _wait_until(lambda: len(updates) == 1)
+    _wait_until(lambda: len(updates) >= 1)
     time.sleep(0.08)
-    assert len(updates) == 1
+    update_count = len(updates)
+    time.sleep(0.08)
+    assert len(updates) == update_count
     display.show_event("status | active | 仍在运行", phase="active")
-    _wait_until(lambda: len(updates) == 2)
+    _wait_until(lambda: len(updates) == update_count + 1)
     display.stop()
 
     assert options["auto_refresh"] is False
@@ -354,7 +356,7 @@ def test_rich_ready_accepts_start_without_periodic_frame_appends(
     display = TerminalDisplay("auto", refresh_hz=20.0, stream=output_stream)
     try:
         assert display.uses_rich is True
-        action_source = cli._action_source(input_stream)
+        action_source = cli._action_source(input_stream, on_edit=display.set_command_input)
         display.show_event(
             "state | ready | 输入 start 后按 Enter 开始闭合",
             phase="ready",
@@ -390,9 +392,12 @@ def test_rich_ready_accepts_start_without_periodic_frame_appends(
         rendered = b"".join(chunks).decode("utf-8", errors="replace")
         assert "输入 start 后按 Enter" in rendered
         assert "已收到 start，正在检查电机" in rendered
-        assert rendered.count("DMgripper 等待命令") == 1
-        assert rendered.count("DMgripper 已收到命令") == 1
+        assert "命令>" in rendered
+        assert rendered.count("DMgripper 等待命令") >= 1
+        assert rendered.count("DMgripper 已收到命令") >= 1
     finally:
+        if "action_source" in locals():
+            action_source.close()
         display.stop()
         os.close(master_fd)
         os.close(slave_fd)

@@ -3,6 +3,8 @@
 import time
 from types import SimpleNamespace
 
+import numpy as np
+
 from papillarray_hardware import PapillArraySerialConfig, PtsReadDiagnostics, PtsReadTimeout
 
 from dmgripper_experiments.tactile import TactileWorker
@@ -37,6 +39,8 @@ class _RetryClient:
             packet_counter=self.calls,
             timestamp_us=self.calls * 2_000,
             global_forces=([0.0, 0.0, 0.01], [0.0, 0.0, 0.02]),
+            pillar_forces=(np.zeros((2, 3)), np.ones((2, 3))),
+            n_sensors=2,
         )
 
 
@@ -126,6 +130,20 @@ def test_worker_preserves_all_axes_in_snapshot_and_record() -> None:
         assert snapshot.raw_right_fy_n == 0.9
         assert snapshot.raw_right_fz_n == -0.12
         assert snapshot.right_force_n == 0.0
+        assert snapshot.left_taxel_forces_n == ((0.0, 0.0, 0.0),) * 2
+        assert snapshot.right_taxel_forces_n == ((1.0, 1.0, 1.0),) * 2
         assert asdict(snapshot) in records
     finally:
         worker.stop()
+
+
+def test_experiment_module_reexports_hardware_snapshot_with_compatible_defaults() -> None:
+    """旧实验导入路径保持可用，旧构造无需提供新增逐 taxel 字段。"""
+    from papillarray_hardware import TactileSnapshot as HardwareSnapshot
+
+    from dmgripper_experiments.tactile import TactileSnapshot
+
+    assert TactileSnapshot is HardwareSnapshot
+    snapshot = TactileSnapshot(0.0, 1, 2, 0.0, 0.0, 0.0, 0.0)
+    assert snapshot.left_taxel_forces_n == ()
+    assert snapshot.right_taxel_forces_n == ()

@@ -51,9 +51,9 @@ def plot_experiment_run(
         _plot_joint_command(axes[2], time_s, rows)
         if has_stiffness:
             _plot_stiffness(axes[3], time_s, rows)
-            axes[3].set_xlabel("Time (s)")
+            axes[3].set_xlabel(r"$t$ (s)")
         else:
-            axes[2].set_xlabel("Time (s)")
+            axes[2].set_xlabel(r"$t$ (s)")
         for axis in axes:
             axis.grid(True, alpha=0.25)
         target = Path(output_directory) if output_directory is not None else directory
@@ -156,9 +156,16 @@ def _plot_normal_force(axis: Any, time_s: list[float], rows: list[dict[str, str]
     measured = _mean_pair(left, right)
     if not any(math.isfinite(value) for value in measured):
         measured = _values(rows, "measured_force_n")
-    _line_if_data(axis, time_s, measured, "Measured, avg. side", "C0")
-    _line_if_data(axis, time_s, _values(rows, "target_force_n"), "Target", "C3", linestyle="--")
-    axis.set_ylabel("Normal force (N)")
+    _line_if_data(axis, time_s, measured, r"$F_z$", "C0")
+    _line_if_data(
+        axis,
+        time_s,
+        _values(rows, "target_force_n"),
+        r"$F_z^{\mathrm{ref}}$",
+        "C3",
+        linestyle="--",
+    )
+    axis.set_ylabel(r"$F_z$ (N)")
     _legend(axis)
 
 
@@ -166,34 +173,40 @@ def _plot_tangential_force(axis: Any, time_s: list[float], rows: list[dict[str, 
     """绘制左右触觉切向力模和触发状态。"""
     left = _magnitude(_values(rows, "raw_left_fx_n"), _values(rows, "raw_left_fy_n"))
     right = _magnitude(_values(rows, "raw_right_fx_n"), _values(rows, "raw_right_fy_n"))
-    _line_if_data(axis, time_s, left, "Left tangential", "C0")
-    _line_if_data(axis, time_s, right, "Right tangential", "C1")
-    axis.set_ylabel("Tangential force (N)")
+    _line_if_data(axis, time_s, left, "Left", "C0")
+    _line_if_data(axis, time_s, right, "Right", "C1")
+    axis.set_ylabel(r"$F_T$ (N)")
     trigger = _values(rows, "target_trigger_active", boolean=True)
     if not any(math.isfinite(value) for value in trigger):
         trigger = _values(rows, "trigger_active", boolean=True)
     if any(math.isfinite(value) for value in trigger):
-        trigger_axis = axis.twinx()
-        trigger_axis.step(time_s, trigger, where="post", color="C3", linewidth=1.0, label="Trigger")
-        trigger_axis.set_ylabel("Trigger")
-        trigger_axis.set_ylim(-0.1, 1.1)
-        _legend(axis, trigger_axis)
-    else:
-        _legend(axis)
+        active = [math.isfinite(value) and value > 0.5 for value in trigger]
+        axis.fill_between(
+            time_s,
+            0.0,
+            1.0,
+            where=active,
+            step="post",
+            transform=axis.get_xaxis_transform(),
+            color="#009E73",
+            alpha=0.14,
+            linewidth=0.0,
+            zorder=0.1,
+            label="Trigger",
+        )
+    _legend(axis)
 
 
 def _plot_joint_command(axis: Any, time_s: list[float], rows: list[dict[str, str]]) -> None:
     """绘制关节位置与电机力矩，并明确标注各自单位。"""
-    _line_if_data(axis, time_s, _values(rows, "position_rad"), "Joint position", "C0")
-    _line_if_data(
-        axis, time_s, _values(rows, "q_des_rad"), "Desired position", "C2", linestyle="--"
-    )
-    axis.set_ylabel("Joint position (rad)")
+    _line_if_data(axis, time_s, _values(rows, "position_rad"), r"$q$", "C0")
+    _line_if_data(axis, time_s, _values(rows, "q_des_rad"), r"$q_d$", "C2", linestyle="--")
+    axis.set_ylabel(r"$q$ (rad)")
     torque_axis = axis.twinx()
     _line_if_data(
-        torque_axis, time_s, _values(rows, "torque_nm"), "Motor torque", "#CC79A7", linestyle=":"
+        torque_axis, time_s, _values(rows, "torque_nm"), r"$\tau_m$", "#CC79A7", linestyle=":"
     )
-    torque_axis.set_ylabel("Motor torque (N m)")
+    torque_axis.set_ylabel(r"$\tau_m$ ($\mathrm{N\,m}$)")
     _legend(axis, torque_axis)
 
 
@@ -205,8 +218,8 @@ def _plot_stiffness(axis: Any, time_s: list[float], rows: list[dict[str, str]]) 
         value if math.isfinite(valid_flag) and valid_flag > 0.5 else math.nan
         for value, valid_flag in zip(values, valid, strict=True)
     ]
-    _line_if_data(axis, time_s, masked, "Estimate (valid)", "C0")
-    axis.set_ylabel("Stiffness (N/m)")
+    _line_if_data(axis, time_s, masked, r"$\hat{K}$", "C0")
+    axis.set_ylabel(r"$K$ ($\mathrm{N\,m^{-1}}$)")
     _legend(axis)
 
 

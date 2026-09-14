@@ -15,6 +15,13 @@ Contactile PapillArray 的 PTS v2.0 纯 Python 同步串口采集边界。它只
 - `PtsStreamReader` 处理半包、前导噪声、坏校验和和异常长度，并保留控制器的 `packet_counter`
   与 `timestamp_us`。Type 1／3／4／5／6 被解码；未定义布局的 Type 7 仅以原始 `bytes`
   保存，绝不猜测其含义。
+- `TactileWorker` 在单一后台线程中组合串口客户端、包完整性跟踪和双侧全局 `Fz` 低通，
+  `TactileSnapshot` 同时保留左右逐 taxel 三轴原始力。采集会话拒绝空 taxel、shape 或有限性
+  错误、运行中 taxel 数变化、重复／乱序计数器及非递增设备时间；合法缺包和 uint32 回绕
+  作为 `counter_event`／`counter_gap` 诊断随快照上送。
+- 请求 bias 时，采集会话先等待首个完整有效包，再只发送一次 `z\n`，并清空协议与操作系统串口
+  接收缓冲；bias 前包不发布也不记录。发送后重置滤波和设备时间／计数器基线，但保留本次会话
+  已经确认的 taxel 拓扑。
 - 顶层索引与首个数据块之间允许 Controller v2.0 实际输出的全零对齐填充；非零的未声明
   字节仍按协议结构错误拒绝。
 - Type 3／4／5／6 的嵌套索引均以去除起止标志后的整段帧数据起点为绝对基址，不以所属
@@ -108,10 +115,10 @@ uv run --package papillarray-hardware python packages/papillarray_hardware/examp
 
 ## 协议来源与许可
 
-协议布局与控制命令以本机下列已有实现为参考：
+协议布局与控制命令以下列远程实现为参考，链接固定指向与记录的 SHA-256 对应的提交：
 
-- `/home/xiaodaliang/workspace/maintained/tactile_grasp_ros2/src/contactile-papillarray-ros2/papillarray_serial_driver/papillarray_serial_driver/protocol.py`
-- `/home/xiaodaliang/workspace/maintained/tactile_grasp_ros2/src/contactile-papillarray-ros2/papillarray_serial_driver/papillarray_serial_driver/serial_worker.py`
+- [`papillarray_serial_driver/protocol.py`](https://github.com/langxin11/contactile-papillarray-ros2/blob/3dd143c19c4c88c69f0fe2a5e8c60aa37f0156f3/papillarray_serial_driver/papillarray_serial_driver/protocol.py)
+- [`papillarray_serial_driver/serial_worker.py`](https://github.com/langxin11/contactile-papillarray-ros2/blob/3dd143c19c4c88c69f0fe2a5e8c60aa37f0156f3/papillarray_serial_driver/papillarray_serial_driver/serial_worker.py)
 
 上述参考文件在本次实现时的 SHA-256 分别为
 `ddacbdd228705b170c3e358e48507ec245c95adc31c94042641e23a0542423f1` 与

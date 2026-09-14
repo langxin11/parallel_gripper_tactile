@@ -14,7 +14,7 @@ import threading
 from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import NoReturn, TextIO
+from typing import Callable, NoReturn, TextIO
 
 from .config import ExperimentConfig, experiment_config_record, load_experiment_config
 from .recording import create_run_directory
@@ -59,35 +59,44 @@ class _InputFailure:
 
 
 _INPUT_CLOSED = object()
+_ACTION_ALIASES = {"s": "start", "r": "release"}
 
 
-def _action_source(stream: TextIO | None = None):
-    """创建非阻塞的交互命令来源；输入线程不访问串口。
+def _normalize_action(text: str) -> str:
+    """归一化命令并展开需要回车确认的单字符别名。"""
+    action = text.strip().casefold()
+    return _ACTION_ALIASES.get(action, action)
 
-    完整输入行会去除首尾空白并按 Unicode 规则折叠大小写；空行忽略。
-    后台读取异常不会静默丢失，而是在运行线程下次轮询时明确抛出。
-    """
-    input_stream = sys.stdin if stream is None else stream
-    actions: queue.SimpleQueue[object] = queue.SimpleQueue()
 
-    def read_stdin() -> None:
-        """持续读取完整命令行。"""
+class _ActionSource:
+    """从逐行输入或 Rich 固定输入区非阻塞交付命令。"""
+
+    def __init__(self, stream: TextIO, on_edit: Callable[[str], None] | None) -> None:
+        """启动输入线程；交互终端可切换为逐字符读取。"""
+        self._stream = stream
+        self._on_edit = on_edit
+        self._actions: queue.SimpleQueue[object] = queue.SimpleQueue()
+        self._restore: tuple[object, int, list[object]] | None = None
+        self._restore_lock = threading.Lock()
+        target = self._read_lines
+        if on_edit is not None and bool(getattr(stream, "isatty", lambda: False)()):
+            try:
+                import termios
+                import tty
+
+                descriptor = stream.fileno()
+                attributes = termios.tcgetattr(descriptor)
+                tty.setcbreak(descriptor, termios.TCSANOW)
+                self._restore = (termios, descriptor, attributes)
+                target = self._read_characters
+            except (AttributeError, OSError, termios.error):
+                target = self._read_lines
+        threading.Thread(target=target, name="dmgripper-input", daemon=True).start()
+
+    def __call__(self) -> str | None:
+        """返回当前已提交的一条命令。"""
         try:
-            for line in input_stream:
-                action = line.strip().casefold()
-                if action:
-                    actions.put(action)
-        except Exception as error:  # noqa: BLE001
-            actions.put(_InputFailure(error))
-        else:
-            actions.put(_INPUT_CLOSED)
-
-    threading.Thread(target=read_stdin, name="dmgripper-input", daemon=True).start()
-
-    def next_action() -> str | None:
-        """返回当前已有的一条命令。"""
-        try:
-            action = actions.get_nowait()
+            action = self._actions.get_nowait()
         except queue.Empty:
             return None
         if isinstance(action, _InputFailure):
@@ -97,7 +106,72 @@ def _action_source(stream: TextIO | None = None):
         assert isinstance(action, str)
         return action
 
-    return next_action
+    def close(self) -> None:
+        """恢复逐字符模式之前的终端属性。"""
+        with self._restore_lock:
+            restore = self._restore
+            self._restore = None
+        if restore is not None:
+            termios, descriptor, attributes = restore
+            try:
+                termios.tcsetattr(descriptor, termios.TCSANOW, attributes)
+            except (OSError, termios.error):
+                pass
+        if self._on_edit is not None:
+            self._on_edit("")
+
+    def _read_lines(self) -> None:
+        """保留非终端流的原始逐行语义。"""
+        try:
+            for line in self._stream:
+                action = _normalize_action(line)
+                if action:
+                    self._actions.put(action)
+        except Exception as error:  # noqa: BLE001
+            self._actions.put(_InputFailure(error))
+        else:
+            self._actions.put(_INPUT_CLOSED)
+
+    def _read_characters(self) -> None:
+        """在禁用内核回显的终端中维护 Rich 输入缓冲。"""
+        buffer = ""
+        try:
+            while True:
+                character = self._stream.read(1)
+                if character == "":
+                    self._actions.put(_INPUT_CLOSED)
+                    break
+                if character in {"\r", "\n"}:
+                    action = _normalize_action(buffer)
+                    buffer = ""
+                    if self._on_edit is not None:
+                        self._on_edit(buffer)
+                    if action:
+                        self._actions.put(action)
+                elif character in {"\x7f", "\b"}:
+                    buffer = buffer[:-1]
+                    if self._on_edit is not None:
+                        self._on_edit(buffer)
+                elif character == "\x04":
+                    self._actions.put(_INPUT_CLOSED)
+                    break
+                elif character.isprintable() and len(buffer) < 64:
+                    buffer += character
+                    if self._on_edit is not None:
+                        self._on_edit(buffer)
+        except Exception as error:  # noqa: BLE001
+            self._actions.put(_InputFailure(error))
+        finally:
+            self.close()
+
+
+def _action_source(
+    stream: TextIO | None = None,
+    *,
+    on_edit: Callable[[str], None] | None = None,
+) -> _ActionSource:
+    """创建非阻塞操作事件来源。"""
+    return _ActionSource(sys.stdin if stream is None else stream, on_edit)
 
 
 def _emit(event: dict[str, object]) -> None:
@@ -169,16 +243,30 @@ def run(argv: Sequence[str] | None = None) -> int:
             if not terminal.uses_rich:
                 _emit(event)
 
-        action_source = _action_source() if interactive else lambda: None
-        result = run_experiment(
-            config,
-            output_directory=output_directory,
-            clear_bias=bias,
-            action_source=action_source,
-            event_sink=event_sink,
-            terminal=terminal,
-            input_config_path=config_path,
-        )
+        if interactive and terminal.uses_rich:
+            action_source = _action_source(on_edit=terminal.set_command_input)
+        elif interactive:
+            action_source = _action_source()
+        else:
+
+            def action_source() -> None:
+                """非交互执行不产生人工命令。"""
+                return None
+
+        try:
+            result = run_experiment(
+                config,
+                output_directory=output_directory,
+                clear_bias=bias,
+                action_source=action_source,
+                event_sink=event_sink,
+                terminal=terminal,
+                input_config_path=config_path,
+            )
+        finally:
+            close_action_source = getattr(action_source, "close", None)
+            if close_action_source is not None:
+                close_action_source()
         if not terminal.uses_rich:
             _emit({"event": "complete", **result})
         else:

@@ -25,6 +25,9 @@ def test_factory_contains_exact_dm4310p_gripper_deployment_values() -> None:
     assert config.motor_limits.torque_max_nm == 4.0
     assert config.joint_position_min_rad == 0.0
     assert config.joint_position_max_rad == math.pi / 2.0
+    assert config.feedback_position_margin_rad == 0.05
+    assert config.feedback_position_min_rad == -0.05
+    assert config.feedback_position_max_rad == math.pi / 2.0 + 0.05
     assert config.closing_direction == 1
 
 
@@ -43,6 +46,43 @@ def test_joint_position_rejects_out_of_range_or_nonfinite_target(position_rad: f
 
     with pytest.raises(ValueError, match="机械关节目标角"):
         config.validate_joint_position(position_rad)
+
+
+def test_feedback_position_uses_explicit_safety_margin_without_relaxing_commands() -> None:
+    """反馈可略微越过工作端点，但同一位置仍不得作为目标命令。"""
+    config = make_dm4310p_gripper_config("fake://usb2can", feedback_position_margin_rad=0.05)
+
+    assert config.validate_feedback_position(-0.049) == -0.049
+    assert config.validate_feedback_position(math.pi / 2.0 + 0.049) == pytest.approx(
+        math.pi / 2.0 + 0.049
+    )
+    with pytest.raises(ValueError, match="目标角"):
+        config.validate_joint_position(-0.001)
+
+
+@pytest.mark.parametrize(
+    "position_rad",
+    [-0.050001, math.pi / 2.0 + 0.050001, math.inf, math.nan],
+)
+def test_feedback_position_rejects_values_outside_safety_range(position_rad: float) -> None:
+    """扩展安全范围外或非有限反馈必须失败。"""
+    config = make_dm4310p_gripper_config("fake://usb2can")
+
+    with pytest.raises(ValueError, match="反馈角"):
+        config.validate_feedback_position(position_rad)
+
+
+@pytest.mark.parametrize("margin", [-0.001, math.inf, math.nan])
+def test_feedback_margin_must_be_finite_and_nonnegative(margin: float) -> None:
+    """反馈安全余量不能为负或非有限数。"""
+    with pytest.raises(ValueError, match="反馈位置安全余量"):
+        make_dm4310p_gripper_config("fake://usb2can", feedback_position_margin_rad=margin)
+
+
+def test_feedback_margin_must_remain_inside_protocol_position_range() -> None:
+    """反馈安全范围不得越过固件协议可解码的位置量程。"""
+    with pytest.raises(ValueError, match="反馈位置安全范围"):
+        make_dm4310p_gripper_config("fake://usb2can", feedback_position_margin_rad=2.0)
 
 
 @pytest.mark.parametrize(

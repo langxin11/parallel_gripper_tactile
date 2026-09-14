@@ -1,8 +1,8 @@
 # dmgripper-experiments 0.2.0
 
 DM4310P 与双侧 PapillArray 的通用纯 Python 真机抓取实验包。它不依赖 ROS 或 MuJoCo，把基础
-力跟踪与原倒水实验收敛为同一条生命周期：预检、就绪、受限接近、接触确认、速度过渡、初始抓力
-稳定、正式运行、保持抓握、显式释放回位和结束。目标力来自给定时间曲线或触觉动态增力，控制器
+力跟踪与原倒水实验收敛为同一条生命周期：预检、就绪、必要时受限回零、受限接近、接触确认、
+速度过渡、初始抓力稳定、正式运行、保持抓握、显式释放回位和结束。目标力来自给定时间曲线或触觉动态增力，控制器
 在二阶导纳、PID 与一阶位置型 LADRC 中独立选择，互不绑定。
 
 先审阅计划（默认 dry-run，不导入运行时、不打开设备）：
@@ -14,7 +14,7 @@ uv run --package dmgripper-experiments dmgripper-run \
   --config configs/hardware/dmgripper/adaptive_grip.yaml
 ```
 
-确认传感器完全无负载、急停可用后，在交互终端执行（运行时输入 `start`、`status`、`release`，
+确认传感器完全无负载、急停可用后，在交互终端执行（运行时输入 `s`/`start`、`status`、`r`/`release`，
 每条命令都需按 `Enter` 提交）：
 
 ```sh
@@ -22,7 +22,11 @@ uv run --package dmgripper-experiments dmgripper-run \
   --config configs/hardware/dmgripper/adaptive_grip.yaml --bias --execute
 ```
 
-使能前的零力验证以 `lifecycle.zero_force_stable_s` 窗口中双侧滤波 `Fz` 绝对值的均值为门禁：左右
+交互终端的实时面板底部保留固定 `命令>` 输入区；输入内容、退格与回车提交不受状态刷新干扰。
+`s` 和 `r` 分别是 `start` 与 `release` 的快捷输入，两者仍需按 `Enter` 确认。
+
+使能前的零力验证会逐帧阻断 taxel 缺失、数量变化、非有限值和包序异常，并将逐 taxel 残余统计写入
+诊断；是否通过仍以 `lifecycle.zero_force_stable_s` 窗口中双侧滤波 `Fz` 绝对值的均值为门禁：左右
 均值均不大于 `lifecycle.zero_force_threshold_n` 才会进入 `ready`。均值门禁通过后，若整个验证期内任一
 滤波峰值达到 `lifecycle.contact_on_n`，终端和 `events.jsonl` 会输出一次结构化 `warning`（最大峰值、
 触发侧、告警阈值），不会重置窗口或单独阻止使能；这不是带载运行许可，仍应检查传感器是否完全空载。
@@ -30,8 +34,10 @@ uv run --package dmgripper-experiments dmgripper-run \
 均不受影响。
 
 非交互执行只允许明确的无人值守组合：`lifecycle.auto_start=true` 且 `lifecycle.on_finished=return`。
-正常结束默认保持抓握（`on_finished: hold`），等待用户显式 `release` 后才受限张开回位并失能；
-任何故障路径都会尽力失能、关闭串口和采集，并把原始故障与清理故障分开写入 manifest。
+正常结束默认保持抓握（`on_finished: hold`），等待用户显式 `release` 后才受限张开回位并失能。
+使能后若实验级故障发生且 DM 反馈与命令通道仍健康，运行进入 `fault_holding`，在当前位置受限保持并
+等待操作者承接物体后输入 `release`；通信丢失、电机故障、意外失能、反馈越界、保持失败和 `Ctrl+C`
+等无法保持的故障会立即尽力失能。两类路径都把原始故障、保持结果与清理故障分开写入 manifest。
 控制过程即使已经结束，只要失能、设备关闭、采集停止或终端收尾失败，本次运行仍标记为
 `failed` 并返回非零状态；失能确认只由真实设备操作结果决定，不受事件显示失败影响。
 
@@ -59,8 +65,8 @@ Rich 面板停止后会额外输出一行稳定摘要，包含最终状态、失
 PID／LADRC 路径把原始力交给共享核，由核心内部做唯一一次低通（trace 同时记录原始力、外层
 滤波力与控制使用力）；导纳路径沿用外层滤波力，死区与单向闭合是导纳专属参数。曲线模式含下降
 段时与导纳 `prevent_unloading` 互斥，计划阶段直接报错。
-预载稳定区间支持独立的低侧 `preload_tolerance_n` 与高侧
-`preload_overforce_tolerance_n`；动态抓取真机配置只放宽高侧，以接纳温和过冲而不降低最低抓力要求。
+预载在确认双侧接触后，只要平均力连续高于
+`目标-preload_tolerance_n` 即可进入正式阶段，不设高侧稳定窗口。
 
 ## 迁移说明
 

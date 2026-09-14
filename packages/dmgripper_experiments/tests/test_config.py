@@ -10,6 +10,7 @@ from dmgripper_experiments.config import (
     AdaptiveReferenceConfig,
     CurveReferenceConfig,
     ExperimentConfig,
+    HardwareConfig,
     ReferenceConfig,
     WaypointConfig,
     load_experiment_config,
@@ -31,6 +32,41 @@ def test_default_config_constructs_and_selects_curve():
     assert config.reference.initial_force_n == pytest.approx(0.5)
     assert config.estimation.enabled is True
     assert config.controller.stiffness_consumption == "none"
+    assert config.hardware.home_position_rad == pytest.approx(0.0)
+    assert config.hardware.home_tolerance_rad == pytest.approx(0.03)
+    assert config.hardware.feedback_position_margin_rad == pytest.approx(0.05)
+
+
+def test_hardware_home_and_feedback_margin_are_strictly_validated():
+    """home 必须位于命令工作范围，反馈余量与容差不得为负。"""
+    with pytest.raises(ValueError, match="home_position_rad"):
+        HardwareConfig(home_position_rad=-0.01)
+    with pytest.raises(ValueError, match="home_tolerance_rad"):
+        HardwareConfig(home_tolerance_rad=-0.01)
+    with pytest.raises(ValueError, match="feedback_position_margin_rad"):
+        HardwareConfig(feedback_position_margin_rad=-0.01)
+    with pytest.raises(ValueError, match="反馈位置安全范围.*超出电机协议位置量程"):
+        HardwareConfig(feedback_position_margin_rad=2.0)
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("mit_kp", 500.01),
+        ("mit_kd", 5.01),
+        ("velocity_limit_rad_s", 8.01),
+        ("torque_limit_nm", 4.01),
+        ("return_mit_kp", 500.01),
+        ("return_mit_kd", 5.01),
+        ("return_torque_limit_nm", 4.01),
+    ],
+)
+def test_controller_mit_fields_cannot_exceed_dm_protocol_ranges(name: str, value: float):
+    """实验配置不得让协议饱和改变共享核的安全计算。"""
+    from dmgripper_experiments.config import ControllerConfig
+
+    with pytest.raises(ValueError, match=rf"controller\.{name}.*协议上限"):
+        ControllerConfig(**{name: value})
 
 
 def test_adaptive_reference_constructs_with_explicit_duration():
@@ -43,8 +79,8 @@ def test_adaptive_reference_constructs_with_explicit_duration():
     assert config.reference.initial_force_n == pytest.approx(0.5)
 
 
-def test_adaptive_hardware_profile_allows_safe_preload_overforce():
-    """动态真机配置只放宽预载高侧，并保留导纳单向闭合。"""
+def test_adaptive_hardware_profile_uses_shared_target_limit():
+    """动态真机配置使用共享目标上限，并保留导纳单向闭合。"""
     repository_root = Path(__file__).resolve().parents[3]
     config = load_experiment_config(
         repository_root / "configs/hardware/dmgripper/adaptive_grip.yaml"
@@ -54,19 +90,8 @@ def test_adaptive_hardware_profile_allows_safe_preload_overforce():
     assert config.controller.admittance.force_deadband_n == pytest.approx(0.1)
     assert config.controller.admittance.prevent_unloading is True
     assert config.lifecycle.preload_tolerance_n == pytest.approx(0.15)
-    assert config.lifecycle.preload_overforce_tolerance_n == pytest.approx(0.3)
-
-
-def test_preload_overforce_allowance_must_stay_below_force_ceiling():
-    """预载高侧允许区间不能触及运行期过力保护上限。"""
-    from dataclasses import replace
-
-    base = ExperimentConfig()
-    with pytest.raises(ValueError, match="预载高侧允许值"):
-        replace(
-            base,
-            lifecycle=replace(base.lifecycle, preload_overforce_tolerance_n=1.5),
-        )
+    assert config.safety.max_target_force_n == pytest.approx(30.0)
+    assert config.safety.force_ceiling_n == pytest.approx(40.0)
 
 
 def test_reference_requires_exactly_one_source():
@@ -200,7 +225,9 @@ reference:
   adaptive:
     initial_force_n: 0.6
     duration_s: 8.0
-    max_force_n: 1.2
+safety:
+  max_target_force_n: 1.2
+  force_ceiling_n: 2.0
 controller:
   kind: pid
 """
@@ -209,7 +236,7 @@ controller:
     config = load_experiment_config(path)
     assert config.reference.kind == "adaptive"
     assert config.controller.kind == "pid"
-    assert config.reference.adaptive.max_force_n == pytest.approx(1.2)
+    assert config.safety.max_target_force_n == pytest.approx(1.2)
 
 
 def test_sanitize_directory_component_blocks_traversal():

@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import math
+import statistics
 import time
 from collections import deque
 from collections.abc import Callable
@@ -57,13 +58,17 @@ _KINEMATICS = CrankSliderKinematics(
 _PHASE_MESSAGES = {
     LifecyclePhase.PREPARING: "正在预检：建立采集并验证空载零力。",
     LifecyclePhase.READY: (
-        "预检完成。电机未使能；输入 start 后按 Enter 开始闭合，输入 release 取消。"
+        "预检完成。电机未使能；输入 start 后可能先自动回零，再开始闭合；输入 release 取消。"
     ),
+    LifecyclePhase.HOMING: "启动位置不在 home 附近，正在执行受限自动回零。",
     LifecyclePhase.APPROACH: "正在受限闭合接近，等待双侧接触。",
     LifecyclePhase.CONTACT_TRANSITION: "双侧接触已确认，正在平滑衰减接近速度。",
     LifecyclePhase.PRELOAD: "正在建立初始抓力并学习基线。",
     LifecyclePhase.ACTIVE: "目标策略已启用，运行中。",
     LifecyclePhase.HOLDING: "任务计时完成，保持抓握；输入 release 后按 Enter 结束。",
+    LifecyclePhase.FAULT_HOLDING: (
+        "实验已失败，电机仍受控保持。请先承接物体，再输入 release 后按 Enter。"
+    ),
     LifecyclePhase.RETURNING: "已收到 release，正在受限张开回位。",
     LifecyclePhase.COMPLETED: "回位完成，实验结束。",
     LifecyclePhase.CANCELLED: "使能前取消，未发送运动命令。",
@@ -77,7 +82,35 @@ class _DeviceState:
 
     opened: bool = False
     # 发送使能报文前即置位：确认丢失时仍要尽力失能。
-    enabled: bool = False
+    enable_attempted: bool = False
+    enable_confirmed: bool = False
+    phase: str | None = None
+
+
+class HoldableExperimentFault(RuntimeError):
+    """电机通道仍健康时应转入故障保持的实验级故障。"""
+
+
+class FatalHardwareFault(RuntimeError):
+    """不能继续声称安全保持的底层设备故障。"""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        phase: str | None = None,
+        resolution: str = "forced_disable",
+        holding_entered: bool = False,
+        holding_duration_s: float = 0.0,
+        primary_error: BaseException | None = None,
+    ) -> None:
+        """保存故障发生阶段。"""
+        super().__init__(message)
+        self.phase = phase
+        self.resolution = resolution
+        self.holding_entered = holding_entered
+        self.holding_duration_s = holding_duration_s
+        self.primary_error = primary_error
 
 
 def run_experiment(
@@ -117,13 +150,23 @@ def run_experiment(
     """
     recorder = ExperimentRecorder(output_directory, config, input_config_path=input_config_path)
     started = clock()
+    devices = _DeviceState()
 
     def emit(event: dict[str, object]) -> None:
         """为事件附加与控制 trace 共用的相对时间并落盘。"""
         stamped = {"time_s": clock() - started, **event}
-        recorder.append(stamped)
+        if event.get("event") == "state" and event.get("phase") is not None:
+            devices.phase = str(event["phase"])
+        errors: list[BaseException] = []
+        try:
+            recorder.append(stamped)
+        except BaseException as error:  # noqa: BLE001
+            errors.append(error)
         if event_sink is not None:
-            event_sink(stamped)
+            try:
+                event_sink(stamped)
+            except BaseException as error:  # noqa: BLE001
+                errors.append(error)
         if terminal is not None and stamped.get("event") in {
             "command_received",
             "disabled",
@@ -131,33 +174,51 @@ def run_experiment(
             "status",
             "warning",
         }:
-            terminal.show_event(
-                format_event_line(stamped),
-                phase=str(stamped.get("phase") or ""),
-                event=str(stamped.get("event") or ""),
-                action=str(stamped.get("action") or ""),
-            )
+            try:
+                terminal.show_event(
+                    format_event_line(stamped),
+                    phase=str(stamped.get("phase") or ""),
+                    event=str(stamped.get("event") or ""),
+                    action=str(stamped.get("action") or ""),
+                )
+            except BaseException as error:  # noqa: BLE001
+                errors.append(error)
+        if errors:
+            primary_error, *secondary_errors = errors
+            for secondary_error in secondary_errors:
+                primary_error.add_note(f"同一事件的后续输出失败：{secondary_error}")
+            raise primary_error
 
-    tactile = tactile_factory(
-        PapillArraySerialConfig(
-            port=config.hardware.tactile_port,
-            sampling_rate=500,
-            expected_sensors=2,
-            timeout_s=0.05,
-            packet_timeout_s=config.timing.tactile_timeout_s,
-        ),
-        clear_bias=clear_bias,
-        clock=clock,
-        cutoff_hz=config.timing.tactile_cutoff_hz,
-        filter_reset_gap_s=config.timing.tactile_filter_reset_gap_s,
-        sample_sink=recorder.sample,
-    )
-    dm = session_factory(config.hardware.dm_port, timeout_s=0.05)
-    devices = _DeviceState()
+    tactile: TactileWorker | None = None
+    dm: DmSession | None = None
     disable_confirmed: bool | str = "not_applicable"
     failure: BaseException | None = None
     outcome: dict[str, object] | None = None
+    fault_phase: str | None = None
+    fault_holding_entered = False
+    fault_holding_duration_s = 0.0
+    fault_resolution: str | None = None
+    runtime_secondary_errors: list[str] = []
     try:
+        tactile = tactile_factory(
+            PapillArraySerialConfig(
+                port=config.hardware.tactile_port,
+                sampling_rate=500,
+                expected_sensors=2,
+                timeout_s=0.05,
+                packet_timeout_s=config.timing.tactile_timeout_s,
+            ),
+            clear_bias=clear_bias,
+            clock=clock,
+            cutoff_hz=config.timing.tactile_cutoff_hz,
+            filter_reset_gap_s=config.timing.tactile_filter_reset_gap_s,
+            sample_sink=recorder.sample,
+        )
+        dm = session_factory(
+            config.hardware.dm_port,
+            timeout_s=0.05,
+            feedback_position_margin_rad=config.hardware.feedback_position_margin_rad,
+        )
         tactile.start()
         if terminal is not None:
             terminal.start()
@@ -194,12 +255,32 @@ def run_experiment(
             started,
             devices,
         )
+        if outcome.get("status") == "failed":
+            primary_error = outcome.get("primary_error")
+            assert isinstance(primary_error, BaseException)
+            failure = primary_error
+            fault_phase = str(outcome.get("fault_phase") or "") or None
+            fault_holding_entered = bool(outcome.get("fault_holding_entered"))
+            fault_holding_duration_s = float(outcome.get("fault_holding_duration_s") or 0.0)
+            fault_resolution = str(outcome.get("fault_resolution") or "") or None
+            runtime_secondary_errors = list(outcome.get("secondary_errors") or [])
     except BaseException as error:  # noqa: BLE001
         failure = error
+        if isinstance(error, FatalHardwareFault):
+            if error.primary_error is not None:
+                failure = error.primary_error
+                runtime_secondary_errors.append(str(error))
+            fault_phase = error.phase
+            fault_resolution = error.resolution
+            fault_holding_entered = error.holding_entered
+            fault_holding_duration_s = error.holding_duration_s
+        elif devices.enable_attempted:
+            fault_phase = devices.phase
+            fault_resolution = "forced_disable"
     finally:
         had_primary_failure = failure is not None
-        cleanup_errors: list[str] = []
-        if devices.enabled:
+        cleanup_errors: list[str] = list(runtime_secondary_errors)
+        if devices.enable_attempted and dm is not None:
             try:
                 dm.disable()
             except BaseException as error:  # noqa: BLE001
@@ -217,15 +298,16 @@ def run_experiment(
                     )
                 except BaseException as error:  # noqa: BLE001
                     cleanup_errors.append(f"失能确认事件记录失败：{error}")
-        if devices.opened:
+        if devices.opened and dm is not None:
             try:
                 dm.close()
             except BaseException as error:  # noqa: BLE001
                 cleanup_errors.append(f"DM 串口关闭失败：{error}")
-        try:
-            tactile.stop()
-        except BaseException as error:  # noqa: BLE001
-            cleanup_errors.append(f"触觉采集退出失败：{error}")
+        if tactile is not None:
+            try:
+                tactile.stop()
+            except BaseException as error:  # noqa: BLE001
+                cleanup_errors.append(f"触觉采集退出失败：{error}")
         if terminal is not None:
             try:
                 terminal.stop()
@@ -240,21 +322,30 @@ def run_experiment(
                 try:
                     generated = plot_experiment_run(Path(output_directory))
                     plots = [str(path) for path in generated]
+                    recorder.register_artifacts({path.name: path.name for path in generated})
                 except BaseException as error:  # noqa: BLE001
                     post_processing_error = error
         if failure is not None:
             try:
-                recorder.append(
-                    {"time_s": clock() - started, "event": "fault", "error": str(failure)}
-                )
-            finally:
+                try:
+                    recorder.append(
+                        {"time_s": clock() - started, "event": "fault", "error": str(failure)}
+                    )
+                except BaseException as error:  # noqa: BLE001
+                    cleanup_errors.append(f"最终故障事件记录失败：{error}")
                 recorder.close(
                     status="failed",
                     error=failure,
                     disable_confirmed=disable_confirmed,
                     cleanup_errors=cleanup_errors,
                     input_config_path=input_config_path,
+                    fault_phase=fault_phase,
+                    fault_holding_entered=fault_holding_entered,
+                    fault_holding_duration_s=fault_holding_duration_s,
+                    fault_resolution=fault_resolution,
                 )
+            except BaseException as error:  # noqa: BLE001
+                failure.add_note(f"运行记录最终化失败：{error}")
         elif outcome is not None and outcome.get("status") == "cancelled":
             recorder.close(
                 status="cancelled",
@@ -369,18 +460,16 @@ def _run_ready_and_enabled(
     dm.inspect()
     dm.require_disabled()
     # 使能报文可能已生效但确认丢失，发送前即登记，清理阶段仍会尽力失能。
-    devices.enabled = True
+    devices.enable_attempted = True
     feedback = dm.enable()
+    devices.enable_confirmed = True
     # 只有确认成功才发送接近命令；ready 等待时间不得计入首个控制 dt。
     now = clock()
-    lifecycle.start(now)
-    emit(
-        {
-            "event": "state",
-            "phase": LifecyclePhase.APPROACH.value,
-            "message": _PHASE_MESSAGES[LifecyclePhase.APPROACH],
-        }
+    needs_homing = (
+        abs(feedback.position_rad - config.hardware.home_position_rad)
+        > config.hardware.home_tolerance_rad
     )
+    lifecycle.start(now, needs_homing=needs_homing)
     return _run_control_loop(
         config,
         dm,
@@ -411,6 +500,69 @@ def _run_control_loop(
     lifecycle: Lifecycle,
     feedback,
 ) -> dict[str, object]:
+    """运行使能后状态机，并把实验级故障收敛到 DM-only 故障保持。"""
+    feedback_state = [feedback]
+    try:
+        emit(
+            {
+                "event": "state",
+                "phase": lifecycle.phase.value,
+                "message": _PHASE_MESSAGES[lifecycle.phase],
+                "position_rad": feedback.position_rad,
+                "home_position_rad": config.hardware.home_position_rad,
+                "home_tolerance_rad": config.hardware.home_tolerance_rad,
+            }
+        )
+        return _run_control_loop_inner(
+            config,
+            dm,
+            tactile,
+            recorder,
+            emit,
+            terminal,
+            action_source,
+            clock,
+            sleep,
+            started,
+            lifecycle,
+            feedback,
+            feedback_state,
+        )
+    except FatalHardwareFault:
+        raise
+    except KeyboardInterrupt:
+        raise
+    except Exception as error:
+        return _run_fault_holding(
+            config,
+            dm,
+            recorder,
+            emit,
+            action_source,
+            clock,
+            sleep,
+            started,
+            lifecycle,
+            feedback_state[0],
+            error,
+        )
+
+
+def _run_control_loop_inner(
+    config: ExperimentConfig,
+    dm: DmSession,
+    tactile: TactileWorker,
+    recorder: ExperimentRecorder,
+    emit: EventSink,
+    terminal: TerminalDisplay | None,
+    action_source: Callable[[], str | None],
+    clock: Callable[[], float],
+    sleep: Callable[[float], None],
+    started: float,
+    lifecycle: Lifecycle,
+    feedback,
+    feedback_state: list[object],
+) -> dict[str, object]:
     """使用真实单调时钟驱动唯一控制循环，不对丢失周期补算。"""
     timing = config.timing
     lifecycle_config = config.lifecycle
@@ -437,6 +589,7 @@ def _run_control_loop(
     target_source = build_target_source(
         curve=_curve_from_config(config),
         adaptive=config.reference.adaptive,
+        max_target_force_n=config.safety.max_target_force_n,
         control_rate_hz=timing.control_rate_hz,
         contact_floor_n=lifecycle_config.contact_off_n,
     )
@@ -444,7 +597,11 @@ def _run_control_loop(
 
     period = 1.0 / timing.control_rate_hz
     phase_started = last_control = clock()
-    trajectory = _approach_trajectory(config, command_config, kinematics, feedback.position_rad)
+    trajectory = (
+        _home_trajectory(config, kinematics, feedback.position_rad)
+        if lifecycle.phase is LifecyclePhase.HOMING
+        else _approach_trajectory(config, command_config, kinematics, feedback.position_rad)
+    )
     last_command = _hold_command(kinematics, command_config, feedback)
     transition: ContactTransition | None = None
     reference_position = feedback.position_rad
@@ -461,9 +618,8 @@ def _run_control_loop(
     latest_stiffness: StiffnessSnapshot | None = None
 
     def fail(reason: str) -> NoReturn:
-        """登记故障终态并终止循环。"""
-        lifecycle.fault(clock(), reason)
-        raise RuntimeError(reason)
+        """把实验级故障交给外层故障保持状态机。"""
+        raise HoldableExperimentFault(reason)
 
     def enter_phase(phase: LifecyclePhase, message: str, **extra: object) -> None:
         """登记阶段事件。"""
@@ -474,6 +630,94 @@ def _run_control_loop(
         dt = now - last_control if last_sample is not None else period
         if not 0 < dt <= timing.max_control_gap_s:
             fail(f"控制周期超时：{dt:.4f}s")
+        if lifecycle.phase is LifecyclePhase.HOMING:
+            try:
+                action = action_source()
+            except KeyboardInterrupt:
+                raise
+            except BaseException as error:  # noqa: BLE001
+                raise FatalHardwareFault(
+                    str(error),
+                    phase=lifecycle.phase.value,
+                ) from error
+            if action == "status":
+                emit(
+                    {
+                        "event": "status",
+                        "phase": lifecycle.phase.value,
+                        "action": action,
+                        "message": _PHASE_MESSAGES[lifecycle.phase],
+                    }
+                )
+            elif action is not None:
+                emit(
+                    {
+                        "event": "warning",
+                        "code": "command_not_available",
+                        "phase": lifecycle.phase.value,
+                        "action": action,
+                        "message": "自动回零阶段只接受 status；紧急停止请按 Ctrl+C。",
+                    }
+                )
+            closure, velocity, _ = trajectory.sample(now - phase_started)
+            command = _closure_trajectory_command(
+                kinematics,
+                return_config,
+                feedback,
+                closure,
+                velocity,
+                0.0,
+                0.0,
+            )
+            if clock() - last_control > timing.max_control_gap_s:
+                fail("自动回零命令计算或事件记录超时")
+            send_started = clock()
+            try:
+                feedback = dm.command(command)
+            except KeyboardInterrupt:
+                raise
+            except BaseException as error:  # noqa: BLE001
+                raise FatalHardwareFault(
+                    f"自动回零期间 DM 命令或反馈失败：{error}",
+                    phase=lifecycle.phase.value,
+                ) from error
+            feedback_state[0] = feedback
+            recorder.write(
+                _motor_only_trace_row(
+                    time_s=now - started,
+                    phase=lifecycle.phase,
+                    feedback=feedback,
+                    command=command,
+                    dt=dt,
+                    latency=clock() - send_started,
+                )
+            )
+            timeout_s = max(
+                lifecycle_config.return_timeout_s,
+                trajectory.duration_s + lifecycle_config.return_settle_timeout_s,
+            )
+            if now - phase_started > timeout_s:
+                fail("自动回零轨迹执行超时")
+            if (
+                now - phase_started >= trajectory.duration_s
+                and abs(feedback.position_rad - config.hardware.home_position_rad)
+                <= config.hardware.home_tolerance_rad
+            ):
+                lifecycle.finish_homing(now)
+                enter_phase(LifecyclePhase.APPROACH, _PHASE_MESSAGES[LifecyclePhase.APPROACH])
+                phase_started = now
+                trajectory = _approach_trajectory(
+                    config,
+                    command_config,
+                    kinematics,
+                    feedback.position_rad,
+                )
+                last_control = now
+                sleep(max(0.0, period - (clock() - now)))
+                continue
+            last_control = now
+            sleep(max(0.0, period - (clock() - now)))
+            continue
         sample = tactile.latest()
         axes = _validate_snapshot(sample, now, config)
         paired = pair_observation(
@@ -483,7 +727,15 @@ def _run_control_loop(
             now_s=now,
             kinematics=kinematics,
         )
-        action = action_source()
+        try:
+            action = action_source()
+        except KeyboardInterrupt:
+            raise
+        except BaseException as error:  # noqa: BLE001
+            raise FatalHardwareFault(
+                str(error),
+                phase=lifecycle.phase.value,
+            ) from error
         if action == "release" and lifecycle.phase in {
             LifecyclePhase.ACTIVE,
             LifecyclePhase.HOLDING,
@@ -498,13 +750,7 @@ def _run_control_loop(
             )
             lifecycle.begin_return(now, "用户请求释放")
             enter_phase(LifecyclePhase.RETURNING, _PHASE_MESSAGES[LifecyclePhase.RETURNING])
-            trajectory = ClosureTrajectory.from_limits(
-                kinematics.closure(feedback.position_rad),
-                kinematics.closure(command_config.position_min_rad),
-                lifecycle_config.return_closure_velocity_m_s,
-                lifecycle_config.return_closure_acceleration_m_s2,
-                lifecycle_config.return_closure_jerk_m_s3,
-            )
+            trajectory = _home_trajectory(config, kinematics, feedback.position_rad)
             phase_started = now
         elif action == "status":
             emit(
@@ -619,14 +865,9 @@ def _run_control_loop(
                 if lifecycle.phase is LifecyclePhase.PRELOAD:
                     target_value = target_source.preload_target(task_time_s)
                     minimum_stable_force_n = target_value - lifecycle_config.preload_tolerance_n
-                    maximum_stable_force_n = (
-                        target_value + lifecycle_config.preload_overforce_tolerance_n
-                    )
                     stable = (
                         min(left_n, right_n) >= lifecycle_config.contact_on_n
-                        and minimum_stable_force_n
-                        <= paired.measured_force_n
-                        <= maximum_stable_force_n
+                        and paired.measured_force_n >= minimum_stable_force_n
                     )
                     preload_stable_since = (
                         (now if preload_stable_since is None else preload_stable_since)
@@ -667,12 +908,11 @@ def _run_control_loop(
         ):
             target_value = target_source.preload_target(task_time_s)
             minimum_stable_force_n = target_value - lifecycle_config.preload_tolerance_n
-            maximum_stable_force_n = target_value + lifecycle_config.preload_overforce_tolerance_n
             detail = (
                 "初始抓力在等待上限内未达到稳定："
                 f"目标={target_value:.3f}N，当前均值={paired.measured_force_n:.3f}N"
                 f"（LEFT={sample.left_force_n:.3f}N、RIGHT={sample.right_force_n:.3f}N），"
-                f"允许区间={minimum_stable_force_n:.3f}–{maximum_stable_force_n:.3f}N"
+                f"最低预载力={minimum_stable_force_n:.3f}N"
             )
             if (
                 config.controller.kind == "admittance"
@@ -694,13 +934,7 @@ def _run_control_loop(
             enter_phase(LifecyclePhase.HOLDING, _PHASE_MESSAGES[LifecyclePhase.HOLDING])
             if lifecycle_config.on_finished == "return":
                 lifecycle.begin_return(now, "配置 on_finished=return，自动回位")
-                trajectory = ClosureTrajectory.from_limits(
-                    kinematics.closure(feedback.position_rad),
-                    kinematics.closure(command_config.position_min_rad),
-                    lifecycle_config.return_closure_velocity_m_s,
-                    lifecycle_config.return_closure_acceleration_m_s2,
-                    lifecycle_config.return_closure_jerk_m_s3,
-                )
+                trajectory = _home_trajectory(config, kinematics, feedback.position_rad)
                 phase_started = now
                 enter_phase(LifecyclePhase.RETURNING, _PHASE_MESSAGES[LifecyclePhase.RETURNING])
 
@@ -773,7 +1007,16 @@ def _run_control_loop(
             fail("发送前控制计算或事件记录超时")
         _validate_snapshot(sample, clock(), config)
         send_started = clock()
-        feedback = dm.command(command)
+        try:
+            feedback = dm.command(command)
+        except KeyboardInterrupt:
+            raise
+        except BaseException as error:  # noqa: BLE001
+            raise FatalHardwareFault(
+                f"DM 命令或反馈失败：{error}",
+                phase=lifecycle.phase.value,
+            ) from error
+        feedback_state[0] = feedback
         latency = clock() - send_started
         row = _trace_row(
             time_s=now - started,
@@ -814,7 +1057,7 @@ def _run_control_loop(
                 fail("回位轨迹执行超时")
             if (
                 now - phase_started >= trajectory.duration_s
-                and abs(feedback.position_rad - command_config.position_min_rad)
+                and abs(feedback.position_rad - config.hardware.home_position_rad)
                 <= lifecycle_config.return_position_tolerance_rad
             ):
                 lifecycle.complete_return(now)
@@ -844,6 +1087,371 @@ def _run_control_loop(
         "final_phase": lifecycle.phase.value,
         "task_time_s": task_time_s,
     }
+
+
+def _run_fault_holding(
+    config: ExperimentConfig,
+    dm: DmSession,
+    recorder: ExperimentRecorder,
+    emit: EventSink,
+    action_source: Callable[[], str | None],
+    clock: Callable[[], float],
+    sleep: Callable[[float], None],
+    started: float,
+    lifecycle: Lifecycle,
+    feedback,
+    primary_error: BaseException,
+) -> dict[str, object]:
+    """建立并守护故障保持，确保后续异常不能覆盖首个实验故障。"""
+    try:
+        return _run_fault_holding_impl(
+            config,
+            dm,
+            recorder,
+            emit,
+            action_source,
+            clock,
+            sleep,
+            started,
+            lifecycle,
+            feedback,
+            primary_error,
+        )
+    except FatalHardwareFault:
+        raise
+    except KeyboardInterrupt as error:
+        holding_entered = lifecycle.fault_holding_started_s is not None
+        raise FatalHardwareFault(
+            "故障保持控制期间收到 Ctrl+C，立即请求失能",
+            phase=(
+                lifecycle.fault_phase.value
+                if lifecycle.fault_phase is not None
+                else lifecycle.phase.value
+            ),
+            resolution="forced_disable",
+            holding_entered=holding_entered,
+            holding_duration_s=_fault_holding_duration(lifecycle, clock()),
+            primary_error=primary_error,
+        ) from error
+    except BaseException as error:  # noqa: BLE001
+        holding_entered = lifecycle.fault_holding_started_s is not None
+        raise FatalHardwareFault(
+            f"故障保持后续控制所有权丢失：{error}",
+            phase=(
+                lifecycle.fault_phase.value
+                if lifecycle.fault_phase is not None
+                else lifecycle.phase.value
+            ),
+            resolution="hold_lost" if holding_entered else "forced_disable",
+            holding_entered=holding_entered,
+            holding_duration_s=_fault_holding_duration(lifecycle, clock()),
+            primary_error=primary_error,
+        ) from error
+
+
+def _fault_holding_duration(lifecycle: Lifecycle, now_s: float) -> float:
+    """返回从首次建立故障保持起累计的非负时长。"""
+    if lifecycle.fault_holding_started_s is None:
+        return 0.0
+    return max(0.0, now_s - lifecycle.fault_holding_started_s)
+
+
+def _run_fault_holding_impl(
+    config: ExperimentConfig,
+    dm: DmSession,
+    recorder: ExperimentRecorder,
+    emit: EventSink,
+    action_source: Callable[[], str | None],
+    clock: Callable[[], float],
+    sleep: Callable[[float], None],
+    started: float,
+    lifecycle: Lifecycle,
+    feedback,
+    primary_error: BaseException,
+) -> dict[str, object]:
+    """以 DM-only 循环保持首个故障位置，直到人工释放并回到 home。"""
+    source_phase = lifecycle.phase.value
+    kinematics = _KINEMATICS
+    base_config = MITCommandConfig(
+        position_min_rad=dm.deployment.joint_position_min_rad,
+        position_max_rad=dm.deployment.joint_position_max_rad,
+        velocity_limit_rad_s=config.controller.velocity_limit_rad_s,
+        closing_direction=dm.deployment.closing_direction,
+        kp=config.controller.return_mit_kp,
+        kd=config.controller.return_mit_kd,
+        feedforward_ratio=0.0,
+        feedforward_torque_limit_nm=config.controller.return_torque_limit_nm,
+        torque_limit_nm=config.controller.return_torque_limit_nm,
+    )
+    period = 1.0 / config.timing.control_rate_hz
+    secondary_errors: list[str] = []
+
+    def safe_emit(event: dict[str, object]) -> None:
+        """记录故障阶段事件；记录通道失败不得夺走电机控制权。"""
+        try:
+            emit(event)
+        except KeyboardInterrupt as error:
+            raise FatalHardwareFault(
+                "故障保持事件记录期间收到 Ctrl+C，立即请求失能",
+                phase=source_phase,
+                resolution="forced_disable",
+                holding_entered=True,
+                holding_duration_s=clock() - entered_s,
+                primary_error=primary_error,
+            ) from error
+        except Exception as error:
+            secondary_errors.append(f"故障保持事件记录失败：{error}")
+
+    try:
+        hold_command = _hold_command(kinematics, base_config, feedback)
+        feedback = dm.hold(hold_command)
+    except KeyboardInterrupt as error:
+        raise FatalHardwareFault(
+            "首个故障后收到 Ctrl+C，立即请求失能",
+            phase=source_phase,
+            resolution="forced_disable",
+            primary_error=primary_error,
+        ) from error
+    except BaseException as error:  # noqa: BLE001
+        raise FatalHardwareFault(
+            f"首个故障后无法建立位置保持：{error}",
+            phase=source_phase,
+            resolution="forced_disable",
+            primary_error=primary_error,
+        ) from error
+    entered_s = clock()
+    lifecycle.hold_fault(entered_s, str(primary_error))
+    safe_emit(
+        {
+            "event": "fault_detected",
+            "phase": source_phase,
+            "error": str(primary_error),
+            "hold_established": True,
+        }
+    )
+    safe_emit(
+        {
+            "event": "state",
+            "phase": LifecyclePhase.FAULT_HOLDING.value,
+            "message": _PHASE_MESSAGES[LifecyclePhase.FAULT_HOLDING],
+            "primary_error": str(primary_error),
+            "fault_phase": source_phase,
+            "hold_position_rad": hold_command.position_rad,
+        }
+    )
+    return_trajectory: ClosureTrajectory | None = None
+    return_started_s = 0.0
+    last_control_s = entered_s
+    while True:
+        now = clock()
+        if now - last_control_s > config.timing.max_control_gap_s:
+            safe_emit(
+                {
+                    "event": "warning",
+                    "code": "fault_holding_control_gap",
+                    "phase": lifecycle.phase.value,
+                    "message": "故障保持周期超时，正在立即刷新安全命令。",
+                }
+            )
+        try:
+            action = action_source()
+        except KeyboardInterrupt as error:
+            raise FatalHardwareFault(
+                "故障保持期间收到 Ctrl+C，立即请求失能",
+                phase=source_phase,
+                resolution="forced_disable",
+                holding_entered=True,
+                holding_duration_s=clock() - entered_s,
+                primary_error=primary_error,
+            ) from error
+        except BaseException as error:  # noqa: BLE001
+            raise FatalHardwareFault(
+                f"故障保持期间无法继续接收人工 release：{error}",
+                phase=source_phase,
+                resolution="hold_lost",
+                holding_entered=True,
+                holding_duration_s=clock() - entered_s,
+                primary_error=primary_error,
+            ) from error
+        if lifecycle.phase is LifecyclePhase.FAULT_HOLDING:
+            if action == "release":
+                safe_emit(
+                    {
+                        "event": "command_received",
+                        "phase": lifecycle.phase.value,
+                        "action": "release",
+                        "message": "已收到 release，正在执行不依赖触觉的受限回位。",
+                    }
+                )
+                lifecycle.begin_return(now, "故障保持后人工 release")
+                return_trajectory = _home_trajectory(config, kinematics, feedback.position_rad)
+                return_started_s = now
+                safe_emit(
+                    {
+                        "event": "state",
+                        "phase": LifecyclePhase.RETURNING.value,
+                        "message": _PHASE_MESSAGES[LifecyclePhase.RETURNING],
+                        "fault_release": True,
+                    }
+                )
+            elif action == "status":
+                safe_emit(
+                    {
+                        "event": "status",
+                        "phase": lifecycle.phase.value,
+                        "action": action,
+                        "message": _PHASE_MESSAGES[LifecyclePhase.FAULT_HOLDING],
+                        "primary_error": str(primary_error),
+                    }
+                )
+            elif action is not None:
+                safe_emit(
+                    {
+                        "event": "warning",
+                        "code": "unknown_command",
+                        "phase": lifecycle.phase.value,
+                        "action": action,
+                        "message": "故障保持阶段只接受 status 或 release。",
+                    }
+                )
+            if lifecycle.phase is LifecyclePhase.FAULT_HOLDING:
+                try:
+                    command = _hold_command(kinematics, base_config, feedback)
+                    feedback = dm.hold(command)
+                except KeyboardInterrupt as error:
+                    raise FatalHardwareFault(
+                        "故障保持命令期间收到 Ctrl+C，立即请求失能",
+                        phase=source_phase,
+                        resolution="forced_disable",
+                        holding_entered=True,
+                        holding_duration_s=clock() - entered_s,
+                        primary_error=primary_error,
+                    ) from error
+                except BaseException as error:  # noqa: BLE001
+                    raise FatalHardwareFault(
+                        f"故障保持丢失：{error}",
+                        phase=source_phase,
+                        resolution="hold_lost",
+                        holding_entered=True,
+                        holding_duration_s=clock() - entered_s,
+                        primary_error=primary_error,
+                    ) from error
+        else:
+            assert lifecycle.phase is LifecyclePhase.RETURNING
+            assert return_trajectory is not None
+            closure, velocity, _ = return_trajectory.sample(now - return_started_s)
+            command = _closure_trajectory_command(
+                kinematics,
+                base_config,
+                feedback,
+                closure,
+                velocity,
+                0.0,
+                0.0,
+            )
+            try:
+                feedback = dm.command(command)
+            except KeyboardInterrupt as error:
+                raise FatalHardwareFault(
+                    "故障释放回位期间收到 Ctrl+C，立即请求失能",
+                    phase=source_phase,
+                    resolution="forced_disable",
+                    holding_entered=True,
+                    holding_duration_s=clock() - entered_s,
+                    primary_error=primary_error,
+                ) from error
+            except BaseException as error:  # noqa: BLE001
+                raise FatalHardwareFault(
+                    f"故障释放回位期间 DM 命令或反馈失败：{error}",
+                    phase=source_phase,
+                    resolution="hold_lost",
+                    holding_entered=True,
+                    holding_duration_s=clock() - entered_s,
+                    primary_error=primary_error,
+                ) from error
+            try:
+                recorder.write(
+                    _motor_only_trace_row(
+                        time_s=now - started,
+                        phase=lifecycle.phase,
+                        feedback=feedback,
+                        command=command,
+                        dt=max(period, now - last_control_s),
+                        latency=clock() - now,
+                    )
+                )
+            except Exception as error:
+                secondary_errors.append(f"故障释放回位记录失败：{error}")
+            if (
+                now - return_started_s >= return_trajectory.duration_s
+                and abs(feedback.position_rad - config.hardware.home_position_rad)
+                <= config.hardware.home_tolerance_rad
+            ):
+                lifecycle.complete_return(now)
+                safe_emit(
+                    {
+                        "event": "state",
+                        "phase": LifecyclePhase.COMPLETED.value,
+                        "message": "故障后回位完成；本次实验结果仍为 failed。",
+                    }
+                )
+                return {
+                    "status": "failed",
+                    "final_phase": LifecyclePhase.COMPLETED.value,
+                    "primary_error": primary_error,
+                    "fault_phase": source_phase,
+                    "fault_holding_entered": True,
+                    "fault_holding_duration_s": now - entered_s,
+                    "fault_resolution": "released",
+                    "secondary_errors": secondary_errors,
+                }
+            timeout_s = max(
+                config.lifecycle.return_timeout_s,
+                return_trajectory.duration_s + config.lifecycle.return_settle_timeout_s,
+            )
+            if now - return_started_s > timeout_s:
+                try:
+                    feedback = dm.hold(_hold_command(kinematics, base_config, feedback))
+                except KeyboardInterrupt as error:
+                    raise FatalHardwareFault(
+                        "故障释放超时恢复保持时收到 Ctrl+C，立即请求失能",
+                        phase=source_phase,
+                        resolution="forced_disable",
+                        holding_entered=True,
+                        holding_duration_s=clock() - entered_s,
+                        primary_error=primary_error,
+                    ) from error
+                except BaseException as error:  # noqa: BLE001
+                    raise FatalHardwareFault(
+                        f"故障释放回位超时且无法恢复保持：{error}",
+                        phase=source_phase,
+                        resolution="hold_lost",
+                        holding_entered=True,
+                        holding_duration_s=clock() - entered_s,
+                        primary_error=primary_error,
+                    ) from error
+                lifecycle.resume_fault_holding(now, "故障释放回位超时，已恢复位置保持")
+                safe_emit(
+                    {
+                        "event": "state",
+                        "phase": LifecyclePhase.FAULT_HOLDING.value,
+                        "message": "故障释放回位未达 home，已恢复保持；请检查后再次输入 release。",
+                        "primary_error": str(primary_error),
+                    }
+                )
+                return_trajectory = None
+        last_control_s = now
+        try:
+            sleep(max(0.0, period - (clock() - now)))
+        except KeyboardInterrupt as error:
+            raise FatalHardwareFault(
+                "故障保持等待期间收到 Ctrl+C，立即请求失能",
+                phase=source_phase,
+                resolution="forced_disable",
+                holding_entered=True,
+                holding_duration_s=clock() - entered_s,
+                primary_error=primary_error,
+            ) from error
 
 
 def _preload_force_target(target_source: TargetSource, task_time_s: float) -> ForceTarget:
@@ -997,10 +1605,17 @@ def _validate_snapshot(
     if age_s < 0.0 or age_s > config.timing.tactile_timeout_s:
         raise RuntimeError(f"触觉快照过期：age={age_s:.3f}s")
     axes = raw_axes(snapshot)
+    for side, taxels in (
+        ("LEFT", snapshot.left_taxel_forces_n),
+        ("RIGHT", snapshot.right_taxel_forces_n),
+    ):
+        if not taxels:
+            raise RuntimeError(f"{side} 逐 taxel 数据缺失")
+        for taxel_index, vector in enumerate(taxels):
+            if len(vector) != 3 or not all(math.isfinite(value) for value in vector):
+                raise RuntimeError(f"{side} taxel {taxel_index} 三轴数据结构错误或包含非有限数值")
     if max(abs(axes[2]), abs(axes[5])) > config.safety.force_ceiling_n:
         raise RuntimeError("原始法向力超过保护上限")
-    if abs(axes[2] - axes[5]) > config.safety.max_force_imbalance_n:
-        raise RuntimeError("双侧原始法向力不平衡超过保护上限")
     return axes
 
 
@@ -1022,10 +1637,13 @@ def _verify_zero(
     sample = tactile.wait_for_update(None, config.timing.tactile_startup_timeout_s)
     if clear_bias:
         sleep(config.timing.tactile_bias_settle_s)
-        sample = tactile.wait_for_update(sample.received_at_s, config.timing.tactile_timeout_s)
+        settle_boundary = tactile.latest().received_at_s
+        sample = tactile.wait_for_update(settle_boundary, config.timing.tactile_timeout_s)
     deadline = clock() + lifecycle.zero_force_timeout_s
     previous_timestamp: int | None = None
-    window: deque[tuple[float, float, float]] = deque()
+    previous_counter: int | None = None
+    taxel_counts: tuple[int, int] | None = None
+    window: deque[tuple[float, float, float, TactileSnapshot]] = deque()
     left_sum_n = right_sum_n = 0.0
     window_duration_s = 0.0
     left_mean_n = right_mean_n = 0.0
@@ -1035,7 +1653,24 @@ def _verify_zero(
         _validate_snapshot(sample, clock(), config)
         if previous_timestamp is not None and sample.timestamp_us <= previous_timestamp:
             raise RuntimeError("空载验证期间触觉设备时间未递增")
+        if previous_counter is not None:
+            counter_delta = (sample.packet_counter - previous_counter) % (1 << 32)
+            if counter_delta == 0 or counter_delta >= (1 << 31):
+                raise RuntimeError("空载验证期间触觉包计数未按前进规则递增")
+        current_counts = (
+            len(sample.left_taxel_forces_n),
+            len(sample.right_taxel_forces_n),
+        )
+        if taxel_counts is None:
+            taxel_counts = current_counts
+        elif current_counts != taxel_counts:
+            raise RuntimeError(
+                "空载验证期间逐侧 taxel 数量变化："
+                f"期望 LEFT={taxel_counts[0]}、RIGHT={taxel_counts[1]}，"
+                f"实际 LEFT={current_counts[0]}、RIGHT={current_counts[1]}"
+            )
         previous_timestamp = sample.timestamp_us
+        previous_counter = sample.packet_counter
         left_force_n = abs(sample.left_force_n)
         right_force_n = abs(sample.right_force_n)
         peak_n = max(left_force_n, right_force_n)
@@ -1047,12 +1682,12 @@ def _verify_zero(
                 peak_side = "left"
             else:
                 peak_side = "right"
-        window.append((sample.received_at_s, left_force_n, right_force_n))
+        window.append((sample.received_at_s, left_force_n, right_force_n, sample))
         left_sum_n += left_force_n
         right_sum_n += right_force_n
         cutoff_s = sample.received_at_s - lifecycle.zero_force_stable_s
         while len(window) > 1 and window[1][0] <= cutoff_s:
-            _, expired_left_n, expired_right_n = window.popleft()
+            _, expired_left_n, expired_right_n, _ = window.popleft()
             left_sum_n -= expired_left_n
             right_sum_n -= expired_right_n
         window_duration_s = sample.received_at_s - window[0][0]
@@ -1063,6 +1698,16 @@ def _verify_zero(
             and left_mean_n <= lifecycle.zero_force_threshold_n
             and right_mean_n <= lifecycle.zero_force_threshold_n
         ):
+            if warning_sink is not None:
+                warning_sink(
+                    {
+                        "event": "zero_force_diagnostics",
+                        "window_duration_s": window_duration_s,
+                        "left_global_mean_n": left_mean_n,
+                        "right_global_mean_n": right_mean_n,
+                        "taxels": _zero_taxel_diagnostics([item[3] for item in window]),
+                    }
+                )
             if maximum_peak_n >= lifecycle.contact_on_n and warning_sink is not None:
                 side_label = {"left": "LEFT", "right": "RIGHT", "both": "双侧"}.get(
                     peak_side, "未知侧"
@@ -1106,6 +1751,52 @@ def _verify_zero(
     )
 
 
+def _zero_taxel_diagnostics(samples: list[TactileSnapshot]) -> dict[str, object]:
+    """汇总零力窗口的逐侧 taxel 三轴残余，不参与通过判定。"""
+    diagnostics: dict[str, object] = {}
+    for side in ("left", "right"):
+        frames = [getattr(sample, f"{side}_taxel_forces_n") for sample in samples]
+        taxel_count = len(frames[0]) if frames else 0
+        axis_values = [
+            [float(vector[axis]) for frame in frames for vector in frame] for axis in range(3)
+        ]
+        per_taxel = []
+        for taxel_index in range(taxel_count):
+            values_by_axis = [
+                [float(frame[taxel_index][axis]) for frame in frames] for axis in range(3)
+            ]
+            per_taxel.append(
+                {
+                    "taxel_index": taxel_index,
+                    "axis_mean_n": [statistics.fmean(values) for values in values_by_axis],
+                    "axis_std_n": [statistics.pstdev(values) for values in values_by_axis],
+                    "maximum_abs_residual_n": max(
+                        abs(value) for values in values_by_axis for value in values
+                    ),
+                }
+            )
+        maximum = max(
+            (
+                (abs(float(value)), taxel_index, axis, float(value))
+                for frame in frames
+                for taxel_index, vector in enumerate(frame)
+                for axis, value in enumerate(vector)
+            ),
+            default=(0.0, 0, 0, 0.0),
+        )
+        diagnostics[side] = {
+            "taxel_count": taxel_count,
+            "axis_mean_n": [statistics.fmean(values) for values in axis_values],
+            "axis_std_n": [statistics.pstdev(values) for values in axis_values],
+            "maximum_abs_residual_n": maximum[0],
+            "maximum_residual_taxel_index": maximum[1],
+            "maximum_residual_axis": ("x", "y", "z")[maximum[2]],
+            "maximum_residual_signed_n": maximum[3],
+            "per_taxel": per_taxel,
+        }
+    return diagnostics
+
+
 def _approach_trajectory(
     config: ExperimentConfig,
     command_config: MITCommandConfig,
@@ -1126,6 +1817,47 @@ def _approach_trajectory(
         lifecycle.approach_closure_acceleration_m_s2,
         lifecycle.approach_closure_jerk_m_s3,
     )
+
+
+def _home_trajectory(
+    config: ExperimentConfig,
+    kinematics: CrankSliderKinematics,
+    start_position_rad: float,
+) -> ClosureTrajectory:
+    """复用受限回位参数，从当前反馈规划到配置的 home 位置。"""
+    return ClosureTrajectory.from_limits(
+        kinematics.closure(start_position_rad),
+        kinematics.closure(config.hardware.home_position_rad),
+        config.lifecycle.return_closure_velocity_m_s,
+        config.lifecycle.return_closure_acceleration_m_s2,
+        config.lifecycle.return_closure_jerk_m_s3,
+    )
+
+
+def _motor_only_trace_row(
+    *,
+    time_s: float,
+    phase: LifecyclePhase,
+    feedback,
+    command: MITCommand,
+    dt: float,
+    latency: float,
+) -> dict[str, object]:
+    """记录不依赖触觉的 homing／故障释放周期。"""
+    return {
+        "time_s": time_s,
+        "phase": phase.value,
+        "position_rad": feedback.position_rad,
+        "velocity_rad_s": feedback.velocity_rad_s,
+        "torque_nm": feedback.torque_nm,
+        "q_des_rad": command.position_rad,
+        "dq_des_rad_s": command.velocity_rad_s,
+        "kp": command.kp,
+        "kd": command.kd,
+        "tau_ff_nm": command.feedforward_torque_nm,
+        "control_dt_s": dt,
+        "command_latency_s": latency,
+    }
 
 
 def _closure_trajectory_command(
@@ -1191,4 +1923,19 @@ def _hold_command(
     feedback,
 ) -> MITCommand:
     """构造当前位置零速度保持命令。"""
-    return _trajectory_command(kinematics, config, feedback, feedback.position_rad, 0.0, 0.0, 0.0)
+    command = _trajectory_command(
+        kinematics,
+        config,
+        feedback,
+        feedback.position_rad,
+        0.0,
+        0.0,
+        0.0,
+    )
+    expected_position_rad = min(
+        max(feedback.position_rad, config.position_min_rad),
+        config.position_max_rad,
+    )
+    if not math.isclose(command.position_rad, expected_position_rad, abs_tol=1e-9):
+        raise ValueError("当前位置投影无法同时满足故障保持的合成力矩限制")
+    return command

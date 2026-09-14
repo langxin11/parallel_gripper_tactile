@@ -15,7 +15,7 @@ from types import UnionType
 from typing import Any, Literal, get_args, get_origin, get_type_hints
 
 import yaml
-from dmgripper_hardware import DEFAULT_USB2CAN_PORT
+from dmgripper_hardware import DEFAULT_USB2CAN_PORT, make_dm4310p_gripper_config
 from papillarray_hardware import DEFAULT_PAPILLARRAY_PORT
 
 from dm_grasp_core import ForceInterpolation
@@ -96,13 +96,17 @@ class MetadataConfig:
 
 @dataclass(frozen=True, slots=True)
 class HardwareConfig:
-    """设备端口与部署来源。
+    """设备端口、home 定义与反馈安全余量。
 
-    机械硬限制由硬件包的部署配置提供，不在此重复定义。
+    命令工作范围仍由硬件部署固定为 ``[0, pi / 2]``；这里仅配置
+    当前装配的 home 位置、判定容差和编码器反馈安全余量。
     """
 
     dm_port: str = DEFAULT_USB2CAN_PORT
     tactile_port: str = DEFAULT_PAPILLARRAY_PORT
+    home_position_rad: float = 0.0
+    home_tolerance_rad: float = 0.03
+    feedback_position_margin_rad: float = 0.05
 
     def __post_init__(self) -> None:
         """验证端口为非空字符串。"""
@@ -110,6 +114,22 @@ class HardwareConfig:
             value = getattr(self, name)
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"{name} 必须是非空字符串")
+        _finite_number(self.home_position_rad, "hardware.home_position_rad")
+        _finite_number(self.home_tolerance_rad, "hardware.home_tolerance_rad")
+        _finite_number(
+            self.feedback_position_margin_rad,
+            "hardware.feedback_position_margin_rad",
+        )
+        if not 0.0 <= self.home_position_rad <= math.pi / 2.0:
+            raise ValueError("hardware.home_position_rad 必须位于命令工作范围 [0, pi/2]")
+        if self.home_tolerance_rad < 0.0:
+            raise ValueError("hardware.home_tolerance_rad 不得为负")
+        if self.feedback_position_margin_rad < 0.0:
+            raise ValueError("hardware.feedback_position_margin_rad 不得为负")
+        make_dm4310p_gripper_config(
+            self.dm_port,
+            feedback_position_margin_rad=self.feedback_position_margin_rad,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -174,7 +194,6 @@ class LifecycleConfig:
         reapproach_max_attempts: 单次运行允许的重新接近次数上限。
         reapproach_timeout_s: 重接近路径的累计时间上限。
         preload_tolerance_n: 初始抓力稳定判定的低侧力误差容限。
-        preload_overforce_tolerance_n: 初始抓力稳定判定的高侧力误差容限。
         preload_stable_time_s: 初始抓力稳定需要持续的时长。
         preload_timeout_s: preload 等待上限。
         auto_start: ready 阶段是否跳过交互等待直接启动。
@@ -205,7 +224,6 @@ class LifecycleConfig:
     reapproach_max_attempts: int = 2
     reapproach_timeout_s: float = 20.0
     preload_tolerance_n: float = 0.15
-    preload_overforce_tolerance_n: float = 0.15
     preload_stable_time_s: float = 2.0
     preload_timeout_s: float = 30.0
     auto_start: bool = False
@@ -258,7 +276,6 @@ class LifecycleConfig:
                 raise ValueError(f"lifecycle.{name} 必须大于 0")
         for name in (
             "preload_tolerance_n",
-            "preload_overforce_tolerance_n",
             "return_position_tolerance_rad",
         ):
             if getattr(self, name) < 0.0:
@@ -354,7 +371,6 @@ class AdaptiveReferenceConfig:
     Attributes:
         initial_force_n: 初始抓力（preload 目标与策略基线初值）。
         duration_s: 任务计时长度。
-        max_force_n: 目标力上限。
         max_force_rate_n_s: 目标力变化率上限。
         filter_tau_s: 切向力滤波时间常数。
         shear_threshold_n: 触发阈值。
@@ -363,7 +379,6 @@ class AdaptiveReferenceConfig:
 
     initial_force_n: float = 0.5
     duration_s: float = 10.0
-    max_force_n: float = 1.5
     max_force_rate_n_s: float = 0.5
     filter_tau_s: float = 0.05
     shear_threshold_n: float = 0.06
@@ -375,8 +390,6 @@ class AdaptiveReferenceConfig:
             _finite_number(
                 getattr(self, item.name), f"reference.adaptive.{item.name}", positive=True
             )
-        if self.max_force_n < self.initial_force_n:
-            raise ValueError("reference.adaptive.max_force_n 必须不小于 initial_force_n")
 
 
 @dataclass(frozen=True, slots=True)
@@ -530,6 +543,26 @@ class ControllerConfig:
             "return_torque_limit_nm",
         ):
             _finite_number(getattr(self, name), f"controller.{name}", positive=True)
+        deployment = make_dm4310p_gripper_config("config://validation")
+        limits = deployment.motor_limits
+        upper_bounds = {
+            "mit_kp": 500.0,
+            "mit_kd": 5.0,
+            "velocity_limit_rad_s": min(
+                abs(limits.velocity_min_rad_s),
+                limits.velocity_max_rad_s,
+            ),
+            "torque_limit_nm": min(abs(limits.torque_min_nm), limits.torque_max_nm),
+            "return_mit_kp": 500.0,
+            "return_mit_kd": 5.0,
+            "return_torque_limit_nm": min(
+                abs(limits.torque_min_nm),
+                limits.torque_max_nm,
+            ),
+        }
+        for name, upper_bound in upper_bounds.items():
+            if getattr(self, name) > upper_bound:
+                raise ValueError(f"controller.{name} 不得超过 DM 协议上限 {upper_bound}")
         if not isinstance(self.admittance, AdmittanceConfig):
             raise ValueError("controller.admittance 必须是 AdmittanceConfig")
         if not isinstance(self.pid, PIDConfig):
@@ -609,7 +642,6 @@ class SafetyConfig:
 
     max_target_force_n: float = 1.5
     force_ceiling_n: float = 2.0
-    max_force_imbalance_n: float = 1.0
     approach_feedforward_force_n: float = 2.0
     approach_feedforward_ratio: float = 0.5
 
@@ -618,7 +650,6 @@ class SafetyConfig:
         for name in (
             "max_target_force_n",
             "force_ceiling_n",
-            "max_force_imbalance_n",
             "approach_feedforward_force_n",
         ):
             _finite_number(getattr(self, name), f"safety.{name}", positive=True)
@@ -709,8 +740,6 @@ class ExperimentConfig:
             raise ValueError("初始目标力不得大于 safety.max_target_force_n")
         if initial < lifecycle.contact_on_n:
             raise ValueError("初始目标力不得小于 lifecycle.contact_on_n")
-        if initial + lifecycle.preload_overforce_tolerance_n >= safety.force_ceiling_n:
-            raise ValueError("预载高侧允许值必须严格小于 safety.force_ceiling_n")
         if safety.max_target_force_n >= safety.force_ceiling_n:
             raise ValueError("safety.max_target_force_n 必须严格小于 force_ceiling_n")
         if self.reference.curve is not None:
@@ -726,9 +755,6 @@ class ExperimentConfig:
                         "导纳 prevent_unloading 与曲线下降段不相容；"
                         "请改用 hold 语义外的其他插值、去掉下降段或关闭单向闭合"
                     )
-        if self.reference.adaptive is not None:
-            if self.reference.adaptive.max_force_n > safety.max_target_force_n:
-                raise ValueError("动态增力上限不得大于 safety.max_target_force_n")
 
     def _validate_controller_compatibility(self) -> None:
         """校验控制器、目标来源与失接触处理的组合约束。"""
@@ -811,7 +837,9 @@ def _decode_dataclass(data: object, cls: type[Any], name: str) -> Any:
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"{field_name} 必须是非空字符串")
             kwargs[item.name] = value
-        elif cls is HardwareConfig or (cls is OutputConfig and item.name == "root"):
+        elif (cls is HardwareConfig and item.name in {"dm_port", "tactile_port"}) or (
+            cls is OutputConfig and item.name == "root"
+        ):
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"{field_name} 必须是非空字符串")
             kwargs[item.name] = value

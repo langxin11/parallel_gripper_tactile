@@ -81,6 +81,44 @@ def test_plot_without_stiffness_omits_panel(tmp_path: Path):
     assert len(plots) == 2
 
 
+def test_tangential_trigger_is_background_and_axes_use_math_symbols():
+    """Trigger 在切向力曲线下层，坐标轴使用标准物理量符号。"""
+    import matplotlib.pyplot as plt
+
+    from dmgripper_experiments.plotting import (
+        _plot_joint_command,
+        _plot_normal_force,
+        _plot_stiffness,
+        _plot_tangential_force,
+    )
+
+    rows = [
+        {key: str(value) for key, value in row.items() if value is not None}
+        for row in _adaptive_rows()
+    ]
+    time_s = [float(row["time_s"]) for row in rows]
+    figure, axes = plt.subplots(4, 1)
+    _plot_normal_force(axes[0], time_s, rows)
+    _plot_tangential_force(axes[1], time_s, rows)
+    _plot_joint_command(axes[2], time_s, rows)
+    _plot_stiffness(axes[3], time_s, rows)
+
+    trigger = next(
+        collection for collection in axes[1].collections if collection.get_label() == "Trigger"
+    )
+    assert trigger.get_zorder() < min(line.get_zorder() for line in axes[1].lines)
+    assert [line.get_label() for line in axes[0].lines] == [r"$F_z$", r"$F_z^{\mathrm{ref}}$"]
+    assert [line.get_label() for line in axes[1].lines] == ["Left", "Right"]
+    assert [line.get_label() for line in axes[2].lines] == [r"$q$", r"$q_d$"]
+    assert figure.axes[-1].lines[0].get_label() == r"$\tau_m$"
+    assert axes[3].lines[0].get_label() == r"$\hat{K}$"
+    assert axes[0].get_ylabel() == r"$F_z$ (N)"
+    assert axes[1].get_ylabel() == r"$F_T$ (N)"
+    assert axes[2].get_ylabel() == r"$q$ (rad)"
+    assert axes[3].get_ylabel() == r"$K$ ($\mathrm{N\,m^{-1}}$)"
+    plt.close(figure)
+
+
 def test_plot_returns_empty_for_missing_or_empty_trace(tmp_path: Path):
     """缺失或空 trace 返回空元组而不是异常。"""
     assert plot_experiment_run(tmp_path) == ()

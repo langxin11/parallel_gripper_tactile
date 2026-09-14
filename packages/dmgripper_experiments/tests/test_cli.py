@@ -27,7 +27,7 @@ def test_action_source_normalizes_lines_and_reports_eof() -> None:
     """交互输入忽略空行、折叠大小写，并在读完后报告关闭。"""
     from dmgripper_experiments import cli
 
-    action_source = cli._action_source(io.StringIO("  START  \n\nStatus\nrelease\n"))
+    action_source = cli._action_source(io.StringIO("  s  \n\nStatus\nr\n"))
     assert _wait_for_action(action_source) == "start"
     assert _wait_for_action(action_source) == "status"
     assert _wait_for_action(action_source) == "release"
@@ -72,6 +72,32 @@ def test_action_source_receives_start_from_pseudo_terminal() -> None:
         os.close(master_fd)
         os.close(slave_fd)
         input_stream.close()
+
+
+@pytest.mark.skipif(not hasattr(os, "openpty"), reason="需要 POSIX 伪终端")
+def test_rich_action_source_reports_edits_and_restores_terminal() -> None:
+    """Rich 输入逐字符更新固定输入区，并在结束后恢复终端。"""
+    import termios
+
+    from dmgripper_experiments import cli
+
+    master_fd, slave_fd = os.openpty()
+    input_stream = os.fdopen(os.dup(slave_fd), "r", encoding="utf-8", buffering=1)
+    original = termios.tcgetattr(input_stream.fileno())
+    edits: list[str] = []
+    action_source = cli._action_source(input_stream, on_edit=edits.append)
+    try:
+        os.write(master_fd, b"releasx\x7fe\n")
+        assert _wait_for_action(action_source) == "release"
+        assert "releasx" in edits
+        assert "release" in edits
+    finally:
+        action_source.close()
+        restored = termios.tcgetattr(input_stream.fileno())
+        os.close(master_fd)
+        os.close(slave_fd)
+        input_stream.close()
+    assert restored == original
 
 
 def test_dry_run_outputs_plan_without_runtime(capsys: pytest.CaptureFixture[str]) -> None:
@@ -175,7 +201,7 @@ def test_plain_execute_prints_preflight_warning(
     from dmgripper_experiments import cli, runtime
 
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
-    monkeypatch.setattr(cli, "_action_source", lambda: lambda: None)
+    monkeypatch.setattr(cli, "_action_source", lambda **_kwargs: lambda: None)
 
     def fake_run_experiment(*_args, event_sink, **_kwargs):
         assert event_sink is not None
@@ -212,7 +238,7 @@ def test_rich_execute_prints_final_safety_summary(
     from dmgripper_experiments import cli, runtime
 
     monkeypatch.setattr(sys.stdin, "isatty", lambda: True)
-    monkeypatch.setattr(cli, "_action_source", lambda: lambda: None)
+    monkeypatch.setattr(cli, "_action_source", lambda **_kwargs: lambda: None)
 
     def fake_run_experiment(*_args, **_kwargs):
         return {

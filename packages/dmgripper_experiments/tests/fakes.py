@@ -52,6 +52,7 @@ class PhaseActions:
         """初始化当前阶段和释放轮次。"""
         self.phase = "preparing"
         self.holding_cycles = 0
+        self.fault_holding_cycles = 0
         self.states: list[str] = []
 
     def event(self, payload: dict[str, object]) -> None:
@@ -68,6 +69,10 @@ class PhaseActions:
         if self.phase == "holding":
             self.holding_cycles += 1
             if self.holding_cycles >= 4:
+                return "release"
+        if self.phase == "fault_holding":
+            self.fault_holding_cycles += 1
+            if self.fault_holding_cycles >= 4:
                 return "release"
         return None
 
@@ -148,9 +153,18 @@ class FakeTactile:
             raw_left_fy_n=tangential_n,
             raw_right_fx_n=0.0,
             raw_right_fy_n=0.0,
+            left_taxel_forces_n=((0.0, 0.0, force_n),),
+            right_taxel_forces_n=((0.0, 0.0, force_n),),
         )
         if self.sample_sink is not None:
-            self.sample_sink({"counter": self.counter, "timestamp_us": snapshot.timestamp_us})
+            self.sample_sink(
+                {
+                    "counter": self.counter,
+                    "timestamp_us": snapshot.timestamp_us,
+                    "left_taxel_forces_n": snapshot.left_taxel_forces_n,
+                    "right_taxel_forces_n": snapshot.right_taxel_forces_n,
+                }
+            )
         return snapshot
 
 
@@ -228,13 +242,17 @@ class FakeDmSession:
         self.deployment = SimpleNamespace(
             joint_position_min_rad=0.0,
             joint_position_max_rad=math.pi / 2,
+            feedback_position_min_rad=-0.05,
+            feedback_position_max_rad=math.pi / 2 + 0.05,
             closing_direction=1,
         )
-        self.feedback = MotorFeedback(0.4, 0.0, 0.0, STATUS_DISABLED)
+        self.feedback = MotorFeedback(0.0, 0.0, 0.0, STATUS_DISABLED)
         self.opened = False
         self.closed = False
         self.disable_calls = 0
         self.command_count = 0
+        self.hold_calls = 0
+        self.commands = []
 
     def open(self) -> None:
         """标记串口打开。"""
@@ -246,6 +264,12 @@ class FakeDmSession:
 
     def inspect(self) -> MotorFeedback:
         """返回启动前反馈。"""
+        if not (
+            self.deployment.feedback_position_min_rad
+            <= self.feedback.position_rad
+            <= self.deployment.feedback_position_max_rad
+        ):
+            raise ValueError("机械关节反馈角超出扩展安全范围")
         return self.feedback
 
     def require_disabled(self) -> MotorFeedback:
@@ -258,12 +282,18 @@ class FakeDmSession:
         """模拟使能确认或确认丢失。"""
         if self.enable_error:
             raise RuntimeError("使能确认丢失")
-        self.feedback = MotorFeedback(0.4, 0.0, 0.0, STATUS_ENABLED)
+        self.feedback = MotorFeedback(
+            self.feedback.position_rad,
+            0.0,
+            0.0,
+            STATUS_ENABLED,
+        )
         return self.feedback
 
     def command(self, command) -> MotorFeedback:
         """让反馈跟随纯控制核的 MIT 请求。"""
         self.command_count += 1
+        self.commands.append(command)
         self.feedback = MotorFeedback(
             command.position_rad,
             command.velocity_rad_s,
@@ -271,6 +301,11 @@ class FakeDmSession:
             STATUS_ENABLED,
         )
         return self.feedback
+
+    def hold(self, command) -> MotorFeedback:
+        """记录安全保持请求并复用命令反馈。"""
+        self.hold_calls += 1
+        return self.command(command)
 
     def disable(self) -> MotorFeedback:
         """记录每一次安全失能请求。"""
@@ -343,7 +378,6 @@ def adaptive_config(**lifecycle_overrides) -> ExperimentConfig:
             adaptive=AdaptiveReferenceConfig(
                 initial_force_n=0.5,
                 duration_s=0.03,
-                max_force_n=1.5,
             )
         ),
     )
@@ -368,6 +402,13 @@ def run_fake_experiment(
     plots: bool = False,
     terminal=None,
     event_observer=None,
+    initial_position_rad: float = 0.0,
+    command_error_at: int | None = None,
+    command_error: BaseException | None = None,
+    hold_error_at: int | None = None,
+    freeze_phase: str | None = None,
+    sleep_observer=None,
+    session_factory_error: BaseException | None = None,
 ):
     """以注入的纯内存会话和触觉工厂执行一次运行并返回关键替身。"""
     import dataclasses
@@ -381,7 +422,14 @@ def run_fake_experiment(
     actions = actions_type()
     session_holder: list[FakeDmSession] = []
 
-    def session_factory(port: str, *, timeout_s: float) -> FakeDmSession:
+    def session_factory(
+        port: str,
+        *,
+        timeout_s: float,
+        feedback_position_margin_rad: float = 0.05,
+    ) -> FakeDmSession:
+        if session_factory_error is not None:
+            raise session_factory_error
         session = FakeDmSession(
             port,
             timeout_s=timeout_s,
@@ -389,15 +437,48 @@ def run_fake_experiment(
             enable_error=enable_error,
             disable_error=disable_error,
         )
+        session.deployment.feedback_position_min_rad = -feedback_position_margin_rad
+        session.deployment.feedback_position_max_rad = math.pi / 2 + feedback_position_margin_rad
+        session.feedback = MotorFeedback(
+            initial_position_rad,
+            0.0,
+            0.0,
+            STATUS_DISABLED,
+        )
         session_holder.append(session)
         original_command = session.command
+        command_calls = 0
 
         def command_with_delay(command):
+            nonlocal command_calls
+            command_calls += 1
+            if command_error_at is not None and command_calls == command_error_at:
+                raise command_error or OSError("模拟 DM 通信丢失")
+            previous = session.feedback
             result = original_command(command)
+            if actions.phase == freeze_phase:
+                session.feedback = MotorFeedback(
+                    previous.position_rad,
+                    0.0,
+                    0.0,
+                    STATUS_ENABLED,
+                )
+                result = session.feedback
             clock.advance(command_delay_s)
             return result
 
         session.command = command_with_delay
+        original_hold = session.hold
+        hold_calls = 0
+
+        def hold_with_failure(command):
+            nonlocal hold_calls
+            hold_calls += 1
+            if hold_error_at is not None and hold_calls == hold_error_at:
+                raise OSError("模拟故障保持命令失败")
+            return original_hold(command)
+
+        session.hold = hold_with_failure
         return session
 
     def tactile_factory(serial_config, **kwargs):
@@ -408,6 +489,11 @@ def run_fake_experiment(
         if event_observer is not None:
             event_observer(payload, session_holder[0])
 
+    def controlled_sleep(duration_s: float) -> None:
+        if sleep_observer is not None:
+            sleep_observer(duration_s, actions)
+        clock.sleep(duration_s)
+
     output_directory = create_run_directory(tmp_path, config)
     result = run_experiment(
         config,
@@ -416,7 +502,7 @@ def run_fake_experiment(
         action_source=actions,
         event_sink=event_sink,
         clock=clock,
-        sleep=clock.sleep,
+        sleep=controlled_sleep,
         session_factory=session_factory,
         tactile_factory=tactile_factory,
         terminal=terminal,

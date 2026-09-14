@@ -76,6 +76,53 @@ def test_full_lifecycle_completes_for_all_six_combinations(
     assert manifest["disable_confirmed"] is True
 
 
+def test_online_plots_are_registered_in_final_manifest(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """在线绘图发生在 manifest 最终化前，产物仍必须登记到最终清单。"""
+    from dmgripper_experiments import runtime
+
+    def fake_plot(directory: Path) -> tuple[Path, Path]:
+        paths = (directory / "plot.pdf", directory / "plot.png")
+        for path in paths:
+            path.write_bytes(b"fake plot")
+        return paths
+
+    monkeypatch.setattr(runtime, "plot_experiment_run", fake_plot)
+    result, _session, _actions, directory = run_fake_experiment(
+        tmp_path,
+        curve_config(),
+        plots=True,
+    )
+    manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
+    assert result["status"] == "completed"
+    assert set(result["plots"]) == {str(directory / "plot.pdf"), str(directory / "plot.png")}
+    assert manifest["files"]["plot.pdf"] == "plot.pdf"
+    assert manifest["files"]["plot.png"] == "plot.png"
+
+
+def test_online_plot_failure_does_not_replace_control_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """后处理绘图失败只记入 manifest，不覆盖已完成的控制结果。"""
+    from dmgripper_experiments import runtime
+
+    def fail_plot(_directory: Path):
+        raise OSError("模拟绘图失败")
+
+    monkeypatch.setattr(runtime, "plot_experiment_run", fail_plot)
+    result, _session, _actions, directory = run_fake_experiment(
+        tmp_path,
+        curve_config(),
+        plots=True,
+    )
+    manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
+    assert result["status"] == "completed"
+    assert result["plots"] == []
+    assert manifest["status"] == "completed"
+    assert manifest["post_processing_error"]["message"] == "模拟绘图失败"
+
+
 def test_adaptive_target_increases_under_tangential_load(tmp_path: Path) -> None:
     """动态模式在 active 阶段因切向载荷增加目标力并记录触发。"""
     result, _session, _actions, directory = run_fake_experiment(tmp_path, adaptive_config())
@@ -87,12 +134,12 @@ def test_adaptive_target_increases_under_tangential_load(tmp_path: Path) -> None
     assert any(row["target_trigger_active"] == "True" for row in rows if row["phase"] == "active")
 
 
-def test_preload_timeout_reports_force_and_blocked_unloading(tmp_path: Path) -> None:
-    """预载过冲且禁止卸载时，超时错误直接报告力与相容性线索。"""
+def test_preload_accepts_force_above_floor_without_imbalance_fault(tmp_path: Path) -> None:
+    """双侧均接触且均值高于下限时，力差不阻止进入 active。"""
     from dataclasses import replace
 
     class HighPreloadTactile(FakeTactile):
-        """进入 preload 后持续返回高于稳定容差的法向力。"""
+        """仅在 preload 阶段返回明显不对称的双侧力。"""
 
         def latest(self):
             snapshot = super().latest()
@@ -100,48 +147,13 @@ def test_preload_timeout_reports_force_and_blocked_unloading(tmp_path: Path) -> 
                 return snapshot
             return replace(
                 snapshot,
-                left_force_n=0.8,
-                right_force_n=0.7,
-                raw_left_fz_n=0.8,
-                raw_right_fz_n=0.7,
-            )
-
-    with pytest.raises(
-        RuntimeError,
-        match=(
-            r"目标=0\.500N，当前均值=0\.750N.*允许区间=0\.350–0\.650N；"
-            r"导纳 prevent_unloading=true"
-        ),
-    ):
-        config = adaptive_config()
-        config = replace(config, lifecycle=replace(config.lifecycle, preload_timeout_s=0.05))
-        run_fake_experiment(tmp_path, config, tactile_type=HighPreloadTactile)
-
-
-def test_asymmetric_preload_tolerance_accepts_safe_overforce(tmp_path: Path) -> None:
-    """只放宽高侧容差时，0.75 N 预载可稳定进入 active。"""
-    from dataclasses import replace
-
-    class HighPreloadTactile(FakeTactile):
-        """仅在 preload 阶段返回 0.75 N 平均力。"""
-
-        def latest(self):
-            snapshot = super().latest()
-            if self.phase.phase != "preload":
-                return snapshot
-            return replace(
-                snapshot,
-                left_force_n=0.8,
-                right_force_n=0.7,
-                raw_left_fz_n=0.8,
-                raw_right_fz_n=0.7,
+                left_force_n=2.0,
+                right_force_n=0.2,
+                raw_left_fz_n=2.0,
+                raw_right_fz_n=0.2,
             )
 
     config = adaptive_config()
-    config = replace(
-        config,
-        lifecycle=replace(config.lifecycle, preload_overforce_tolerance_n=0.3),
-    )
     result, _session, actions, _directory = run_fake_experiment(
         tmp_path,
         config,
@@ -207,6 +219,69 @@ def test_start_command_is_recorded_before_motor_approach(tmp_path: Path) -> None
     )
     assert acknowledgement < approach
     assert "正在连接、检查并使能电机" in str(events[acknowledgement]["message"])
+
+
+@pytest.mark.parametrize("initial_position_rad", [0.2, -0.04])
+def test_start_outside_home_runs_limited_homing_before_approach(
+    tmp_path: Path, initial_position_rad: float
+) -> None:
+    """安全范围内但不在 home 的位置先受限回零，所有目标仍位于工作范围。"""
+    result, session, actions, _directory = run_fake_experiment(
+        tmp_path,
+        curve_config(),
+        initial_position_rad=initial_position_rad,
+    )
+    assert result["status"] == "completed"
+    assert actions.states.index("homing") < actions.states.index("approach")
+    assert session.commands
+    assert all(0.0 <= command.position_rad <= math.pi / 2 for command in session.commands)
+
+
+@pytest.mark.parametrize("initial_position_rad", [0.02, -0.02])
+def test_start_inside_home_skips_homing(tmp_path: Path, initial_position_rad: float) -> None:
+    """启动位置已在 home 容差内时不发送回零阶段命令。"""
+    result, _session, actions, _directory = run_fake_experiment(
+        tmp_path,
+        curve_config(),
+        initial_position_rad=initial_position_rad,
+    )
+    assert result["status"] == "completed"
+    assert "homing" not in actions.states
+
+
+def test_feedback_outside_extended_safety_range_never_moves(tmp_path: Path) -> None:
+    """初始反馈越出扩展安全范围时不得使能或自动运动。"""
+    observed_sessions = []
+
+    def observe(_event: dict[str, object], session) -> None:
+        observed_sessions.append(session)
+
+    with pytest.raises(ValueError, match="扩展安全范围"):
+        run_fake_experiment(
+            tmp_path,
+            curve_config(),
+            initial_position_rad=-0.051,
+            event_observer=observe,
+        )
+    session = observed_sessions[-1]
+    assert session.command_count == 0
+    assert session.disable_calls == 0
+
+
+def test_homing_timeout_with_healthy_dm_enters_fault_holding(tmp_path: Path) -> None:
+    """回零未到位但命令通道健康时保持等待 release，最终仍返回失败。"""
+    config = curve_config()
+    with pytest.raises(RuntimeError, match="自动回零轨迹执行超时"):
+        run_fake_experiment(
+            tmp_path,
+            config,
+            initial_position_rad=0.2,
+            freeze_phase="homing",
+        )
+    manifest = json.loads(next(tmp_path.rglob("manifest.json")).read_text(encoding="utf-8"))
+    assert manifest["fault_phase"] == "homing"
+    assert manifest["fault_holding_entered"] is True
+    assert manifest["fault_resolution"] == "released"
 
 
 def test_ready_reports_status_and_unknown_command_before_start(tmp_path: Path) -> None:
@@ -328,6 +403,412 @@ def test_failures_disable_and_write_failed_manifest(
             enable_error=failure == "enable",
             command_delay_s=0.1 if failure == "latency" else 0.0,
         )
+
+
+@pytest.mark.parametrize(
+    ("failure", "expected"),
+    [
+        ("stale", "触觉快照过期"),
+        ("lost", "持续失去接触"),
+        ("preload", "初始抓力在等待上限内未达到稳定"),
+        ("overforce", "原始法向力超过保护上限"),
+    ],
+)
+def test_holdable_fault_waits_for_release_then_keeps_failed_result(
+    tmp_path: Path, failure: str, expected: str
+) -> None:
+    """四类实验故障先保持并接受 status/release，回位失能后结果仍为 failed。"""
+    from dataclasses import replace
+
+    from .fakes import BadTactile
+
+    class StatusThenReleaseActions(PhaseActions):
+        def __init__(self) -> None:
+            super().__init__()
+            self.fault_actions = ["status", None, "release"]
+
+        def __call__(self):
+            if self.phase == "fault_holding" and self.fault_actions:
+                return self.fault_actions.pop(0)
+            return super().__call__()
+
+    if failure == "lost":
+        tactile_type = type(
+            "LostTactile",
+            (BadTactile,),
+            {"mode": "lost", "target_phase": "active"},
+        )
+        config = curve_config()
+    elif failure == "preload":
+
+        class PreloadTimeoutTactile(FakeTactile):
+            def latest(self):
+                snapshot = super().latest()
+                if self.phase.phase == "preload":
+                    return replace(
+                        snapshot,
+                        left_force_n=0.2,
+                        right_force_n=0.2,
+                        raw_left_fz_n=0.2,
+                        raw_right_fz_n=0.2,
+                    )
+                return snapshot
+
+        tactile_type = PreloadTimeoutTactile
+        config = replace(
+            curve_config(),
+            lifecycle=replace(curve_config().lifecycle, preload_timeout_s=0.05),
+        )
+    else:
+        tactile_type = type(
+            f"{failure.title()}Tactile",
+            (BadTactile,),
+            {"mode": failure, "target_phase": "approach"},
+        )
+        config = curve_config()
+
+    observations: list[tuple[dict[str, object], object]] = []
+
+    def observe(event: dict[str, object], session) -> None:
+        observations.append((event, session))
+        if event.get("phase") == "fault_holding" and event.get("event") == "state":
+            assert session.disable_calls == 0
+            assert session.hold_calls >= 1
+            hold = session.commands[-1]
+            assert hold.velocity_rad_s == pytest.approx(0.0)
+            assert hold.feedforward_torque_nm == pytest.approx(0.0)
+
+    with pytest.raises(RuntimeError, match=expected):
+        run_fake_experiment(
+            tmp_path,
+            config,
+            tactile_type=tactile_type,
+            actions_type=StatusThenReleaseActions,
+            event_observer=observe,
+        )
+    manifest = json.loads(next(tmp_path.rglob("manifest.json")).read_text(encoding="utf-8"))
+    assert manifest["status"] == "failed"
+    assert expected in manifest["primary_error"]["message"]
+    assert manifest["fault_holding_entered"] is True
+    assert manifest["fault_resolution"] == "released"
+    assert manifest["disable_confirmed"] is True
+    events = _read_events(next(tmp_path.rglob("manifest.json")).parent)
+    phases = [event.get("phase") for event in events]
+    assert "fault_holding" in phases
+    assert any(
+        event.get("event") == "status" and event.get("phase") == "fault_holding" for event in events
+    )
+    assert any(
+        event.get("event") == "command_received" and event.get("action") == "release"
+        for event in events
+    )
+    assert "returning" in phases
+
+
+def test_dm_command_failure_forces_immediate_disable_without_claiming_hold(
+    tmp_path: Path,
+) -> None:
+    """DM 命令通道丢失属于不可保持故障，立即尽力失能且不记录 holding。"""
+    sessions = []
+
+    def observe(_event: dict[str, object], session) -> None:
+        sessions.append(session)
+
+    with pytest.raises(RuntimeError, match="DM 命令或反馈失败"):
+        run_fake_experiment(
+            tmp_path,
+            curve_config(),
+            command_error_at=1,
+            event_observer=observe,
+        )
+    session = sessions[-1]
+    assert session.hold_calls == 0
+    assert session.disable_calls == 1
+    manifest = json.loads(next(tmp_path.rglob("manifest.json")).read_text(encoding="utf-8"))
+    assert manifest["fault_holding_entered"] is False
+    assert manifest["fault_resolution"] == "forced_disable"
+    assert manifest["disable_confirmed"] is True
+
+
+@pytest.mark.parametrize(
+    "hardware_error",
+    [
+        RuntimeError("DM 电机故障：status_code=8"),
+        RuntimeError("DM 运行中失能：status_code=0"),
+        ValueError("机械关节反馈角超出扩展安全范围"),
+    ],
+)
+def test_unsafe_dm_feedback_forces_immediate_disable(
+    tmp_path: Path,
+    hardware_error: BaseException,
+) -> None:
+    """电机故障、意外失能与反馈越界均不得进入故障保持。"""
+    sessions = []
+
+    def observe(_event: dict[str, object], session) -> None:
+        sessions.append(session)
+
+    with pytest.raises(RuntimeError, match=str(hardware_error)):
+        run_fake_experiment(
+            tmp_path,
+            curve_config(),
+            command_error_at=1,
+            command_error=hardware_error,
+            event_observer=observe,
+        )
+    session = sessions[-1]
+    assert session.hold_calls == 0
+    assert session.disable_calls == 1
+    manifest = json.loads(next(tmp_path.rglob("manifest.json")).read_text(encoding="utf-8"))
+    assert manifest["fault_holding_entered"] is False
+    assert manifest["fault_resolution"] == "forced_disable"
+    assert manifest["disable_confirmed"] is True
+
+
+def test_enable_confirmation_failure_is_recorded_as_forced_disable(tmp_path: Path) -> None:
+    """使能确认丢失后必须尽力失能，并明确记录 forced_disable 处置。"""
+    with pytest.raises(RuntimeError, match="使能确认丢失"):
+        run_fake_experiment(tmp_path, curve_config(), enable_error=True)
+    manifest = json.loads(next(tmp_path.rglob("manifest.json")).read_text(encoding="utf-8"))
+    assert manifest["fault_holding_entered"] is False
+    assert manifest["fault_resolution"] == "forced_disable"
+    assert manifest["disable_confirmed"] is True
+
+
+def test_fault_holding_command_failure_preserves_primary_and_marks_hold_lost(
+    tmp_path: Path,
+) -> None:
+    """保持建立后再次写入失败时立即失能，但首个触觉故障仍是 primary。"""
+    from .fakes import BadTactile
+
+    stale_type = type(
+        "StaleTactile",
+        (BadTactile,),
+        {"mode": "stale", "target_phase": "approach"},
+    )
+    with pytest.raises(RuntimeError, match="触觉快照过期"):
+        run_fake_experiment(
+            tmp_path,
+            curve_config(),
+            tactile_type=stale_type,
+            hold_error_at=2,
+        )
+    manifest = json.loads(next(tmp_path.rglob("manifest.json")).read_text(encoding="utf-8"))
+    assert "触觉快照过期" in manifest["primary_error"]["message"]
+    assert manifest["fault_holding_entered"] is True
+    assert manifest["fault_resolution"] == "hold_lost"
+    assert manifest["disable_confirmed"] is True
+    assert any("故障保持丢失" in error for error in manifest["cleanup_errors"])
+
+
+def test_fault_release_planning_failure_preserves_primary_and_holding_metadata(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """建立保持后的任意二次规划异常都由整体兜底保留首故障。"""
+    from .fakes import BadTactile
+    from dmgripper_experiments import runtime
+
+    stale_type = type(
+        "StaleTactile",
+        (BadTactile,),
+        {"mode": "stale", "target_phase": "approach"},
+    )
+
+    def fail_home_trajectory(*_args, **_kwargs):
+        raise ValueError("模拟故障释放规划失败")
+
+    monkeypatch.setattr(runtime, "_home_trajectory", fail_home_trajectory)
+    with pytest.raises(RuntimeError, match="触觉快照过期"):
+        run_fake_experiment(tmp_path, curve_config(), tactile_type=stale_type)
+    manifest = json.loads(next(tmp_path.rglob("manifest.json")).read_text(encoding="utf-8"))
+    assert "触觉快照过期" in manifest["primary_error"]["message"]
+    assert manifest["fault_holding_entered"] is True
+    assert manifest["fault_resolution"] == "hold_lost"
+    assert any("模拟故障释放规划失败" in error for error in manifest["cleanup_errors"])
+
+
+def test_keyboard_interrupt_is_emergency_exit_and_disables_immediately(tmp_path: Path) -> None:
+    """Ctrl+C 不进入普通 release 流程，而是立即尽力失能并关闭设备。"""
+
+    class InterruptActions(PhaseActions):
+        def __call__(self):
+            if self.phase == "approach":
+                raise KeyboardInterrupt
+            return super().__call__()
+
+    sessions = []
+
+    def observe(_event: dict[str, object], session) -> None:
+        sessions.append(session)
+
+    with pytest.raises(KeyboardInterrupt):
+        run_fake_experiment(
+            tmp_path,
+            curve_config(),
+            actions_type=InterruptActions,
+            event_observer=observe,
+        )
+    assert sessions[-1].disable_calls == 1
+    manifest = json.loads(next(tmp_path.rglob("manifest.json")).read_text(encoding="utf-8"))
+    assert manifest["fault_holding_entered"] is False
+    assert manifest["fault_resolution"] == "forced_disable"
+    assert manifest["disable_confirmed"] is True
+
+
+def test_keyboard_interrupt_during_fault_holding_preserves_first_fault(tmp_path: Path) -> None:
+    """故障保持中的 Ctrl+C 立即失能，但不得覆盖先发生的实验故障。"""
+    from .fakes import BadTactile
+
+    stale_type = type(
+        "StaleTactile",
+        (BadTactile,),
+        {"mode": "stale", "target_phase": "approach"},
+    )
+
+    class InterruptHoldingActions(PhaseActions):
+        def __call__(self):
+            if self.phase == "fault_holding":
+                raise KeyboardInterrupt
+            return super().__call__()
+
+    sessions = []
+
+    def observe(_event: dict[str, object], session) -> None:
+        sessions.append(session)
+
+    with pytest.raises(RuntimeError, match="触觉快照过期"):
+        run_fake_experiment(
+            tmp_path,
+            curve_config(),
+            tactile_type=stale_type,
+            actions_type=InterruptHoldingActions,
+            event_observer=observe,
+        )
+    assert sessions[-1].disable_calls == 1
+    manifest = json.loads(next(tmp_path.rglob("manifest.json")).read_text(encoding="utf-8"))
+    assert "触觉快照过期" in manifest["primary_error"]["message"]
+    assert manifest["fault_holding_entered"] is True
+    assert manifest["fault_resolution"] == "forced_disable"
+    assert manifest["disable_confirmed"] is True
+    assert any("Ctrl+C" in error for error in manifest["cleanup_errors"])
+
+
+def test_keyboard_interrupt_during_fault_holding_sleep_preserves_first_fault(
+    tmp_path: Path,
+) -> None:
+    """故障保持等待被 Ctrl+C 打断时同样保留首故障并立即失能。"""
+    from .fakes import BadTactile
+
+    stale_type = type(
+        "StaleTactile",
+        (BadTactile,),
+        {"mode": "stale", "target_phase": "approach"},
+    )
+
+    def interrupt_holding_sleep(_duration_s: float, actions: PhaseActions) -> None:
+        if actions.phase == "fault_holding":
+            raise KeyboardInterrupt
+
+    sessions = []
+
+    def observe(_event: dict[str, object], session) -> None:
+        sessions.append(session)
+
+    with pytest.raises(RuntimeError, match="触觉快照过期"):
+        run_fake_experiment(
+            tmp_path,
+            curve_config(),
+            tactile_type=stale_type,
+            event_observer=observe,
+            sleep_observer=interrupt_holding_sleep,
+        )
+    assert sessions[-1].disable_calls == 1
+    manifest = json.loads(next(tmp_path.rglob("manifest.json")).read_text(encoding="utf-8"))
+    assert "触觉快照过期" in manifest["primary_error"]["message"]
+    assert manifest["fault_holding_entered"] is True
+    assert manifest["fault_resolution"] == "forced_disable"
+    assert any("Ctrl+C" in error for error in manifest["cleanup_errors"])
+
+
+def test_recorder_failure_enters_safe_hold_before_release(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """控制记录失败时，只要 DM 通道健康就先保持而不是立即失能。"""
+    from dmgripper_experiments import runtime
+    from dmgripper_experiments.recording import ExperimentRecorder
+
+    class OneShotFailingRecorder(ExperimentRecorder):
+        failed = False
+
+        def write(self, row):
+            if not self.failed:
+                self.failed = True
+                raise OSError("模拟控制记录失败")
+            return super().write(row)
+
+    monkeypatch.setattr(runtime, "ExperimentRecorder", OneShotFailingRecorder)
+    holding_observed = []
+
+    def observe(event: dict[str, object], session) -> None:
+        if event.get("event") == "state" and event.get("phase") == "fault_holding":
+            holding_observed.append((session.disable_calls, session.hold_calls))
+
+    with pytest.raises(OSError, match="模拟控制记录失败"):
+        run_fake_experiment(
+            tmp_path,
+            curve_config(),
+            event_observer=observe,
+        )
+    assert holding_observed and holding_observed[0][0] == 0
+    assert holding_observed[0][1] >= 1
+    manifest = json.loads(next(tmp_path.rglob("manifest.json")).read_text(encoding="utf-8"))
+    assert manifest["fault_resolution"] == "released"
+    assert "模拟控制记录失败" in manifest["primary_error"]["message"]
+
+
+def test_first_emit_error_is_not_overwritten_by_later_output_error(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """同一事件的记录与外部输出同时失败时，先发生的记录错误仍是 primary。"""
+    from dmgripper_experiments import runtime
+    from dmgripper_experiments.recording import ExperimentRecorder
+
+    class ApproachFailingRecorder(ExperimentRecorder):
+        def append(self, event):
+            if event.get("event") == "state" and event.get("phase") == "approach":
+                raise OSError("首个记录错误")
+            return super().append(event)
+
+    monkeypatch.setattr(runtime, "ExperimentRecorder", ApproachFailingRecorder)
+
+    def fail_same_event(event: dict[str, object], _session) -> None:
+        if event.get("event") == "state" and event.get("phase") == "approach":
+            raise RuntimeError("后续显示错误")
+
+    with pytest.raises(OSError, match="首个记录错误") as exc_info:
+        run_fake_experiment(
+            tmp_path,
+            curve_config(),
+            event_observer=fail_same_event,
+        )
+    assert any("后续显示错误" in note for note in getattr(exc_info.value, "__notes__", ()))
+    manifest = json.loads(next(tmp_path.rglob("manifest.json")).read_text(encoding="utf-8"))
+    assert manifest["primary_error"]["message"] == "首个记录错误"
+    assert manifest["fault_resolution"] == "released"
+
+
+def test_session_factory_failure_still_finalizes_pre_enable_manifest(tmp_path: Path) -> None:
+    """会话构造失败仍在清理边界内，不能留下无 manifest 的半成品目录。"""
+    with pytest.raises(RuntimeError, match="模拟会话构造失败"):
+        run_fake_experiment(
+            tmp_path,
+            curve_config(),
+            session_factory_error=RuntimeError("模拟会话构造失败"),
+        )
+    manifest = json.loads(next(tmp_path.rglob("manifest.json")).read_text(encoding="utf-8"))
+    assert manifest["status"] == "failed"
+    assert manifest["primary_error"]["message"] == "模拟会话构造失败"
+    assert manifest["disable_confirmed"] == "not_applicable"
 
 
 def test_input_closed_and_disable_failure_preserve_original_error(tmp_path: Path) -> None:

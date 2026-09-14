@@ -1,65 +1,111 @@
 # DMgripper 通用抓取实验：触觉动态增力任务的保守默认配置。
 # preload 建立 0.5 N 初始抓力并学习切向基线；active 起切向增长驱动增力。
 metadata:
+  # 实验任务名；用于记录元数据和输出目录层级，不参与控制计算。
   task_name: adaptive-grip
+  # 被抓物名称；用于记录元数据和输出目录层级，可按实际物体修改。
   object_name: object
 hardware:
   # 端口使用 udev 固定别名（/etc/udev/rules.d/99-gripper-devices.rules），
   # 避免插拔顺序改变 ttyACM 编号。
+  # DM4310P 经 USB2CAN 连接后的串口设备路径。
   dm_port: /dev/dmj4310_can
+  # 双侧 PapillArray 触觉传感器的串口设备路径。
   tactile_port: /dev/papillarray
+  # 张开 home 关节角（rad）；所有自动回零和正常释放都以此为目标。
+  home_position_rad: 0.0
+  # 启动与回零完成时允许的 home 位置误差（rad）。
+  home_tolerance_rad: 0.03
+  # 编码器反馈可超出 [0, pi/2] 工作命令范围的安全余量（rad）；尚未经真机验收。
+  feedback_position_margin_rad: 0.05
 timing:
-  control_rate_hz: 100.0
+  # 控制循环目标频率（Hz）；250 Hz 对应 4 ms 标称周期。
+  control_rate_hz: 250
+  # 单个控制周期允许的最大真实间隔（s）；超出即触发故障并尽力失能。
+  # 若 DM 命令和反馈仍健康，会先进入 fault_holding；无法保持时才立即尝试失能。
   max_control_gap_s: 0.1
+  # 最新触觉快照允许的最大数据年龄（s），也用于限制因果配对间隔。
   tactile_timeout_s: 0.2
 lifecycle:
+  # 使能电机前验证双侧传感器处于稳定零力状态。
   verify_zero_force: true
+  # 单侧滤波法向力达到此值（N）后，可参与双侧接触确认。
   contact_on_n: 0.2
+  # 跟踪阶段单侧滤波法向力降至此值（N）时，开始累计失接触时间。
   contact_off_n: 0.1
+  # 确认接触后，将接近速度平滑衰减至零所用时间（s）。
   contact_transition_s: 0.15
   # 动态模式只接受失接触 fault；重接近的基线语义尚未定义。
+  # any_side 表示任一侧失接触即可满足失接触判据。
   lost_contact_scope: any_side
+  # 确认失接触后直接进入故障，不尝试自动重新接近。
   lost_contact_action: fault
-  # 低侧仍用默认 0.15 N；高侧允许接触过渡后的温和过冲，实测约 0.73 N 可进入 active。
-  preload_overforce_tolerance_n: 0.3
+  # 双侧接触且平均力持续高于最低预载线的时长（s）。
   preload_stable_time_s: 2.0
+  # 建立稳定预载的最长等待时间（s）；超时即触发故障。
   preload_timeout_s: 30.0
+  # 动态任务计时结束后继续闭环保持抓握，等待人工输入 release。
   on_finished: hold
 reference:
   adaptive:
+    # 预载阶段以及动态策略激活时的初始平均单侧法向力目标（N）。
     initial_force_n: 0.5
-    duration_s: 10.0
-    max_force_n: 1.5
-    max_force_rate_n_s: 0.5
+    # active 阶段的任务计时时长（s）；结束后按 on_finished 处理。
+    duration_s: 40.0
+    # 目标力允许的最大上升速率（N/s），用于限制动态增力斜率。
+    max_force_rate_n_s: 1.0
+    # 合成切向力的一阶低通时间常数（s）。
     filter_tau_s: 0.05
+    # 相对预载切向基线的增长超过此阈值（N）后，触发目标增力。
     shear_threshold_n: 0.06
+    # 超阈值切向力增量映射到法向目标增量的比例增益。
     shear_gain: 1.0
 controller:
+  # 使用二阶导纳外环生成受限位置请求；可选值还包括 pid 和 adrc。
   kind: admittance
   admittance:
     # 抓握期间避免小误差触发正反转；只有显式 release 才正常张开。
+    # 目标力与测量力误差绝对值不超过该值（N）时，不因误差继续调整。
     force_deadband_n: 0.1
+    # 禁止导纳控制因力偏高而主动张开，降低抓握过程中意外卸载风险。
     prevent_unloading: true
   pid:
+    # PID 比例增益；仅在 controller.kind=pid 时参与控制。
     kp: 0.016
+    # PID 积分增益；仅在 controller.kind=pid 时参与控制。
     ki: 0.2
+    # PID 微分增益；仅在 controller.kind=pid 时参与控制。
     kd: 0.0
+    # PID 相对接触参考位置允许的最大位置调整量（rad）。
     max_position_adjustment_rad: 0.15
   adrc:
+    # LADRC 名义输入增益，即闭合位移对法向力的估计增益（N/m）。
     b0_n_per_m: 1000.0
+    # LADRC 控制器带宽（rad/s）。
     controller_bandwidth_rad_s: 5.0
+    # LADRC 扩张状态观测器带宽（rad/s）。
     observer_bandwidth_rad_s: 20.0
+    # LADRC 允许的最大闭合速度（m/s）。
     max_closing_velocity_m_s: 0.002
+  # 刚度估计仅记录诊断，不作为 PID／LADRC 前馈输入。
   stiffness_consumption: none
 estimation:
+  # 启用等效接触刚度估计；当前配置只记录结果，不改变控制命令。
   enabled: true
+  # 使用滑动窗口线性拟合估计平均单侧法向力相对于闭合行程的刚度。
   method: window_linear
 safety:
-  max_target_force_n: 1.5
-  force_ceiling_n: 2.0
+  # 任一目标策略允许请求的最大平均单侧法向力（N）。
+  max_target_force_n: 30.0
+  # 任一侧全局原始法向力绝对值的紧急停机阈值（N）；超过即触发故障。
+  force_ceiling_n: 40.0
 output:
+  # 运行记录根目录；实际目录还会追加任务名、物体名、UTC 时间戳和运行 ID。
   root: outputs/real
+  # 正常控制结束后生成 PDF 与 PNG 结果图。
   plots: true
 terminal:
+  # 自动选择 Rich 动态面板或纯文本输出，不影响控制与记录逻辑。
   mode: auto
+  # 终端状态面板的目标刷新频率（Hz）；控制循环仍按 control_rate_hz 运行。
   refresh_hz: 5.0

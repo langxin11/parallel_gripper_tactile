@@ -26,6 +26,32 @@ def test_full_transition_table_happy_path():
     assert lifecycle.elapsed_s(16.0) == 0.0
 
 
+def test_homing_precedes_approach_only_when_requested():
+    """start 可按位置检查进入 homing，并只在回零完成后接近。"""
+    lifecycle = Lifecycle()
+    lifecycle.mark_ready(0.0)
+    lifecycle.start(0.1, needs_homing=True)
+    assert lifecycle.phase is LifecyclePhase.HOMING
+    lifecycle.finish_homing(0.2)
+    assert lifecycle.phase is LifecyclePhase.APPROACH
+
+
+def test_fault_holding_is_nonterminal_and_preserves_primary_fault():
+    """可保持故障记录源阶段，人工释放后回位但不改写首个原因。"""
+    lifecycle = Lifecycle()
+    lifecycle.mark_ready(0.0)
+    lifecycle.start(0.1)
+    lifecycle.hold_fault(0.2, "触觉断流")
+    assert lifecycle.phase is LifecyclePhase.FAULT_HOLDING
+    assert not lifecycle.is_terminal
+    assert lifecycle.fault_phase is LifecyclePhase.APPROACH
+    assert lifecycle.fault_reason == "触觉断流"
+    lifecycle.begin_return(0.3, "人工 release")
+    lifecycle.complete_return(0.4)
+    assert lifecycle.phase is LifecyclePhase.COMPLETED
+    assert lifecycle.fault_reason == "触觉断流"
+
+
 def test_contact_segment_increments_per_confirmed_contact():
     """接触段编号只在确认新的双侧接触时递增。"""
     lifecycle = Lifecycle()
