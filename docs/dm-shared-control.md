@@ -1,156 +1,80 @@
 # DMgripper 共享控制核
 
-`packages/dm_grasp_core` 是独立构建的 `dm-grasp-core==0.1.0`，运行依赖仅限 numpy 与
-simple-pid 两个纯计算库，不包含 ROS、MuJoCo、串口或模型路径。
-仿真通过 uv workspace 使用它，ROS 2 的 `dm_gripper_control` 安装同版本 wheel。
-算法修复只改此包；两端的输入适配、调度和设备生命周期分别维护。
-仿真侧 `parallel_gripper_tactile.control` 是该核的适配层：负责 MIT 执行器绑定、
-profile 配置转换与公共名称再导出，不重复实现控制律。
+`packages/dm_grasp_core` 是独立包 `dm-grasp-core`，运行依赖仅为 numpy 与 simple-pid。
+算法只接收数值，不访问设备、时钟、ROS 消息或 MuJoCo。仿真适配层
+`parallel_gripper_tactile.control` 负责执行器绑定、profile 转换和名称再导出；
+真机入口见 [DMgripper 通用抓取实验](dmgripper-experiments.md)。各后端分别拥有设备生命周期。
 
-## 已共享的内容
+## 核心接口与职责
 
-- 曲柄滑块正/反解与雅可比、五次接近轨迹、接触确认和速度过渡。
-- 二阶导纳：目标力与平均双侧反馈力之差沿闭合方向驱动虚拟位移：
+- 曲柄滑块正反解、雅可比、五次接近轨迹、双侧接触确认和速度过渡。
+- 二阶导纳 `step_admittance`：平均双侧力误差驱动闭合位移，先按机构雅可比裁剪速度再积分，
+  同时限制内部状态、目标构型速度和 MIT 合成力矩。
+- `MITCommandConfig`、五字段 `MITCommand`、`build_mit_command`：生成量化前 MIT 请求；
+  `MITTorqueModel`：协议量化与合成力矩计算。
+- 法向外环 `begin_tracking`／`step_tracking`：PID、一阶 LADRC、直接力矩、二阶 LADRC 路径，
+  经 `MITTorqueInner` 注入电机访问；另提供三种在线接触刚度估计。
+
+导纳方程为：
 
 \[
 M\ddot c+B\dot c+Kc=f_{target}-\frac{f_{left}+f_{right}}{2}.
 \]
 
-- 导纳内部状态限幅、目标构型速度逆映射、实测构型力矩前馈和 MIT 合成力矩约束。
-- 达妙 MIT 协议量化与力矩命令计算（`MITTorqueModel`）、三种方法的在线接触刚度估计、
-  二阶直接力矩 LADRC，以及法向力外环状态机与 PID、一阶 LADRC、直接力矩、
-  二阶 LADRC 四条跟踪路径（电机访问经 `MITTorqueInner` 协议注入）。
-- 显式 `MITCommandConfig`、五字段 `MITCommand`、`build_mit_command` 与
-  `step_admittance`。算法只接收数值，不读取时钟、设备、ROS 消息或 MuJoCo 数据。
+共享接触状态机负责 `approach` → `contact_transition` → `force_tracking` 及持续失接触后的
+重接近；具体控制器决定跟踪阶段的 MIT 请求。目标曲线从跟踪建立后计时，接近不占用任务时间。
+共享算法不意味着后端的使能、bias、故障与释放策略相同。
 
-`dm_gripper_control.control` 保留原导入路径，实际重导出共享实现。ROS 标定、使能、
-bias、输入有效性、新鲜度、HOLD/FAULT 和失能策略保留现有行为。仿真接触阶段使用
-相同算法原语，但不模拟 ROS 的设备生命周期；共同回放验证范围是跟踪阶段 MIT 请求。
-仿真侧全部 DM 力控外环（PID、刚度估计与两条 ADRC）已随上述模块迁入核心；
-`parallel_gripper_tactile.control` 只保留执行器绑定、profile 配置转换与名称再导出。
+## 仿真入口
 
-## 运行仿真
+```sh
+uv run pgt run force-track --experiment dm_gripper/force_tracking_admittance
+# 动画追加 --set execution.viewer=true
 
-在 `parallel_gripper_tactile` 根目录执行：
+# PID／导纳使用共同 task 与平台的对比组合
+uv run python scripts/research/run.py experiment=dm_gripper/force_tracking_pid_unified
+uv run python scripts/research/run.py experiment=dm_gripper/force_tracking_admittance_unified
 
-```bash
-uv sync --all-groups
-uv run pgt run force-track \
-  --experiment dm_gripper/force_tracking_admittance
+# 导纳候选研究：默认只计划，执行追加 execution=study_run
+uv run python scripts/research/study.py research=dm_admittance_tuning/study
 ```
 
-需要查看动画时显式选择 viewer：
+参数由当前 controller、platform、task 组合确定，不将某次调优数值写成通用默认值。
+统一组合隔离控制律差异，不保证两种方法均已调优；饱和或跟踪失败须保留为实验结果。
+正式研究执行约定见[运行流程](workflows.md)。
 
-```bash
-uv run pgt run force-track \
-  --experiment dm_gripper/force_tracking_admittance \
-  --set execution.viewer=true
+## 时序与量化边界
+
+导纳外环只在配置的控制周期积分；仿真每个物理步用最新实测位置、速度重新计算上一 MIT 请求的
+合成力矩，以表示电机内环。不能将一次合成力矩保持整个外环周期当作等价实现。
+
+`DMAdmittanceController.last_requested_command` 为量化前请求；trace 的 `control`、
+`mit_feedforward_torque_n_m`、`motor_torque_n_m` 分别为量化后位置、前馈和仿真合成力矩，
+均不能解释为电机实测力矩。导纳 trace 按外环周期保存，快照记录核心版本与执行器应用方式。
+
+当前仿真平台使用位置编码区间 `[0,1.7]` 与 Python `round`；真机部署协议使用 `[-1.7,1.7]`
+与非负编码值的 `floor(x+0.5)`。两者位置区间及恰好半整数时的取整规则不同。
+共享请求对齐不等于协议字节或物理行为等价。更改量化规则须显式记录并保留既有实验基线。
+
+## 构建与验证
+
+```sh
+uv build --package dm-grasp-core --wheel
 ```
 
-接触阈值、MIT 增益、导纳参数和任务曲线分别以当前 controller、platform 与 task 组合为准，
-不要沿用历史单次实验中的数值。可用下列 Hydra 正式入口审阅或执行当前导纳候选；执行命令可追加
-`execution.workers=8` 使用 CPU 多进程：
+其他环境应安装构建产物，记录包版本、源码提交及 wheel 校验值，不跨仓复制算法文件。
+安装路径和部署流程由目标工作区维护，本仓不假定外部 ROS 工作区的目录或依赖锁定状态。
 
-```bash
-uv run python scripts/research/study.py \
-  research=dm_admittance_tuning/study
-uv run python scripts/research/study.py \
-  research=dm_admittance_tuning/study \
-  execution=study_run
-```
+常规门禁见[测试策略](testing.md)。共享核固定回归数据
+`packages/dm_grasp_core/tests/golden_tracking.json` 保存迁移前输出及来源 SHA256；
+生成器须读取保存的原始实现，不能用当前实现刷新期望值。
 
-## PID／导纳统一对比
+可选 ROS 对齐检查：
 
-PID／导纳控制律隔离对比使用两条独立组合：
-
-```bash
-uv run python scripts/research/run.py \
-  experiment=dm_gripper/force_tracking_pid_unified
-uv run python scripts/research/run.py \
-  experiment=dm_gripper/force_tracking_admittance_unified
-```
-
-两条组合共享 PID Ramp 目标、4 ms 外环、`kp=20`、`kd=0.63793536`、6 s 线性关节接近、
-1 N 接近前馈和公共双侧接触状态机。状态依次为 `approach`、`contact_transition`、
-`force_tracking`：双侧连续 5 个周期达到 0.15 N 后，用 50 ms 五次曲线将接近期望速度降至零；
-跟踪中任一侧连续 25 个周期不高于 0.05 N，状态机才返回 `approach`。目标力曲线只在
-`force_tracking` 建立后开始计时，接近耗时不会占用 Ramp。
-
-公共状态机属于 `dm-grasp-core`，不包含 PID 或导纳方程。统一入口下，具体控制器只决定
-跟踪阶段如何把同一平均单侧力误差转换为 MIT 请求。现有导纳参数尚未针对 6 N Ramp 调优，
-因此其饱和或跟踪失败应作为实验结果保留。
-
-DMgripper 的其他 PID、刚度前馈、直接力矩及 ADRC 配置也启用同一公共状态机；它们所用的
-接近时长、等待上限和目标曲线仍由各自选择的 task 决定。旧导纳实验不再由内部低速轨迹接管，
-因此不会再出现约 41 s 的预接触等待。
-
-共享二阶导纳在更新位移前先按当前机构雅可比裁剪速度，再积分位移；仿真适配器不再在
-积分完成后才补做角速度裁剪。这一顺序用于避免单个外环周期生成越过限速边界的位置跳变。
-
-## 两层控制周期与量化边界
-
-ROS 以外环频率发送 q/dq/kp/kd/tau_ff，由电机内部控制器持续计算力矩。仿真新导纳
-变体在每个物理步用最新 q/dq 重新计算上一 MIT 请求的合成力矩，导纳积分仍只在
-4 ms 外环时钟触发。若把一次合成力矩保持 4 ms，不能等价模拟 kp=10、kd=5 的电机
-内环；迁移烟雾测试曾暴露此差异。旧 PID/ADRC 的时序不因此改变。
-
-`DMAdmittanceController.last_requested_command` 是共享核的量化前请求。
-既有 trace 的 `control`、`mit_feedforward_torque_n_m` 和 `motor_torque_n_m`
-仍表示仿真量化后的位置、前馈和合成力矩；不得把它们当作电机实测力矩。
-导纳 trace 默认按外环周期保存，运行快照记录核心版本和执行器应用方式。
-
-本阶段刻意保留原仿真量化器：其位置区间 `[0,1.7]` 和取整方法，与当前官方 SDK
-`[-1.7,1.7]` 对称区间及截断不同。已验证的是共享请求一致；协议字节对齐须另作
-显式变更并保留原实验基线，不能称本阶段已实现全部仿真实机等价。
-
-## 独立构建与安装
-
-在仿真仓根目录构建。下例使用本机系统 Python 已安装的 setuptools/wheel，不联网：
-
-```bash
-uv build --package dm-grasp-core --wheel --offline \
-  --python /usr/bin/python3 --no-build-isolation
-sha256sum dist/dm_grasp_core-0.1.0-py3-none-any.whl
-```
-
-在 ROS 工作区根目录安装到原有 `.venv`，再走工作区构建脚本：
-
-```bash
-uv pip install --python .venv/bin/python --no-index --no-deps \
-  ../parallel_gripper_tactile/dist/dm_grasp_core-0.1.0-py3-none-any.whl
-./scripts/build_ros2.sh
-```
-
-ROS 包的 `install_requires` 不代替上述安装。保留每次验收过的 wheel、SHA256、
-核心版本及源码提交或工作树快照，升级版本后才切换实机；不要跨仓复制 Python 文件。
-
-当前 ROS 工作区已将验收后的 wheel 保存在 DM 子仓 `wheels/`，并以工作区
-`pyproject.toml`/`uv.lock` 固定该本地发行包，因此日常 `uv sync --locked` 也能
-恢复控制核。未来发布新版本时同步更新发行包和版本约束；开发中的源文件改动不会
-自动替换实机使用的 wheel。
-
-## 验证
-
-默认仿真测试包括共享核及其迁移前固定输出：
-
-```bash
-uv run ruff check .
-uv run ruff format --check .
-PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest
-```
-
-`packages/dm_grasp_core/tests/golden_tracking.json` 固化迁移前 ROS 代码的 240 步
-输出，并记录两份来源文件 SHA256；覆盖方向、2/4 ms、不规则步长和复位/限幅场景。
-生成器必须读取保存的迁移前代码，不能拿新实现刷新期望值。
-
-两端共同回放需加载 ROS、已构建的 `dm_gripper_msgs` 和 `papillarray_interfaces`，
-并令 `PYTHONPATH` 包含 ROS 的 `dm_gripper_control` 包目录。然后在仿真仓执行：
-
-```bash
+```sh
 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest tests/test_dm_ros_alignment.py
 ```
 
-该测试不创建 ROS 节点或通信实体：实际 `_control_tick` 方法使用内存输入和发布器，
-与仿真适配器比较 2 ms、4 ms、不规则周期共 540 步的五字段请求及导纳状态。
-缺少 ROS 环境时此组集成测试明确跳过。节点保护由 ROS 仓的 safety 测试单独验证。
-MuJoCo 烟雾只证明代码可进入跟踪并产生有限输出，不构成硬件稳定性或抓取性能结论。
+需先安装 ROS 和消息包，并将目标 `dm_gripper_control` 加入 `PYTHONPATH`；缺少环境时明确跳过。
+测试以实际 `_control_tick` 方法和内存输入／发布器比较跟踪阶段五字段请求及导纳状态，不创建 ROS 节点，
+不验证设备保护。MuJoCo 烟雾也仅证明能进入跟踪并产生有限输出，不构成硬件稳定性或抓取性能结论。

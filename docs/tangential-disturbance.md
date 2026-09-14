@@ -1,8 +1,11 @@
 # 切向扰动下的触觉增力
 
+所属主题：[自适应抓取](adaptive-grasping.md)。三条路线的关系与选择见主题总览。
+
 `tangential-disturbance` 是 DMgripper 的纯仿真实验。它检验在稳定夹持后，控制器能否只依据触觉力的变化提高法向目标，以抵抗世界 `YZ` 接触平面内的外加载荷。它不是在线摩擦估计实验，也不把外载、物体位移、速度或真实摩擦系数输入控制律。
 
-本实现参考了 [Gentle Grasping: A Method With Low-Cost Magnetic Tactile Sensors 的原文](https://imec-publications.be/server/api/core/bitstreams/1a8e6d21-1ce1-4a84-aa50-8a44aaaf28a7/content) 中的变化量比值判据，但没有声称完整复现论文。传感器类型、力学模型、采样与滤波、控制器和阈值都不同；`force_ratio` 只是显式的论文判据适配对照，不能沿用磁传感器实机的数值阈值，也不构成微滑移已经被证明的证据。
+可选 `force_ratio` 参考 [Gentle Grasping](https://imec-publications.be/server/api/core/bitstreams/1a8e6d21-1ce1-4a84-aa50-8a44aaaf28a7/content)
+的变化量比值判据，但传感器、模型与控制器不同，不构成完整复现或真实微滑证明。
 
 ## 运行边界与时序
 
@@ -44,11 +47,13 @@ F_\mathrm{envelope}=\min\!\left(F_\max,\;F_0+g\max(0,S-S_0)\right).
 
 ## 任务、指标和产物
 
-任务组为 `tangential_disturbance/ramp`、`step` 与 `pulse`。其主要字段包括物体质量、真实摩擦系数、材料、接近参数、求解器、`policy`、`disturbance`、`metrics` 与 `control_period_s`。真实摩擦系数只用于场景接触；Hydra 的 `material` 选择会覆盖 task 内的 `object_material`，并写入有效配置。默认 task 固定 `control_period_s=2 ms`，即 500 Hz 触觉外环和物理步；策略以 100 Hz 更新，法向目标最大增长率为 `30 N/s`，剪切滤波时间常数为 `5 ms`，确认时间为 `6 ms`。`fixed_step` 为 `0.15 N`，`dynamic_step` 范围为 `0.03～0.3 N`。
+任务组为 `tangential_disturbance/ramp`、`step`、`pulse`；`policy`、`disturbance`、`metrics`
+与周期以有效 task 为准。真值摩擦只用于场景，Hydra `material` 写入 task 的 `object_material`。
 
 `passed` 同时要求数值稳定、完整完成、初始保持合格、扰动阶段最大切向位移未超过滑移阈值，以及恢复窗口成立。峰值实际法向力、最终实际法向力与最大切向位移均只在 `disturbance` 阶段评分；初始保持的位移以独立的 `initial_hold_displacement_m` 评估。恢复从最后一次载荷变化之后开始计时：物体切向速度、实际法向力相对目标的误差和控制状态必须连续满足 `recovery_dwell_s`，并一直维持到扰动结束。`recovery_time_s` 是该连续窗口开始相对最后载荷变化的时间；它为空即不通过。
 
-runner 保存全物理频率 `trace.csv`、`metrics.json`、输入 `profile.yaml`／`task.yaml`、`effective_parameters.json`，以及同 stem 的 `plot.png` 和 `plot.pdf`。图仅使用初始保持和扰动阶段，显示平均单侧法向目标／实际值、触觉切向量及仅供离线解释的真实外载、切向位移和触发点。`summary` 与 `diagnostic` 均输出这组三面板。空轨迹不绘图，manifest 也只登记实际存在的文件。
+runner 保存全物理频率 `trace.csv`、指标、输入快照、有效参数、`plot.png`／`plot.pdf` 与 manifest。
+两种出图模式均显示初始保持与扰动阶段的法向力、切向量、离线外载／位移和触发点；空轨迹不绘图。
 
 ## 当前回归结果
 
@@ -76,30 +81,10 @@ runner 保存全物理频率 `trace.csv`、`metrics.json`、输入 `profile.yaml
 ## 命令
 
 ```bash
-# 单次 CLI 运行。
-uv run pgt run tangential-disturbance \
-  --experiment dm_gripper/tangential_disturbance
-
-# 仅组合、校验并编译场景，不推进物理。
-uv run python scripts/research/run.py \
-  experiment=dm_gripper/tangential_disturbance \
-  execution=plan
-
-# 探索性 Multirun；该实验尚未定义正式 study 矩阵。
-uv run python scripts/research/run.py -m \
-  experiment=dm_gripper/tangential_disturbance \
-  task=tangential_disturbance/ramp,tangential_disturbance/step,tangential_disturbance/pulse \
-  task.definition.policy.strategy=constant,fixed_step,dynamic_step \
-  seed=0,1,2
+uv run pgt run tangential-disturbance --experiment dm_gripper/tangential_disturbance
 ```
 
-切换为纯 PID 法向外环时使用：
-
-```bash
-uv run pgt run tangential-disturbance \
-  --set controller=dm_gripper/pid_only --set estimator=none
-```
-
-这里的 MIT 指内环执行接口，法向目标不会直接当作电机力矩。共享链路由法向外环根据
-力误差生成关节请求，MIT 依据位置、速度和前馈计算有界力矩。当前结果仅适用于仿真，
-真机采样延迟、力标定和执行器量化应使用实测参数另行验证。
+切换纯 PID 使用 `--set controller=dm_gripper/pid_only --set estimator=none`。
+科研入口可通过 `experiment=dm_gripper/tangential_disturbance execution=plan` 校验组合；
+探索性 Multirun 可扫描 task、`task.definition.policy.strategy` 与 seed，尚无正式 study。
+MIT 接收法向外环生成的关节请求；法向目标不直接作为电机力矩。仿真结果不替代实机验证。

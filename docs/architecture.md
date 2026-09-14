@@ -1,62 +1,33 @@
-# 🏗️ 项目架构
+# 项目架构
 
-项目把演示/检查、科研组合和正式研究分开：`pgt` 面向交互运行，`scripts/research/run.py` 面向
-Hydra 单次与探索性 Multirun，`scripts/research/study.py` 面向固定矩阵的正式研究；它们通过 Python
-runner 复用同一套实验实现和运行产物约定。旧研究脚本已移除，避免绕过统一组合解析。
+仿真入口通过组合解析、runner 和实验内核完成运行；真机由独立硬件实验包组合设备会话与共享控制核。
 
 ```mermaid
-flowchart TB
-  subgraph Entry[入口层]
-    CLI["pgt CLI<br/>单次运行与交互检查"]
-    Research["scripts/research<br/>Hydra 科研入口"]
-  end
-
-  subgraph Orchestration[编排层]
-    Resolve["research<br/>组合解析、计划与溯源"]
-    Study["studies<br/>study schema 与条件矩阵"]
-    Lifecycle["studies/lifecycle<br/>状态、失败与产物账本"]
-    Runner["runners<br/>一次运行的生命周期"]
-    Artifacts["artifacts<br/>快照、manifest 与目录"]
-  end
-
-  subgraph Domain[实验与领域层]
-    Experiments["experiments<br/>阶段机、步进循环与指标"]
-    Control["control<br/>MIT 与法向力控制"]
-    Tactile["tactile / contact_taxels<br/>统一触觉读数"]
-    Scenes["scenes<br/>模型装配与接触选项"]
-    Profiles["config/profiles<br/>YAML schema 与路径解析"]
-    Shared["simulation / timing / analysis / recording<br/>共享能力"]
-  end
-
-  CLI --> Runner
-  Research --> Resolve
-  Resolve --> Runner
-  Resolve --> Study
-  Study --> Lifecycle
-  Lifecycle --> Runner
-  Runner --> Artifacts
-  Runner --> Experiments
-  Experiments --> Control
-  Experiments --> Tactile
-  Experiments --> Scenes
-  Experiments --> Profiles
-  Experiments --> Shared
-  Scenes --> Profiles
-  Tactile --> Profiles
+flowchart LR
+  Entry["pgt／科研入口"] --> Config["research：组合与校验"]
+  Config --> Study["study protocol：唯一矩阵"]
+  Study --> Life["公共研究生命周期"]
+  Config --> Runner["runner：单次运行"]
+  Life --> Runner
+  Runner --> Experiment["experiment：阶段与物理循环"]
+  Runner --> Artifacts["artifacts：快照与登记"]
+  Experiment --> Scene["scene／触觉读取"]
+  Experiment --> Adapter["仿真控制适配"]
+  Adapter --> Core["共享控制核"]
+  Hardware["真机实验运行时"] --> Core
+  Hardware --> Device["硬件会话"]
 ```
 
-箭头表示调用或配置依赖，不表示每个模块都必须经过图中的所有节点。例如，轻量的静态查看命令可以
-直接装配 scene；需要保存结果的力跟踪则由 runner 统一创建目录、调用 experiment、登记产物并完成
-manifest。
+静态查看可直接装配 scene。共享算法不负责设备访问、物理步进或实验生命周期。
 
 ## 模块职责
 
 | 区域 | 主要职责 | 不应承担的职责 |
 | --- | --- | --- |
-| `config/profiles.py` | 校验最终冻结的 Pydantic profile；兼容旧完整 YAML 的相对资源路径解析 | 选择配置组、启动 MuJoCo 或写运行结果 |
+| `config/profiles.py` | 校验最终冻结的 Pydantic profile；解析资源相对路径 | 选择配置组、启动 MuJoCo 或写运行结果 |
 | `research/configuration.py` | 将 platform、model、controller、estimator、task、material、execution 与 experiment 片段组合为冻结领域对象 | 推进仿真或让 runner 重读片段 |
 | `artifacts/` | 管理运行目录、输入快照、manifest 与安全清理 | 推进仿真或决定实验控制逻辑 |
-| `analysis/` | 读取触觉力轨迹并提供基础分析；原 `analysis` 导入路径由同名包兼容 | 设定论文样式或改变实验数据口径 |
+| `analysis/` | 读取触觉力轨迹并提供基础分析 | 设定论文样式或改变实验数据口径 |
 | `visualization/` | 提供论文绘图样式与摩擦检测图 | 读取控制状态或重新计算实验指标 |
 | `scenes/` | 装配 MJCF、物体材料、碰撞几何和求解选项 | 控制算法、指标统计 |
 | `tactile.py`、`contact_taxels.py` | 把不同后端统一为局部 `(3, rows, cols)` 力数组 | 决定目标力或控制状态 |
@@ -64,7 +35,6 @@ manifest。
 | `tangential_disturbance.py` | 保留 Pydantic 仿真配置兼容，并再导出共享的纯触觉增力策略 | 估计摩擦系数或证明微滑移 |
 | `packages/robotiq_grasp_core` | 在整数命令空间执行稳定判定、单 tick 增益估计、HOLD 与安全动作决策 | 推进仿真、读取 oracle 刚度或依赖 DM 控制核 |
 | `perception/slip.py` | 仅由触觉时序生成变化评分，持续确认后冻结摩擦候选 | 读取外部载荷、探测命令、真值 `μ` 或物体运动 |
-| `perception/friction.py` | 保留历史估计器和估计结果结构 | 被当前实验实例化以使用残差检测 |
 | `perception/taxels.py` | 筛选逐 taxel 接触，并用局部摩擦比趋势和剪切重分配生成纯力局部起滑候选 | 把未验证的局部候选直接用于目标力调度 |
 | `control.py` | DM 力控的仿真适配层：MIT 执行器绑定、profile 到核心配置转换与公共名称再导出；算法本体在 `dm_grasp_core.control` | 改变算法数值行为或让本层重新实现控制律 |
 | `experiments/` | 定义阶段机、仿真循环、trace 字段和指标 | 组织跨条件批量研究 |
@@ -74,11 +44,8 @@ manifest。
 | `scripts/research/` | 提供轻薄的 Hydra 原生科研入口 | 复制 runner、矩阵或实验物理逻辑 |
 | `cli/` | 参数适配、面向人的诊断和结果展示 | 作为包内模块的反向依赖 |
 
-正式研究的入口适配在 `research/study.py` 的 `_STUDY_ADAPTERS` 显式登记：每个研究类型关联
-领域 schema、需要规范的路径字段、预检函数和 protocol。新增研究时登记一次适配关系，并验证对应配置
-可建计划、执行仍接收同一 `StudyPlan`；不再分别扩展解析、计划和执行的类型分支。
-普通研究先预检再建计划；Torque 调参仍先由 protocol 校验 coarse／confirm 谱系并生成候选计划，
-再按实际候选预检。诊断的 phase 和速率确认的研究身份继续显式传给原协议。
+正式研究在 `research/study.py` 的 `_STUDY_ADAPTERS` 登记 schema、路径规范、预检函数和
+protocol；计划与执行持有同一 `StudyPlan`。Torque 调参先校验谱系并生成候选，再按候选预检。
 
 ## 仿真循环所有权
 
@@ -98,113 +65,20 @@ Pillar 碰撞几何属于 asset/profile，`scenes.custom` 负责把它装配进�
 
 ## 运行产物流
 
-```mermaid
-sequenceDiagram
-  participant E as pgt 或 Hydra 科研入口
-  participant C as 组合解析与领域校验
-  participant R as execute_force_tracking
-  participant A as RunDirectory
-  participant X as force_tracking experiment
+1. 组合服务校验并冻结 profile、task 与运行参数；runner 不重读原始片段。
+2. runner 创建独占目录，保存输入快照与有效参数，再调用 experiment。
+3. experiment 返回 trace 与指标；绘图层处理结果，不推进仿真或重算控制命令。
+4. runner 登记实际产物并完成 manifest；失败也保留输入和异常信息。
+5. study protocol 唯一生成矩阵；公共生命周期处理状态、失败、聚合与登记，不改变科学口径。
 
-  E->>C: 配置组、preset 与运行时覆盖
-  C->>C: 插值、Pydantic、资源与兼容性校验
-  C->>R: 同一份冻结 profile、task 与运行参数
-  R->>A: 创建独占目录并快照 profile
-  R->>A: 快照 task
-  R->>A: 写入解析后的有效参数与运行时覆盖
-  R->>X: 传入已校验配置与产物路径
-  X-->>R: 完整频率 trace 与结构化 metrics
-  R->>R: 调用独立绘图层生成 plots
-  R->>A: 登记产物并 finalize manifest
-  R-->>E: RunDirectory 与结果
-```
+Hydra 拥有调用外层目录和组合来源，`RunDirectory` 拥有单次实验目录。研究的目录、哈希、失败分类、
+并行与恢复规则见[科研配置](research-configuration.md)，各实验的 trace 与指标见对应专题。
 
-单次结果目录的典型结构为：
+## 共享核与硬件边界
 
-```text
-outputs/<profile>/<experiment>/<UTC timestamp>-<id>/
-├── manifest.json
-├── profile.yaml
-├── task.yaml        # 仅需要 task 的实验
-├── effective_parameters.json  # 任务实验：完整解析结果与实际覆盖
-├── trace.parquet
-├── trace.csv       # discrete-force、force-schedule、friction-estimate 与 tangential-disturbance
-├── metrics.json
-├── plot.png         # 其他实验的单次图
-├── plot.pdf         # tangential-disturbance 与 PNG 同 stem 的矢量图
-├── plots/           # force-track 的单次图
-│   ├── tracking.png
-│   ├── tactile.png      # 诊断模式或科学失败
-│   └── controller.png   # 诊断模式或科学失败
-└── video.mp4        # 仅请求录制时
-```
-
-人工输入的 profile、task 与 study 保持 YAML，便于审阅和版本管理。每个 force-track run 额外写入
-`effective_parameters.json`，其中包含解析后的完整 profile、task 和实际运行时覆盖；它是复现运行语义的
-权威机器可读快照。默认 `trace.parquet` 使用 Zstd 压缩和事件感知降采样：普通控制器常规区段为
-100 Hz，直接力矩 ADRC 为 250 Hz，状态切换和 waypoint 邻域保留完整控制频率。指标与绘图读取内存中的
-完整频率 trace，因此存储优化不改变实验结论。旧 CSV API 与历史 `trace.csv` 仍可读取。
-
-`metrics.json` 与 `manifest.json` 继续使用 JSON。`manifest.json` 只列出实际生成并登记的文件，同时记录
-profile 哈希、Git 状态、依赖版本、参数和创建时间。组合入口的 `profile.yaml` 与 `task.yaml` 直接序列化
-实际执行使用的同一冻结对象，避免把 platform 或 task 组包装误作完整输入。失败的运行目录会保留输入快照，
-便于复现诊断。
-
-Hydra 拥有科研调用的外层目录和组合溯源，`RunDirectory` 拥有内部实验产物。study 在单次运行之上
-增加一层父目录；每个条件仍使用相同 runner：
-
-```text
-outputs/research/studies/<study>/<UTC timestamp>-<id>/
-├── study.yaml
-├── study.resolved.json
-├── runs/
-│   └── <profile>/force-track/<condition>-<UTC timestamp>-<id>/
-├── summary.csv
-├── summary.parquet
-├── summary.json            # 保留兼容的结构化汇总
-├── aggregate.csv         # 需要跨重复统计的批量研究提供
-├── aggregate.parquet     # 需要跨重复统计的批量研究提供
-├── figures/              # study 级跨条件对比图
-│   ├── metrics_by_controller.png
-│   ├── saturation_comparison.png
-│   ├── ablation_delta.png
-│   └── tracking_<task>_<material>.png
-└── study_manifest.json   # 登记子 run 与 study 级产物
-```
-
-study 的 `summary` 与（适用时的）`aggregate` 同时输出 CSV 和 Parquet；diagnosis study 只输出 summary，
-不生成 aggregate。单次 force-track run 由 runner 的 `on_result(full_rows, result)` 回调调用纯绘图层，
-从本次完整频率 trace 按出图模式生成单次图并登记实际文件；跨 run 的统计图由
-包内 study protocol 在所有条件结束后从 `summary`、`aggregate` 和子 run trace 生成 600 DPI PNG，
-并登记到 `study_manifest.json`。公共生命周期持有同一个有序 `StudyPlan`，在执行前写入
-`running` 状态；`execution.workers>1` 时以 `spawn` 进程并行运行独立条件，父进程在每个条件完成后
-按计划顺序更新账本，并独占聚合与绘图。最终状态为 `partial`、`completed` 或 `failed`。正常完成但
-`passed=false` 的条件记录为 `scientific_failure`，形成不了 run 的 Python 异常记录为
-`execution_error`；聚合和绘图异常独立登记。未建立 `track_reference` 的正常条件会在 summary 与
-manifest 的 `failed_runs` 中保留，
-但不会参与同 seed 轨迹叠加。绘图层不推进 MuJoCo，也不重新计算控制命令。
-
-`StudyPlan` 的科学哈希覆盖领域配置、有序条件、控制器完整默认值、输入资源内容、材料／seed 及
-统计和阶段规则，同时排除时间、cwd 和输出目录。Torque ADRC confirm 额外把 coarse 科学哈希与排名
-产物摘要纳入谱系。恢复接口只读分析兼容 manifest 和可重试条件，当前不自动跳过 run 或跨配置聚合。
-
-## 依赖规则
-
-DMgripper 的二阶导纳基线另由 `packages/dm_grasp_core` 独立包提供，与 ROS 2 共用；
-包内按 `control`、`grasp` 与 `tactile` 子域组织，同时保留旧导入路径。
-`control.py` 与 `dm_admittance.py` 都只负责把共享算法接入 MuJoCo；PID、ADRC、导纳和刚度估计的算法本体
-统一维护在 `dm_grasp_core`。
-`dm-grasp-core` 的公共双侧接触状态机可由 PID 与导纳共同使用，统一入口据此共享接近、接触确认、
-速度过渡和掉力重接近语义；未显式选择该状态机的历史实验保持原阶段行为。
-共享核无 ROS、MuJoCo 或 profile 依赖，安装 ROS 侧时不需要安装仿真主包。
-导纳外环按任务周期生成 MIT 请求，执行器适配每个物理步用最新 q/dq 重算内环力矩，
-模拟电机内部持续执行目标。此路径不改变旧实验的控制时序。详情见
-[DMgripper 共享控制核](dm-shared-control.md)。
-
-Robotiq 离散力控制由独立 workspace 成员 `packages/robotiq_grasp_core` 提供；仿真主包直接依赖该 workspace 成员。该核心仅依赖 NumPy，不依赖 ROS、MuJoCo、profile、DM 核或仿真主包。
-DM 与 Robotiq 分别维护控制算法、命令类型和状态机。
-
-纯 Python 真机基础层同样按夹爪隔离。DMgripper 真机链路的四包职责如下：
+DM 的 PID、ADRC、导纳、刚度估计、运动学、目标曲线与触觉增力由 `dm_grasp_core` 提供纯计算。
+仿真 `control.py`／`dm_admittance.py` 负责配置与执行器适配，真机运行时负责设备生命周期。
+两层控制周期、请求量化和验证边界见[DMgripper 共享控制核](dm-shared-control.md)。
 
 | 包 | 拥有的职责 | 不拥有的职责 |
 | --- | --- | --- |
@@ -213,60 +87,24 @@ DM 与 Robotiq 分别维护控制算法、命令类型和状态机。
 | `dm_grasp_core` | 曲柄滑块运动学、受限轨迹与 MIT 请求，以及导纳、PID、LADRC 和刚度估计等纯计算 | 设备访问、实验生命周期和文件记录 |
 | `dmgripper_experiments` | 冻结配置、人工命令、零力门禁、接触／预载／动态任务、自动回零、故障分类与故障保持，以及 `config.json`、`events.jsonl`、`tactile.jsonl`、`trace.csv`、manifest 和绘图 | 重新实现 PTS、USB2CAN、DM 协议或共享控制公式 |
 
-`packages/robotiq_hardware` 仍独立提供 `0～255` 位置命令边界与
-`pyrobotiqgripper==3.3.12` 薄适配；它与 DMgripper 四包链路互不混用，也不依赖仿真主包。
-硬件包只向上提供结构化原始数据、诊断和显式设备动作，实验专用的数据目录与结果语义始终由
-`dmgripper_experiments` 拥有。
-切向触觉增力策略已移入 `dm_grasp_core.grasp.disturbance`，使仿真与 DMgripper 真机共用同一纯计算
-实现；仿真主包的 `tangential_disturbance.py` 仅保留 Pydantic 配置兼容并再导出该策略。
-通用抓取实验的 `dmgripper-run` 是 Tyro 独立入口，不依赖 Hydra、MuJoCo 或仿真主包；它与
-`dmgripper-plot` 共享唯一的运行时与历史读取器，输出按任务／物体／运行编号组织。
-仿真 `ForceReference` 的 waypoint 插值委托共享核 `dm_grasp_core.grasp.reference` 的纯计算，
-两侧保持同一数值语义。
-后续 `robotiq_experiments` 以相同层次单独组合 Robotiq 链路；两者不共享命令类型、
-控制状态机或调度周期。
-所有设备对象均要求显式打开或调用才发生 I/O，构造配置或会话不会自动连接、激活或驱动执行器。
-`papillarray-probe` 只配置采样率并输出有限个触觉包；`dmgripper-state-probe` 只发送状态查询帧。
-两者用于分别核对数据链路，均不是闭环运行时、安全互锁或急停实现。
-DM 核心命令经显式适配后才进入协议量化；Robotiq 硬件单步只调用自身离散控制核心，且仅在
-位置命令成功交给后端后登记动作。两条适配链不共享命令类型或控制时序；USB2CANFD 仍待实物
-到位后按实际接口新增传输后端。
+Robotiq 使用独立的 `robotiq_grasp_core` 与 `robotiq_hardware`，不与 DM 共用命令类型或控制状态机。
+硬件对象构造不发生 I/O；连接、使能与动作必须显式调用。真机入口与故障处理见
+[DMgripper 通用抓取实验](dmgripper-experiments.md)。
 
-1. `src/parallel_gripper_tactile` 不依赖 `scripts/` 或 CLI 输出格式；
-2. study 直接调用 runner，不通过子进程拼接 `pgt` 命令；
-3. scene 不读取控制目标，controller 不选择碰撞 asset；
-4. experiment 返回结构化结果，入口层决定如何展示；
-5. 任何新增结果文件必须先写入独占 run 目录，再登记到 manifest。
-6. 正式 study 的条件只由领域 protocol 展开；计划与执行必须共享同一个 `StudyPlan`，Hydra 外层不得再次展开。
+## 依赖规则
 
-Hydra 与 OmegaConf 属于主包运行依赖，供 CLI 与科研入口共用 `research/` 组合服务。共享 DM/Robotiq 控制核、硬件基础包
-和夹爪专属真机组合包均不依赖 Hydra 或仿真主包。科研配置解析可以读取、校验和编译模型，但不会创建
-设备连接或发送命令。完整的配置组、路径和目录所有权见
-[Hydra 科研配置与实验编排](research-configuration.md)。
+- 主包不依赖 `scripts/` 或 CLI 输出；study 直接调用 runner，不启动 CLI 子进程。
+- scene 不读取控制目标，controller 不选择碰撞资产；experiment 返回结构化结果，由入口展示。
+- 新产物先写入独占目录，再登记 manifest；不同条件不写共享输出。
+- 矩阵只由领域 protocol 展开，Hydra 外层不得再次展开；科学失败、执行异常与阶段谱系分别保留。
+- Hydra／OmegaConf 属于主包运行依赖，供组合服务使用；共享核、硬件基础包与真机实验包不依赖仿真主包。
 
-上述规则中可表达为 import 依赖的部分（分层方向、规则 1／3／4 的包边界、共享包独立性）由
-import-linter 契约机器检查：配置位于 `pyproject.toml` 的 `[tool.importlinter]`，可用
-`uv run lint-imports` 单独执行，并由 `tests/test_architecture_contracts.py` 并入裸 pytest 门禁。
-规则 2 与规则 5 涉及运行行为与产物登记时序，仍由评审与 runner 实现保证。
+导入边界由 `pyproject.toml` 的 import-linter 契约及 `tests/test_architecture_contracts.py` 检查；
+运行时调用与产物登记仍需行为测试和评审。
 
 ## 科研绘图公共层
 
-`visualization/plotstyle.py` 只负责样式、物理尺寸与文件导出，不处理实验数据和统计。
-`science_pyplot()` 注册 SciencePlots 并应用统一中英文字体；`paper_figsize()` 提供单栏和跨栏宽度；
-`save_publication_figure()` 只按调用方请求的扩展名保存一份图像，保留画布尺寸并由调用方关闭图像。
-实验入口负责面板组织、标签与图例，runner 或 CLI 负责产物登记。视频叠加面板不属于论文图。
-
-force-track 单次绘图层位于 `visualization/force_tracking.py`：默认 summary 模式只输出跟踪主图，
-diagnostic 模式输出完整诊断；科学失败自动保留诊断。图像为 600 DPI PNG，不自动生成 PDF。
-`tracking.png` 为目标力 `F_ref` 与滤波力 `F_filt`（缺失时回退 `meas`）单面板；`tactile.png`
-展示左右法向力 `F_{nL}`／`F_{nR}` 与切向模长 `F_{tL}`／`F_{tR}`；`controller.png` 展示
-`q_des`／`q`、`dq_des`／`dq`、命令力矩 `tau_cmd` 与 MuJoCo 执行力矩 `tau_act`，并按有效数据
-增加 `K_hat`、导纳 `x_a`／`dx_a`、ADRC 扰动和位置修正分解。坐标轴使用带单位的 MathText 标签
-（例如 `t (s)`），关键接触事件用细灰色竖线；waypoint 仅在线性参考曲线上使用 marker，不绘制
-事件竖线。默认不含误差、滞回、limits 或 state 面板。
-
-切向扰动实验由 `experiments/tangential_disturbance.py` 持有唯一物理循环。它在触觉外环到期时更新
-`TactileDisturbancePolicy` 与 `NormalForceController`，每个物理步调用 MIT 内环的保持命令；外加载荷与
-物体运动只用于场景和离线指标。`runners/tangential_disturbance.py` 负责输入快照、全频 CSV、指标和实际
-生成的 PNG／PDF 登记，异常时保留目录、写入 `error.json` 并 finalize manifest。该任务的组合预检仅允许
-DM `full`／`pid-only`，不支持 viewer。详见[切向扰动下的触觉增力](tangential-disturbance.md)。
+`visualization/plotstyle.py` 只负责样式、尺寸与导出。`science_pyplot()` 配置统一字体，
+`paper_figsize()` 提供论文栏宽，`save_publication_figure()` 按请求格式保存并由调用方关闭图像。
+实验绘图层组织面板与标签，runner／study 登记产物；出图选择见
+[科研出图模式](research-configuration.md#plot-modes)，验证要求见[测试策略](testing.md)。

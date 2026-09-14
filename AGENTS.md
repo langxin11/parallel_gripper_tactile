@@ -8,15 +8,18 @@
 MuJoCo 平行夹爪触觉仿真与力控实验库。核心链路：YAML profile 校验 → 场景编译 → 仿真循环 →
 触觉/接触力读取 → 控制器（MIT、力跟踪）→ 实验脚本与 study 聚合统计。
 
-## 必读文档
+## 阅读入口
+
+先读 `CONTRIBUTING.md` 的文档更新判断与本次相关规范，再按改动范围选择专题。
 
 - `docs/architecture.md`：模块职责、仿真循环所有权、依赖规则。
-- `docs/workflows.md`：`pgt` 演示/检查、Hydra 科研入口与兼容研究脚本的用法。
-- `docs/research-configuration.md`：Hydra 科研入口、配置组、计划/执行、路径与迁移边界。
+- `docs/workflows.md`：`pgt` 演示／检查、Hydra 科研命令与正式研究执行顺序。
+- `docs/research-configuration.md`：Hydra 科研入口、配置组、计划/执行、路径与产物契约。
 - `docs/coding-conventions.md`：注释、docstring 与文档书写规范。
 - `docs/testing.md`：串行门禁、并行全量、增量映射与绘图测试分工。
 - `docs/force-tracking.md`、`docs/control-comparison-ablation.md`：力跟踪控制器与对比研究的方法和结论。
-- `CONTRIBUTING.md`：提交门禁与 PR 验收清单。
+- `docs/adaptive-grasping.md`：自适应抓取路线关系，按需进入具体实验专题。
+- `CONTRIBUTING.md`：文档更新判断与 PR 验收清单。
 
 ## 硬性约定
 
@@ -51,16 +54,5 @@ MuJoCo 平行夹爪触觉仿真与力控实验库。核心链路：YAML profile 
 
 ## 验证
 
-```bash
-uv run ruff check .            # 环境缓存异常时：uv run ruff check --no-cache .
-uv run ruff format --check .
-uv run pytest                  # CI 使用裸 pytest；本地全局 pytest 插件干扰时，
-                               # 可加 PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 隔离
-```
-
-pre-commit 使用 `uv run pytest -n auto` 执行并行完整测试。24 逻辑核开发机可用
-`uv run pytest -n 24` 加速全量反馈；按改动模块开发时使用
-`uv run python scripts/test_changed.py`。`--lf` 仅用于失败重跑，不能替代上述裸 pytest 门禁。
-
-pre-commit 会在每次 `git commit` 自动执行以上三项（含全量 pytest）。改完代码先自查再提交，
-避免提交中途被 hook 拦下。
+权威命令、pre-commit／CI 全量门禁和增量检查统一见 [测试策略](docs/testing.md)。
+按改动范围完成开发验证，提交前先自查；增量测试与失败重跑不能替代完整提交门禁。

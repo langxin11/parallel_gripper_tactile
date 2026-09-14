@@ -8,54 +8,35 @@
 
 ## 提交前检查
 
-在仓库根目录执行：
-
-```bash
-uv sync --all-packages --all-groups --locked
-uv run pre-commit install
-```
-
-安装后，每次 `git commit` 会自动执行 Ruff 检查、Ruff 格式检查和并行完整 pytest。pytest worker
-数量由 `pytest-xdist` 按当前机器自动确定。需要手动对全部文件运行同一组门禁时执行：
-
-```bash
-uv run pre-commit run --all-files
-```
-
-也可逐项执行：
-
-```bash
-uv run ruff check .            # 环境缓存异常时：uv run ruff check --no-cache .
-uv run ruff format --check .
-PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest
-```
-
-开发阶段可按当前改动运行相关测试，或在 24 逻辑核开发机执行已实测的并行全量命令：
-
-```bash
-uv run python scripts/test_changed.py
-uv run pytest -n 24
-```
-
-`uv run pytest --lf` 仅用于重跑上次失败，不是提交门禁。pre-commit 执行
-`uv run pytest -n auto`，CI 仍执行裸 `uv run pytest`；两者都运行完整测试集，增量运行不能替代
-提交前的权威全量结果。
-
-修改 `configs/research/`、`scripts/research/`、`research/` 编排层或 `studies/lifecycle.py` 时，至少额外
-验证配置组合、计划、生命周期状态／失败分类和 study 矩阵测试；`scripts/test_changed.py` 已包含对应
-映射。需要手工冒烟时使用计划模式，避免把 Hydra
-的 `--cfg job --resolve` 误当作领域校验：
-
-```bash
-uv run python scripts/research/run.py execution=plan
-uv run python scripts/research/study.py research=force_controller_ablation/study
-uv run python scripts/research/study.py research=torque_adrc_tuning/study
-```
+环境安装、pre-commit 接入、串行／并行门禁和增量测试统一见[测试策略](docs/testing.md)。
+修改后先自查再提交；增量检查不能替代 pre-commit 与 CI 的完整门禁。
 
 Hydra/OmegaConf 属于主包运行依赖，CLI 与科研入口共用组合服务；`research` 组名仅保留兼容。不要将 Hydra 引入共享控制核或
 硬件包，也不要用外层 Multirun 执行正式 study。新增或修改正式 study 时，领域 protocol 必须独占条件
 生成，计划和执行传递同一个 `StudyPlan`；不得把科学失败与 Python 异常混为同一失败字段，也不得绕过
 产物摘要或 coarse／confirm 谱系校验。
+
+## 文档更新判断
+
+先判断可观察行为或维护契约是否变化，再按下表定位权威正文；其他页面只保留摘要和链接。
+无需为了内部重构同步修改所有相关专题，也不新增逐次打勾的文档清单。
+
+| 变更 | 更新位置 |
+| --- | --- |
+| 内部重构，行为与架构边界均不变 | 通常无需更新 docs；必要说明放在代码附近。 |
+| 命令或操作步骤改变 | `docs/workflows.md` 或对应专题的操作说明；面向使用者的变更同时记录 CHANGELOG。 |
+| 配置组合、计划、生命周期或产物契约改变 | `docs/research-configuration.md`；实验专有字段由对应专题维护，并同步测试与 CHANGELOG。 |
+| 模块职责或依赖边界改变 | `docs/architecture.md`。 |
+| 测试门禁、运行方式改变 | `docs/testing.md`。 |
+| 新实验结果与阶段性判断 | `reports/` 正文与冻结证据；维护方式见 `docs/reports.md`。 |
+| 稳定方法或适用边界改变 | 对应专题正文；注明证据来源与适用条件，不回溯改写历史结论。 |
+| 新增阅读主题或专题 | 主题入口和 `zensical.toml` 导航；首页只在新增任务类别时调整。 |
+
+研究执行顺序集中在 `docs/workflows.md`，配置规范解释约束与语义。自适应抓取总览只维护路线关系，
+各实验的方法与边界由各自专题负责。已完成计划与被替代的操作文档删除，历史变更通过 Git 追溯；
+仍受支持的兼容行为在当前接口文档中简述，实验原始证据保留在报告与产物中。
+链接到经常改名的小节时使用显式锚点，避免依赖自动编号。纯文档修改应构建站点并检查本次涉及的
+内部链接与导航；测试选择仍按测试策略执行。
 
 ## 语言与风格要点
 
@@ -69,4 +50,4 @@ Hydra/OmegaConf 属于主包运行依赖，CLI 与科研入口共用组合服务
 - [ ] ruff 与格式检查通过。
 - [ ] 测试通过。
 - [ ] 新增/修改的注释、docstring、文档为简体中文。
-- [ ] 若新增命令或结论涉及时序逻辑，更新对应文档与 `CHANGELOG.md`。
+- [ ] 按文档更新判断表维护权威正文；面向使用者的变更已记录 `CHANGELOG.md`。

@@ -1,4 +1,4 @@
-# ⚙️ 曲柄滑块二指平行夹爪：接触刚度与目标力控制
+# 曲柄滑块力控模型
 
 本文为 DMgripper 建立从机构位置、接触柔顺性到目标法向力控制的局部模型。
 它适用于左右手指同步闭合、物体大致居中、接触集合在一个控制周期内不变化的准静态阶段。
@@ -88,12 +88,8 @@ J_f(q)=\frac{\partial f_n}{\partial q}
 
 单位为 N/rad。这是把目标力误差转化为曲柄位置修正时应使用的量。
 
-对于两侧均为一根刚度 \(k_p\) 的 Pillar、且物体足够硬的理想对称情形，
-\(k_{\mathrm{pair}}=k_p/2\)，因此 \(J_f=(k_p/2)J_c\)。若取当前 Pillar 名义刚度
-\(k_p=6000\ \mathrm{N/m}\)，则 \(J_f\) 在行程两端约为 \(127\ \mathrm{N/rad}\)，在中间约为
-\(180\ \mathrm{N/rad}\)。若改用总力 \(F_\Sigma\)，对应雅可比才会变成这些数值的 2 倍：
-在行程两端约为 \(255\ \mathrm{N/rad}\)，在中间约为
-\(360\ \mathrm{N/rad}\)。这些值只是局部小扰动近似，不应用于预测大位移下的接触力。
+理想对称、每侧一根刚度 \(k_p\) 的 Pillar 且物体足够硬时，\(k_{pair}=k_p/2\)。
+改用总法向力时，对应力雅可比才是上述值的两倍。
 
 虚功关系还给出理想准静态的力矩映射：
 
@@ -105,144 +101,40 @@ J_f(q)=\frac{\partial f_n}{\partial q}
 
 ## 4. 用于目标力控制
 
-令 \(e_f=f_{\mathrm{ref}}-f_n\)，并在线估计平均单侧法向力相对总闭合行程的整体等效刚度：
+令 \(e_f=f_{ref}-f_n\)，逆刚度位置修正与机构力矩前馈分别为：
 
 \[
-\hat k_{\mathrm{pair}}\simeq\frac{\Delta f_n}{\Delta c}.
+\Delta q_{stiff}=\alpha\frac{e_f}{\hat k_{pair}J_c(q)},\qquad
+\tau_{ff}=\beta f_{ref}J_c(q).
 \]
 
-则 \(\hat J_f(q)=\hat k_{\mathrm{pair}}J_c(q)\)，使用估计值的位置前馈为：
+逆刚度项与 PI 相加时，二者均依赖实时力误差，因此属于模型辅助反馈，可能重复补偿；
+它不是严格意义上的参考前馈。刚度也可用于限制每周期位置增量或把期望力变化率换算成关节速度。
+三种实现的离散公式、限幅和控制频率语义统一见[动态目标力跟踪](force-tracking.md)。
 
-\[
-\Delta q_{\mathrm{ff}}=\frac{e_f}{\hat k_{\mathrm{pair}}J_c(q)}.
-\]
-
-历史 `pid-stiffness-ff` 变体把逆刚度位置修正与 PI 输出相加：
-
-\[
-\Delta q=
-\operatorname{clip}\left(
-\alpha\frac{e_f}{\hat J_f(q)}+\Delta q_{\mathrm{PI}},
--\Delta q_{\max},\Delta q_{\max}
-\right),
-\qquad 0<\alpha<1.
-\]
-
-其中 \(\alpha\) 是保守系数，\(\Delta q_{\mathrm{PI}}\) 用来抵消建模误差和稳态偏差。
-对较硬物体，\(\hat J_f\) 较大，位置修正会自动减小以抑制过冲；对较软物体，位置修正会增大以更快达到目标力。
-由于该项和 PI 同时使用实时误差，它属于模型辅助反馈而不是严格意义上的参考前馈，估计误差还可能与 PI
-重复补偿。新的 `pid-stiffness-limit` 因此关闭该加法项，仅把在线刚度用于 PID 位置目标的周期增量约束。
-设允许的预测平均单侧力变化率为 \(\dot f_{lim}\)，刚度安全系数为 \(\gamma_k\ge1\)，则：
-
-\[
-k_{safe,k}=\gamma_k\hat k_{pair,k},\qquad
-\Delta f_{lim,k}=\min\left(|e_{f,k}|,\dot f_{lim}\Delta t\right),
-\]
-
-\[
-\Delta q_{lim,k}=\frac{\Delta f_{lim,k}}{k_{safe,k}J_c(q_k)},
-\]
-
-\[
-\Delta q_{cmd,k}=\operatorname{clip}\left(
-\Delta q_{PI,k},
-\Delta q_{cmd,k-1}-\Delta q_{lim,k},
-\Delta q_{cmd,k-1}+\Delta q_{lim,k}
-\right).
-\]
-
-该动态边界同时受全局 `max_position_adjustment` 约束，并直接设置为 PID 的输出上下界，使积分项在限幅期间
-同步裁剪。误差为零时 \(\Delta q_{lim,k}=0\)，控制器保持上一周期的平衡位置，而不是把绝对位置修正拉回零。
-该变体默认保留机构力矩前馈；`position_limit_force_rate_n_s` 与
-`position_limit_stiffness_safety_factor` 仍是待正式 study 验证的仿真起点，不是实机安全认证参数。
-
-同时使用开度雅可比计算准静态力矩前馈：
-
-\[
-\tau_{\mathrm{ff}}=\beta f_{\mathrm{ref}}J_c(q),
-\qquad 0\le\beta\le1.
-\]
-
-该项只作为 MIT `t_ff` 的前馈输入，最终仍由达妙协议量化和 `T_MAX` 限幅保护。
-
-也可以构造直接力矩式力控。此时 MIT 内环的 `kp` 和 `kd` 设为 0，不再通过位置误差产生输出力矩，
-而是把力反馈项和机构模型前馈直接合成为 `t_ff`：
-
-\[
-t_{\mathrm{ff}}=
-\tau_{\mathrm{force\ feedback}}+
-\tau_{\mathrm{model\ feedforward}}.
-\]
-
-其中一种最小形式为：
-
-\[
-\tau_{\mathrm{force\ feedback}}=
-K_p^F e_f+
-K_i^F\int e_f\,dt+
-K_d^F\frac{de_f}{dt},
-\qquad
-\tau_{\mathrm{model\ feedforward}}=
-\beta f_{\mathrm{ref}}J_c(q).
-\]
-
-该模式更直接地测试“力误差到电机力矩”的闭环，不受 MIT 位置刚度主导，适合作为当前位置式力控的对照。
-但它接触前没有位置弹簧提供闭合趋势，因此仍需要单独的接近阶段；接触后也必须处理噪声、积分饱和、
-脱离接触和 `T_MAX` 限幅。实现时应至少保留接触状态机、低通滤波、积分 anti-windup 和力矩斜率限制。
-
-对于二阶直接力矩 ADRC，采用电机输出轴上的控制导向动力学：
+对于二阶直接力矩 MB-ADRC，电机输出轴的控制导向模型为：
 
 \[
 I_{eq}(q)\ddot q+B_{eq}(q)\dot q+\tau_f(\dot q)+J_c(q)f_n=\tau+d_\tau,
-\]
-
-\[
+\qquad
 f_n\simeq k_{pair}(c-c_{contact})+d_{pair}\dot c+d_f.
 \]
 
-将惯量、摩擦、接触阻尼、雅可比变化与刚度误差并入残差总扰动后，在目标频段内近似为：
+把惯量、摩擦、接触阻尼、雅可比变化和刚度误差并入残差扰动，在目标频段内近似为：
 
 \[
 \ddot f_n=f_{res}+b_0\tau_{res},\qquad
 b_0\simeq s_b\frac{\hat k_{pair}J_c(q)}{I_{eq}}.
 \]
 
-这里 `s_b` 是由小信号 `τ→f_n` 辨识校准的输入增益尺度，不应通过伪造惯量来调节；
-`I_eq` 仍保留明确的输出轴等效惯量物理意义。机构前馈
-`τ_model=f_ref·J_c(q)` 单独承担名义静态力矩，LESO 只使用
-`τ_res=τ_applied-τ_model` 作为已知输入并估计剩余 `f_res`。
+\(I_{eq}\) 是输出轴等效惯量，不能用伪造惯量代替输入增益尺度 \(s_b\) 的辨识。
+模型前馈 \(\tau_{model}=f_{ref}J_c(q)\) 承担静态力矩，LESO 只使用
+\(\tau_{res}=\tau_{applied}-\tau_{model}\) 估计残差。当前实现没有参数收敛律，不能称为在线参数学习控制器。
 
-实际实现中应：
+运动学、刚度估计和控制算法位于 `packages/dm_grasp_core/src/dm_grasp_core/control/`，
+仿真适配位于 `src/parallel_gripper_tactile/control.py`。位置、速度与力矩边界由实际组合配置决定。
 
-1. 对 \(\hat k_{\mathrm{pair}}\) 进行低通滤波，并设置正的上下限；
-2. 仅在双侧接触确认后更新刚度估计，接触柱集合变化时应冻结估计；
-3. 在接触建立、脱离、滑移、力突变或接触柱数量变化时冻结估计，并退回保守 PI；
-4. 根据 \(1/\hat J_f\) 对位置式力环的比例和积分增益做调度，保持不同物体上的闭环带宽接近；
-5. 对 \(\Delta q\)、目标位置、MIT 力矩命令分别限幅，保持在 profile 中定义的机械与执行器范围内。
-
-当前实现位于 `src/parallel_gripper_tactile/control.py`：
-
-- `CrankSliderKinematics` 计算 \(\omega(q)\)、\(c(q)\) 和 \(J_c(q)\)；
-- `ContactStiffnessEstimator` 用滑动窗口拟合或历史 secant-EWMA 方法估计 \(\hat k_{\mathrm{pair}}\)；
-- `NormalForceController` 将 \(\Delta q_{\mathrm{ff}}\)、PI 修正和 \(\tau_{\mathrm{ff}}\) 合并后交给 MIT 力矩内环。
-
-直接力矩式力控已实现为 `direct-torque` 控制器变体，profile 入口是
-`control.force.torque_feedback_gain`（大于 0 时启用，`direct-torque` 变体取 1.0）。
-跟踪阶段由控制器逐周期把 MIT kp/kd 覆盖为 0（profile 增益不动，接近阶段仍用同一组增益
-做位置伺服闭合），力误差与模型前馈按上式合成 `t_ff`，仍经达妙量化与 `T_MAX` 限幅；
-刚度估计器照常运行以保持 trace 中刚度曲线可比。该变体与当前位置式控制器共享同一个
-`force-track` benchmark，见 [控制器对比研究](control-comparison-ablation.md)。
-
-二阶直接力矩 MB-ADRC 已实现为 `adrc-torque` 变体，profile 入口是
-`control.force.torque_adrc`。其三状态 current LESO 估计力、力变化率和残差总扰动；名义 PD
-位于 ADRC 控制律内部，因此跟踪阶段可以旁路 MIT `kp/kd`。接近到跟踪的切换使用上一周期实际力矩
-初始化扰动状态，在线调度 `b0` 时同步缩放扰动状态；力矩变化率和幅值限制后的实际输入会反馈给
-下一周期 LESO。触觉力先经过独立的 40 Hz 一阶轻度预处理再进入 LESO，不复用 PID、刚度估计与
-指标使用的 20 Hz 公共低通；力和力变化率的主要估计仍由 LESO 完成。当前实现仍是 MB-ADRC，
-不包含参数收敛律；PL-ADRC 应在完成实机
-`τ→q̈`、`c→f_n`、`τ→f_n` 辨识后另行增加带投影约束的参数学习通道。
-
-## 5. 刚度辨识与 MuJoCo 模型解释
+## 5. 刚度辨识与 MuJoCo 模型解释 {#stiffness-identification}
 
 通过缓慢、小幅的试探压入，可拟合局部关系
 
@@ -254,12 +146,8 @@ b_0\simeq s_b\frac{\hat k_{pair}J_c(q)}{I_{eq}}.
 这辨识的是“Pillar—物体—机构/接触链路”组合的整体等效 \(k_{\mathrm{pair}}\)，用于前馈、增益调度
 和实验比较；它不表示材料弹性模量，也不用于在线反推物体参数。
 
-当前 MuJoCo Pillar 使用 `solref="-1200 -10"` 和
-`solimp="0.75 0.95 0.0025 0.5 2"`。目标方块也声明了
-`solref="0.015 1"`、`solimp="0.90 0.95 0.002"` 的接触参数。
-实际响应应以编译模型中的显式接触对参数为准，不能仅由两个 geom 的参数推断混合结果。
-因而仿真中从试探接触识别出的刚度是求解器接触层的等效响应，
-不等同于实体硅胶或方块材料的独立弹性模量。
+MuJoCo 的响应以编译模型中的显式接触对参数为准，不能仅由 geom 参数推断混合结果，
+也不能把 `solref` 数值当作材料刚度。
 
 正式真值研究不把 `solref` 的数值直接当作 (N/m) 参考，而是在相同平均单侧力 (f_n) 与总闭合行程
 (c) 语义下，对加载、卸载两个分支分别采集平衡工作点。内部点使用中心差分：
@@ -287,10 +175,6 @@ k_{\mathrm{ref}}(c_i)\simeq
 这不是一个控制周期内的动态预测误差。力跟踪 RMSE 只用于
 评价估计器对下游控制的影响，不能替代上述估计精度指标。
 
-`pid-stiffness-limit` 当前应解释为接触阶段或全阶段保留的安全约束层，而不是已经胜出的统一控制器。
-基础力跟踪控制器负责跟踪动态 (F_n^*(t))，刚度路径负责限制每周期闭合增量；最终是否采用该组合，仍需
-通过“无刚度限制／参考刚度限制／各在线估计器限制”的成对研究分离控制结构收益与估计误差。
-
 ## 6. 适用边界
 
 本文模型不应直接用于以下情况：
@@ -302,8 +186,3 @@ k_{\mathrm{ref}}(c_i)\simeq
 - 控制带宽接近机构柔性模态或传感器延迟主导的频段。
 
 在这些场景中，应将上述关系视为前馈和增益调度的先验，并持续使用触觉闭环来保证最终力跟踪。
-
-## 参考
-
-- [MuJoCo：Solver parameters](https://mujoco.readthedocs.io/en/stable/modeling.html#solver-parameters)
-- [MuJoCo：Contact parameters](https://mujoco.readthedocs.io/en/stable/modeling.html#contact-parameters)

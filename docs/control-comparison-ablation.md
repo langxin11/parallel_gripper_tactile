@@ -1,331 +1,65 @@
-# 🧪 控制算法对比与消融实验
+# 控制算法对比与消融
 
-本文规定 DMgripper force tracking 的对比矩阵、统计口径和当前结论。纯控制算法维护在
-`packages/dm_grasp_core`，仿真主包负责 MuJoCo 适配、实验执行与研究产物，真机实验包负责设备调度和记录。
+本页说明 DMgripper 力控制研究的比较口径与证据边界。控制律见[动态目标力跟踪](force-tracking.md)，
+模块职责见[架构](architecture.md)，执行入口与研究顺序见[工作流](workflows.md#formal-study-route)。
 
-## 1. 项目分工
+## 正式协议
 
-| 区域 | 负责内容 | 不负责内容 |
-| --- | --- | --- |
-| `parallel_gripper_tactile` | 真实 MJCF、profile、触觉读取、force tracking 任务、viewer、Parquet/CSV、plot/metrics 产物、消融配置 | 维护大量与仿真无关的通用控制算法抽象 |
-| `packages/dm_grasp_core` | PID、ADRC、导纳、刚度估计、机构运动学等纯算法与单元测试 | 读取 MuJoCo、串口、ROS 消息或模型路径 |
-| `packages/dmgripper_experiments` 与硬件包 | 传感器读取、电机协议、真机生命周期、安全边界与实验记录 | 重复实现共享控制律或承载仿真研究矩阵 |
+**算法对比**比较完整控制结构；**消融**只改变同一结构中的被测模块。条件矩阵由
+`configs/research/<研究名>/study.yaml` 和对应领域 protocol 唯一生成，计划与执行共享同一 `StudyPlan`。
+文档不另外维护可执行矩阵；以计划产物确认实际条件，以 run 快照解释既有结果。
 
-`src/parallel_gripper_tactile/control.py` 只把 profile 转为核心配置并绑定 MuJoCo 执行器；算法修改应先落在
-`dm_grasp_core`，再由仿真和真机适配层共同验证。
-
-## 2. 术语
-
-“消融”这个词可以使用，但应和“算法对比”区分：
-
-| 名称 | 含义 | 示例 |
-| --- | --- | --- |
-| 对比实验 | 比较不同控制算法的整体表现 | PID vs ADRC vs 自适应刚度控制 |
-| 消融实验 | 在同一算法框架内关闭某个模块，观察该模块贡献 | 关闭力矩前馈、关闭刚度估计、关闭 approach 前馈 |
-
-论文或报告中可以写作“控制算法对比与模块消融实验”。
-
-## 3. 实验与接口基线
-
-当前 benchmark 固定以下输入和产物：
-
-1. 固定一组 `configs/task/force_tracking/*.yaml` 目标力曲线；
-2. 固定每组实验的 profile 或 controller 配置快照；
-3. 保留 `trace.parquet`、`metrics.json`、`manifest.json` 和 `effective_parameters.json`；summary 模式
-   生成 `plots/tracking.png`，diagnostic 模式或科学失败再保留三张诊断图；
-4. 支持 `--set execution.viewer=true` 观察接触过程，默认仍 headless 批量运行；
-5. 明确每个指标的统计时间窗，例如使用 `metrics.ignore_initial_s` 跳过初始过渡。
-
-控制器使用统一的纯计算接口：
-
-```text
-observation + reference + dt -> command
-```
-
-这一层接口由 `ForceControlObservation`、`ForceControlReference` 和
-`ForceTrackingController.step(...)` 表达；PID、ADRC、导纳与刚度相关控制路径均由共享核维护。
-
-其中 observation 至少包含当前法向力、双侧法向力、接近目标位置和控制周期；
-reference 至少包含目标法向力和接近阶段前馈力；command 至少包含目标位置修正、
-MIT 前馈力矩、测量力、滤波力和诊断量。
-
-当前已落地 `step.yaml`、`ramp.yaml`、`mixed.yaml` 三类标准任务，以及
-`controller × task × material × seed` 的显式 comparison schema、计划模式条件审阅、结构化聚合和
-study 级对比图。2026-09-02 起 `direct-torque` 与 `adrc` 变体均已实现（入口分别为
-`--set controller=dm_gripper/direct_torque` 与 `--set controller=dm_gripper/adrc`，profile 字段
-`control.force.torque_feedback_gain` 与 `control.force.adrc`）。2026-09-03 新增二阶直接力矩
-`adrc-torque`（profile 字段 `control.force.torque_adrc`）。一阶位置式 `adrc` 保留为历史复现入口，
-但因外包在 MIT 阻抗位置环外造成模型阶次不匹配，不再进入默认正式矩阵；当前默认矩阵由四个 PID 2×2
-变体、`pid-stiffness-rate` 与 `adrc-torque` 组成，共 6 个变体、162 条。
-
-正式批量研究的接触 preset 已整体上移一档：使用 `medium=(-650,-8)`、`hard=(-1200,-10)` 和
-`stiff=(-2500,-15)`。其中日常语义依次更接近 compliant、firm 与 stiff；这些参数是单个显式
-contact pair 的求解器参数，不是物体弹性模量或整套系统的实测等效刚度。旧 `soft=(-250,-5)` 只为历史
-配置和专项接触建立标定保留，不进入默认消融、控制器对比或诊断矩阵。
-
-## 4. 推荐实验矩阵
-
-第一批实验应先做模块消融，确认当前控制结构里每个模块是否真的有贡献。
-
-| 组别 | 配置变化 | 目的 |
-| --- | --- | --- |
-| Full | 默认配置 | 完整算法基线 |
-| PID only | 关闭刚度估计与力矩前馈 | 最朴素反馈控制基线 |
-| Direct torque | `direct-torque` 变体：跟踪阶段 MIT kp/kd 逐周期覆盖为 0，力误差和模型前馈直接进入 `t_ff` | 对照位置式力控和直接力矩式力控 |
-| No approach FF | `approach.feedforward_force_n: 0.0` | 评估低速闭合前馈对接触建立的影响 |
-| No torque FF | `torque_feedforward_gain: 0.0` | 评估开度公式力矩前馈的贡献 |
-| No stiffness position FF | `position_feedforward_gain: 0.0` | 评估刚度估计用于位置前馈的贡献 |
-| No stiffness estimator | `stiffness.enabled: false` | 评估在线刚度估计整体贡献 |
-
-`pid-stiffness-limit` 与 `pid-torque-ff` 保持相同的 PID 和机构力矩前馈，只增加由在线刚度换算的
-周期位置增量边界。频率验证在 stiff Step 上发现明显平台极限环，因此该变体退出当前最终矩阵，
-只保留专项复现。`pid-stiffness-rate` 以连续刚度映射替代动态位置边界，进入小规模参数调优；旧结果仍按
-其运行时保存的矩阵解释，不回溯改写。
-
-首轮 250 Hz stiff Step 调优扫描
-\(K_P\in\{10,20,30\}\ \mathrm{s}^{-1}\) 与
-\(\dot F_{\max}\in\{30,50,70\}\ \mathrm{N/s}\)。在平台标准差不超过 0.03 N、超调比不超过
-0.10 的约束下，\((30\ \mathrm{s}^{-1},70\ \mathrm{N/s})\) 排名第一：三个 seed 的平均 RMSE 为
-0.650 N，平台标准差为 0.011 N。该候选仍需跨频率、跨材料确认；在冻结候选前不启动最终控制器比较。
-
-第二批实验再做算法对比：
-
-| 组别 | 控制器 | 对比重点 |
-| --- | --- | --- |
-| PID | 固定参数 PID | 稳态误差、超调、抗噪性 |
-| PID + feedforward | PID 加机构力矩前馈 | 跟踪误差和力矩饱和变化 |
-| Adaptive stiffness | PID 加在线刚度估计 | 不同物体刚度下的泛化能力 |
-| Direct torque force | `t_ff = τ_force_feedback + τ_model_feedforward` | 不经过位置刚度的力矩式力控 |
-| ADRC | `adrc` 变体：一阶 LADRC 外环替换 PID 位置修正 | 扰动、模型误差和延迟下的鲁棒性 |
-| Torque MB-ADRC | `adrc-torque`：二阶 current LESO＋机构前馈，跟踪阶段直接输出力矩 | 检验模型前馈与残差观测、连续目标跟踪及限幅鲁棒性 |
-
-所有组别应使用相同目标力曲线、相同物体、相同接触参数和相同噪声种子。只改变待评估的控制模块。
-
-## 5. 目标力曲线设计
-
-建议至少保留三类 waypoint schedule：
-
-| 曲线 | 用途 |
+| 研究名 | 比较对象与控制变量 |
 | --- | --- |
-| `step.yaml` | 测试阶跃响应、超调、稳定时间和稳态误差 |
-| `ramp.yaml` | 测试平滑加载/卸载能力和迟滞 |
-| `mixed.yaml` | 综合测试平台段、斜坡段和卸载段 |
+| `force_controller_ablation` | PID 的刚度位置修正与机构力矩前馈组成 2×2 消融；固定默认 waypoint，配对材料与 seed。 |
+| `force_controller_selection` | 四个 PID 变体、`pid-stiffness-rate` 与 `adrc-torque`；固定 Step／Ramp／Mixed，配对材料与 seed。 |
+| `stiffness_estimator_validation` | 固定 `pid-stiffness-ff`，只替换三种估计器，比较下游力跟踪。 |
+| `torque_adrc_tuning` | 扫描测量滤波、控制带宽与观测带宽比，经连续任务约束后确认候选。 |
 
-设计原则：
+默认控制器对比排除 `direct-torque`、一阶位置式 `adrc` 和 `pid-stiffness-limit`，它们仍有独立复现入口。
+退出原因分别是历史跨任务表现退化、控制导向模型与 MIT 位置闭环阶次不匹配、stiff Step 上出现平台极限环。
+不要把历史 study 的成员或运行结果解释为当前矩阵已经执行。
 
-1. 目标峰值先保守，确认无明显饱和后再提高；
-2. 每个平台段保留 1 到 2 秒，便于统计稳态误差；
-3. 斜率逐步提高，避免一开始就让执行器限幅主导结果；
-4. 如果主要评估控制器动态响应，使用 `hold` 阶跃；
-5. 如果主要评估连续跟踪，使用 `smoothstep`。
+正式接触 preset 为 `medium`、`hard`、`stiff`，它们描述显式 contact pair 的求解器参数，
+不是材料弹性模量，也不是系统实测等效刚度。所有比较保持目标、接触参数、控制周期、噪声 seed 和评价时间窗一致，
+只改变研究指定因素。执行异常、科学失败和有效结果分别登记，不能通过丢弃失败运行改善排名。
 
-`ramp.yaml` 自 2026-09-02 起在匀速卸载终点后附加 2 s 终端保持段，使 `final_error_n` 可以作为
-终端稳态误差解读，而不是单纯的动态滞后。
+## 指标与解释
 
-## 6. 指标
+误差、饱和和阶跃指标的精确定义见[力跟踪指标](force-tracking.md#force-tracking-metrics)。比较时同时检查：
 
-每次实验至少比较以下指标：
+- RMSE／MAE、偏差、终端误差及阶跃超调／调节时间；Step 的最大瞬时误差常由目标跳变主导，不能单独排名。
+- 力矩与位置饱和、力矩抖动、接触恢复和刚度估计有效性；更低 RMSE 伴随更高饱和不自动代表更优。
+- 同材料、同 seed 的配对轨迹；PID 消融须四变体齐全才计算 2×2 主效应与交互作用。
 
-| 指标 | 用途 |
+Ramp 的卸载终点有 2 s 保持段，终端误差可解释为末端稳态误差。现有每组合三个 seed 的研究只支持工程趋势，
+不构成统计显著性结论。汇总指标与图表必须保留所用配置、统计窗口和失败状态。
+
+## 刚度估计器
+
+估计量为平均单侧力相对总闭合行程的局部斜率 \(\hat k_{pair}\)，单位 N/m。默认使用 `window_linear`。
+
+| 方法 | 估计方式 |
 | --- | --- |
-| `rmse_n` | 整体跟踪质量 |
-| `mae_n` | 平均绝对误差 |
-| `peak_abs_error_n` | 最坏瞬时偏差 |
-| `mean_error_n` | 是否存在系统性偏差 |
-| `final_error_n` | 结束时误差 |
-| `torque_saturation_ratio` | 力矩限幅是否主导结果 |
-| `position_saturation_ratio` | 位置修正是否触达限幅 |
-| `contact_time_s` | 接触建立速度 |
-| `mean_estimated_stiffness_n_per_m` | 等效接触刚度估计是否合理 |
-| `rise_time_s` | 阶跃加载的上升时间（90% 阶跃幅值） |
-| `overshoot_ratio` | 阶跃超调量与阶跃幅值之比 |
-| `settling_time_s` | 进入并保持 ±5% 稳定带的耗时 |
+| `secant_ewma` | 有效参考点间 \(\Delta f/\Delta c\) 的正割线斜率，经限幅与 EWMA 平滑。 |
+| `window_linear` | 窗口模型 \(F=a_0+a_1c\) 的斜率 \(a_1\)，再经 EWMA。 |
+| `window_quadratic` | 窗口模型 \(F=a_0+a_1c+a_2c^2\) 在当前闭合量处的导数，再经 EWMA。 |
 
-瞬态三项仅在 `hold` 任务存在合格加载阶跃时计算，其余任务输出空值；定义与空值语义见
-[动态目标力跟踪](force-tracking.md)的指标表。
+样本数、闭合跨度和力跨度必须满足门限；退化拟合或非正斜率保持上一次估计，输出受正刚度范围约束。
+估计器没有显式分离接触阻尼、迟滞和各部件刚度，也没有仅凭滑移或 taxel 集合变化自动冻结的机制。
 
-如果某个算法 RMSE 更低但饱和比例明显更高，不能直接认为它更好。应同时检查 `trace.parquet`
-中的力矩、位置修正、接触状态和刚度估计曲线。
+`stiffness_estimator_validation` 固定刚度位置修正、关闭机构力矩前馈，隔离估计器对控制的影响；
+它没有独立刚度参考，不能回答“谁估计得最准”。精度研究应采用独立平衡工作点构造的参考刚度，见
+[力控模型的辨识口径](crank-slider-force-control.md#stiffness-identification)。
 
-对于直接力矩式力控，还应额外关注力矩抖动、力矩变化率、积分项是否 windup，以及脱离接触时是否仍有
-持续闭合力矩。该模式建议先在仿真中作为对照组使用，不应直接跳到硬件。
+## 已有证据的适用范围
 
-### 6.1 当前控制器对比结论
+详细数据与复现来源统一进入[科研报告](reports.md)，本页只保留影响当前选择的结论：
 
-当前权威配置矩阵覆盖四个 PID 2×2 变体、`pid-stiffness-rate` 与二阶直接力矩 `adrc-torque`，并在
-三类目标、三种接触 preset 和三个噪声 seed 下比较。以下关于 `direct-torque` 的条目来自此前包含该
-独立对照的历史 study，不应误认为当前矩阵已经执行；所有对应已完成条件均未出现力矩或位置饱和。
-
-- 在位置式 MIT 框架中，机构力矩前馈是最稳定、最明显的改善来源；`full` 与 `pid-torque-ff` 都显著优于
-  `pid-only`，刚度位置前馈只带来有限的附加变化。
-- `direct-torque` 在当前未经专门阻尼整形的设定下，通常更快但明显欠阻尼；它适合作为直接力矩架构的基线，
-  不能据此代表充分调参后的性能上限。
-- `adrc-torque` 在 Ramp、Mixed 等连续参考上优于位置式 `full`，但在 Step 上误差和超调更高。因此当前结论是
-  “连续目标具有优势，阶跃动态仍需调参”，不能表述为整体优于 `full`。
-- 一阶位置式 `adrc` 只保留作历史复现入口，不进入当前正式矩阵；其早期连续跟踪退化说明控制导向模型与实际
-  位置弹簧闭环阶次并不匹配，但不能推广为“自抗扰不适合此类力控任务”。
-
-当前每个比较只包含三个 seed，适合判断工程趋势而不足以作统计显著性结论。Step 的
-`peak_abs_error_n` 主要反映目标跳变瞬间，不应单独用于控制器排名；Ramp 的终端保持段使
-`final_error_n` 更适合解释为末端稳态误差。
-
-### 6.2 历史割线估计器的原理与定位
-
-历史 benchmark 使用的 `secant_ewma` 是轻量级局部割线估计器，不属于先进的概率状态估计或系统
-辨识算法。它继续作为计算量小、容易解释的历史工程基线；当前 profile 默认方法已经切换为
-`window_linear`。详细力学关系也见[曲柄滑块力控模型](crank-slider-force-control.md)。
-
-对每个控制周期，先用曲柄滑块运动学把电机位置 (q) 转换为总闭合行程 (c(q))，再计算自上一个有效参考点
-以来的增量：
-
-\[
-\Delta c=c(q_k)-c(q_{k-1}),\qquad
-\Delta f=f_{n,k}-f_{n,k-1}.
-\]
-
-只有当 \(|\Delta c|\) 和 \(|\Delta f|\) 均超过配置门限，且二者同号时，才构造局部割线样本：
-
-\[
-k_{\mathrm{sample}}=
-\operatorname{clip}\left(
-\left|\frac{\Delta f}{\Delta c}\right|,
-k_{\min},k_{\max}
-\right).
-\]
-
-随后用指数加权移动平均更新估计：
-
-\[
-\hat k_k=\hat k_{k-1}+\alpha(k_{\mathrm{sample}}-\hat k_{k-1}).
-\]
-
-三种方法共用 `initial=3000 N/m`、`min=250 N/m`、`max=25000 N/m`、`alpha=0.15`、
-`min_delta_closure=0.05 mm` 和 `min_delta_force=0.025 N`。估计器在双侧接触确认时以当前位置和滤波力重置；
-控制器随后把它换算为 \(\hat J_f=\hat kJ_c(q)\)，并生成受限的位置前馈：
-
-\[
-\Delta q_{\mathrm{stiff}}=
-\gamma\frac{f_{\mathrm{ref}}-f_n}{\hat kJ_c(q)}.
-\]
-
-割线实现的优点是每步只需常数时间和常数内存，带有增量门限、符号检查、上下限与 EWMA，适合实时控制和
-历史 benchmark。它的主要局限是：
-
-- 仅使用两个参考点之间的割线，没有利用一段时间窗内的全部样本；
-- 不估计置信度或噪声协方差，也没有遗忘因子的正规最小二乘模型；
-- 没有显式辨识接触阻尼、迟滞、粘弹性或非线性刚度；
-- 无法分离 Pillar、物体、机构和 MuJoCo 接触参数各自的贡献；
-- 当前控制器没有依据活跃 taxel 集合变化、滑移等事件专门冻结估计，主要依赖接触状态、门限和符号检查。
-
-因此论文中宜将该基线称为“在线局部割线刚度估计（EWMA-filtered secant estimate）”，而不宜笼统称为先进自适应
-辨识。若后续希望提高算法层级，可依次比较滑动窗鲁棒回归、带遗忘因子的递推最小二乘（RLS）、联合估计
-刚度与阻尼的 EKF/UKF，以及显式处理接触模式切换的多模型估计器。已有研究中，RLS 可结合残差模型在线拟合
-非线性刚度，[Flacco 等](https://doi.org/10.1177/0278364912461813)；也有工作使用双候选力观测器在缺少可靠
-接触位置时估计环境刚度，[Online stiffness estimation for robotic tasks with force observers](https://doi.org/10.1016/j.conengprac.2013.11.002)。这些方法模型更完整，但辨识条件、调参与验证成本也更高。
-
-### 6.3 滑动窗刚度估计器对比
-
-在不改变 PID 参数、目标力任务或接触条件的前提下，当前新增独立的刚度估计器对比 protocol。该 protocol 固定
-`pid-stiffness-ff`：保留刚度位置前馈、关闭机构力矩前馈，因此结果只比较估计器如何影响位置前馈，而不把力矩前馈
-的收益混入结论。比较方法为：
-
-| 方法 | 局部模型 | 当前刚度 |
-| --- | --- | --- |
-| `secant_ewma` | 相邻有效点的割线 | 割线斜率经 EWMA 平滑 |
-| `window_linear` | 最近窗口的 \(F=a_0+a_1c\) | \(a_1\) 经 EWMA 平滑 |
-| `window_quadratic` | 最近窗口的 \(F=a_0+a_1c+a_2c^2\) | 当前闭合量处的 \(a_1+2a_2c\)，再经 EWMA 平滑 |
-
-默认 profile 使用 `window_linear`，它利用整段窗口的样本但仍保持线性、易解释和较低计算量；`secant_ewma`
-保留为历史工程基线，`window_quadratic` 用于验证是否确实存在对控制有益的局部非线性。窗口估计只在样本数量、
-闭合行程跨度与力变化均足够时更新；拟合退化或给出非正刚度时保持上一次估计。所有输出仍裁剪到既有的安全刚度范围。
-
-正式矩阵固定为 3 个估计器 × 3 个目标任务 × 3 个接触 preset × 3 个噪声 seed，共 81 次运行。主指标仍为
-RMSE、MAE、最终误差与力矩/位置饱和率；同时从 trace 检查刚度曲线的抖动、是否频繁触及上下限，以及相同 seed
-下的力—刚度叠加图。窗口法不能仅因估计曲线更平滑而判优，只有在不增加饱和或显著动态滞后的条件下改善跟踪误差，
-才可认为其对控制有效。
-
-#### 6.3.1 当前刚度估计器对比结论
-
-在固定 `pid-stiffness-ff` 的矩阵中，三种估计器均能稳定完成 Step、Ramp 和 Mixed 任务，且未引入明显饱和。
-`secant_ewma` 继续作为轻量、可解释的工程基线；`window_linear` 与 `window_quadratic` 的跟踪误差差异很小，
-目前没有显示出稳定、可推广的控制收益。因此不能只因窗口法的刚度曲线更平滑就判定其更优。
-
-三种方法给出的平均等效刚度可能相差较大，且不一定随接触 preset 单调变化；这种差异未转化为明确的跟踪改善。
-它反映的是夹爪、Pillar、物体和接触求解器共同形成的局部等效刚度，不应解释为材料弹性模量或估计器精度的
-直接证据。当前每个组合只有三个 seed，结论仅限于当前 `pid-stiffness-ff` 配置与显式接触模型。
-
-## 7. 配置组织建议
-
-当前项目按如下方式组织：
-
-```text
-configs/
-├── task/force_tracking/
-│   ├── default_waypoints.yaml
-│   ├── step.yaml
-│   ├── ramp.yaml
-│   └── mixed.yaml
-└── research/
-    ├── force_controller_ablation/study.yaml
-    ├── force_controller_selection/study.yaml
-    └── stiffness_estimator_validation/study.yaml
-```
-
-控制器变体通过运行时的不可变 profile 副本实现，不复制完整 profile。正式入口组合基础 profile，study
-protocol 唯一展开条件矩阵；控制器、仿真循环和单次运行产物仍分别由 `control.py`、
-`experiments/force_tracking.py` 与 `runners/force_tracking.py` 管理。
-
-## 8. 推荐命令形式
-
-单次带 viewer 检查：
-
-<pre><code class="language-bash">
-uv run pgt run force-track \
-  --set task=force_tracking/default_waypoints \
-  --set execution.viewer=true
-</code></pre>
-
-批量对比先生成计划，校验 profile、三类 task 和完整条件矩阵，不创建子 run：
-
-<pre><code class="language-bash">
-uv run python scripts/research/study.py \
-  research=force_controller_selection/study
-</code></pre>
-
-确认矩阵后以 headless 方式执行完整 study：
-
-<pre><code class="language-bash">
-uv run python scripts/research/study.py \
-  research=force_controller_selection/study execution=study_run
-</code></pre>
-
-默认配置展开 6 个控制器变体（四个 PID 2×2 变体、`pid-stiffness-rate` 与二阶
-`adrc-torque`）× 3 个 task × 3 个正式接触 preset × 3 个 seed，共 162 个条件。
-`direct-torque` 与一阶位置式 `adrc` 只保留为独立/历史复现入口；历史 study 应按自身保存的配置解释。
-每个条件保留独立
-run，study 父目录生成 `summary.csv`、`summary.parquet`、适用时的 `aggregate.csv` 与
-`aggregate.parquet`、对比图和 `study_manifest.json`。diagnosis study 只生成 summary。人工输入配置仍为
-YAML；每个 force-track run 的 `effective_parameters.json` 记录完整解析 profile、task 及实际运行时覆盖。
-默认时序产物是 Zstd 压缩的 `trace.parquet`：普通控制器常规区段为 100 Hz，直接力矩 ADRC 为 250 Hz，
-关键状态变化与 waypoint 邻域保留完整控制频率；指标计算和绘图仍使用完整频率数据。旧 CSV API 和历史 CSV
-产物仍可读取。脚本顺序调用 runner，不通过 CLI 子进程启动单次实验。
-
-不同研究使用不同图表，而不是复用一套通用柱状图：
-
-- PID 消融：按材料汇总 RMSE/MAE/力矩饱和，并用同材料、同 seed、四变体齐全的数据绘制 2×2 主效应与交互作用；
-- 控制器对比：按任务/材料比较误差和饱和，叠加同 seed 轨迹；诊断模式额外展示有有效 Full 基线的简单增量；
-- ADRC 参数寻优：展示候选排名、连续任务约束与饱和可行性，以及三个调参维度和总体 RMSE 的关系；
-- 刚度估计器对比：展示各估计器指标及同条件的跟踪力和估计刚度轨迹；相对 secant 的简单增量转为诊断图；
-- 因果诊断：数值扫描使用真实参数横轴，分类实验使用条件标签，同时叠加通过运行的目标/滤波力轨迹。
-
-上述图表统一输出一份 600 DPI PNG，并登记到各自的 `study_manifest.json`。
-
-刚度估计器对比同样先计划再审阅；它固定 `pid-stiffness-ff`，默认展开 81 个条件：
-
-<pre><code class="language-bash">
-uv run python scripts/research/study.py \
-  research=stiffness_estimator_validation/study
-uv run python scripts/research/study.py \
-  research=stiffness_estimator_validation/study \
-  execution=study_run
-</code></pre>
+- 位置式 MIT 控制中，机构力矩前馈是稳定的改善来源；刚度加法修正的附加收益有限。
+- 已完成研究中，`adrc-torque` 对 Ramp／Mixed 连续参考优于位置式 `full`，Step 误差与超调更高；
+  不能据此宣布其对所有任务更优。
+- `pid-stiffness-limit` 的平台极限环使其退出默认比较；`pid-stiffness-rate` 的局部调优结果仍需跨频率、
+  跨材料确认，局部最优不能直接成为统一控制器结论。
+- 固定 `pid-stiffness-ff` 的估计器对比未显示窗口法稳定、可推广的跟踪收益；曲线平滑和平均刚度差异
+  都不能替代估计精度或控制收益证据。

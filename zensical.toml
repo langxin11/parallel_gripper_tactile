@@ -9,11 +9,14 @@ nav = [
     { "2. Onshape 导出" = "onshape-export-upgrade.md" },
     { "3. 曲柄滑块力控模型" = "crank-slider-force-control.md" },
     { "4. 动态目标力跟踪" = "force-tracking.md" },
-    { "5. Oracle 目标力调度" = "force-scheduling.md" },
-    { "6. 切向扰动与 MIT 触觉增力" = "tangential-disturbance.md" },
-    { "7. 微滑移探测与摩擦估计" = "friction-estimation.md" },
-    { "8. Robotiq 离散力控制" = "discrete-force-control.md" },
-    { "9. 控制算法对比与消融" = "control-comparison-ablation.md" },
+    { "5. 自适应抓取" = [
+      { "主题总览" = "adaptive-grasping.md" },
+      { "Oracle 抓取目标力调度" = "force-scheduling.md" },
+      { "切向扰动下的触觉增力" = "tangential-disturbance.md" },
+      { "纯触觉接触变化检测、摩擦能力估计与力调度" = "friction-estimation.md" },
+    ] },
+    { "6. Robotiq 离散力控制" = "discrete-force-control.md" },
+    { "7. 控制算法对比与消融" = "control-comparison-ablation.md" },
   ] },
   { "工程基线" = [
     { "DMgripper 配置与执行器基线" = "dmgripper-configuration.md" },
@@ -24,11 +27,6 @@ nav = [
     { "测试规范" = "testing.md" },
     { "科研报告" = "reports.md" },
     { "代码与注释规范" = "coding-conventions.md" },
-  ] },
-  { "归档" = [
-    { "配置重构 Goal" = "archive/configuration-refactor-goal.md" },
-    { "配置重构历史基线" = "archive/configuration-migration-baseline.md" },
-    { "DMgripper 真机倒水历史数据" = "archive/dmgripper-cup.md" },
   ] },
 ]
 extra_javascript = [

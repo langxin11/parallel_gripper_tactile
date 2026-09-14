@@ -66,12 +66,12 @@ uv run python scripts/research/study.py \
 - [常用工作流](docs/workflows.md)：单次运行、Hydra study、计划与执行。
 - [动态目标力跟踪](docs/force-tracking.md)：控制任务与接触状态。
 - [Oracle 抓取目标力调度](docs/force-scheduling.md)：已知摩擦系数下的基线调度。
-- [微滑移探测与保守摩擦估计](docs/friction-estimation.md)：当前触觉检测器、估计边界和固定种子结果。
+- [纯触觉接触变化检测、摩擦能力估计与力调度](docs/friction-estimation.md)：当前触觉检测器、估计边界和固定种子结果。
 - [Robotiq 2F-85 离散力控制](docs/discrete-force-control.md)：整数命令与 `ΔF_tick` 控制。
 - [控制算法对比与消融](docs/control-comparison-ablation.md)：比较矩阵与统计口径。
 - [科研报告的组织与维护](docs/reports.md)：报告目录、数据冻结与编译入口。
 
-当前摩擦估计结果、适用范围和历史结论见[摩擦估计专题](docs/friction-estimation.md)。
+摩擦估计结果与适用范围见[摩擦估计专题](docs/friction-estimation.md)。
 
 ## 开发入口
 

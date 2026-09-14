@@ -17,7 +17,7 @@ frame   = 对应指尖触觉 site 的局部坐标系
 
 `2f85_taxels.xml` 的每个指尖包含 3×3 个 taxel。每个 taxel 是 pad 下的子 body，具有
 对齐的 site 与 MuJoCo `force` sensor。MuJoCo 原始传感器力表示“taxel 子 body 施加给 pad
-父 body 的力”，因此 `run_cube_grasp_demo.py` 会对完整三维向量取反，记录为“物体施加给
+父 body 的力”，因此 `tactile.py` 的读取器对完整三维向量取反，记录为“物体施加给
 taxel 表面的力”。这样记录中的压缩 `Fz` 为正。
 
 taxel 合力仅代表这些离散触觉单元传递的力，不等同于整个 pad 的完整外力。`pad_force` 与
@@ -33,14 +33,10 @@ taxel 合力仅代表这些离散触觉单元传递的力，不等同于整个 p
 
 ## DMgripper Pillars
 
-DMgripper 的左右指尖各有 3×3 个 Pillars STL。每个 Pillar 的 mesh geom 是唯一的主动指尖
-碰撞面，同时也是一个触觉通道。`ContactTaxelReader` 遍历 `data.contact`，通过
-`mj_contactForce` 读取接触坐标系力，转换到世界系后再转换到对应触觉 site 局部系，并按
-`left/right_taxel_geom_00` 至 `22` 聚合。
-
-Pillars 的 3×3 触觉面不是严格共面：中心 taxel 最高，四个边中间次之，四角最低。当前
-MJCF 中中心比四角高约 0.50 mm，边中间比四角高约 0.30 mm。这个几何形状会影响最先接触
-的 taxel 顺序，不能把它当作完全平整的 3×3 平面压力阵列。
+DMgripper 每侧有 3×3 个 Pillar 通道。默认 `height_spheres` 模型使用保留高度差的球体碰撞代理；
+`ContactTaxelReader` 按 `left/right_taxel_geom_00` 至 `22` 聚合 `mj_contactForce`，从接触系经
+世界系转换到触觉 site 局部系。多个接触点累加，无接触单元为零；每侧数组为 `(3, 3, 3)`。
+中心比四角高约 0.50 mm，边中间比四角高约 0.30 mm，不能按平整阵列解释接触顺序。
 
 ### 高载荷接触的定性结论 {: #collision-geometry-conclusions }
 
@@ -50,35 +46,9 @@ MJCF 中中心比四角高约 0.50 mm，边中间比四角高约 0.30 mm。这�
 因此，当前模型中的高载荷振荡不是“非共面”“mesh”或“multiccd”任一单独因素的必然结果，而是原非共面
 mesh 与多接触点求解方式的交互。该结论描述当前 MuJoCo 模型与任务条件，仍需通过实物接触试验验证。
 
-可使用以下命令复现实验：
-
-```bash
-uv run python scripts/research/study.py \
-  research=archive/model_bug_diagnosis/study \
-  study.phase=collision-geometry \
-  execution=study_run
-```
-
-实物 Pillar 确认为“中心高、边中间次之、四角低”后，默认 profile 采用保留该高度差的球体碰撞
-代理 `parallel_gripper_height_sphere_collision.xml`，并保持 `multiccd` 开启。它保留分阶段接触的
-物理几何趋势，同时避免非共面 mesh 接触流形切换。
-
-原非共面 mesh 加 `--set execution.multiccd_enabled=false` 保留为候选物理设置，供后续以实物面接触承载、摩擦和
-力—压入标定进行比较；在完成该标定前，不应把它替换为默认模型。
-
-该指尖按 Contactile PapillArray 类传感器处理。公开资料说明 PapillArray 是 soft silicone
-pillar 阵列，每个阵列单元可测 3D displacement、3D force 和 vibration；产品规格可参考
-[Contactile technology](https://contactile.com/novel-optical-sensing-technology/)、
-[Contactile products](https://contactile.com/products/) 和
-[Scivaro PapillArray specs](https://www.scivaro.com/index.php?c=show&id=454)。按
-`15 N / 2.5 mm` 的 Z 向量程换算，`6000 N/m` 可视为偏硬上界；若 15 N 对应整阵列总量程，
-单 pillar 约为 667 N/m。PapillArray 原型论文报告的单 pillar 弹簧常数约为
-`1.174 N/mm`，即 `1174 N/m`
-（[PapillArray slip sensor paper](https://www.sciencedirect.com/science/article/pii/S0924424717313419)）。
-当前 MJCF 采用接近该公开实测值的 `1200 N/m`。
-
-因此同一 Pillar 的多个接触点会累加；无接触单元严格为零。读取器返回
-`ContactTaxelFrame(left, right)`，两个数组均为 `(3, 3, 3)`。
+默认保持高度差球体与 `multiccd` 开启；原 mesh、共面 mesh 与关闭 `multiccd` 的模型只用于对照。
+碰撞诊断可选择 `research=archive/model_bug_diagnosis/study study.phase=collision-geometry`。
+`solref` 等效接触参数不是独立硅胶形变模型或已完成的实机力学标定，不能由它推导传感器精度。
 
 ## 实机传感器接口
 

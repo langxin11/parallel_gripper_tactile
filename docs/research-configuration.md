@@ -1,350 +1,119 @@
 # 🧪 Hydra 科研配置与实验编排
 
-科研入口与面向演示的 `pgt` 分工如下：
-
-- `pgt` 用于模型查看、设备检查、交互演示和已知参数的一次性运行；
-- `scripts/research/run.py` 用于组合配置、计划检查、单次实验和探索性 Multirun；
-- `scripts/research/study.py` 用于带固定条件矩阵、配对关系、重复运行、失败账本和聚合统计的正式研究。
-
-三个入口最终调用同一 Python runner 和实验内核，不通过子进程互相调用。Hydra 只存在于科研入口与
-`research/` 编排层，不进入控制循环、共享控制核或硬件基础包。
+操作命令与研究顺序见[常用工作流](workflows.md)。本页只定义配置、计划、生命周期和复现契约。
+`pgt`、科研单次与 study 最终调用同一 Python runner；Hydra 不进入控制循环或硬件基础包。
 
 ## 安装科研依赖
 
-```bash
-uv sync --all-packages --all-groups --locked
-```
-
-Hydra 与 OmegaConf 属于主包运行依赖，普通 CLI 与科研入口都可直接使用组合服务。
-仅运行实验可执行 `uv sync --locked --no-default-groups`；上面的完整安装还包含测试和文档工具。
-`research` 依赖组名保留为空的兼容入口，旧 `--group research` 安装命令仍可使用。
+完整环境安装见[测试策略](testing.md)。仅运行实验可用 `uv sync --locked --no-default-groups`；
+Hydra 与 OmegaConf 属于运行依赖。
 
 ## 单次实验
 
-可先用 `uv run pgt configs list` 查看配置，或用 `pgt configs list controller --search pid`
-过滤名称与用途。配置名对应组目录下的相对路径，例如 `dm_gripper/pid_only`；
-在科研入口中写为 `controller=dm_gripper/pid_only`，在 `pgt run` 中写为
-`--set controller=dm_gripper/pid_only`。目录发现只读取 YAML 元数据，不组合配置或推进仿真；
-列表不保证任意跨组组合都兼容，仍须用计划模式校验。
-
-默认 DM 力跟踪组合：
-
-```bash
-uv run python scripts/research/run.py
-```
-
-显式选择控制器、估计器、任务、材料和 seed：
-
-```bash
-uv run python scripts/research/run.py \
-  controller=dm_gripper/adrc_torque \
-  estimator=window_linear \
-  task=force_tracking/ramp \
-  material=hard \
-  seed=0
-```
-
-DMgripper 共享导纳仿真链路使用 experiment 组合，同时选择相容的控制器、估计器和任务：
-
-```bash
-uv run python scripts/research/run.py \
-  experiment=dm_gripper/force_tracking_admittance
-```
-
-切向扰动使用自己的 experiment 组合。它只允许 `controller=dm_gripper/full` 或
-`controller=dm_gripper/pid_only`，并拒绝导纳、其他控制器及 `execution.viewer=true`；material 选择会
-写入实际任务的 `object_material`。先以计划模式检查组合：
-
-```bash
-uv run python scripts/research/run.py \
-  experiment=dm_gripper/tangential_disturbance \
-  execution=plan
-```
-
-探索性参数组合使用 Hydra 原生 Multirun。每个组合拥有独立的 Hydra 外层目录和内部 run artifacts：
-
-```bash
-uv run python scripts/research/run.py -m \
-  material=medium,hard,stiff \
-  seed=0,1,2
-```
-
-切向扰动可使用同一单次入口进行探索性 Multirun，但没有正式 study 或预定义条件矩阵：
-
-```bash
-uv run python scripts/research/run.py -m \
-  experiment=dm_gripper/tangential_disturbance \
-  task=tangential_disturbance/ramp,tangential_disturbance/step,tangential_disturbance/pulse \
-  material=medium,hard
-```
+配置名是组目录下的相对路径：科研入口使用 `controller=dm_gripper/pid_only`，
+`pgt run` 使用 `--set controller=dm_gripper/pid_only`。`pgt configs list` 只发现 YAML 元数据，
+不保证跨组组合兼容。`run.py -m` 的每个探索性组合有独立外层目录和内部 run。
 
 ## 计划模式
 
-计划模式会完成 OmegaConf 插值、严格 Pydantic 校验、资源路径检查、profile 资源与触觉布局检查、
-组件兼容性检查和 MuJoCo scene 编译，但不会创建 `MjData`、推进仿真或访问设备：
-
-```bash
-uv run python scripts/research/run.py \
-  execution=plan \
-  controller=dm_gripper/full \
-  task=force_tracking/step \
-  material=medium \
-  seed=0
-```
-
-输出包含 `effective_configuration.json`、`composition_provenance.json`、`plan.json` 和 Hydra 的
-`.hydra/` 启动快照。`--cfg job --resolve` 仅打印 OmegaConf 组合结果，不替代上述领域计划检查。
+`execution=plan` 完成插值、严格 Pydantic 校验、路径与 profile 资源检查、触觉布局与组件兼容检查、
+MuJoCo scene 编译，不创建 `MjData`、推进时间或访问设备。输出包含 `effective_configuration.json`、
+`composition_provenance.json`、`plan.json` 与 `.hydra/` 快照。
+`--cfg job --resolve` 仅打印组合结果，不能替代领域检查。
 
 ## 正式研究
 
 ### 推荐执行路线与决策门
 
-正式 study 的配置相互独立，但从科学决策角度，推荐按以下路线组织新一轮完整实验：
+执行顺序见[正式研究路线](workflows.md#formal-study-route)。默认生成计划，`execution=study_run` 执行；
+计划文件不是执行的前置依赖，但正式运行前应审阅相同参数的计划。各研究不会自动传递最优参数。
 
-```text
-刚度参考合理性检查 ────────┐
-刚度位置限幅三臂实验 ──────┤
-PID 模块消融 ──────────────┼→ 人工审查／冻结 PID-ADRC 候选 → 最终控制器比较
-Torque ADRC coarse → confirm ┘
+每个 `configs/research/<purpose>/study.yaml` 保存研究元数据和唯一条件矩阵，领域 protocol 唯一展开矩阵。
+入口拒绝 `-m`、`--multirun` 与 `hydra.mode=MULTIRUN`。计划与执行共享冻结的 `StudyPlan`，
+条件包含稳定 `condition_id`、科学参数、配对键和基线角色。
 
-共享导纳调优 → 冻结共享导纳基线（不进入上述选型）
-局部起滑验证、Robotiq 离散力验证：独立研究
-```
+活跃研究以 `study.profile.experiment` 的组合结果为唯一基础 profile；`study.profile.overrides` 仅保存
+矩阵共享且改变基础 profile 的 controller、estimator 或 model 选择。任务与 seed 归
+`study.definition`，研究目录归 `execution.output_root`。解析、预检、执行和快照持有同一冻结对象，
+摘要来自实际组合对象。归档模型诊断因改写历史资源而保留原 profile 路径，并执行等价检查。
 
-各阶段含义如下：
-
-| 阶段 | Study | 决策作用 |
-| --- | --- | --- |
-| 基础组件验证 | `stiffness_ground_truth_validation` | 检查默认 `window_linear` 的量级、有效性与参考边界；不再作为主线选型门。 |
-| 控制结构验证 | `force_tracking_stiffness_limit_pilot` | 比较无限幅、默认在线限幅与准静态参考限幅，回答峰值、力增长率和跟踪误差取舍。 |
-| 控制结构验证 | `force_tracking_stiffness_rate_validation` | 在 125／250／500 Hz 下比较无位置限幅、刚度位置限幅和刚度速率控制，检查极限环与外环频率敏感性。 |
-| 参数调优 | `force_tracking_stiffness_rate_tuning` | 固定 250 Hz stiff Step 和 `window_linear`，以九组 \(K_P\times\dot F_{\max}\) 候选改善瞬态并约束平台波动。 |
-| 参数再调优 | `force_tracking_stiffness_rate_refinement` | 针对 500 Hz medium／hard 的超调失败，以六组候选和性能基线选择最坏工况可行参数。 |
-| 参数确认 | `force_tracking_stiffness_rate_confirmation` | 固定二次调优选出的 \(K_P=20\ \mathrm{s^{-1}}\)、\(\dot F_{\max}=50\ \mathrm{N/s}\)，在三种频率和三种材料上与性能基线配对复验。 |
-| 历史敏感性 | `stiffness_estimator_validation` | 只比较估计器接入控制器后的执行指标，不作为刚度精度或默认方法选型依据。 |
-| 基础组件验证 | `force_controller_ablation` | 判断 PID、刚度位置前馈和力矩前馈的贡献。 |
-| 参数调优 | `torque_adrc_tuning` | 先 coarse 搜索可行域，再 confirm 验证前五候选。 |
-| 参数调优 | `dm_admittance_tuning` | 调整共享导纳接近和接触切换参数；作为独立基线。 |
-| 决策门 | 人工审查 | 审查摘要、配对统计和失败记录；必要时更新配置、测试和文档并提交。 |
-| 最终比较 | `force_controller_selection` | 只比较决策门之后已经冻结在配置中的控制器。 |
-| 独立研究 | `friction_local_slip_validation` | 验证局部起滑检测，不阻塞力控制器选型。 |
-| 独立研究 | `robotiq_discrete_force_validation` | 验证另一夹爪的整数命令控制，不依赖 DM 研究。 |
-
-这一路线中只有 Torque ADRC 的 `coarse → confirm` 是入口强制校验的硬依赖；其他箭头是推荐的
-科学决策顺序，不是程序调用依赖。计划模式也不是执行模式的前置文件依赖，但正式运行前应先审阅计划。
-Study 不会把排名第一的参数自动写入另一个 Study；如果前置结果改变候选配置，必须先人工更新并冻结，
-再启动最终控制器比较，否则最终矩阵仍会使用当前 YAML 中的固定参数。归档的模型 bug 诊断已经完成使命，
-不进入这条路线。
-
-控制器对比计划固定为当前权威 study YAML 中的 6 个控制器 × 3 个任务 × 3 个材料 × 3 个 seed，
-共 162 个有序条件：
-
-```bash
-uv run python scripts/research/study.py \
-  research=force_controller_selection/study
-```
-
-确认计划后执行：
-
-```bash
-uv run python scripts/research/study.py \
-  research=force_controller_selection/study \
-  execution=study_run
-```
-
-PID 模块消融计划为 4 个控制器 × 3 个材料 × 3 个 seed，共 36 个有序条件：
-
-```bash
-uv run python scripts/research/study.py \
-  research=force_controller_ablation/study
-uv run python scripts/research/study.py \
-  research=force_controller_ablation/study \
-  execution=study_run
-```
-
-局部起滑验证、刚度参考真值、估计器下游敏感性、DM 导纳调参与 Robotiq 离散力 study 用法相同，矩阵分别为
-5 场景 × 3 seed（15 条）、3 估计器 × 3 材料 × 3 seed（27 条）、3 估计器 × 3 任务 × 3 材料 × 3 seed
-（81 条）、16 候选 × 1 材料 × 2 seed
-（32 条）与 5 控制器 × 4 材料 × 3 噪声 × 1 seed（60 条）：
-
-```bash
-uv run python scripts/research/study.py \
-  research=friction_local_slip_validation/study
-uv run python scripts/research/study.py \
-  research=stiffness_ground_truth_validation/study
-uv run python scripts/research/study.py \
-  research=force_tracking_stiffness_limit_pilot/study
-uv run python scripts/research/study.py \
-  research=force_tracking_stiffness_rate_validation/study
-uv run python scripts/research/study.py \
-  research=force_tracking_stiffness_rate_tuning/study
-uv run python scripts/research/study.py \
-  research=force_tracking_stiffness_rate_refinement/study
-uv run python scripts/research/study.py \
-  research=force_tracking_stiffness_rate_confirmation/study
-uv run python scripts/research/study.py \
-  research=stiffness_estimator_validation/study
-uv run python scripts/research/study.py \
-  research=dm_admittance_tuning/study
-uv run python scripts/research/study.py \
-  research=robotiq_discrete_force_validation/study \
-  execution=study_run
-```
-
-因果诊断研究一次调用执行一个 phase，`study.phase` 必选（10 个 phase 共 39 条条件）；原
-`--phase all` 由逐 phase 循环替代：
-
-```bash
-uv run python scripts/research/study.py \
-  research=archive/model_bug_diagnosis/study \
-  study.phase=collision-geometry \
-  execution=study_run
-```
-
-Torque ADRC 调参也由同一正式入口承载。正式 coarse 为 34 个满足测量带宽约束的候选 × 3 个任务 ×
-`medium` × seed 0，共 102 条；confirm 从已完成 coarse 的可行排名取前五，并在缺席时追加基线，随后对
-所选候选执行 3 个任务 × 3 个材料 × 3 个 seed：
-
-```bash
-uv run python scripts/research/study.py \
-  research=torque_adrc_tuning/study
-uv run python scripts/research/study.py \
-  research=torque_adrc_tuning/study \
-  execution=study_run
-uv run python scripts/research/study.py \
-  research=torque_adrc_tuning/study study.stage=confirm \
-  study.coarse_study_dir=/absolute/path/to/coarse-study
-uv run python scripts/research/study.py \
-  research=torque_adrc_tuning/study study.stage=confirm \
-  study.coarse_study_dir=/absolute/path/to/coarse-study \
-  execution=study_run
-```
-
-confirm 不只检查目录是否存在，还要求 coarse manifest 的生命周期 schema、研究类型、阶段、完成状态、
-研究定义哈希和无执行异常均匹配，并验证 `candidate_ranking.csv` 已登记、内容摘要一致、候选全集及排名
-schema 正确。任一项不一致都会在任何 confirm 子 run 前失败。
-
-每个 `configs/research/<purpose>/study.yaml` 同时保存研究元数据与唯一条件矩阵；Hydra 只选择研究方案
-和执行模式，不再通过 selector 跳转到第二份 domain YAML。入口明确拒绝
-`-m`、`--multirun` 与 `hydra.mode=MULTIRUN`，并在任何子实验前失败，避免把同一矩阵重复展开。
-计划和执行持有同一个冻结 `StudyPlan`；每个条件带稳定 `condition_id`、科学参数、配对键和基线角色。
-每个研究还用 `study.profile.experiment` 与 `study.profile.overrides` 选择基础 profile，复用单次实验的组合
-服务；解析、预检、执行与有效配置快照持有同一冻结对象。归档模型诊断因需改写历史模型路径而保留原始
-profile 来源字段，但其基础对象仍会通过组合入口预检。
-
-活跃研究的 profile 以 `study.profile.experiment` 组合结果为唯一来源。`study.profile.overrides` 只保存
-矩阵共享且确实改变基础 profile 的 controller、estimator 或 model 选择，不再用 task、seed 或 execution
-充当组合占位。任务与 seed 归 `study.definition` 的矩阵所有，研究目录归
-`execution.output_root` 所有；领域定义不再重复保存旧完整 profile 路径和 `output_root`。研究计划中的
-profile 摘要来自实际冻结的组合对象，而不是兼容 profile 文件。归档模型诊断因需要改写历史模型资源，
-继续显式保留原始 profile 路径，并在解析时执行新旧等价检查。
+Torque ADRC 的 `coarse → confirm` 强制校验谱系：coarse manifest 的生命周期 schema、研究类型、阶段、
+完成状态、研究定义哈希和无执行异常必须匹配；`candidate_ranking.csv` 必须已登记且摘要、候选全集与
+排名 schema 正确。confirm 按可行排名取前五，缺席时追加基线；校验失败发生在任何 confirm 子 run 之前。
 
 ## 生命周期、状态与失败分类
 
-公共生命周期仅统一“已校验计划→逐条件执行→失败记录→聚合→研究专属绘图→产物登记”，不改变任务、
-控制器、指标、统计公式或仿真循环。`study_manifest.json` 的状态为：
+公共生命周期仅负责计划、执行、失败记录、聚合／绘图钩子和产物登记；科学条件、统计公式与仿真循环归领域模块。
 
-- `planned`：已完成预检，但没有创建 `MjData`、推进仿真或登记 run；
-- `running`：正在逐条件执行，manifest 在每个条件完成后由父进程更新；
-- `partial`：至少一个条件形成正常 run，同时至少一个条件发生 Python 执行异常；
-- `completed`：所有条件都形成正常 run；其中仍可包含科学验收失败；
-- `failed`：没有任何正常 run，或聚合／绘图阶段无法完成。
+| `study_manifest.json` 状态 | 含义 |
+| --- | --- |
+| `planned` | 已预检，未创建 `MjData`、推进仿真或登记 run。 |
+| `running` | 条件正在执行，父进程逐条件更新 manifest。 |
+| `partial` | 至少形成一个正常 run，且存在 Python 执行异常。 |
+| `completed` | 所有条件均形成正常 run，仍可能有科学验收失败。 |
+| `failed` | 没有正常 run，或聚合／绘图无法完成。 |
 
-`condition_results` 将 `completed`、`scientific_failure` 和 `execution_error` 分开记录。兼容字段 `runs`
-包含所有正常 run，`failed_runs` 只包含 `passed=false` 的科学失败，`failed_conditions` 只包含没有形成
-正常 run 的 Python 异常。入口、配置、预检、聚合与绘图异常另存于 `lifecycle_failures`，不会混入
-`failed_runs`。所有登记产物同时保存 SHA-256 摘要。
+`condition_results` 区分 `completed`、`scientific_failure`、`execution_error`。
+`runs` 包含所有正常 run；`failed_runs` 仅含 `passed=false` 的科学失败；`failed_conditions` 仅含未形成
+正常 run 的 Python 异常。入口、配置、预检及聚合／绘图异常归 `lifecycle_failures`。登记产物均保存 SHA-256。
 
-## 出图模式
+`execution.workers` 默认为 `1`；大于 `1` 时采用 `spawn` 条件级 CPU 多进程，worker 独占 run 目录，
+父进程独占 manifest、聚合与绘图，并按计划顺序保存结果，保证配对和统计输入不受完成顺序影响。
+进度中的“已处理”包含三类条件结果，不等于验收通过数。可选 `on_progress` 在父进程写入 manifest 后
+接收不可变 `StudyProgress`；回调异常仅告警，不中断研究，也不发送到 worker。
 
-单次运行与正式 study 都支持 `execution.plot_mode=summary|diagnostic`，默认 `summary`。
+## 出图模式 {#plot-modes}
 
-```bash
-# 单次力跟踪默认只生成 tracking.png；完整控制器和双侧触觉诊断显式开启。
-uv run python scripts/research/run.py execution.plot_mode=diagnostic
-# 正式研究恢复全部逐次诊断和补充汇总图。
-uv run python scripts/research/study.py research=force_controller_ablation/study \
-  execution=study_run execution.plot_mode=diagnostic
-# CLI 通过相同组合字段选择。
-uv run pgt run force-track --set execution.plot_mode=diagnostic
-```
+`execution.plot_mode=summary|diagnostic` 默认为 `summary`，写入有效配置与 manifest，
+不改变条件矩阵、指标、验收或科学哈希。
 
-`summary` 模式下，力跟踪研究按计划预先确定的最小 seed 保留完整逐次诊断，其余成功运行只保存
-轨迹、指标和输入快照；科学失败保留诊断。代表 seed 不按误差或完成顺序选择，研究级同 seed
-轨迹叠加继续使用原有共同有效 seed 规则。只有一个 seed 的研究仍会保留每个条件的诊断。候选在跨条件聚合中被判定不可行，不等于单条件
-科学失败，也不会触发所有逐次图的补绘；需要分析此类候选时应选择完整诊断模式。
-摩擦局部起滑研究采用同样的预定 seed 策略，负例按研究自己的验收规则处理。其他实验的必要主图
-与刚度真值验证汇总继续保留。执行异常若未产生有效轨迹，只保留已有输入和失败账本。
-
-控制器／估计器比较的汇总默认省略简单基线差值图和 MAE 补充面板；完整配对消融效应、饱和指标、刚度真值验证和
-刚度限制的各项独立指标仍保留。`diagnostic` 可恢复补充图，但缺少有效基线时不会生成空差值图。
-模式写入有效配置与研究 manifest，不进入科学配置哈希，不改变指标、条件矩阵或验收规则。
-
-运行时选中的逐次图仍读取完整频率数据。保存轨迹继续使用既有采样策略，事后重绘不能恢复被降采样
-丢失的瞬态；需要完整诊断应在运行前选择 `diagnostic`，或显式配置按控制周期保存轨迹。
+- 单次力跟踪默认生成 `tracking.png`，`diagnostic` 增加触觉与控制器诊断。
+- 力跟踪和局部起滑 study 按计划预定最小 seed 保留逐次诊断；其他成功 run 保存轨迹、指标和输入。
+  科学失败保留诊断，局部起滑负例按自身验收规则处理。代表 seed 不按误差或完成顺序选择。
+- 跨条件聚合判定候选不可行，不等于单条件科学失败，不触发自动补图；需分析时选 `diagnostic`。
+- 汇总默认省略简单基线差值图和 MAE 补充面板；配对消融、饱和及刚度验证指标保留。
+  `diagnostic` 恢复补充图，但无有效基线时不生成空差值图。其他实验必要主图保持保留。
+- 运行时图读取完整频率数据；保存轨迹仍按采样策略处理，事后重绘不能恢复已丢失的瞬态。
+  无有效轨迹的执行异常只保留已有输入与失败账本。
 
 ## 配置组及所有权
 
-正式执行默认输出逐条件进度：已处理／总条件数、科学失败数、执行异常数、状态与绝对目录。
-“已处理”包含三类条件结果，不能当作科学验收通过数；`completed` 也仍允许存在科学失败。
-计划模式只显示条件总数和计划目录，不发送运行进度。Python 调用可传入可选 `on_progress` 观察
-不可变 `StudyProgress`；通知只发生在父进程完成 manifest 写入之后，不发送至 worker，不进入科学哈希
-或产物格式。观察回调异常会告警，研究继续运行。
+| 配置组 | 所有权 |
+| --- | --- |
+| `platform` | 设备家族、后端、基础 profile。 |
+| `model` | MJCF、碰撞几何与触觉布局。 |
+| `controller` | 算法及独有参数。 |
+| `estimator` | 刚度估计方法或显式关闭。 |
+| `task` | 任务家族和曲线。 |
+| `material` | 接触材料。 |
+| `execution` | 计划／执行、目录、进程数、viewer、记录与恢复检查。 |
+| `experiment` | 常用配置组合与有意覆盖。 |
+| `research` | 研究问题、决策、准入／停止／排除规则、谱系及唯一矩阵。 |
 
-| 配置组 | 负责参数 | 不负责参数 |
-| --- | --- | --- |
-| `platform` | 设备家族、仿真后端、基础 profile | 控制算法、任务曲线 |
-| `controller` | 控制器名称及该算法独有参数 | 估计器和材料 |
-| `estimator` | 刚度估计方法或显式关闭 | 控制器增益 |
-| `task` | 任务家族及 task 文件 | profile 或材料 |
-| `material` | 接触材料 preset | 控制时序 |
-| `execution` | 计划/执行、输出、条件进程数、viewer、记录与只读恢复检测 | 科学条件 |
-| `research` | 研究问题、决策、准入／停止／排除依据、阶段谱系及唯一矩阵 | 外层笛卡尔积 |
+优先级：组默认值 < 根 preset 的 `_self_` < 命令行。列表整表替换，不拼接；矩阵列表仅在研究定义中维护。
+配置使用 `extra="forbid"`，未知字段与缺失值在仿真前失败。控制器组整体替换，解析器清除其他算法的
+`adrc`、`torque_adrc`、`admittance` 和直接力矩反馈字段，再校验完整 profile。
 
-优先级从低到高依次为：配置组默认值、根 preset 的 `_self_` 值、命令行覆盖。Hydra 对列表采用整表
-替换，不进行元素级拼接；正式矩阵列表只在目的目录的 `study.yaml` 中维护。配置模型使用 `extra="forbid"`，未知字段、
-拼写错误和缺失值会在仿真前失败。控制器组整体替换；领域解析器还会清空其他算法的 `adrc`、
-`torque_adrc`、`admittance` 与直接力矩反馈字段，随后对完整 profile 重新执行 Pydantic 校验。
+导纳必须配 `estimator=none`；非导纳仅 `pid-only` 可显式关闭估计器。Torque ADRC 参数仅可随
+`adrc-torque` 或 `adrc-torque-td` 出现。platform 选择不连接或使能设备，未支持的硬件组合由 schema 拒绝。
 
-当前声明 DM 与 Robotiq 仿真组合。导纳必须配 `estimator=none`；非导纳控制器中仅 `pid-only` 允许显式关闭估计器；
-Torque ADRC 参数只能随 `adrc-torque` 或 `adrc-torque-td` 出现。选择 platform 不会打开串口、连接设备、
-使能电机或发送命令；尚未支持的硬件组合会被 schema 拒绝。
-
-`tangential_disturbance` 是额外的 DM 单次任务家族。解析时会先构造最终 profile，再以任务实际材料编译
-scene，检查 MIT 法向控制、非导纳／非 ADRC 路径以及 `control_period_s` 不小于物理步长。计划模式完成这些
-检查但不创建 `MjData` 或推进时间。实验方法和输出语义见
-[切向扰动下的触觉增力](tangential-disturbance.md)。
+切向扰动仅支持 DM 的 `full`／`pid-only`，拒绝 viewer、导纳与 ADRC；material 写入任务的
+`object_material`。解析先构造最终 profile，再按实际材料编译 scene，检查 MIT 法向控制及
+`control_period_s` 不小于物理步长。它支持单次与探索性 Multirun，未定义正式 study。
 
 ## 路径、产物与复现
 
-Hydra 配置搜索路径由入口脚本确定；profile、task、study 和输出根目录中的相对路径则统一以代码仓库根
-解析，不依赖调用时的当前目录。profile 内部 MJCF 等相对资源仍按 profile 文件所在目录解析，保持旧语义。
+配置搜索路径由入口确定；profile、task、study 和输出根目录的相对路径统一基于仓库根，
+profile 内的 MJCF 等资源基于该 profile 所在目录，不依赖调用 cwd。
 
-Hydra 拥有一次科研调用的外层目录，其中保存组合来源、选择、覆盖参数、Git 状态和领域有效配置；
-`RunDirectory` 继续拥有内部单次实验目录、manifest、trace、metrics 与图。正式 study 在外层目录中保存
-完整计划、实际完成记录、逐条件异常及聚合结果。单条件异常会登记到 `failed_conditions.json` 并继续其余
-条件；若配置或预检阻止研究启动，入口仍写出 `setup_failure.json` 和 `state=failed` 的生命周期 manifest。
+Hydra 外层目录保存组合来源、覆盖、Git 状态、领域有效配置及 study 计划与聚合；`RunDirectory`
+拥有内部 run 的 manifest、trace、metrics 和图。单条件异常写入 `failed_conditions.json` 后继续；
+启动前失败仍写入 `setup_failure.json` 和失败状态的生命周期 manifest。
+实际运行与 `effective_parameters.json` 使用同一冻结 `GripperProfile` 和 `ForceTrackingTask`，不重读原文件覆盖配置。
 
-科学配置哈希排除时间戳、Hydra 输出目录、domain `output_root` 和绝对运行目录；它包含有序条件、完整
-控制器参数（含默认值）、任务与 profile 内容摘要、材料、seed、统计／排序／阶段规则及 confirm 的 coarse
-谱系。因此仅改变 cwd 或输出位置不会改变哈希，任何科学参数或输入资源内容变化都会改变。可在
-`execution.recovery_source` 指向既有 study，生成 `recovery_assessment.json`：只有研究类型、阶段、哈希和
-`condition_id` 均匹配且状态为 `completed` 的条件才列为已有成功。本阶段明确
-`automatic_resume_enabled=false`，不会自动跳过、续跑或跨配置聚合。
+科学哈希包含有序条件、完整控制器参数及默认值、任务与 profile 内容摘要、材料、seed、统计／排名／阶段
+规则和 confirm 的 coarse 谱系；排除时间戳、输出位置、绝对运行目录、workers、绘图模式及进度观察。
+改变 cwd 或输出位置不改变哈希，改变科学参数或输入资源内容会改变。
 
-实际执行与 `effective_parameters.json` 使用同一个冻结 `GripperProfile` 和 `ForceTrackingTask` 对象，
-底层不会重新读取原始 profile 覆盖 Hydra 结果。
-
-## 迁移边界
-
-本阶段已贯通 DM 单次力跟踪、DM 共享导纳、正式控制器对比、PID 模块消融、Torque ADRC 两阶段调参、
-摩擦局部起滑、刚度参考真值、刚度估计器下游敏感性、DM 导纳调参、Robotiq 离散力和因果诊断（单 phase 入口）。原
-`scripts/experiments/` 研究入口已删除，统一使用 Hydra 正式入口；可复用矩阵展开与聚合实现仍位于包内
-protocol。
-
-迁移中保留的语义边界：导纳调参的候选排名与 raw 物理力峰值口径、估计器对比的 secant 基线与公共
-seed 叠加、Robotiq 离散力的 HOLD/再激活时序与逐平台指标、诊断的单因素条件构造与数值/分类双横轴
-绘图均原样保留；旧 protocol 私有的 `max_workers` 和 `--jobs` 已统一为 `execution.workers`。当
-`execution.workers>1` 时，公共生命周期使用 `spawn` 条件级 CPU 多进程；每个进程独占 run 目录，父进程
-独占 manifest、聚合与绘图。该调度参数不进入科学配置哈希，也不引入自动 resume、Optuna、Ray、MLflow
-或分布式执行框架。
+`execution.recovery_source` 仅生成 `recovery_assessment.json`。研究类型、阶段、哈希、`condition_id`
+均匹配且状态为 `completed` 的条件才列为已有成功；`automatic_resume_enabled=false`，不自动跳过、续跑或跨配置聚合。
