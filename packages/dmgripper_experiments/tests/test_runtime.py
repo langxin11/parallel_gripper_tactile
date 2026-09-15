@@ -134,6 +134,127 @@ def test_adaptive_target_increases_under_tangential_load(tmp_path: Path) -> None
     assert any(row["target_trigger_active"] == "True" for row in rows if row["phase"] == "active")
 
 
+@pytest.mark.parametrize(
+    "mode",
+    [
+        "healthy",
+        "capacity",
+        "overforce",
+        "communication",
+        "hold_communication",
+        "taxel_saturation",
+        "invalid_timestamp",
+    ],
+)
+def test_unified_nine_taxel_lifecycle_and_fault_health_gate(tmp_path: Path, mode: str) -> None:
+    """九点链路按设备时间增力，容量失败可保持，触觉失效必须失能。"""
+    from dataclasses import replace
+
+    from dm_grasp_core.grasp.adaptive import AdaptiveLoadConfig
+    from dm_grasp_core.grasp.unified import UnifiedAdaptiveConfig
+    from dm_grasp_core.tactile.risk import TaxelRiskConfig
+
+    class NineTaxelTactile(FakeTactile):
+        """提供九点真机形状，设备采样间隔与接收间隔刻意不同。"""
+
+        def latest(self):
+            if (mode == "communication" and self.phase.phase == "active") or (
+                mode == "hold_communication" and self.phase.phase == "fault_holding"
+            ):
+                raise OSError("模拟统一模式触觉通信丢失")
+            return super().latest()
+
+        def _snapshot(self, *, force_n, tangential_n=0.0):
+            sink = self.sample_sink
+            self.sample_sink = None
+            try:
+                snapshot = super()._snapshot(force_n=force_n, tangential_n=tangential_n)
+            finally:
+                self.sample_sink = sink
+            shear = (0.3 if mode == "healthy" else 1.0) if force_n else 0.0
+            if mode == "overforce" and self.phase.phase == "active":
+                force_n = 3.0
+            snapshot = replace(
+                snapshot,
+                timestamp_us=self.counter * 5000,
+                raw_left_fy_n=shear,
+                raw_left_fz_n=force_n,
+                left_taxel_forces_n=((0.0, shear / 9, force_n / 9),) * 9,
+                right_taxel_forces_n=((0.0, 0.0, force_n / 9),) * 9,
+            )
+            if mode == "taxel_saturation" and self.phase.phase == "active":
+                snapshot = replace(snapshot, left_taxel_forces_n=((4.0, 0.0, force_n / 9),) * 9)
+            if mode == "invalid_timestamp" and self.phase.phase == "active":
+                snapshot = replace(snapshot, timestamp_us=math.nan)
+            if sink is not None:
+                sink(
+                    {
+                        "timestamp_us": snapshot.timestamp_us,
+                        "left_taxel_forces_n": snapshot.left_taxel_forces_n,
+                        "right_taxel_forces_n": snapshot.right_taxel_forces_n,
+                    }
+                )
+            return snapshot
+
+    config = adaptive_config()
+    unified = UnifiedAdaptiveConfig(
+        load=AdaptiveLoadConfig(max_force_n=1.5, max_force_rate_n_s=0.5),
+        observer=TaxelRiskConfig(window_s=0.01),
+        failure_timeout_s=0.01,
+    )
+    config = replace(
+        config,
+        reference=replace(
+            config.reference,
+            adaptive=replace(config.reference.adaptive, duration_s=0.08, unified=unified),
+        ),
+        safety=replace(config.safety, max_target_force_n=1.5, force_ceiling_n=2.0),
+    )
+    if mode == "healthy":
+        result, session, actions, directory = run_fake_experiment(
+            tmp_path, config, tactile_type=NineTaxelTactile
+        )
+        assert result["disable_confirmed"] is True
+        assert session.disable_calls == 1
+    else:
+        with pytest.raises(RuntimeError, match="统一"):
+            run_fake_experiment(tmp_path, config, tactile_type=NineTaxelTactile)
+        directory = next(tmp_path.rglob("manifest.json")).parent
+    manifest = json.loads((directory / "manifest.json").read_text())
+    events = _read_events(directory)
+    if mode == "healthy":
+        assert result["status"] == "completed"
+        assert "active" in actions.states and "holding" in actions.states
+        rows = _read_rows(directory)
+        active = [row for row in rows if row["phase"] == "active"]
+        targets = [float(row["target_force_n"]) for row in active]
+        assert max(targets) > 0.5
+        assert all(0 <= b - a <= 0.5 * 0.005 + 1e-12 for a, b in zip(targets, targets[1:]))
+        assert all(row["adaptive_left_valid_mask"] == "111111111" for row in active)
+        assert all(
+            row["adaptive_left_update_reason"] in {"diagnostic_only", "contact_reset"}
+            for row in active
+        )
+        assert any(
+            float(row["adaptive_load_target_n"]) > 0.5
+            for row in rows
+            if row["phase"] == "preload" and row["adaptive_load_target_n"]
+        )
+        assert any(event["event"] == "adaptive_observation" for event in events)
+        raw = [json.loads(line) for line in (directory / "tactile.jsonl").read_text().splitlines()]
+        assert raw and all(len(row["left_taxel_forces_n"]) == 9 for row in raw)
+    else:
+        assert manifest["status"] == "failed"
+        assert manifest["disable_confirmed"] is True
+        assert manifest["fault_holding_entered"] == (mode in {"capacity", "hold_communication"})
+        if mode in {"capacity", "hold_communication"}:
+            assert "capacity_limited" in manifest["primary_error"]["message"]
+        if mode == "capacity":
+            assert manifest["fault_resolution"] == "released"
+        else:
+            assert manifest["fault_resolution"] == "forced_disable"
+
+
 def test_preload_accepts_force_above_floor_without_imbalance_fault(tmp_path: Path) -> None:
     """双侧均接触且均值高于下限时，力差不阻止进入 active。"""
     from dataclasses import replace

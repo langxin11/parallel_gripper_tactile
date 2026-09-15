@@ -41,6 +41,7 @@ class DMAdmittanceController:
         mit: MITControl,
         *,
         force_semantics: ForceSemantics = "average_side",
+        saturation_feedback: bool = False,
     ) -> None:
         """绑定执行器并验证导纳配置，实际命令仍由现有量化器施加。
 
@@ -49,6 +50,7 @@ class DMAdmittanceController:
             force: 含导纳与机构几何的法向力控制配置。
             mit: MIT 内环增益及协议量程。
             force_semantics: 仅支持平均单侧法向力 ``average_side``。
+            saturation_feedback: 是否把最终命令限幅反馈给导纳状态。
 
         Raises:
             ValueError: 力语义不支持、缺少导纳或几何配置，或机械限值超出 MIT 范围。
@@ -60,6 +62,7 @@ class DMAdmittanceController:
         if mit.kp <= 0.0:
             raise ValueError("DM admittance requires positive MIT kp for torque limiting")
         self.motor = motor
+        self.saturation_feedback = saturation_feedback
         self.config = force.admittance
         self.force = force
         cfg = self.config
@@ -109,6 +112,7 @@ class DMAdmittanceController:
         *,
         name_prefix: str = "",
         force_semantics: ForceSemantics = "average_side",
+        saturation_feedback: bool = False,
     ) -> "DMAdmittanceController":
         """根据实验已装配模型创建执行器适配器。
 
@@ -117,6 +121,7 @@ class DMAdmittanceController:
             profile: 含 MIT、力控和机构配置的夹爪 profile。
             name_prefix: 场景装配附加的关节及执行器名称前缀。
             force_semantics: 仅支持 ``average_side``。
+            saturation_feedback: 是否启用最终命令限幅的导纳回投。
 
         Returns:
             尚未执行外环或写入控制量的导纳适配器。
@@ -131,6 +136,7 @@ class DMAdmittanceController:
             profile.normal_force,
             profile.mit,
             force_semantics=force_semantics,
+            saturation_feedback=saturation_feedback,
         )
 
     @property
@@ -268,6 +274,7 @@ class DMAdmittanceController:
                 right_force_n=filtered,
                 target_force_n=reference.target_force_n,
                 dt_s=dt,
+                saturation_feedback=self.saturation_feedback,
             )
         else:
             if self.state == "approach":

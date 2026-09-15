@@ -1,0 +1,18 @@
+# @package _global_
+defaults:
+  - override /platform: dm_gripper/simulation
+  - override /model: dm_gripper/height_spheres
+  - override /controller: dm_gripper/pid_torque_ff
+  - override /estimator: window_linear
+  - override /task: force_scheduling/unified_step_load
+  - override /material: hard
+  - override /execution: run
+  - _self_
+
+experiment:
+  name: dm_unified_step_load_pid
+  kind: force_scheduling
+controller:
+  stiffness_control:
+    # 复用历史 pid-torque-ff：估计器用于启用模型前馈路径，不作刚度位置修正。
+    position_feedforward_gain: 0.0

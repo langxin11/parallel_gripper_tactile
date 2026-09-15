@@ -36,7 +36,7 @@ uv run --package dmgripper-experiments dmgripper-run \
   MIT 模式与开始前失能状态，确认使能成功才运动。使能前 `release` 记为 `cancelled`，不发送运动命令。
 - `preload` 取曲线首值或动态初始抓力。双侧确认接触且平均力连续达到
   `目标-preload_tolerance_n`，持续 `preload_stable_time_s` 后进入 `active`；**不设高侧稳定窗口**。
-  动态策略此时冻结预载基线，后续载荷不移动基线。
+  旧动态策略此时冻结预载基线，后续载荷不移动基线；统一策略不从绝对承载中扣除预载载荷。
 - 失接触判据 `any_side`／`both_sides` 与动作 `fault`／`reapproach` 独立，默认
   `any_side + fault`。只有曲线模式支持重接近：暂停任务时间，恢复接触并稳定到暂停点目标后继续，接触段编号递增。
 - 默认 `on_finished: hold`，任务结束仍闭环抓握并等待 `release`；动态模式继续响应载荷增长。
@@ -65,12 +65,12 @@ uv run --package dmgripper-experiments dmgripper-run \
 `warning`，不重置窗口或单独阻止启动；操作者仍应排查接触或预紧。
 
 每帧检查传感器与 taxel 数量／结构、三轴有限性、包计数、设备时间和新鲜度；原始法向过力与
-双侧严重不平衡同样阻断启动。逐 taxel 幅值不使用未标定阈值，也不参与零力均值门禁；
+双侧严重不平衡同样阻断启动。旧模式的逐 taxel 幅值不使用未标定阈值，也不参与零力均值门禁；
 `zero_force_diagnostics` 记录数量、均值、标准差和最大残余力位置，供离线标定。
 
 ## 故障保持与人工释放
 
-故障处理取决于 DM 通道是否仍可控：
+旧模式故障处理取决于 DM 通道是否仍可控；统一模式还有下文所述的独立触觉保护：
 
 | 情形 | 行为 |
 |---|---|
@@ -105,6 +105,41 @@ uv run --package dmgripper-experiments dmgripper-run \
 刚度估计默认 `enabled: true`、`method: window_linear`，`stiffness_consumption: none`，
 只记录数值、有效性与原因。仅 PID／LADRC 显式选择 `feedforward` 才消费估计；默认估计参数尚未经真机辨识。
 
+## 统一自适应试运行与旁路回放 {: #unified-adaptive }
+
+```sh
+# 只验证配置，不连接、不使能
+uv run --package dmgripper-experiments dmgripper-run \
+  --config configs/hardware/dmgripper/unified_adaptive.yaml
+
+# 仅回放一段连续抓取记录，输出文件必须尚不存在
+uv run --package dmgripper-experiments python -m dmgripper_experiments.replay \
+  <抓取段的tactile.jsonl> <新的diagnostic.csv> \
+  --config configs/hardware/dmgripper/unified_adaptive.yaml
+```
+
+`reference.adaptive.unified` 非空时替代旧剪切增量策略，保持 `adaptive` 生命周期和交互入口。
+它要求双侧恰好九点，按设备时间戳只消费新观测；直接使用采集层局部三轴力，
+部署前必须核对左右身份、坐标、正压缩符号、触点量程与摩擦先验。适配器不自动推断这些标定。
+算法和仿真边界见[统一策略初步验证](force-scheduling.md#unified-adaptive)。
+
+新配置初始目标 0.5 N/侧、目标上限 1.5 N/侧、原始单侧保护线 2 N、目标限速 0.5 N/s；
+这些仅是待验收的低载荷起点，不保证物体耐受或实际增力能力。仅支持导纳，固定 MIT 增益，
+启用执行限幅回投；共享 `load` 的最低力、上限与速率必须与生命周期／保护配置一致。
+风险与摩擦更新默认关闭，仍记录旁路候选。开放风险需要 `risk_enabled` 与
+`risk_validation_passed`；开放摩擦还需要 `friction_update_enabled` 与
+`friction_validation_passed`。布尔门禁仅记录操作者授权，不能代替真实独立验收证据。
+
+统一模式在触觉失鲜、通信异常、坏数据、触点越量程、原始过力或严重不平衡时，
+直接进入独立失能清理，不以保持物体覆盖保护。承载不足、预算耗尽等科学失败仅在
+DM 与触觉健康时尝试受限位置保持，等待人工释放；保持期间继续检查触觉保护。
+失能可能掉落物体，所有首次实验必须有防坠承接，底层响应标定完成前不要撤去全部支撑。
+
+回放始终撤销两条控制权限，目标不推进，也不模拟执行器；按原始设备时间产生相同的因果诊断。
+重复时间戳忽略，回退／坏输入明确报错，已写部分结果可能保留，不可当作完整验收记录。
+多次抓取需分段单独回放。检测提前量和误触发仍需独立位移参考、负例及未参与调参的记录；
+该工具不自行给出起滑真值、摩擦准确性或闭环性能结论。
+
 ## 记录与重绘
 
 输出目录为 `outputs/real/<task_name>/<object_name>/<UTC时间戳>-<run_id>/`：
@@ -117,6 +152,10 @@ uv run --package dmgripper-experiments dmgripper-run \
 | `trace.csv` | 控制周期记录，schema 为 `dmgripper-experiment/v1` |
 | `manifest.json` | 结果、原始／清理故障、失能确认、产物清单 |
 | `plot.pdf`／`plot.png` | 结果图 |
+
+记录器 1.2.0 在现有 schema 上追加 `adaptive_*` 列：风险、事件、有效掩码、摩擦候选／质量、
+更新原因、需求与跟踪缺口、执行限幅及失败原因；旧目标模式对应列为空。
+原始需求仍保留于 `target_raw_force_n`，观测状态变化与新事件同步写入 `events.jsonl`。
 
 `fault_resolution` 区分 `released`、`forced_disable`、`hold_lost`；`disable_confirmed` 为
 `true`／`false`／`not_applicable`，只有读回失能状态才写 `true`。任何设备或终端清理故障均使运行

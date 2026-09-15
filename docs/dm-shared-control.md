@@ -10,6 +10,8 @@
 - 曲柄滑块正反解、雅可比、五次接近轨迹、双侧接触确认和速度过渡。
 - 二阶导纳 `step_admittance`：平均双侧力误差驱动闭合位移，先按机构雅可比裁剪速度再积分，
   同时限制内部状态、目标构型速度和 MIT 合成力矩。
+  统一自适应模式显式启用 `saturation_feedback`，把最终限幅后的 MIT 位置／速度请求回投导纳状态，
+  以 `execution_limited` 反馈目标调度；默认关闭以保持旧控制轨迹。此处不包含协议量化或实测响应补偿。
 - `MITCommandConfig`、五字段 `MITCommand`、`build_mit_command`：生成量化前 MIT 请求；
   `MITTorqueModel`：协议量化与合成力矩计算。
 - 法向外环 `begin_tracking`／`step_tracking`：PID、一阶 LADRC、直接力矩、二阶 LADRC 路径，

@@ -1,0 +1,60 @@
+# 统一自适应低载荷试运行配置；尚未完成真实设备验收。
+# 每侧恰好九点，直接使用采集层的局部 Fx、Fy、正压缩 Fz。
+# 实际左右编号、法向符号、九点行列顺序和装配坐标仍需标定；
+# 风险与摩擦只做旁路诊断，完成独立验收后才可同时开放权限和验收门禁。
+metadata:
+  task_name: unified-adaptive
+  object_name: low-load-object
+hardware:
+  dm_port: /dev/dmj4310_can
+  tactile_port: /dev/papillarray
+timing:
+  control_rate_hz: 250
+  max_control_gap_s: 0.1
+  tactile_timeout_s: 0.1
+lifecycle:
+  verify_zero_force: true
+  contact_on_n: 0.2
+  contact_off_n: 0.1
+  lost_contact_action: fault
+  preload_stable_time_s: 2.0
+  preload_timeout_s: 30.0
+  on_finished: hold
+reference:
+  adaptive:
+    initial_force_n: 0.5
+    duration_s: 20.0
+    max_force_rate_n_s: 0.5
+    risk_validation_passed: false
+    friction_validation_passed: false
+    unified:
+      risk_enabled: false
+      friction_update_enabled: false
+      load:
+        left_friction: 0.6
+        right_friction: 0.6
+        safety_factor: 1.5
+        min_force_n: 0.5
+        max_force_n: 1.5
+        max_force_rate_n_s: 0.5
+      observer:
+        # 量程为初始配置，必须按实际传感器验证。
+        tangential_range_n: 4.0
+        normal_range_n: 15.0
+      tracking_error_n: 0.3
+      failure_timeout_s: 0.5
+      max_sample_gap_s: 0.1
+controller:
+  kind: admittance
+  admittance:
+    force_deadband_n: 0.1
+    prevent_unloading: true
+  stiffness_consumption: none
+safety:
+  max_target_force_n: 1.5
+  force_ceiling_n: 2.0
+output:
+  root: outputs/real
+  plots: true
+terminal:
+  mode: auto

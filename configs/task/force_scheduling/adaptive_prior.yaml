@@ -1,0 +1,29 @@
+# @package task
+family: force_scheduling
+path: configs/task/force_scheduling/adaptive_prior.yaml
+definition:
+  schema_version: 1
+  name: adaptive_prior
+  cube_mass_kg: 0.05
+  friction_coefficient: 0.8
+  object_material: hard
+  # 先验显式独立于场景摩擦；只用于仿真初步验证。
+  adaptive_prior:
+    left_friction: 0.6
+    right_friction: 0.6
+    gap_gain_per_s: 8.0
+    load_rate_gain: 1.0
+    filter_tau_s: 0.05
+  scheduler:
+    safety_factor: 1.5
+    min_force_n: 0.5
+    max_force_n: 8.0
+    max_force_rate_n_s: 1.0
+  downward_load:
+    interpolation: linear
+    waypoints:
+      - {t_s: 0.0, force_n: 0.0}
+      - {t_s: 1.0, force_n: 0.0}
+      - {t_s: 5.0, force_n: 2.0}
+      - {t_s: 7.0, force_n: 2.0}
+  control_period_s: 0.004

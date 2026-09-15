@@ -1,0 +1,14 @@
+# @package _global_
+defaults:
+  - override /platform: dm_gripper/simulation
+  - override /model: dm_gripper/height_spheres
+  - override /controller: dm_gripper/admittance_unified
+  - override /estimator: none
+  - override /task: force_scheduling/adaptive_prior
+  - override /material: hard
+  - override /execution: run
+  - _self_
+
+experiment:
+  name: dm_adaptive_prior
+  kind: force_scheduling

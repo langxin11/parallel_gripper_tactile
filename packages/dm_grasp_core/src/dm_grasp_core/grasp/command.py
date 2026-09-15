@@ -158,6 +158,7 @@ def step_admittance(
     dt_s: float,
     force_deadband_n: float = 0.0,
     prevent_unloading: bool = False,
+    saturation_feedback: bool = False,
 ) -> MITCommand:
     """按平均单侧力误差积分、限制导纳状态并构建 MIT 命令。
 
@@ -165,6 +166,7 @@ def step_admittance(
     调用者负责接触状态、时间步裁剪、目标力上限、复位及设备保护。
     正的虚拟位移始终表示沿闭合方向运动，与电机安装方向无关。启用单向
     保持后，力偏高或导纳惯性不得减小已经建立的虚拟闭合量。
+    启用执行反馈后，命令限幅优先于虚拟单向保持，回投最终可执行状态。
 
     Args:
         admittance: 原地更新的二阶导纳状态。
@@ -179,6 +181,7 @@ def step_admittance(
         dt_s: 积分步长 (s)，本函数不裁剪。
         force_deadband_n: 误差绝对值不超过该值时冻结导纳位置和速度 (N)。
         prevent_unloading: 是否禁止虚拟闭合量在抓握期间减小。
+        saturation_feedback: 是否将最终 MIT 限幅回投至导纳状态，防止虚拟位移积累。
 
     Returns:
         MITCommand: 此步生成的未量化命令。
@@ -195,6 +198,7 @@ def step_admittance(
         or dt_s <= 0.0
         or force_deadband_n < 0.0
         or not isinstance(prevent_unloading, bool)
+        or not isinstance(saturation_feedback, bool)
     ):
         raise ValueError("导纳死区或单向保持配置无效")
     jacobian_m_per_rad = kinematics.closure_jacobian(float(measured_position_rad))
@@ -237,12 +241,14 @@ def step_admittance(
             (kinematics.closure(config.position_max_rad) - reference_closure_m) / closing_direction,
         )
     )
+    requested_displacement_m = displacement_m
+    requested_velocity_m_s = velocity_m_s
     displacement_m, velocity_m_s = admittance.limit_state(
         position_bounds_m[0],
         position_bounds_m[1],
         maximum_velocity_m_s,
     )
-    return build_mit_command(
+    command = build_mit_command(
         kinematics,
         config,
         reference_position_rad=reference_position_rad,
@@ -252,3 +258,30 @@ def step_admittance(
         measured_velocity_rad_s=measured_velocity_rad_s,
         feedforward_force_n=target_force_n,
     )
+    if saturation_feedback:
+        requested_position_rad = kinematics.position_for_closure(
+            reference_closure_m + closing_direction * displacement_m,
+            config.position_min_rad,
+            config.position_max_rad,
+        )
+        requested_velocity_rad_s = (
+            closing_direction * velocity_m_s / kinematics.closure_jacobian(requested_position_rad)
+        )
+        admittance.execution_limited = (
+            displacement_m != requested_displacement_m
+            or velocity_m_s != requested_velocity_m_s
+            or abs(requested_velocity_m_s) >= maximum_velocity_m_s
+            or not math.isclose(command.position_rad, requested_position_rad, abs_tol=1e-12)
+            or not math.isclose(command.velocity_rad_s, requested_velocity_rad_s, abs_tol=1e-12)
+        )
+        if admittance.execution_limited:
+            # 限幅回投可以撤销不可执行的闭合请求，不属于主动反向卸载。
+            admittance.displacement_m = (
+                kinematics.closure(command.position_rad) - reference_closure_m
+            ) / closing_direction
+            admittance.velocity_m_s = (
+                command.velocity_rad_s
+                * kinematics.closure_jacobian(command.position_rad)
+                / closing_direction
+            )
+    return command

@@ -19,6 +19,7 @@ from dmgripper_hardware import DEFAULT_USB2CAN_PORT, make_dm4310p_gripper_config
 from papillarray_hardware import DEFAULT_PAPILLARRAY_PORT
 
 from dm_grasp_core import ForceInterpolation
+from dm_grasp_core.grasp.unified import UnifiedAdaptiveConfig
 
 ControllerKind = Literal["admittance", "pid", "adrc"]
 StiffnessConsumption = Literal["none", "feedforward"]
@@ -365,8 +366,8 @@ class CurveReferenceConfig:
 class AdaptiveReferenceConfig:
     """根据触觉反馈动态增力的目标来源。
 
-    复用共享核 ``TactileDisturbancePolicy``；第一版只暴露真机 cup 已
-    验证的 ``shear_increase`` 检测器与 ``dynamic_step`` 策略。
+    默认复用 ``TactileDisturbancePolicy`` 的 ``shear_increase`` 与
+    ``dynamic_step``；显式提供 unified 时切换为九点统一策略。
 
     Attributes:
         initial_force_n: 初始抓力（preload 目标与策略基线初值）。
@@ -375,6 +376,9 @@ class AdaptiveReferenceConfig:
         filter_tau_s: 切向力滤波时间常数。
         shear_threshold_n: 触发阈值。
         shear_gain: 切向增量到目标包络的增益。
+        unified: 可选统一策略；省略时保持既有切向增力行为。
+        risk_validation_passed: 局部风险真机验收是否通过；仅开放风险闭环时要求。
+        friction_validation_passed: 摩擦更新真机验收是否通过；仅开放摩擦闭环时要求。
     """
 
     initial_force_n: float = 0.5
@@ -383,13 +387,32 @@ class AdaptiveReferenceConfig:
     filter_tau_s: float = 0.05
     shear_threshold_n: float = 0.06
     shear_gain: float = 1.0
+    unified: UnifiedAdaptiveConfig | None = None
+    risk_validation_passed: bool = False
+    friction_validation_passed: bool = False
 
     def __post_init__(self) -> None:
         """验证动态增力参数。"""
         for item in fields(self):
+            if item.name in {"unified", "risk_validation_passed", "friction_validation_passed"}:
+                continue
             _finite_number(
                 getattr(self, item.name), f"reference.adaptive.{item.name}", positive=True
             )
+        for value in (self.risk_validation_passed, self.friction_validation_passed):
+            if not isinstance(value, bool):
+                raise ValueError("风险与摩擦验收门禁必须为布尔值")
+        if self.unified is not None:
+            if not isinstance(self.unified, UnifiedAdaptiveConfig):
+                raise ValueError("unified 必须是 UnifiedAdaptiveConfig")
+            if self.unified.load.min_force_n != self.initial_force_n:
+                raise ValueError("unified 最低力必须等于 initial_force_n")
+            if self.unified.load.max_force_rate_n_s != self.max_force_rate_n_s:
+                raise ValueError("unified 与 adaptive 的最大增力速率必须一致")
+            if self.unified.risk_enabled and not self.risk_validation_passed:
+                raise ValueError("风险闭环需要 risk_validation_passed 验收门禁")
+            if self.unified.friction_update_enabled and not self.friction_validation_passed:
+                raise ValueError("摩擦闭环需要 friction_validation_passed 验收门禁")
 
 
 @dataclass(frozen=True, slots=True)
@@ -742,6 +765,10 @@ class ExperimentConfig:
             raise ValueError("初始目标力不得小于 lifecycle.contact_on_n")
         if safety.max_target_force_n >= safety.force_ceiling_n:
             raise ValueError("safety.max_target_force_n 必须严格小于 force_ceiling_n")
+        if self.unified_adaptive_enabled:
+            unified = self.reference.adaptive.unified
+            if unified.load.max_force_n != safety.max_target_force_n:
+                raise ValueError("unified 最大目标力必须等于 safety.max_target_force_n")
         if self.reference.curve is not None:
             curve = self.reference.curve
             peak = max(waypoint.force_n for waypoint in curve.waypoints)
@@ -759,6 +786,8 @@ class ExperimentConfig:
     def _validate_controller_compatibility(self) -> None:
         """校验控制器、目标来源与失接触处理的组合约束。"""
         adaptive = self.reference.adaptive is not None
+        if self.unified_adaptive_enabled and self.controller.kind != "admittance":
+            raise ValueError("统一自适应模式只支持导纳控制器")
         if adaptive and self.lifecycle.lost_contact_action == "reapproach":
             raise ValueError("动态增力模式只接受失接触 fault；重接近的基线语义尚未定义")
         if self.controller.stiffness_consumption == "feedforward":
@@ -766,6 +795,11 @@ class ExperimentConfig:
                 raise ValueError("导纳路径不消费刚度前馈；请将 stiffness_consumption 设为 none")
             if not self.estimation.enabled:
                 raise ValueError("刚度前馈消费要求 estimation.enabled 为真")
+
+    @property
+    def unified_adaptive_enabled(self) -> bool:
+        """返回是否选择了逐触点统一自适应模式。"""
+        return self.reference.adaptive is not None and self.reference.adaptive.unified is not None
 
 
 _ROOT_SCHEMA: dict[str, type[Any]] = {

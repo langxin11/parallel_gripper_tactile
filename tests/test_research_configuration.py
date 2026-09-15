@@ -250,6 +250,10 @@ def test_remaining_task_groups_match_frozen_domain_values(
     family = legacy_task.split("/")[1]
     expected = snapshot["tasks"][family][legacy_task]["effective"]
 
+    if family == "force_scheduling":
+        # 新增可选先验策略默认为关闭，其余字段仍逐项核对冻结证据。
+        expected = {**expected, "adaptive_prior": None, "unified_adaptive": None}
+
     assert resolved.task.model_dump(mode="json") == expected
 
 

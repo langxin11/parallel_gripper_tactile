@@ -1,0 +1,12 @@
+# @package _global_
+defaults:
+  - /experiment/dm_gripper/unified_step_load
+  - _self_
+
+experiment:
+  name: dm_unified_step_load_fast
+controller:
+  admittance:
+    # 仅供仿真瞬态诊断；尚未通过 2 mm 滑移验收，不替换基线或真机参数。
+    velocity_limit_rad_s: 0.20
+    feedforward_ratio: 1.0

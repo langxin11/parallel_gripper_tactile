@@ -299,6 +299,68 @@ def test_step_admittance_deadband_still_validates_time_step() -> None:
         )
 
 
+@pytest.mark.parametrize("direction", [-1, 1])
+@pytest.mark.parametrize("holding_force_n", [10.0, 11.0])
+def test_saturation_feedback_bounds_state_and_recovers_without_jump(
+    direction: int, holding_force_n: float
+) -> None:
+    """持续饱和不积累位移，死区和单向保持均服从限幅且恢复时不跳变。"""
+    cfg = replace(
+        C, closing_direction=direction, kd=0.0, feedforward_ratio=0.0, torque_limit_nm=0.02
+    )
+    corrected = SecondOrderAdmittance(0.8, 40.0, 0.0)
+    legacy = SecondOrderAdmittance(0.8, 40.0, 0.0)
+    inputs = dict(
+        reference_position_rad=0.3,
+        measured_position_rad=0.3,
+        measured_velocity_rad_s=0.0,
+        left_force_n=0.0,
+        right_force_n=0.0,
+        target_force_n=10.0,
+        dt_s=0.002,
+        force_deadband_n=0.1,
+        prevent_unloading=True,
+    )
+    for _ in range(200):
+        limited = step_admittance(corrected, K, cfg, saturation_feedback=True, **inputs)
+        step_admittance(legacy, K, cfg, **inputs)
+    assert corrected.execution_limited
+    assert not legacy.execution_limited
+    assert limited.position_rad == pytest.approx(0.3 + direction * 0.02 / cfg.kp)
+    assert corrected.displacement_m == pytest.approx(
+        (K.closure(limited.position_rad) - K.closure(0.3)) / direction
+    )
+    assert legacy.displacement_m > 10 * corrected.displacement_m
+
+    inputs.update(left_force_n=holding_force_n, right_force_n=holding_force_n)
+    held = step_admittance(
+        corrected, K, replace(cfg, torque_limit_nm=0.01), saturation_feedback=True, **inputs
+    )
+    assert corrected.execution_limited
+    assert corrected.deadband_active == (holding_force_n == 10.0)
+    assert corrected.unloading_blocked == (holding_force_n == 11.0)
+    assert corrected.velocity_m_s == held.velocity_rad_s == 0.0
+    recovered = step_admittance(
+        corrected, K, replace(cfg, torque_limit_nm=100.0), saturation_feedback=True, **inputs
+    )
+    assert recovered.position_rad == pytest.approx(held.position_rad, abs=1e-12)
+    assert recovered.velocity_rad_s == 0.0
+    assert not corrected.execution_limited
+    held_displacement_m = corrected.displacement_m
+    inputs.update(left_force_n=0.0, right_force_n=0.0)
+    step_admittance(
+        corrected, K, replace(cfg, torque_limit_nm=100.0), saturation_feedback=True, **inputs
+    )
+    assert (
+        0.0
+        < corrected.displacement_m - held_displacement_m
+        <= (cfg.velocity_limit_rad_s * K.closure_jacobian(0.3) * inputs["dt_s"] + 1e-14)
+    )
+    corrected.execution_limited = True
+    corrected.reset()
+    assert not corrected.execution_limited
+
+
 def test_state_saturation():
     """验证 state saturation。"""
     a = SecondOrderAdmittance(1.0, 0.0, 0.0, 10.0, 10.0)

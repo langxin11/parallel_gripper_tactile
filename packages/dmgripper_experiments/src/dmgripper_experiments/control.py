@@ -335,6 +335,7 @@ class GripController:
             dt_s=dt,
             force_deadband_n=grip.force_deadband_n,
             prevent_unloading=grip.prevent_unloading,
+            saturation_feedback=self._config.unified_adaptive_enabled,
         )
         self._inner.previous_target = command.position_rad
         return TrackingStep(

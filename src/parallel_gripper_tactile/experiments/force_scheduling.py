@@ -1,9 +1,9 @@
-"""依据已知摩擦系数调度抓取目标力的仿真实验。"""
+"""Oracle 与固定摩擦先验自适应目标力调度的仿真实验。"""
 
 from __future__ import annotations
 
 import csv
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 from pathlib import Path
 from typing import Annotated, Literal
@@ -12,8 +12,11 @@ import mujoco
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, ValidationError, model_validator
 import yaml
+from dm_grasp_core.grasp.adaptive import AdaptiveLoadConfig, AdaptiveLoadScheduler
+from dm_grasp_core.grasp.unified import UnifiedAdaptiveConfig, UnifiedAdaptivePolicy
 
 from ..control import ForceControlObservation, ForceControlReference, NormalForceController
+from ..dm_admittance import DMAdmittanceController
 from ..force_scheduling import OracleTargetForceScheduler, TargetForceSchedulerConfig
 from ..visualization import (
     FULL_WIDTH_FONT_SCALE,
@@ -142,6 +145,16 @@ class ForceSchedulingMetricsConfig(_TaskModel):
     force_rmse_threshold_n: Annotated[FiniteFloat, Field(gt=0)] = 0.5
 
 
+class AdaptivePriorTaskConfig(_TaskModel):
+    """独立于场景真值的摩擦先验与连续增力参数。"""
+
+    left_friction: Annotated[FiniteFloat, Field(gt=0)] = 0.6
+    right_friction: Annotated[FiniteFloat, Field(gt=0)] = 0.6
+    gap_gain_per_s: Annotated[FiniteFloat, Field(gt=0)] = 8.0
+    load_rate_gain: Annotated[FiniteFloat, Field(ge=0)] = 1.0
+    filter_tau_s: Annotated[FiniteFloat, Field(gt=0)] = 0.05
+
+
 class ForceSchedulingSolverConfig(_TaskModel):
     """长时准静态抓取使用的 MuJoCo 摩擦求解设置。"""
 
@@ -149,7 +162,7 @@ class ForceSchedulingSolverConfig(_TaskModel):
 
 
 class ForceSchedulingTask(_TaskModel):
-    """一个已知摩擦系数的目标力调度仿真任务。"""
+    """目标力调度任务；提供 adaptive_prior 时仅由触觉生成承载需求。"""
 
     schema_version: Literal[1]
     name: Annotated[str, Field(min_length=1)]
@@ -158,10 +171,19 @@ class ForceSchedulingTask(_TaskModel):
     object_material: ObjectMaterial = "hard"
     approach: ForceSchedulingApproach = ForceSchedulingApproach()
     scheduler: OracleSchedulerTaskConfig = OracleSchedulerTaskConfig()
+    adaptive_prior: AdaptivePriorTaskConfig | None = None
+    unified_adaptive: UnifiedAdaptiveConfig | None = None
     downward_load: DownwardLoadReference
     metrics: ForceSchedulingMetricsConfig = ForceSchedulingMetricsConfig()
     solver: ForceSchedulingSolverConfig = ForceSchedulingSolverConfig()
     control_period_s: Annotated[FiniteFloat, Field(gt=0)] = 0.002
+
+    @model_validator(mode="after")
+    def validate_adaptive_modes(self) -> "ForceSchedulingTask":
+        """显式策略只能选一种，避免两个状态机同时拥有目标。"""
+        if self.adaptive_prior is not None and self.unified_adaptive is not None:
+            raise ValueError("adaptive_prior 与 unified_adaptive 互斥")
+        return self
 
     @classmethod
     def load(cls, path: str | Path) -> "ForceSchedulingTask":
@@ -205,11 +227,19 @@ class ForceSchedulingResult:
     simulation_stable: bool
     slip_passed: bool
     force_tracking_passed: bool
+    capacity_limited: bool = False
+    failure_reason: str | None = None
 
     @property
     def passed(self) -> bool:
         """是否同时满足稳定性、滑移和力跟踪验收。"""
-        return self.simulation_stable and self.slip_passed and self.force_tracking_passed
+        return (
+            self.simulation_stable
+            and self.slip_passed
+            and self.force_tracking_passed
+            and not self.capacity_limited
+            and self.failure_reason is None
+        )
 
 
 def _tangential_displacement(position: np.ndarray, reference: np.ndarray) -> float:
@@ -217,84 +247,94 @@ def _tangential_displacement(position: np.ndarray, reference: np.ndarray) -> flo
     return float(np.linalg.norm(position[1:3] - reference[1:3]))
 
 
-def _has_fixed_load_offset(demand: np.ndarray, added_load: np.ndarray) -> bool:
-    """判断需求与外载是否只相差数值舍入量级的固定基线。"""
-    return np.allclose(demand - added_load, (demand - added_load)[0], rtol=1e-10, atol=1e-12)
-
-
-def _should_show_load_panel(demand: np.ndarray, added_load: np.ndarray) -> bool:
-    """仅在载荷变化或两条曲线独立时保留载荷面板。"""
-    fixed_offset = _has_fixed_load_offset(demand, added_load)
-    varying_load = not np.allclose(demand, demand[0], rtol=1e-10, atol=1e-12)
-    return varying_load or not fixed_offset
-
-
 def _plot_force_scheduling(
     path: Path, rows: list[dict[str, float | str]], *, task: ForceSchedulingTask
 ) -> None:
-    """绘制载荷、目标力、摩擦裕量和物体滑移诊断图。"""
+    """分开标记控制观测与真值参考；不把承载缺口画成测得的力。"""
     scenario_rows = [row for row in rows if row["phase"] == "schedule_load"]
     if not scenario_rows:
         raise ValueError("cannot plot an empty force scheduling trace")
     plt = science_pyplot(font_scale=FULL_WIDTH_FONT_SCALE)
     rows = scenario_rows
     times = np.asarray([float(row["scenario_time_s"]) for row in rows])
-    demand = np.asarray([float(row["tangential_demand_n"]) for row in rows])
-    added_load = np.asarray([float(row["additional_downward_force_n"]) for row in rows])
-    fixed_offset = _has_fixed_load_offset(demand, added_load)
-    show_load_panel = _should_show_load_panel(demand, added_load)
     figure, axes = plt.subplots(
-        4 if show_load_panel else 3,
+        3,
         1,
-        figsize=paper_figsize(7.8 if show_load_panel else 6.2),
+        figsize=paper_figsize(6.2),
         sharex=True,
         constrained_layout=True,
     )
-    axis_offset = 1 if show_load_panel else 0
-    if show_load_panel:
-        axes[0].plot(times, demand, label="Demand")
-        if fixed_offset:
-            axes[0].set_title(
-                f"Demand = added load + {float((demand - added_load)[0]):.3g} N",
-                fontsize=8,
-            )
-        else:
-            axes[0].plot(times, added_load, label="Added load")
-        axes[0].set_ylabel("Load (N)")
-        axes[0].legend()
+    axes[0].plot(
+        times,
+        [float(row["scheduled_target_force_n"]) for row in rows],
+        color="0.15",
+        linestyle="--",
+        label=r"$F_d$ (target)",
+    )
+    axes[0].plot(
+        times,
+        [float(row["filtered_normal_force_n"]) for row in rows],
+        color="#0072B2",
+        linestyle="-",
+        label=r"$F_n$ (tactile, filtered)",
+    )
+    axes[0].set_title("(a) Mean-side grip-force tracking", loc="left", fontsize=9)
+    axes[0].set_ylabel(r"$F_d,\ F_n$ (N)")
+    axes[0].legend(loc="upper right", fontsize=8)
 
-    axes[axis_offset].plot(
-        times, [float(row["scheduled_target_force_n"]) for row in rows], label="Target"
-    )
-    axes[axis_offset].plot(
-        times, [float(row["filtered_normal_force_n"]) for row in rows], label="Measured"
-    )
-    axes[axis_offset].set_ylabel("Mean-side\nforce (N)")
-    axes[axis_offset].legend()
-    if not show_load_panel:
-        axes[axis_offset].set_title(
-            f"Demand = {demand[0]:.3g} N; added load = {added_load[0]:.3g} N",
-            fontsize=8,
+    # 旧轨迹没有逐侧实测切向合力，不从真值余量反推或伪造观测。
+    measured_keys = ("measured_left_tangential_n", "measured_right_tangential_n")
+    if all(all(key in row for key in measured_keys) for row in rows):
+        axes[1].plot(
+            times,
+            [sum(float(row[key]) for key in measured_keys) for row in rows],
+            color="#0072B2",
+            linestyle="-",
+            label=r"$T$ (tactile)",
         )
+    axes[1].plot(
+        times,
+        [float(row["tangential_demand_n"]) for row in rows],
+        color="0.15",
+        linestyle="--",
+        label=r"$D^{\mathrm{gt}}$ (true load)",
+    )
+    axes[1].plot(
+        times,
+        [float(row["available_friction_n"]) for row in rows],
+        color="#D55E00",
+        linestyle=":",
+        label=r"$C^{\mathrm{gt}}$ (true capacity)",
+    )
+    axes[1].set_title("(b) Tactile load and ground-truth references", loc="left", fontsize=9)
+    axes[1].set_ylabel("Tangential force (N)")
+    axes[1].legend(loc="upper right", fontsize=8)
 
-    axes[axis_offset + 1].plot(times, [float(row["friction_margin_n"]) for row in rows])
-    axes[axis_offset + 1].axhline(0.0, color="0.45", linewidth=0.7)
-    axes[axis_offset + 1].set_ylabel("Friction\nmargin (N)")
-
-    axes[axis_offset + 2].plot(
+    axes[2].plot(
         times,
         [1000.0 * float(row["tangential_displacement_m"]) for row in rows],
+        color="#0072B2",
+        linestyle="-",
+        label=r"$d_t^{\mathrm{gt}}$ (object displacement)",
     )
-    axes[axis_offset + 2].axhline(
+    axes[2].axhline(
         1000.0 * float(task.metrics.slip_threshold_m),
-        color="tab:red",
+        color="0.35",
         linestyle="--",
         linewidth=0.8,
+        label=r"$d_{\mathrm{lim}}$ (acceptance limit)",
     )
-    axes[axis_offset + 2].set_ylabel("Slip (mm)")
-    axes[axis_offset + 2].set_xlabel("Scenario time (s)")
+    axes[2].set_title("(c) Independent displacement evaluation", loc="left", fontsize=9)
+    axes[2].set_ylabel(r"$d_t^{\mathrm{gt}}$ (mm)")
+    axes[2].set_xlabel(r"Time since support removal $t$ (s)")
+    axes[2].legend(loc="lower right", fontsize=8)
+    for axis in axes:
+        axis.axvline(0, color="0.55", linestyle=":", linewidth=0.7)
+        axis.set_xlim(left=0, right=float(times[-1]))
     path.parent.mkdir(parents=True, exist_ok=True)
     save_publication_figure(figure, path)
+    if path.suffix.lower() != ".pdf":
+        save_publication_figure(figure, path.with_suffix(".pdf"))
     plt.close(figure)
 
 
@@ -305,7 +345,7 @@ def run_force_scheduling(
     output_csv: Path | None = None,
     output_plot: Path | None = None,
 ) -> ForceSchedulingResult:
-    """运行已知摩擦系数的目标力调度抓取实验。"""
+    """在共用载荷场景中运行 Oracle 或固定先验自适应调度。"""
     profile = (
         validate_resolved_profile(profile_path)
         if isinstance(profile_path, GripperProfile)
@@ -329,8 +369,48 @@ def run_force_scheduling(
     data = mujoco.MjData(model)
     control_timer = SimulationTimer(float(task.control_period_s), float(data.time))
     reader = _prefixed_reader(model, profile)
-    controller = NormalForceController.from_profile(model, profile, name_prefix=GRIPPER_PREFIX)
+    controller_type = (
+        DMAdmittanceController
+        if profile.normal_force.admittance is not None
+        else NormalForceController
+    )
+    if task.unified_adaptive is not None and controller_type is not DMAdmittanceController:
+        force = profile.normal_force
+        if (
+            force.adrc is not None
+            or force.torque_adrc is not None
+            or force.stiffness_rate is not None
+            or force.torque_feedback_gain
+        ):
+            raise ValueError("统一自适应仿真只支持导纳或位置式 PID")
+    controller = controller_type.from_profile(
+        model,
+        profile,
+        name_prefix=GRIPPER_PREFIX,
+        **(
+            {"saturation_feedback": True}
+            if task.unified_adaptive is not None and controller_type is DMAdmittanceController
+            else {}
+        ),
+    )
     scheduler = OracleTargetForceScheduler(task.scheduler.to_runtime_config())
+    adaptive = (
+        None
+        if task.adaptive_prior is None
+        else AdaptiveLoadScheduler(
+            AdaptiveLoadConfig(
+                **task.adaptive_prior.model_dump(),
+                safety_factor=task.scheduler.safety_factor,
+                min_force_n=task.scheduler.min_force_n,
+                max_force_n=task.scheduler.max_force_n,
+                max_force_rate_n_s=task.scheduler.max_force_rate_n_s,
+            )
+        )
+    )
+    unified = (
+        None if task.unified_adaptive is None else UnifiedAdaptivePolicy(task.unified_adaptive)
+    )
+    adaptive_diagnostics: dict[str, object] = {}
     noise_rng = np.random.default_rng(int(profile.normal_force.sensor_noise_seed))
     support_id = model.geom(SUPPORT_GEOM_NAME).id
     cube_body_id = model.body(CUBE_BODY_NAME).id
@@ -346,6 +426,7 @@ def run_force_scheduling(
     scenario_start_time_s: float | None = None
     release_position: np.ndarray | None = None
     force_command = None
+    execution_limited = False
     schedule_command = None
     simulation_stable = True
     rows: list[dict[str, float | str]] = []
@@ -390,11 +471,46 @@ def run_force_scheduling(
                 rng=noise_rng,
             )
             measured_capacity = measurement.normal_capacity
-            schedule_command = scheduler.update(
-                tangential_demand_n=tangential_demand_n,
-                friction_coefficient=float(task.friction_coefficient),
-                dt=control_dt,
-            )
+            if unified is not None:
+                unified_command = unified.update(
+                    measurement.left.reshape(3, -1).T,
+                    measurement.right.reshape(3, -1).T,
+                    time_s=time_s,
+                    measured_force_n=0.5 * measured_capacity.normal_force_n,
+                    execution_limited=execution_limited,
+                    enabled=scenario_start_time_s is not None,
+                )
+                schedule_command = unified_command.load
+                adaptive_diagnostics = {
+                    "scheduler_kind": "unified_adaptive",
+                    "capacity_limited": schedule_command.capacity_limited,
+                    **unified_command.trace_fields(),
+                }
+            elif adaptive is not None:
+                # 承载仅从触觉测量产生；场景真值继续供物理施加载荷与离线评分。
+                schedule_command = adaptive.update(
+                    left_tangential_n=float(np.linalg.norm(measurement.left_force[:2])),
+                    right_tangential_n=float(np.linalg.norm(measurement.right_force[:2])),
+                    dt=control_dt,
+                )
+                adaptive_diagnostics = {
+                    "scheduler_kind": "adaptive_prior",
+                    "measured_left_tangential_n": float(np.linalg.norm(measurement.left_force[:2])),
+                    "measured_right_tangential_n": float(
+                        np.linalg.norm(measurement.right_force[:2])
+                    ),
+                    "measured_tangential_force_n": schedule_command.measured_tangential_force_n,
+                    "estimated_load_rate_n_s": schedule_command.load_rate_n_s,
+                    "load_target_force_n": schedule_command.load_force_n,
+                    "schedule_gap_n": schedule_command.schedule_gap_n,
+                    "capacity_limited": schedule_command.capacity_limited,
+                }
+            else:
+                schedule_command = scheduler.update(
+                    tangential_demand_n=tangential_demand_n,
+                    friction_coefficient=float(task.friction_coefficient),
+                    dt=control_dt,
+                )
             force_command = controller.step(
                 data,
                 observation=ForceControlObservation(
@@ -425,6 +541,21 @@ def run_force_scheduling(
 
         if force_command is None or schedule_command is None:
             raise RuntimeError("control timer did not produce an initial command")
+        if isinstance(controller, DMAdmittanceController) or unified is not None:
+            force_command = replace(force_command, mit=controller.apply_held_command(data))
+        if unified is not None:
+            if isinstance(controller, DMAdmittanceController):
+                execution_limited = controller.admittance.execution_limited
+            else:
+                # PID 保留原有积分限幅；上层只消费可观测的位置修正／协议／力矩边界。
+                mit = force_command.mit
+                execution_limited = (
+                    abs(force_command.position_adjustment)
+                    >= profile.normal_force.max_position_adjustment - 1e-9
+                    or abs(mit.torque) >= profile.mit.t_max - 1e-9
+                    or mit.target_position <= profile.mit.p_min + 1e-9
+                    or mit.target_position >= profile.mit.p_max - 1e-9
+                )
         mujoco.mj_step(model, data)
         if (
             data.time <= time_s
@@ -463,6 +594,8 @@ def run_force_scheduling(
                 "additional_downward_force_n": additional_load_n,
                 "additional_downward_force_rate_n_s": additional_load_rate_n_s,
                 "tangential_demand_n": tangential_demand_n,
+                "measured_left_tangential_n": float(np.linalg.norm(measurement.left_force[:2])),
+                "measured_right_tangential_n": float(np.linalg.norm(measurement.right_force[:2])),
                 "raw_target_force_n": schedule_command.raw_target_force_n,
                 "scheduled_target_force_n": schedule_command.target_force_n,
                 "scheduled_target_force_rate_n_s": schedule_command.target_force_rate_n_s,
@@ -482,6 +615,12 @@ def run_force_scheduling(
                 "cube_vy": float(data.qvel[cube_dof + 1]),
                 "cube_vz": float(data.qvel[cube_dof + 2]),
                 "motor_torque_n_m": force_command.mit.torque,
+                "motor_position_rad": force_command.mit.position,
+                "motor_velocity_rad_s": force_command.mit.velocity,
+                "requested_position_rad": force_command.mit.target_position,
+                "force_feedforward_torque_n_m": force_command.force_feedforward_torque,
+                "execution_limited": execution_limited,
+                **adaptive_diagnostics,
             }
         )
 
@@ -523,6 +662,14 @@ def run_force_scheduling(
         maximum_ratio = math.nan
         rate_ratio = math.nan
 
+    if (adaptive is not None or unified is not None) and scenario_rows:
+        # 初步自适应验收包含撤支撑后的全部位移，不忽略启动恢复期间的滑移。
+        maximum_displacement = max(
+            float(row["tangential_displacement_m"])
+            for row in rows
+            if row["phase"] == "schedule_load"
+        )
+
     if rows and output_csv is not None:
         output_csv.parent.mkdir(parents=True, exist_ok=True)
         with output_csv.open("w", newline="", encoding="utf-8") as stream:
@@ -554,6 +701,10 @@ def run_force_scheduling(
         simulation_stable=simulation_stable,
         slip_passed=maximum_displacement <= float(task.metrics.slip_threshold_m),
         force_tracking_passed=force_rmse <= float(task.metrics.force_rmse_threshold_n),
+        capacity_limited=any(bool(row.get("capacity_limited", False)) for row in rows),
+        failure_reason=None
+        if unified is None or unified.latest is None
+        else unified.latest.failure_reason,
     )
 
 

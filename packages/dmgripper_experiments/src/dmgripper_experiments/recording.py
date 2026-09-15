@@ -61,10 +61,31 @@ TRACE_FIELDS = (
     "control_dt_s",
     "tactile_age_s",
     "command_latency_s",
+    "adaptive_risk",
+    "adaptive_event_id",
+    "adaptive_increase_count",
+    "adaptive_risk_budget_exhausted",
+    "adaptive_left_mu",
+    "adaptive_right_mu",
+    "adaptive_left_candidate",
+    "adaptive_right_candidate",
+    "adaptive_left_quality",
+    "adaptive_right_quality",
+    "adaptive_left_update_reason",
+    "adaptive_right_update_reason",
+    "adaptive_observation_reason",
+    "adaptive_left_valid_mask",
+    "adaptive_right_valid_mask",
+    "adaptive_load_target_n",
+    "adaptive_schedule_gap_n",
+    "adaptive_track_error_n",
+    "adaptive_capacity_limited",
+    "adaptive_execution_limited",
+    "adaptive_failure_reason",
 )
 
 SCHEMA_NAME = "dmgripper-experiment/v1"
-RECORDER_VERSION = "1.1.0"
+RECORDER_VERSION = "1.2.0"
 
 
 def create_run_directory(root: Path | str, config: ExperimentConfig) -> Path:

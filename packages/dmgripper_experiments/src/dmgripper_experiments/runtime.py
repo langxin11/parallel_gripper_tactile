@@ -400,7 +400,7 @@ def _run_ready_and_enabled(
     )
     period = 1.0 / config.timing.control_rate_hz
     while True:
-        _validate_snapshot(tactile.latest(), clock(), config)
+        _validate_snapshot(_latest_snapshot(tactile, config), clock(), config)
         action = action_source()
         if action == "release":
             lifecycle.cancel_before_enable(clock())
@@ -500,7 +500,7 @@ def _run_control_loop(
     lifecycle: Lifecycle,
     feedback,
 ) -> dict[str, object]:
-    """运行使能后状态机，并把实验级故障收敛到 DM-only 故障保持。"""
+    """运行使能后状态机；统一模式的故障保持额外要求触觉健康。"""
     feedback_state = [feedback]
     try:
         emit(
@@ -528,7 +528,9 @@ def _run_control_loop(
             feedback,
             feedback_state,
         )
-    except FatalHardwareFault:
+    except FatalHardwareFault as error:
+        if error.phase is None:
+            error.phase = lifecycle.phase.value
         raise
     except KeyboardInterrupt:
         raise
@@ -545,6 +547,11 @@ def _run_control_loop(
             lifecycle,
             feedback_state[0],
             error,
+            tactile_health_check=(
+                lambda: _validate_snapshot(_latest_snapshot(tactile, config), clock(), config)
+            )
+            if config.unified_adaptive_enabled
+            else None,
         )
 
 
@@ -616,6 +623,7 @@ def _run_control_loop_inner(
     reapproach_total_s = 0.0
     current_target: ForceTarget | None = None
     latest_stiffness: StiffnessSnapshot | None = None
+    last_observation_signature: tuple[object, ...] | None = None
 
     def fail(reason: str) -> NoReturn:
         """把实验级故障交给外层故障保持状态机。"""
@@ -718,15 +726,22 @@ def _run_control_loop_inner(
             last_control = now
             sleep(max(0.0, period - (clock() - now)))
             continue
-        sample = tactile.latest()
+        sample = _latest_snapshot(tactile, config)
         axes = _validate_snapshot(sample, now, config)
-        paired = pair_observation(
-            snapshot=sample,
-            feedback=feedback,
-            previous=last_sample,
-            now_s=now,
-            kinematics=kinematics,
-        )
+        try:
+            paired = pair_observation(
+                snapshot=sample,
+                feedback=feedback,
+                previous=last_sample,
+                now_s=now,
+                kinematics=kinematics,
+            )
+        except Exception as error:
+            if config.unified_adaptive_enabled:
+                raise FatalHardwareFault(
+                    f"统一策略触觉配对失败：{error}", phase=lifecycle.phase.value
+                ) from error
+            raise
         try:
             action = action_source()
         except KeyboardInterrupt:
@@ -855,7 +870,38 @@ def _run_control_loop_inner(
                     if last_sample is None
                     else sample.received_at_s - last_sample.received_at_s
                 )
-                target_source.observe(paired, policy_dt)
+                try:
+                    target_source.observe(paired, policy_dt)
+                except ValueError as error:
+                    if config.unified_adaptive_enabled:
+                        raise FatalHardwareFault(
+                            f"统一策略观测计算失败：{error}", phase=lifecycle.phase.value
+                        ) from error
+                    raise
+                diagnostics = target_source.trace_fields()
+                signature = tuple(
+                    diagnostics.get(key)
+                    for key in (
+                        "adaptive_observation_reason",
+                        "adaptive_left_update_reason",
+                        "adaptive_right_update_reason",
+                        "adaptive_failure_reason",
+                        "adaptive_capacity_limited",
+                    )
+                )
+                if diagnostics and (
+                    signature != last_observation_signature or diagnostics.get("adaptive_event_id")
+                ):
+                    emit(
+                        {
+                            "event": "adaptive_observation",
+                            "tactile_timestamp_us": sample.timestamp_us,
+                            **diagnostics,
+                        }
+                    )
+                    last_observation_signature = signature
+                if target_source.failure_reason is not None:
+                    fail(f"统一自适应策略失败：{target_source.failure_reason}")
                 latest_stiffness = stiffness.update(
                     position_rad=feedback.position_rad,
                     normal_force_n=paired.measured_force_n,
@@ -1001,6 +1047,7 @@ def _run_control_loop_inner(
                     stiffness_value=stiffness_value,
                 )
             command = controller_step.command
+            target_source.set_execution_limited(controller.admittance.execution_limited)
 
         # 交互输出／存储也可能延迟；发送前再次检查时限和输入新鲜度。
         if clock() - last_control > timing.max_control_gap_s:
@@ -1034,6 +1081,7 @@ def _run_control_loop_inner(
             tactile_age_s=send_started - sample.received_at_s,
             latency=latency,
         )
+        row.update(target_source.trace_fields())
         recorder.write(row)
         if clock() - last_control > timing.max_control_gap_s:
             fail("命令反馈或控制记录超时")
@@ -1101,6 +1149,7 @@ def _run_fault_holding(
     lifecycle: Lifecycle,
     feedback,
     primary_error: BaseException,
+    tactile_health_check: Callable[[], object] | None = None,
 ) -> dict[str, object]:
     """建立并守护故障保持，确保后续异常不能覆盖首个实验故障。"""
     try:
@@ -1116,6 +1165,7 @@ def _run_fault_holding(
             lifecycle,
             feedback,
             primary_error,
+            tactile_health_check,
         )
     except FatalHardwareFault:
         raise
@@ -1168,8 +1218,9 @@ def _run_fault_holding_impl(
     lifecycle: Lifecycle,
     feedback,
     primary_error: BaseException,
+    tactile_health_check: Callable[[], object] | None = None,
 ) -> dict[str, object]:
-    """以 DM-only 循环保持首个故障位置，直到人工释放并回到 home。"""
+    """保持首个故障位置，统一模式持续校验触觉，直到人工释放。"""
     source_phase = lifecycle.phase.value
     kinematics = _KINEMATICS
     base_config = MITCommandConfig(
@@ -1185,6 +1236,21 @@ def _run_fault_holding_impl(
     )
     period = 1.0 / config.timing.control_rate_hz
     secondary_errors: list[str] = []
+
+    def check_tactile_health() -> None:
+        """统一模式仅在触觉反馈健康时允许位置保持。"""
+        if tactile_health_check is None:
+            return
+        try:
+            tactile_health_check()
+        except Exception as error:
+            raise FatalHardwareFault(
+                f"统一策略故障保持期间触觉保护失败：{error}",
+                phase=source_phase,
+                holding_entered=lifecycle.fault_holding_started_s is not None,
+                holding_duration_s=_fault_holding_duration(lifecycle, clock()),
+                primary_error=primary_error,
+            ) from error
 
     def safe_emit(event: dict[str, object]) -> None:
         """记录故障阶段事件；记录通道失败不得夺走电机控制权。"""
@@ -1203,6 +1269,7 @@ def _run_fault_holding_impl(
             secondary_errors.append(f"故障保持事件记录失败：{error}")
 
     try:
+        check_tactile_health()
         hold_command = _hold_command(kinematics, base_config, feedback)
         feedback = dm.hold(hold_command)
     except KeyboardInterrupt as error:
@@ -1244,6 +1311,7 @@ def _run_fault_holding_impl(
     last_control_s = entered_s
     while True:
         now = clock()
+        check_tactile_health()
         if now - last_control_s > config.timing.max_control_gap_s:
             safe_emit(
                 {
@@ -1597,6 +1665,28 @@ def _trace_row(
 def _validate_snapshot(
     snapshot: TactileSnapshot, now_s: float, config: ExperimentConfig
 ) -> tuple[float, ...]:
+    """统一模式把触觉保护失败直接交给失能清理。"""
+    try:
+        return _validate_snapshot_values(snapshot, now_s, config)
+    except Exception as error:
+        if config.unified_adaptive_enabled:
+            raise FatalHardwareFault(f"统一策略触觉保护失败：{error}") from error
+        raise
+
+
+def _latest_snapshot(tactile: TactileWorker, config: ExperimentConfig) -> TactileSnapshot:
+    """统一模式的采集异常不能转入仅依赖电机的故障保持。"""
+    try:
+        return tactile.latest()
+    except Exception as error:
+        if config.unified_adaptive_enabled:
+            raise FatalHardwareFault(f"统一策略触觉采集失败：{error}") from error
+        raise
+
+
+def _validate_snapshot_values(
+    snapshot: TactileSnapshot, now_s: float, config: ExperimentConfig
+) -> tuple[float, ...]:
     """原始力用于保护，滤波法向力用于控制。"""
     values = (snapshot.left_force_n, snapshot.right_force_n, snapshot.received_at_s, now_s)
     if not all(math.isfinite(value) for value in values):
@@ -1611,9 +1701,20 @@ def _validate_snapshot(
     ):
         if not taxels:
             raise RuntimeError(f"{side} 逐 taxel 数据缺失")
+        if config.unified_adaptive_enabled and len(taxels) != 9:
+            raise RuntimeError(f"{side} 统一策略要求恰好九个触点")
         for taxel_index, vector in enumerate(taxels):
             if len(vector) != 3 or not all(math.isfinite(value) for value in vector):
                 raise RuntimeError(f"{side} taxel {taxel_index} 三轴数据结构错误或包含非有限数值")
+            if config.unified_adaptive_enabled:
+                observer = config.reference.adaptive.unified.observer
+                if (
+                    max(abs(vector[0]), abs(vector[1])) >= observer.tangential_range_n
+                    or abs(vector[2]) >= observer.normal_range_n
+                ):
+                    raise RuntimeError(
+                        f"{side} taxel {taxel_index} 达到配置量程，无法继续依赖触觉保持"
+                    )
     if max(abs(axes[2]), abs(axes[5])) > config.safety.force_ceiling_n:
         raise RuntimeError("原始法向力超过保护上限")
     return axes

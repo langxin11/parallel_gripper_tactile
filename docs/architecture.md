@@ -77,6 +77,10 @@ Hydra 拥有调用外层目录和组合来源，`RunDirectory` 拥有单次实�
 ## 共享核与硬件边界
 
 DM 的 PID、ADRC、导纳、刚度估计、运动学、目标曲线与触觉增力由 `dm_grasp_core` 提供纯计算。
+`dm_grasp_core.grasp.adaptive` 提供固定分侧摩擦先验的承载需求与连续单调增力，
+由目标力调度仿真实验适配实测切向力；不读取场景重量、真实摩擦或外加载荷。
+`grasp.unified` 组合 `tactile.risk` 的逐触点观测、分侧摩擦状态和受限目标调度；
+仿真、真机与旁路回放共用计算与诊断字段，运行时仍各自拥有生命周期和故障保护。
 仿真 `control.py`／`dm_admittance.py` 负责配置与执行器适配，真机运行时负责设备生命周期。
 两层控制周期、请求量化和验证边界见[DMgripper 共享控制核](dm-shared-control.md)。
 

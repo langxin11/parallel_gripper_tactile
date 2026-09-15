@@ -37,6 +37,40 @@ def test_default_config_constructs_and_selects_curve():
     assert config.hardware.feedback_position_margin_rad == pytest.approx(0.05)
 
 
+@pytest.mark.parametrize("change", ["risk", "friction", "initial", "rate", "ceiling", "controller"])
+def test_unified_config_loads_and_requires_consistent_limits_and_acceptance(change: str):
+    """低载荷配置可离线解码，权限与执行边界不允许隐式越过。"""
+    from dataclasses import replace
+
+    config = load_experiment_config(
+        Path(__file__).resolve().parents[3] / "configs/hardware/dmgripper/unified_adaptive.yaml"
+    )
+    assert config.unified_adaptive_enabled
+    adaptive = config.reference.adaptive
+    assert adaptive is not None and adaptive.unified is not None
+    assert not adaptive.unified.risk_enabled
+    assert not adaptive.unified.friction_update_enabled
+    assert config.safety.max_target_force_n == 1.5
+    assert config.safety.force_ceiling_n == 2.0
+    with pytest.raises(ValueError):
+        if change == "risk":
+            replace(adaptive, unified=replace(adaptive.unified, risk_enabled=True))
+        elif change == "friction":
+            replace(
+                adaptive,
+                risk_validation_passed=True,
+                unified=replace(adaptive.unified, risk_enabled=True, friction_update_enabled=True),
+            )
+        elif change == "initial":
+            replace(adaptive, initial_force_n=0.6)
+        elif change == "rate":
+            replace(adaptive, max_force_rate_n_s=1.0)
+        elif change == "ceiling":
+            replace(config, safety=replace(config.safety, max_target_force_n=1.6))
+        else:
+            replace(config, controller=replace(config.controller, kind="pid"))
+
+
 def test_hardware_home_and_feedback_margin_are_strictly_validated():
     """home 必须位于命令工作范围，反馈余量与容差不得为负。"""
     with pytest.raises(ValueError, match="home_position_rad"):
