@@ -250,11 +250,13 @@ class TactileWorker:
         cutoff_hz: float = 10.0,
         filter_reset_gap_s: float = 0.1,
         sample_sink: Callable[[dict[str, object]], None] | None = None,
+        snapshot_transform: Callable[[TactileSnapshot], TactileSnapshot] | None = None,
     ) -> None:
         """保存配置，不打开设备。"""
         if config.expected_sensors != 2:
             raise ValueError("双侧 TactileWorker 要求 expected_sensors=2")
         self._sample_sink = sample_sink
+        self._snapshot_transform = snapshot_transform
         self._config = config
         self._clear_bias = clear_bias
         self._client_factory = client_factory
@@ -337,6 +339,8 @@ class TactileWorker:
                         bias_pending = False
                         continue
                     snapshot = self._snapshot_from_packet(packet, diagnostics)
+                    if self._snapshot_transform is not None:
+                        snapshot = self._snapshot_transform(snapshot)
                     if self._sample_sink is not None:
                         self._sample_sink(asdict(snapshot))
                     with self._condition:

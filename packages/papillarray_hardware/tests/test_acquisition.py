@@ -169,16 +169,25 @@ def test_worker_biases_once_and_only_publishes_post_bias_taxels() -> None:
     post_bias.pillar_forces[0][0] = (7.0, 8.0, 9.0)
     client = _ScriptedClient([pre_bias, post_bias])
     records: list[dict[str, object]] = []
+    transformed: list[int] = []
+
+    def transform(snapshot):
+        """转换仅收到 bias 后的完整快照，结果先记录再原子发布。"""
+        transformed.append(snapshot.packet_counter)
+        return snapshot
+
     worker = TactileWorker(
         PapillArraySerialConfig(timeout_s=0.01, packet_timeout_s=0.02),
         clear_bias=True,
         client_factory=lambda _config: client,
         sample_sink=records.append,
+        snapshot_transform=transform,
     )
     worker.start()
     try:
         snapshot = worker.wait_for_update(None, 0.5)
         assert snapshot.packet_counter == 2
+        assert transformed == [2]
         assert snapshot.left_force_n == pytest.approx(0.3)
         assert snapshot.right_force_n == pytest.approx(0.6)
         assert snapshot.left_taxel_forces_n[0] == (7.0, 8.0, 9.0)
