@@ -53,6 +53,79 @@ def test_tracker_accepts_complete_packet_and_reports_gap_and_wrap() -> None:
     assert (wrapped.counter_event, wrapped.counter_gap) == ("wrap", 1)
 
 
+def test_tracker_unwraps_clock_at_recorded_failure_boundary() -> None:
+    """按故障前真实时间序列及预期下一帧，验证跨 uint32 边界仍保持 2 ms。"""
+    tracker = PacketIntegrityTracker(2)
+    raw_times = [4_294_964_000, 4_294_966_000, 704, 2704]
+    diagnostics = [
+        tracker.inspect(_packet(2_185_582 + index, timestamp))
+        for index, timestamp in enumerate(raw_times)
+    ]
+    assert [item.unwrapped_timestamp_us for item in diagnostics] == [
+        4_294_964_000,
+        4_294_966_000,
+        4_294_968_000,
+        4_294_970_000,
+    ]
+    assert [item.timestamp_wrap_count for item in diagnostics] == [0, 0, 1, 1]
+
+
+def test_tracker_handles_repeated_wraps_gaps_and_bias_reset() -> None:
+    """缺包和多次时钟回绕可展开，bias 重置时不保留旧偏移。"""
+    modulus = 2**32
+    tracker = PacketIntegrityTracker(2)
+    tracker.inspect(_packet(10, modulus - 1000))
+    first = tracker.inspect(_packet(12, 3000))
+    assert first.counter_gap == 1
+    assert first.unwrapped_timestamp_us == modulus + 3000
+    tracker.inspect(_packet(13, modulus - 1000))
+    second = tracker.inspect(_packet(14, 1000))
+    assert second.timestamp_wrap_count == 2
+    assert second.unwrapped_timestamp_us == 2 * modulus + 1000
+    tracker.reset_stream_sequence()
+    reset = tracker.inspect(_packet(1, 1000))
+    assert reset.timestamp_wrap_count == 0
+    assert reset.unwrapped_timestamp_us == 1000
+    assert tracker.taxel_counts == (2, 2)
+
+
+def test_tracker_preserves_native_64_bit_clock_and_handles_simultaneous_counter_wrap() -> None:
+    """原生 64 位时间不被截断，计数器与 32 位时间同时回绕也可识别。"""
+    modulus = 2**32
+    tracker = PacketIntegrityTracker(2)
+    tracker.inspect(_packet(1, modulus - 1000))
+    native = tracker.inspect(_packet(2, modulus + 1000))
+    assert native.unwrapped_timestamp_us == modulus + 1000
+    assert native.timestamp_wrap_count == 0
+    tracker.reset_stream_sequence()
+    tracker.inspect(_packet(modulus - 1, modulus - 1000))
+    wrapped = tracker.inspect(_packet(0, 1000))
+    assert wrapped.counter_event == "wrap"
+    assert wrapped.unwrapped_timestamp_us == modulus + 1000
+
+
+@pytest.mark.parametrize(
+    "previous, current, counter",
+    [
+        (2**32 - 1000, 1000, 10),  # 重复计数器。
+        (2**32 - 1000, 1000, 0),  # 设备重启导致计数回退。
+        (2**32 - 2_000_000, 1000, 11),  # 不在短间隔回绕窗口。
+        (2**32 + 1000, 1000, 11),  # 64 位时间的异常回退。
+        (4_000_000, 1000, 11),  # 普通时间回退。
+        (2**32 - 1000, 2**32 - 1000, 11),  # 时间重复。
+    ],
+)
+def test_tracker_does_not_disguise_sequence_faults_as_clock_wrap(previous, current, counter):
+    """合法回绕支持不能放过重复、重启或其他时序故障，也不能污染基线。"""
+    tracker = PacketIntegrityTracker(2)
+    tracker.inspect(_packet(10, previous))
+    with pytest.raises(PacketIntegrityError):
+        tracker.inspect(_packet(counter, current))
+    accepted = tracker.inspect(_packet(11, previous + 100))
+    assert accepted.timestamp_wrap_count == 0
+    assert accepted.unwrapped_timestamp_us == previous + 100
+
+
 @pytest.mark.parametrize(
     ("field", "expected"),
     [
@@ -156,6 +229,46 @@ class _ScriptedClient:
             return self._packets.pop(0)
         time.sleep(0.001)
         return _packet(4, 4_000)
+
+
+def test_worker_unwraps_before_filter_transform_and_recording() -> None:
+    """回绕帧进入滤波、下游转换和日志前已展开，原始设备时间仍保留。"""
+    packets = [
+        _packet(1, 4_294_966_000, global_forces=((0, 0, 0), (0, 0, 0))),
+        _packet(2, 704, global_forces=((0, 0, 1), (0, 0, 1))),
+        _packet(3, 2704, global_forces=((0, 0, 1), (0, 0, 1))),
+    ]
+    client = _ScriptedClient(list(packets))
+    records = []
+    transformed = []
+
+    def transform(snapshot):
+        """模拟多速率处理对严格递增设备时间的要求。"""
+        if transformed:
+            assert snapshot.timestamp_us - transformed[-1] == 2000
+        transformed.append(snapshot.timestamp_us)
+        return snapshot
+
+    def sink(record):
+        """收齐脚本包后结束离线采集，不接触真实串口。"""
+        records.append(record)
+        if len(records) == 3:
+            worker.stop()
+
+    worker = TactileWorker(
+        PapillArraySerialConfig(),
+        clear_bias=False,
+        client_factory=lambda _config: client,
+        snapshot_transform=transform,
+        sample_sink=sink,
+    )
+    worker._run()
+    assert worker.latest().timestamp_us == 4_294_970_000
+    assert [record["raw_timestamp_us"] for record in records] == [4_294_966_000, 704, 2704]
+    assert [record["timestamp_wrap_count"] for record in records] == [0, 1, 1]
+    assert records[1]["left_force_n"] == pytest.approx(1 - math.exp(-2 * math.pi * 10 * 0.002))
+    assert records[2]["left_force_n"] == pytest.approx(1 - math.exp(-2 * math.pi * 10 * 0.004))
+    assert packets[1].timestamp_us == 704
 
 
 def test_worker_biases_once_and_only_publishes_post_bias_taxels() -> None:

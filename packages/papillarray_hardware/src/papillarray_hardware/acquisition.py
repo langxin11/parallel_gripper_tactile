@@ -17,6 +17,8 @@ from .protocol import PtsPacket, PtsReadTimeout
 CounterEvent = Literal["first", "consecutive", "gap", "wrap"]
 TaxelForces = tuple[tuple[float, float, float], ...]
 _COUNTER_MODULUS = 2**32
+_TIMESTAMP_MODULUS_US = 2**32
+_TIMESTAMP_WRAP_WINDOW_US = 1_000_000
 
 
 class PacketIntegrityError(RuntimeError):
@@ -32,12 +34,16 @@ class PacketIntegrityDiagnostics:
         taxel_counts: 各传感器当前包的 taxel 数。
         counter_event: 包计数器相对上一有效包的变化类型。
         counter_gap: 计数器前进时可解释的缺包数。
+        unwrapped_timestamp_us: 在当前采集时序内展开回绕后的设备时间。
+        timestamp_wrap_count: 当前时序内确认的 uint32 微秒时钟回绕次数。
     """
 
     sensor_count: int
     taxel_counts: tuple[int, ...]
     counter_event: CounterEvent
     counter_gap: int | None
+    unwrapped_timestamp_us: int
+    timestamp_wrap_count: int
 
 
 class PacketIntegrityTracker:
@@ -55,6 +61,7 @@ class PacketIntegrityTracker:
         self._taxel_counts: tuple[int, ...] | None = None
         self._previous_counter: int | None = None
         self._previous_timestamp_us: int | None = None
+        self._timestamp_wrap_count = 0
 
     @property
     def taxel_counts(self) -> tuple[int, ...] | None:
@@ -65,12 +72,13 @@ class PacketIntegrityTracker:
         """重置设备时序基线，同时保留本次会话已经确认的 taxel 拓扑。"""
         self._previous_counter = None
         self._previous_timestamp_us = None
+        self._timestamp_wrap_count = 0
 
     def inspect(self, packet: PtsPacket) -> PacketIntegrityDiagnostics:
         """验证一个包，并在全部检查通过后推进完整性基线。
 
-        计数器缺包和合法回绕属于可记录诊断，不会拒绝包；重复、乱序、设备时间重复或回退
-        会拒绝包。
+        计数器缺包和合法回绕属于可记录诊断。设备时间只接受跨 uint32 边界且模差不超过
+        一秒的回绕；包计数仍须前进，重复、乱序及其他时间回退均拒绝。
 
         Args:
             packet: 待验证的原始 PTS 包。
@@ -138,18 +146,36 @@ class PacketIntegrityTracker:
         counter = _unsigned_integer(packet.packet_counter, 32, "packet_counter")
         timestamp_us = _unsigned_integer(packet.timestamp_us, 64, "timestamp_us")
         counter_event, counter_gap = _counter_status(self._previous_counter, counter)
+        wrap_count = self._timestamp_wrap_count
         if self._previous_timestamp_us is not None and timestamp_us <= self._previous_timestamp_us:
-            raise PacketIntegrityError("PapillArray 设备时间未严格递增")
+            previous = self._previous_timestamp_us
+            # Hub 字段占八字节，但部分固件的微秒计时器仍在 uint32 边界回绕。
+            # 只接受边界附近的短间隔，不能把普通回退或设备重启当成回绕。
+            wrapped_delta = timestamp_us + _TIMESTAMP_MODULUS_US - previous
+            if (
+                0 <= timestamp_us < previous < _TIMESTAMP_MODULUS_US
+                and 0 < wrapped_delta <= _TIMESTAMP_WRAP_WINDOW_US
+            ):
+                wrap_count += 1
+            else:
+                raise PacketIntegrityError(
+                    "PapillArray 设备时间未严格递增："
+                    f"previous_us={previous}，current_us={timestamp_us}，"
+                    f"previous_counter={self._previous_counter}，current_counter={counter}"
+                )
 
         if self._taxel_counts is None:
             self._taxel_counts = counts
         self._previous_counter = counter
         self._previous_timestamp_us = timestamp_us
+        self._timestamp_wrap_count = wrap_count
         return PacketIntegrityDiagnostics(
             sensor_count=sensor_count,
             taxel_counts=counts,
             counter_event=counter_event,
             counter_gap=counter_gap,
+            unwrapped_timestamp_us=timestamp_us + wrap_count * _TIMESTAMP_MODULUS_US,
+            timestamp_wrap_count=wrap_count,
         )
 
 
@@ -182,7 +208,7 @@ def _counter_status(previous: int | None, current: int) -> tuple[CounterEvent, i
 
 @dataclass(frozen=True, slots=True)
 class TactileSnapshot:
-    """一次双侧全局力和逐 taxel 三轴原始力快照。"""
+    """双侧触觉快照；timestamp_us 为展开时间，raw_timestamp_us 保留设备原值。"""
 
     received_at_s: float
     packet_counter: int
@@ -199,6 +225,8 @@ class TactileSnapshot:
     right_taxel_forces_n: TaxelForces = ()
     counter_event: CounterEvent = "first"
     counter_gap: int | None = None
+    raw_timestamp_us: int | None = None
+    timestamp_wrap_count: int = 0
 
 
 class FirstOrderLowPassFilter:
@@ -357,13 +385,13 @@ class TactileWorker:
         self, packet: PtsPacket, diagnostics: PacketIntegrityDiagnostics
     ) -> TactileSnapshot:
         """把已验证包转换为不含 NumPy 值的双侧不可变快照。"""
-        sample_time_s = int(packet.timestamp_us) * 1e-6
+        sample_time_s = diagnostics.unwrapped_timestamp_us * 1e-6
         raw_left_fz_n = float(packet.global_forces[0][2])
         raw_right_fz_n = float(packet.global_forces[1][2])
         return TactileSnapshot(
             received_at_s=self._clock(),
             packet_counter=int(packet.packet_counter),
-            timestamp_us=int(packet.timestamp_us),
+            timestamp_us=diagnostics.unwrapped_timestamp_us,
             left_force_n=max(0.0, self._left_filter.filter(raw_left_fz_n, sample_time_s)),
             right_force_n=max(0.0, self._right_filter.filter(raw_right_fz_n, sample_time_s)),
             raw_left_fz_n=raw_left_fz_n,
@@ -376,6 +404,8 @@ class TactileWorker:
             right_taxel_forces_n=_taxel_forces(packet.pillar_forces[1]),
             counter_event=diagnostics.counter_event,
             counter_gap=diagnostics.counter_gap,
+            raw_timestamp_us=int(packet.timestamp_us),
+            timestamp_wrap_count=diagnostics.timestamp_wrap_count,
         )
 
 
