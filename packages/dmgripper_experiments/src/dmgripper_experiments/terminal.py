@@ -17,8 +17,8 @@ from dataclasses import dataclass, fields
 from .lifecycle import LifecyclePhase
 
 _MESSAGES = {
-    LifecyclePhase.PREPARING: "正在预检：建立采集并验证空载零力。",
-    LifecyclePhase.READY: ("预检完成。电机未使能；输入 start 后可能先自动回零，再开始闭合。"),
+    LifecyclePhase.PREPARING: "正在预检：检查电机反馈并按需回零，随后验证空载零力。",
+    LifecyclePhase.READY: ("预检完成。电机已预检回零并失能；输入 start 后使能并开始闭合。"),
     LifecyclePhase.HOMING: "正在执行受限自动回零。",
     LifecyclePhase.APPROACH: "正在受限闭合接近，等待双侧接触。",
     LifecyclePhase.CONTACT_TRANSITION: "双侧接触已确认，正在平滑衰减接近速度。",

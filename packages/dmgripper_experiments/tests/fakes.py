@@ -403,6 +403,7 @@ def run_fake_experiment(
     terminal=None,
     event_observer=None,
     initial_position_rad: float = 0.0,
+    initial_enabled: bool = False,
     command_error_at: int | None = None,
     command_error: BaseException | None = None,
     hold_error_at: int | None = None,
@@ -443,7 +444,7 @@ def run_fake_experiment(
             initial_position_rad,
             0.0,
             0.0,
-            STATUS_DISABLED,
+            STATUS_ENABLED if initial_enabled else STATUS_DISABLED,
         )
         session_holder.append(session)
         original_command = session.command

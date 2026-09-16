@@ -57,6 +57,7 @@ def test_full_lifecycle_completes_for_all_six_combinations(
     assert session.closed
     assert actions.states == [
         "preparing",
+        "preparing",
         "ready",
         "approach",
         "contact_transition",
@@ -315,7 +316,10 @@ def test_curve_mode_holds_final_target_in_holding(tmp_path: Path) -> None:
 
 
 def test_release_before_enable_cancels_without_motion(tmp_path: Path) -> None:
-    """使能前 release 记为 cancelled：不开电机、不发运动命令。"""
+    """使能前 release 记为 cancelled：不使能、不发运动命令。
+
+    DM 串口已在预检阶段打开并确认失能，但不产生任何使能或运动命令。
+    """
     result, session, actions, directory = run_fake_experiment(
         tmp_path, curve_config(), actions_type=CancelActions
     )
@@ -323,14 +327,14 @@ def test_release_before_enable_cancels_without_motion(tmp_path: Path) -> None:
     assert result["disable_confirmed"] == "not_applicable"
     assert session.disable_calls == 0
     assert session.command_count == 0
-    assert not session.opened, "使能前取消不应打开 DM 串口"
+    assert session.opened, "预检已打开 DM 串口；取消只禁止使能与运动"
     manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["status"] == "cancelled"
     assert manifest["disable_confirmed"] == "not_applicable"
 
 
 def test_start_command_is_recorded_before_motor_approach(tmp_path: Path) -> None:
-    """收到 start 后先留存确认事件，再连接使能并进入 approach。"""
+    """收到 start 后先留存确认事件，再使能并进入 approach。"""
     device_state_at_acknowledgement: list[tuple[bool, int]] = []
 
     def observe_event(event: dict[str, object], session) -> None:
@@ -344,7 +348,7 @@ def test_start_command_is_recorded_before_motor_approach(tmp_path: Path) -> None
     )
     assert result["status"] == "completed"
     assert session.command_count > 0
-    assert device_state_at_acknowledgement == [(False, STATUS_DISABLED)]
+    assert device_state_at_acknowledgement == [(True, STATUS_DISABLED)]
     events = _read_events(directory)
     acknowledgement = next(
         index
@@ -357,20 +361,21 @@ def test_start_command_is_recorded_before_motor_approach(tmp_path: Path) -> None
         if event.get("event") == "state" and event.get("phase") == "approach"
     )
     assert acknowledgement < approach
-    assert "正在连接、检查并使能电机" in str(events[acknowledgement]["message"])
+    assert "正在使能电机并进入控制" in str(events[acknowledgement]["message"])
 
 
 @pytest.mark.parametrize("initial_position_rad", [0.2, -0.04])
 def test_start_outside_home_runs_limited_homing_before_approach(
     tmp_path: Path, initial_position_rad: float
 ) -> None:
-    """安全范围内但不在 home 的位置先受限回零，所有目标仍位于工作范围。"""
+    """预检阶段对不在 home 的残留位置先受限回零再进 ready，目标都在工作范围。"""
     result, session, actions, _directory = run_fake_experiment(
         tmp_path,
         curve_config(),
         initial_position_rad=initial_position_rad,
     )
     assert result["status"] == "completed"
+    assert actions.states.index("homing") < actions.states.index("ready")
     assert actions.states.index("homing") < actions.states.index("approach")
     assert session.commands
     assert all(0.0 <= command.position_rad <= math.pi / 2 for command in session.commands)
@@ -407,10 +412,10 @@ def test_feedback_outside_extended_safety_range_never_moves(tmp_path: Path) -> N
     assert session.disable_calls == 0
 
 
-def test_homing_timeout_with_healthy_dm_enters_fault_holding(tmp_path: Path) -> None:
-    """回零未到位但命令通道健康时保持等待 release，最终仍返回失败。"""
+def test_precheck_homing_timeout_forces_disable_before_ready(tmp_path: Path) -> None:
+    """预检回零未到位时直接失能失败退出，不进入故障保持。"""
     config = curve_config()
-    with pytest.raises(RuntimeError, match="自动回零轨迹执行超时"):
+    with pytest.raises(RuntimeError, match="预检回零轨迹执行超时"):
         run_fake_experiment(
             tmp_path,
             config,
@@ -419,8 +424,9 @@ def test_homing_timeout_with_healthy_dm_enters_fault_holding(tmp_path: Path) -> 
         )
     manifest = json.loads(next(tmp_path.rglob("manifest.json")).read_text(encoding="utf-8"))
     assert manifest["fault_phase"] == "homing"
-    assert manifest["fault_holding_entered"] is True
-    assert manifest["fault_resolution"] == "released"
+    assert manifest["fault_holding_entered"] is False
+    assert manifest["fault_resolution"] == "forced_disable"
+    assert manifest["disable_confirmed"] is True
 
 
 def test_ready_reports_status_and_unknown_command_before_start(tmp_path: Path) -> None:
@@ -704,12 +710,40 @@ def test_unsafe_dm_feedback_forces_immediate_disable(
     assert manifest["disable_confirmed"] is True
 
 
+def test_precheck_recovers_leftover_enabled_state_before_zero_force(tmp_path: Path) -> None:
+    """上次异常退出的残留使能态由预检显式失能，不影响后续流程。"""
+    result, session, _actions, _directory = run_fake_experiment(
+        tmp_path,
+        curve_config(),
+        initial_enabled=True,
+    )
+    assert result["status"] == "completed"
+    # 预检恢复失能一次，正常收尾清理失能一次。
+    assert session.disable_calls == 2
+    assert result["disable_confirmed"] is True
+
+
 def test_enable_confirmation_failure_is_recorded_as_forced_disable(tmp_path: Path) -> None:
     """使能确认丢失后必须尽力失能，并明确记录 forced_disable 处置。"""
     with pytest.raises(RuntimeError, match="使能确认丢失"):
         run_fake_experiment(tmp_path, curve_config(), enable_error=True)
     manifest = json.loads(next(tmp_path.rglob("manifest.json")).read_text(encoding="utf-8"))
     assert manifest["fault_holding_entered"] is False
+    assert manifest["fault_resolution"] == "forced_disable"
+    assert manifest["disable_confirmed"] is True
+
+
+def test_precheck_enable_failure_outside_home_fails_before_ready(tmp_path: Path) -> None:
+    """需要预检回零时使能失败在 ready 前暴露，清理仍尽力失能。"""
+    with pytest.raises(RuntimeError, match="使能确认丢失"):
+        run_fake_experiment(
+            tmp_path,
+            curve_config(),
+            initial_position_rad=0.2,
+            enable_error=True,
+        )
+    manifest = json.loads(next(tmp_path.rglob("manifest.json")).read_text(encoding="utf-8"))
+    assert manifest["fault_phase"] == "homing"
     assert manifest["fault_resolution"] == "forced_disable"
     assert manifest["disable_confirmed"] is True
 

@@ -56,9 +56,10 @@ _KINEMATICS = CrankSliderKinematics(
 )
 
 _PHASE_MESSAGES = {
-    LifecyclePhase.PREPARING: "正在预检：建立采集并验证空载零力。",
+    LifecyclePhase.PREPARING: "正在预检：检查电机反馈并按需回零，随后验证空载零力。",
     LifecyclePhase.READY: (
-        "预检完成。电机未使能；输入 start 后可能先自动回零，再开始闭合；输入 release 取消。"
+        "预检完成。电机已预检回零并失能；输入 start 后使能并开始闭合"
+        "（若漂移出容差会先自动回零）；输入 release 取消。"
     ),
     LifecyclePhase.HOMING: "启动位置不在 home 附近，正在执行受限自动回零。",
     LifecyclePhase.APPROACH: "正在受限闭合接近，等待双侧接触。",
@@ -235,6 +236,7 @@ def run_experiment(
                 "message": _PHASE_MESSAGES[LifecyclePhase.PREPARING],
             }
         )
+        _precheck_motor(config, dm, recorder, emit, clock, sleep, started, devices)
         if config.lifecycle.verify_zero_force:
             _verify_zero(tactile, config, clear_bias, clock, sleep, warning_sink=emit)
         else:
@@ -381,6 +383,137 @@ def run_experiment(
     }
 
 
+def _motor_command_configs(
+    config: ExperimentConfig, dm: DmSession
+) -> tuple[MITCommandConfig, MITCommandConfig]:
+    """构建跟踪段与回位／回零段共用的 MIT 命令配置。"""
+    controller = config.controller
+    command_config = MITCommandConfig(
+        position_min_rad=dm.deployment.joint_position_min_rad,
+        position_max_rad=dm.deployment.joint_position_max_rad,
+        velocity_limit_rad_s=controller.velocity_limit_rad_s,
+        closing_direction=dm.deployment.closing_direction,
+        kp=controller.mit_kp,
+        kd=controller.mit_kd,
+        feedforward_ratio=controller.admittance.feedforward_ratio,
+        feedforward_torque_limit_nm=controller.torque_limit_nm,
+        torque_limit_nm=controller.torque_limit_nm,
+    )
+    return_config = replace(
+        command_config,
+        kp=controller.return_mit_kp,
+        kd=controller.return_mit_kd,
+        feedforward_torque_limit_nm=controller.return_torque_limit_nm,
+        torque_limit_nm=controller.return_torque_limit_nm,
+    )
+    return command_config, return_config
+
+
+def _precheck_motor(
+    config: ExperimentConfig,
+    dm: DmSession,
+    recorder: ExperimentRecorder,
+    emit: EventSink,
+    clock: Callable[[], float],
+    sleep: Callable[[float], None],
+    started: float,
+    devices: _DeviceState,
+) -> None:
+    """preparing 阶段的电机预检：验证反馈与失能态，按需受限回零后回到失能。
+
+    操作者约定启动前已移开物体；上次异常退出残留的闭合位置由受限回零
+    解除，使后续零力验证不被夹爪残接触卡死。预检失败按执行异常直接
+    失能退出，不进入故障保持；零力验证期间电机保持失能的语义不变。
+    """
+    dm.open()
+    devices.opened = True
+    feedback = dm.inspect()
+    try:
+        dm.require_disabled()
+    except RuntimeError:
+        # 上次异常退出可能留下使能态；先显式失能一次再确认。
+        dm.disable()
+        dm.require_disabled()
+    home = config.hardware.home_position_rad
+    tolerance = config.hardware.home_tolerance_rad
+    if abs(feedback.position_rad - home) <= tolerance:
+        emit(
+            {
+                "event": "state",
+                "phase": LifecyclePhase.PREPARING.value,
+                "message": "电机预检完成：反馈正常且位于 home 容差内，无需回零。",
+                "position_rad": feedback.position_rad,
+                "home_position_rad": home,
+                "home_tolerance_rad": tolerance,
+            }
+        )
+        return
+    emit(
+        {
+            "event": "state",
+            "phase": LifecyclePhase.HOMING.value,
+            "message": "启动位置不在 home 附近，预检阶段执行受限自动回零。",
+            "position_rad": feedback.position_rad,
+            "home_position_rad": home,
+            "home_tolerance_rad": tolerance,
+        }
+    )
+    # 使能报文可能已生效但确认丢失，发送前即登记，清理阶段仍会尽力失能。
+    devices.enable_attempted = True
+    feedback = dm.enable()
+    devices.enable_confirmed = True
+    _command_config, return_config = _motor_command_configs(config, dm)
+    trajectory = _home_trajectory(config, _KINEMATICS, feedback.position_rad)
+    period = 1.0 / config.timing.control_rate_hz
+    phase_started = last_control = clock()
+    timeout_s = max(
+        config.lifecycle.return_timeout_s,
+        trajectory.duration_s + config.lifecycle.return_settle_timeout_s,
+    )
+    while True:
+        now = clock()
+        closure, velocity, _ = trajectory.sample(now - phase_started)
+        command = _closure_trajectory_command(
+            _KINEMATICS, return_config, feedback, closure, velocity, 0.0, 0.0
+        )
+        if clock() - last_control > config.timing.max_control_gap_s:
+            raise RuntimeError("预检回零命令计算或事件记录超时")
+        send_started = clock()
+        feedback = dm.command(command)
+        recorder.write(
+            _motor_only_trace_row(
+                time_s=now - started,
+                phase=LifecyclePhase.HOMING,
+                feedback=feedback,
+                command=command,
+                dt=now - last_control,
+                latency=clock() - send_started,
+            )
+        )
+        if clock() - phase_started > timeout_s:
+            raise RuntimeError("预检回零轨迹执行超时")
+        if (
+            now - phase_started >= trajectory.duration_s
+            and abs(feedback.position_rad - home) <= tolerance
+        ):
+            break
+        last_control = now
+        sleep(max(0.0, period - (clock() - now)))
+    dm.disable()
+    # 预检自身已确认失能，清理阶段无需重复失能。
+    devices.enable_attempted = False
+    devices.enable_confirmed = False
+    emit(
+        {
+            "event": "state",
+            "phase": LifecyclePhase.PREPARING.value,
+            "message": "预检回零完成，电机已失能；继续触觉预检与零力验证。",
+            "position_rad": feedback.position_rad,
+            "home_position_rad": home,
+        }
+    )
+
+
 def _run_ready_and_enabled(
     config: ExperimentConfig,
     dm: DmSession,
@@ -424,7 +557,7 @@ def _run_ready_and_enabled(
                     "event": "command_received",
                     "phase": LifecyclePhase.READY.value,
                     "action": "start",
-                    "message": "已收到 start，正在连接、检查并使能电机；请勿重复输入。",
+                    "message": "已收到 start，正在使能电机并进入控制；请勿重复输入。",
                 }
             )
             break
@@ -434,7 +567,7 @@ def _run_ready_and_enabled(
                     "event": "command_received",
                     "phase": LifecyclePhase.READY.value,
                     "action": "auto_start",
-                    "message": "已按配置自动启动，正在连接、检查并使能电机。",
+                    "message": "已按配置自动启动，正在使能电机并进入控制。",
                 }
             )
             break
@@ -461,8 +594,9 @@ def _run_ready_and_enabled(
                 }
             )
         sleep(period)
-    dm.open()
-    devices.opened = True
+    if not devices.opened:
+        dm.open()
+        devices.opened = True
     dm.inspect()
     dm.require_disabled()
     # 使能报文可能已生效但确认丢失，发送前即登记，清理阶段仍会尽力失能。
@@ -580,24 +714,7 @@ def _run_control_loop_inner(
     timing = config.timing
     lifecycle_config = config.lifecycle
     kinematics = _KINEMATICS
-    command_config = MITCommandConfig(
-        position_min_rad=dm.deployment.joint_position_min_rad,
-        position_max_rad=dm.deployment.joint_position_max_rad,
-        velocity_limit_rad_s=config.controller.velocity_limit_rad_s,
-        closing_direction=dm.deployment.closing_direction,
-        kp=config.controller.mit_kp,
-        kd=config.controller.mit_kd,
-        feedforward_ratio=config.controller.admittance.feedforward_ratio,
-        feedforward_torque_limit_nm=config.controller.torque_limit_nm,
-        torque_limit_nm=config.controller.torque_limit_nm,
-    )
-    return_config = replace(
-        command_config,
-        kp=config.controller.return_mit_kp,
-        kd=config.controller.return_mit_kd,
-        feedforward_torque_limit_nm=config.controller.return_torque_limit_nm,
-        torque_limit_nm=config.controller.return_torque_limit_nm,
-    )
+    command_config, return_config = _motor_command_configs(config, dm)
     controller = GripController(config, kinematics=kinematics, command_config=command_config)
     target_source = build_target_source(
         curve=_curve_from_config(config),
