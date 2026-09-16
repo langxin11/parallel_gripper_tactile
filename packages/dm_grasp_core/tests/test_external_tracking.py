@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import pytest
 
 from dm_grasp_core import (
@@ -159,6 +161,81 @@ def test_step_tracking_tracks_rising_reference():
     assert controller._filtered_force is not None  # noqa: SLF001  检查滤波状态存在
 
 
+@pytest.mark.parametrize("position_feedforward_gain", [None, 0.0, 0.25])
+def test_pid_position_bias_follows_measurement_not_contact_or_previous_command(
+    position_feedforward_gain,
+):
+    """纯 PI、力矩前馈和刚度加法均以每周期实测位置为偏置参考。"""
+    stiffness = (
+        None
+        if position_feedforward_gain is None
+        else ContactStiffnessConfig(
+            enabled=True,
+            initial_n_per_m=2000.0,
+            min_n_per_m=100.0,
+            max_n_per_m=100_000.0,
+            filter_alpha=0.15,
+            min_delta_closure_m=1e-5,
+            min_delta_force_n=1e-3,
+            position_feedforward_gain=position_feedforward_gain,
+            torque_feedforward_gain=1.0,
+        )
+    )
+    controller = _controller(stiffness=stiffness)
+    inner = FakeInner(position=0.3)
+    controller.begin_tracking(inner, observation=_observation(0.4, 0.4), reference=_reference(0.5))
+
+    for step, measured_position in enumerate((0.36, 0.32, 0.41), start=1):
+        previous_target = inner.commands[-1]["target_position"]
+        inner.position_value = measured_position
+        command = controller.step_tracking(
+            inner,
+            observation=_observation(0.4, 0.4, time_s=0.01 * step),
+            reference=_reference(0.5),
+        )
+        target = inner.commands[-1]["target_position"]
+        assert command.pid_position_adjustment == pytest.approx(0.002 + 0.0002 * (step + 1))
+        assert target == pytest.approx(measured_position + command.position_adjustment)
+        assert target != pytest.approx(0.3 + command.position_adjustment)
+        assert target != pytest.approx(previous_target + command.position_adjustment)
+        if stiffness is not None:
+            assert command.force_feedforward_torque == pytest.approx(
+                KINEMATICS.closure_jacobian(measured_position) * 0.5
+            )
+            assert command.stiffness_position_adjustment == pytest.approx(
+                position_feedforward_gain
+                * 0.1
+                / (2000.0 * KINEMATICS.closure_jacobian(measured_position))
+            )
+
+
+@pytest.mark.parametrize(
+    "target_force, measured_force, saturated_bias", [(20.0, 1.0, 0.15), (0.0, 20.0, -0.15)]
+)
+def test_pid_saturated_bias_remains_relative_to_current_position(
+    target_force, measured_force, saturated_bias
+):
+    """正负饱和只限制相对实测位置的偏置，不限制接触后的累计行程。"""
+    controller = _controller()
+    inner = FakeInner(position=0.3)
+    controller.begin_tracking(
+        inner,
+        observation=_observation(measured_force, measured_force),
+        reference=_reference(target_force),
+    )
+    for step, measured_position in enumerate((0.55, 0.65), start=1):
+        inner.position_value = measured_position
+        command = controller.step_tracking(
+            inner,
+            observation=_observation(measured_force, measured_force, time_s=0.01 * step),
+            reference=_reference(target_force),
+        )
+        assert command.position_adjustment == pytest.approx(saturated_bias)
+        assert inner.commands[-1]["target_position"] == pytest.approx(
+            measured_position + saturated_bias
+        )
+
+
 def test_external_stiffness_conflicts_with_internal_estimator():
     """内部估计器启用时传入外部刚度必须报错。"""
     stiffness = ContactStiffnessConfig(
@@ -249,3 +326,118 @@ def test_adrc_path_supports_external_tracking():
             reference=_reference(0.5),
         )
         assert command.state == "force_tracking"
+
+
+def test_adrc_retains_contact_reference_when_measurement_moves():
+    """LADRC 的累计位移仍参考接触位置，避免被 PI 参考变更误伤。"""
+    controller = _controller(adrc=True)
+    inner = FakeInner(position=0.3)
+    controller.begin_tracking(inner, observation=_observation(0.4, 0.4), reference=_reference(0.5))
+    inner.position_value = 0.4
+    command = controller.step_tracking(
+        inner, observation=_observation(0.4, 0.4, time_s=0.01), reference=_reference(0.5)
+    )
+    assert inner.commands[-1]["target_position"] == pytest.approx(0.3 + command.position_adjustment)
+
+
+@pytest.mark.parametrize("gain", [0.0, 0.5, 1.0])
+@pytest.mark.parametrize("with_stiffness", [False, True])
+def test_independent_pid_torque_feedforward_overrides_model_without_changing_bias(
+    gain, with_stiffness
+):
+    """独立模型项不依赖刚度、不重复叠加，且不改变 PI 位置偏置。"""
+    stiffness = (
+        ContactStiffnessConfig(
+            enabled=False,
+            initial_n_per_m=2000.0,
+            min_n_per_m=100.0,
+            max_n_per_m=100_000.0,
+            filter_alpha=0.15,
+            min_delta_closure_m=1e-5,
+            min_delta_force_n=1e-3,
+            position_feedforward_gain=0.0,
+        )
+        if with_stiffness
+        else None
+    )
+    base = _controller(stiffness=stiffness)
+    controller = NormalForceController(
+        replace(base._config, pid_torque_feedforward_gain=gain)  # noqa: SLF001
+    )
+    inner = FakeInner(position=0.3)
+    comparison_inner = FakeInner(position=0.3)
+    for step, (position, target) in enumerate(((0.3, 0.5), (0.6, 1.0), (0.55, 0.6))):
+        inner.position_value = comparison_inner.position_value = position
+        kwargs = dict(
+            observation=_observation(0.4, 0.4, time_s=step * 0.01),
+            reference=_reference(target),
+            external_stiffness_n_per_m=2000.0 if with_stiffness else None,
+        )
+        method = "begin_tracking" if step == 0 else "step_tracking"
+        command = getattr(controller, method)(inner, **kwargs)
+        baseline = getattr(base, method)(comparison_inner, **kwargs)
+        expected = gain * KINEMATICS.closure_jacobian(position) * target
+        assert command.force_feedforward_torque == pytest.approx(expected)
+        assert inner.commands[-1]["feedforward_torque"] == pytest.approx(expected)
+        assert command.position_adjustment == pytest.approx(baseline.position_adjustment)
+        assert command.stiffness_position_adjustment == 0.0
+
+
+@pytest.mark.parametrize("gain", [-0.1, 1.1, float("nan"), float("inf"), True])
+def test_independent_pid_torque_feedforward_rejects_invalid_gain(gain):
+    """核心拒绝非法前馈比例，不依赖硬件配置层代为校验。"""
+    with pytest.raises(ValueError, match="pid_torque_feedforward_gain"):
+        replace(_controller()._config, pid_torque_feedforward_gain=gain)  # noqa: SLF001
+
+
+def test_independent_pid_torque_feedforward_requires_geometry():
+    """启用模型前馈缺少机构几何时明确报错，避免静默输出零力矩。"""
+    with pytest.raises(ValueError, match="geometry"):
+        replace(_controller()._config, geometry=None, pid_torque_feedforward_gain=1.0)  # noqa: SLF001
+
+
+def test_unbounded_pid_can_integrate_beyond_previous_position_bias_limit():
+    """没有执行饱和时，PID 输出与积分均可超过旧的 0.15 rad 上限。"""
+    controller = NormalForceController(replace(_controller()._config, max_position_adjustment=None))
+    inner = FakeInner(position=0.3)
+    for index in range(100):
+        method = controller.begin_tracking if index == 0 else controller.step_tracking
+        command = method(
+            inner,
+            observation=_observation(1.0, 1.0, time_s=index * 0.01),
+            reference=_reference(2.0),
+        )
+    assert command.position_adjustment == pytest.approx(0.22)
+    assert controller._pid.components[1] == pytest.approx(0.2)
+
+
+@pytest.mark.parametrize("position", [0.3, 1.69])
+def test_unbounded_pid_freezes_integral_at_backend_limits_and_can_unwind(position):
+    """下游力矩或机械行程受限时停止同向积分，反向误差仍可消退积分。"""
+    controller = NormalForceController(replace(_controller()._config, max_position_adjustment=None))
+    inner = FakeInner(position=position)
+    integrals = []
+    for index in range(400):
+        method = controller.begin_tracking if index == 0 else controller.step_tracking
+        method(
+            inner,
+            observation=_observation(1.0, 1.0, time_s=index * 0.01),
+            reference=_reference(2.0),
+        )
+        integrals.append(controller._pid.components[1])
+    assert max(integrals[-100:]) - min(integrals[-100:]) < 1e-12
+    assert integrals[-1] < 0.4
+    before = integrals[-1]
+    for index in range(100):
+        controller.step_tracking(
+            inner,
+            observation=_observation(3.0, 3.0, time_s=4.0 + index * 0.01),
+            reference=_reference(2.0),
+        )
+    assert controller._pid.components[1] < before
+
+
+def test_adrc_rejects_unbounded_position_adjustment():
+    """LADRC 的接触参考累计行程仍要求有限上限。"""
+    with pytest.raises(ValueError, match="max_position_adjustment"):
+        replace(_controller(adrc=True)._config, max_position_adjustment=None)

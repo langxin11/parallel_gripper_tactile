@@ -546,6 +546,43 @@ def test_normal_force_controller_direct_torque_branch_assembles_feedforward() ->
     )
 
 
+@pytest.mark.parametrize("variant", ["pid-only", "pid-torque-ff", "full"])
+def test_simulation_pid_uses_current_joint_feedback_as_position_reference(variant: str) -> None:
+    """仿真状态机进入跟踪后，位置偏置随当前关节反馈移动。"""
+    profile = configure_force_controller(
+        load_profile(ROOT / "configs/dm_gripper.yaml"), variant=variant
+    )
+    model = mujoco.MjModel.from_xml_path(str(profile.model_path))
+    data = mujoco.MjData(model)
+    controller = NormalForceController.from_profile(model, profile)
+    joint_id = int(model.actuator_trnid[controller.actuator_id, 0])
+    position_address = int(model.jnt_qposadr[joint_id])
+    data.qpos[position_address] = 0.3
+    for index in range(8):
+        command = controller.apply(
+            data,
+            approach_position=0.5,
+            total_normal_force_n=0.4,
+            left_normal_force_n=0.2,
+            right_normal_force_n=0.2,
+            dt=0.002,
+        )
+    assert command.state == "force_tracking"
+    for measured_position in (0.6, 0.55, 0.7):
+        data.qpos[position_address] = measured_position
+        command = controller.apply(
+            data,
+            approach_position=0.5,
+            total_normal_force_n=0.4,
+            left_normal_force_n=0.2,
+            right_normal_force_n=0.2,
+            dt=0.002,
+        )
+        assert command.mit.target_position == pytest.approx(
+            measured_position + command.position_adjustment, abs=3e-5
+        )
+
+
 def test_default_torque_feedback_gain_keeps_positional_tracking_path() -> None:
     """torque_feedback_gain 默认 0；显式 0.0 与未设置的输出完全一致。"""
     source = load_profile(ROOT / "configs/dm_gripper.yaml")

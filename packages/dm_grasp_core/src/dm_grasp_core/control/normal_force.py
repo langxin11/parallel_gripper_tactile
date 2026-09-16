@@ -57,7 +57,9 @@ class NormalForceConfig:
         kp: 外环 PID 比例增益。
         ki: 外环 PID 积分增益。
         kd: 外环 PID 微分增益。
-        max_position_adjustment: 跟踪阶段位置修正绝对值上限 (rad)。
+        max_position_adjustment: 跟踪阶段位置修正绝对值上限（rad）；位置式 PID
+            相对每周期实测位置，``None`` 关闭 PID 固定偏置限幅；一阶 LADRC／
+            刚度速率路径相对固定接触位置，仍要求正数上限。
         filter_cutoff_hz: 公共法向力一阶低通截止频率 (Hz)。
         geometry: 曲柄滑块运动学；刚度前馈、限幅与两条 ADRC 路径必需。
         stiffness: 在线接触刚度估计配置；``None`` 表示不启用。
@@ -66,6 +68,8 @@ class NormalForceConfig:
         stiffness_rate: 刚度归一化力变化率 PID；与其他可选外环互斥。
         torque_adrc: 二阶直接力矩 LADRC 配置；与前两条路径互斥。
         supervisor: 可选的公共双侧接触阶段机；``None`` 保持历史两阶段行为。
+        pid_torque_feedforward_gain: PID 独立模型力矩前馈比例（0～1）；显式设置时
+            覆盖刚度路径的力矩前馈，不依赖刚度估计，``None`` 保持旧行为。
     """
 
     target_n: float
@@ -76,7 +80,7 @@ class NormalForceConfig:
     kp: float
     ki: float
     kd: float
-    max_position_adjustment: float
+    max_position_adjustment: float | None
     filter_cutoff_hz: float
     geometry: CrankSliderKinematics | None = None
     stiffness: ContactStiffnessConfig | None = None
@@ -85,6 +89,7 @@ class NormalForceConfig:
     stiffness_rate: StiffnessRateConfig | None = None
     torque_adrc: TorqueAdrcConfig | None = None
     supervisor: BilateralContactConfig | None = None
+    pid_torque_feedforward_gain: float | None = None
 
     def __post_init__(self) -> None:
         """要求释放阈值和可选刚度估计配置相互一致。"""
@@ -92,6 +97,18 @@ class NormalForceConfig:
             raise ValueError("release_threshold_n must not exceed contact_threshold_n")
         if self.stiffness is not None and self.stiffness.enabled and self.geometry is None:
             raise ValueError("geometry is required when contact stiffness estimation is enabled")
+        limit = self.max_position_adjustment
+        if limit is None:
+            if self.adrc is not None or self.stiffness_rate is not None:
+                raise ValueError("LADRC／刚度速率路径要求 max_position_adjustment 为正数")
+        elif isinstance(limit, bool) or not math.isfinite(limit) or limit <= 0.0:
+            raise ValueError("max_position_adjustment 必须为有限正数或 None")
+        gain = self.pid_torque_feedforward_gain
+        if gain is not None:
+            if isinstance(gain, bool) or not math.isfinite(gain) or not 0.0 <= gain <= 1.0:
+                raise ValueError("pid_torque_feedforward_gain 必须是 0～1 的有限数值")
+            if gain > 0.0 and self.geometry is None:
+                raise ValueError("PID 模型力矩前馈要求 geometry")
 
 
 class MITTorqueInner(Protocol):
@@ -279,7 +296,7 @@ class NormalForceController:
             config.kd,
             setpoint=config.target_n,
             sample_time=None,
-            output_limits=(-adjustment, adjustment),
+            output_limits=(None, None) if adjustment is None else (-adjustment, adjustment),
             auto_mode=False,
         )
         # LADRC 外环状态（z1/z2 为扩张状态观测器，u 为上一周期闭合速度，
@@ -913,7 +930,18 @@ class NormalForceController:
                 aperture_m=aperture,
             )
 
+        if config.pid_torque_feedforward_gain is not None:
+            # 目标力矩只依赖机构几何；覆盖旧模型项，避免与刚度路径重复叠加。
+            force_feedforward_torque, closure_jacobian, aperture = self._force_feedforward_torque(
+                position_rad=current_position,
+                target_force_n=target_force_n,
+                gain_override=config.pid_torque_feedforward_gain,
+            )
+
         self._pid.setpoint = target_force_n
+        adjustment_limit = config.max_position_adjustment
+        lower_limit = -math.inf if adjustment_limit is None else -adjustment_limit
+        upper_limit = math.inf if adjustment_limit is None else adjustment_limit
         stiffness = config.stiffness
         if (
             stiffness is not None
@@ -932,19 +960,19 @@ class NormalForceController:
             )
             stiffness_position_limit = maximum_force_step / max(safe_joint_stiffness, 1e-12)
             lower = max(
-                -float(config.max_position_adjustment),
+                lower_limit,
                 self._position_adjustment - stiffness_position_limit,
             )
             upper = min(
-                float(config.max_position_adjustment),
+                upper_limit,
                 self._position_adjustment + stiffness_position_limit,
             )
             self._pid.output_limits = (lower, upper)
         else:
             self._pid.output_limits = (
-                -float(config.max_position_adjustment),
-                float(config.max_position_adjustment),
+                (None, None) if adjustment_limit is None else (lower_limit, upper_limit)
             )
+        previous_integral = self._pid.components[1]
         pid_adjustment = float(self._pid(measured_force_n, dt=dt))
         if stiffness_position_limit is not None:
             raw_pid_adjustment = float(sum(self._pid.components))
@@ -957,15 +985,27 @@ class NormalForceController:
         adjustment = float(
             np.clip(
                 stiffness_adjustment + pid_adjustment,
-                -config.max_position_adjustment,
-                config.max_position_adjustment,
+                lower_limit,
+                upper_limit,
             )
         )
         self._position_adjustment = adjustment
+        # PI／PID 偏置跟随实测位置，避免把限幅误作接触后的累计行程上限。
         mit = inner.apply(
-            target_position=self._contact_position + adjustment,
+            target_position=current_position + adjustment,
             feedforward_torque=force_feedforward_torque,
         )
+        if adjustment_limit is None:
+            # 仅撤掉固定偏置限幅；下游限制仍反馈给积分器。忽略小于约两个
+            # 真机位置编码步长的差异，避免将协议量化误当成执行饱和。
+            position_gap = current_position + adjustment - mit.target_position
+            position_limited = abs(position_gap) > 1e-4 and position_gap * force_error > 0.0
+            torque_limited = (
+                abs(mit.torque) >= inner.torque_limit_n_m - 1e-9 and mit.torque * force_error > 0.0
+            )
+            if position_limited or torque_limited:
+                # simple-pid 未提供积分项 setter；只回退本周期积分，保留微分历史。
+                self._pid._integral = previous_integral
         return _ForceTrackingStep(
             mit=mit,
             position_adjustment=adjustment,
