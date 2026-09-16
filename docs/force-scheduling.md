@@ -95,6 +95,18 @@ uv run pgt run force-schedule --experiment dm_gripper/adaptive_prior
 
 ## 统一策略的初步验证 {: #unified-adaptive }
 
+多速率仿真支持可选 `task.definition.tactile_fault` 注入，默认 `null`，不影响旧组合。
+`start_s` 为撤支撑后的注入起点（默认 0.02 s）；`shear_noise_std_n` 是两侧逐 taxel 切向分量
+附加高斯噪声标准差，使用独立随机流；`spike_n`／`spike_frames` 在两侧第一个 taxel 的 Fx
+施加一帧或两帧加性毛刺。注入仅修改观测，不向物体施加真实外力。
+`drop_frames` 丢弃起点后的指定数量采样，保留序号缺口，不更新 latest；
+`jitter=true` 从采集启动起交替使用一个／三个名义周期，500 Hz 名义设置下为真实 2／6 ms 间隔，
+平均有效频率因此为 250 Hz，此压力测试不代表平均频率保持 500 Hz 的随机抖动。
+采样仍落在物理步上，不伪造时间戳。高频日志以 `injected_drop` 标记未采样记录，
+相应记录无 taxel 字段；已采样记录的 `injected_spike` 标记毛刺。
+短 stale 只冻结目标增长，控制器仍执行原目标；不能据此宣称陈旧反馈下的闭环力控已安全。
+真机故障规则和权限保持原样。故障配置用于有限探索，不是正式 study 或完整硬件故障模型。
+
 ```bash
 uv run pgt run force-schedule --experiment dm_gripper/unified_adaptive
 # 自重 2.5 N 的撤支撑工况，1 N 初始抓力、50 N/s 限速；当前位移仍未达标
@@ -103,6 +115,8 @@ uv run pgt run force-schedule --experiment dm_gripper/unified_step_load
 uv run pgt run force-schedule --experiment dm_gripper/unified_step_load_fast
 # 进一步缩短载荷观测滤波，检查撤支撑后的最初 200 ms
 uv run pgt run force-schedule --experiment dm_gripper/unified_step_load_transient
+# 独立 500 Hz 触觉预处理与 250 Hz 控制，保留高频触觉日志
+uv run pgt run force-schedule --experiment dm_gripper/unified_step_load_multirate
 # 保留相同上层策略，比较位置式 PID＋机构力矩前馈
 uv run pgt run force-schedule --experiment dm_gripper/unified_step_load_pid
 ```
@@ -126,6 +140,26 @@ uv run pgt run force-schedule --experiment dm_gripper/unified_step_load_pid
 该组合用于当前硬物体、自重 2.5 N 的仿真工况，不自动替换原基线、全局默认或真机参数；
 更短滤波对噪声更敏感，跨材料、噪声水平及真机表现仍需独立验证。
 
+`unified_step_load_multirate` 在瞬态候选上显式启用 `task.tactile_sampling`：
+`period_s=0.002`、`median_window=3`、`stale_after_s=0.01`、`record_raw=true`。
+未配置此字段的历史组合保持原采样与数值路径。切向分量先做三点因果中值，再聚合分侧合力模，
+最后使用 `unified_adaptive.load.filter_tau_s` 在采样侧进行唯一一次低通；法向反馈保持不变。
+首帧播种中值历史；长间断或坏帧后重建历史，不把不连续数据拼成载荷导数。
+
+多速率组合只允许统一策略，可显式开启风险增力／摩擦更新；采样与控制周期须为物理步长的整数倍，
+采样周期不得大于控制周期。仿真记录实际采样时间，不回填不存在的历史帧。
+多速率 `trace.csv` 按控制周期记录，追加 `sensor_sequence_id`、`sensor_time_s`、`control_time_s`、
+`sensor_age_s`、`sensor_stale`、`sensor_valid`、丢帧／事件累计与分侧滤波承载。
+旧 `time_s` 仍是执行该请求后一个物理步的评价时刻，分析控制时序应使用 `control_time_s`。
+可选 `tactile.jsonl` 按采样周期保留原始 taxel、滤波承载与风险／摩擦旁路诊断，并登记到 manifest。
+坏帧累计计数跨最新快照保留，非有限原始分量在严格 JSON 中写为 `null`，同时明确标记样本无效。
+指标仍从所有物理步计算，不因控制日志降采样改变原评分；前 200 ms 需另作完整窗口诊断。
+
+可用 `--set task.definition.tactile_sampling.median_window=1` 旁路中值，或改
+`period_s=0.004` 比较 250/250 Hz；比较 5 ms 低通时使用
+`--set task.definition.unified_adaptive.load.filter_tau_s=0.005`。
+这些都是独立探索覆盖，不自动改变原瞬态候选，亦不代表异常、材料和真机评测已经全部完成。
+
 `unified_step_load_pid` 是仿真专用对照：保持同一任务、先验、1 N 初始力、50 N/s 目标限速、
 20 Hz 法向低通、4 ms 外环、MIT 增益、协议力矩上限与配对 seed，仅替换下层完整控制结构。
 复用历史 `pid-torque-ff` 的位置式 PID；启用 `window_linear` 以进入原有模型前馈路径，
@@ -141,9 +175,29 @@ uv run pgt run force-schedule --experiment dm_gripper/unified_step_load_pid
 
 观测器使用接触滞回、因果时间窗、加载趋势、剪切重分配、法向增力排除、持续确认和冷却。
 风险事件只消费一次，并受步长、累计增量、次数和持续时间约束；零承载缺口时也能抬高目标。
+显式配置 `risk_repeat_interval_s` 后，持续满确认时间的风险可按该间隔继续增力，
+无需等待风险解除再生成独立事件；续增不构成新的摩擦证据。默认 `null` 保留旧单事件行为。
+持续风险的确认标志由采样侧生成，避免控制抽取漏过短暂证据中断后错误认定持续风险。
+已确认的大步请求通过 `risk_rate_n_s` 快速完成，但始终受总目标变化率和力上限约束。
+重复、陈旧、坏帧或执行限幅不生成新步数，不补算冻结期间增力。
+采样快照短期锁存最近事件及候选，避免 500/250 Hz 抽取遗漏；接触变化、坏帧、长间断或
+超过采样新鲜度窗口即清除，控制侧只消费一次，不逐个补发漏过的历史事件。
 摩擦候选额外要求相关触点剪切份额下降且局部力比不再增长，取事件前有效比值中位数；
 质量分数仅是有效触点覆盖率，不是统计置信度或真实摩擦的保证。
-较低候选可即时接受，提高需多个独立一致事件；低质量、接触变化及过期回退到先验。
+较低候选经折减后可即时接受，提高需多个独立一致事件；低质量或越界候选不覆盖已有估计，
+接触变化及过期回退到先验。不能把普通稳态切法向力比直接解释为真实静摩擦系数。
+
+`dm_gripper/unified_step_load_risk` 是独立实验候选：开启两条权限，风险窗口 40 ms、确认 12 ms，
+每步 1 N、续增间隔 100 ms、风险附加速率 50 N/s，累计预算 12 N／12 步／20 s，
+保留仿真原 8 N 上限。它显式开启 `observer.allow_steady_load_risk`，允许稳载下局部剪切
+重分配形成风险，但仍排除明显卸载与主动法向增力；恒定载荷本身不触发。
+这些为待验证参数，纯力信号没有局部变化时仍可能漏检持续滑动，不能声称一定接住真实物体。
+该候选同时启用 `observer.stable_contact_subset`：仅比较窗口内始终存在的触点，双侧各至少两个，
+边缘点进出不清空整个窗口，也不直接算作局部重分配；不足时仍重建窗口。
+此模式的切向／法向趋势由同一窗口斜率给出，不使用噪声敏感的 2 ms 瞬时差分；
+代价是卸载或主动增力证据撤销最多延迟一个窗口，需在目标硬件上验证误触发。
+摩擦质量是共同触点数除以九，候选阈值 0.4 要求至少四点，不是统计置信度。
+设备绝对时间的浮点减法采用纳秒级窗口容差，避免整周期窗口被反复误判为预热。
 
 默认 `risk_enabled=false`、`friction_update_enabled=false`，观测仅诊断。
 受控事件注入验证权限、去重、预算和摩擦状态逻辑，不验证真实传感器起滑识别。

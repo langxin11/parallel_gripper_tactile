@@ -29,6 +29,46 @@ uv run --package dmgripper-experiments dmgripper-run \
 
 ## 生命周期与预载
 
+### 快速多速率真机候选
+
+`configs/hardware/dmgripper/unified_adaptive_fast.yaml` 是独立候选，不替换旧配置。
+初始平均单侧目标为 1 N，上限为 30 N／侧，增力上限 50 N/s；导纳速度上限 0.20 rad/s，
+质量 0.2 kg、阻尼 15 N·s/m、刚度 1 N/m、力矩前馈比例 1.0，MIT 力矩上限仍为 4 N·m。
+`controller.admittance.feedforward_ratio` 默认 0 保持旧行为，新候选显式设为 1；
+死区设为 0，`prevent_unloading=true` 按真机实验要求阻止导纳减小闭合量；显式释放仍走独立流程。
+此项与允许反向纠偏的仿真候选不同，不保证实际抓力单调，也不能主动卸去过冲；原始过力保护保留。
+法向低通显式设为 20 Hz，切向链为逐 taxel 中值3＋10 ms 低通。
+
+30 N 是调度上限而不是固定目标；候选过力保护为 35 N／侧，**不是已验证安全值**。
+必须按机构、传感器和物体允许值核对；9 个 taxel 的量程不能简单求和作为允许抓力。
+旧配置不能证明这一快速候选已经安全，首次执行需保留物体承接与硬件急停。
+
+```sh
+# 离线校验：不连接设备
+uv run --package dmgripper-experiments dmgripper-run \
+  --config configs/hardware/dmgripper/unified_adaptive_fast.yaml
+
+# 核对保护阈值与设备条件后交互执行；清零时触觉必须无外载
+uv run --package dmgripper-experiments dmgripper-run \
+  --config configs/hardware/dmgripper/unified_adaptive_fast.yaml --bias --execute
+```
+
+输入 `start` 后执行接近和 1 N 预载，等待进入 `active` 再转移物体支撑载荷；
+程序不会自动撤去外部支撑。`holding` 仍自适应，输入 `release` 才按既有流程释放回位。
+预载仍沿用低侧持续达标规则，并非双向误差稳定判定。此快速候选现显式开启实验性风险增力与摩擦更新：
+每步请求增加 1 N，持续确认风险下每 100 ms 最多续增一次，总目标变化率仍受 50 N/s 限制。
+风险累计预算为 12 N／12 步／20 s，不能无限加力；预算耗尽且风险持续会报告失败并按既有流程处置。
+窗口 40 ms、确认 12 ms；窗口内共同接触点用于比较，避免边缘点反复进出使检测持续预热。
+摩擦质量阈值 0.4 对应至少四个共同触点，候选折减后使用；这只是工程覆盖率，不是统计置信度。
+相同事件只更新一次摩擦，持续风险续增不提供新的独立摩擦证据。
+
+多速率配置只支持 500 Hz 采样／250 Hz 控制。预处理在采集线程每包执行，目标调度每控制周期执行；
+重复或年龄超过 10 ms 的快照冻结目标增长，100 ms 硬超时仍触发原保护。接收年龄不等于
+传感器到主机的总延迟；串口积压和日志性能仍须从实测评估，不保证主机硬实时。
+非法原始数据、过力和量程饱和不能被中值滤波隐藏，采集异常仍会传播为统一模式致命故障。
+真机保留现有逐包原始日志，嵌套 `processed` 保存采样侧结果；`record_raw` 当前不关闭真机审计日志。
+记录器 1.3.0 追加 `sensor_*` 时间、序号、年龄、丢帧和事件列。两类时钟分别记录，不做同步精度承诺。
+
 正常阶段为 `preparing` → `ready` → 必要时 `homing` → `approach` →
 `contact_transition` → `preload` → `active` → `holding` → 显式释放后的 `returning` → `completed`。
 
@@ -129,6 +169,9 @@ uv run --package dmgripper-experiments python -m dmgripper_experiments.replay \
 风险与摩擦更新默认关闭，仍记录旁路候选。开放风险需要 `risk_enabled` 与
 `risk_validation_passed`；开放摩擦还需要 `friction_update_enabled` 与
 `friction_validation_passed`。布尔门禁仅记录操作者授权，不能代替真实独立验收证据。
+未验收的受控实验可显式设置 `experimental_closed_loop=true`，此时不要求伪造上述两项验收标志；
+`unified_adaptive_fast.yaml` 使用此实验路径，通用默认仍关闭。软件接入与仿真通过不意味着
+真实起滑识别、摩擦准确性或止滑能力已经验证；静默匀速滑动仍可能缺少纯力检测证据。
 
 统一模式在触觉失鲜、通信异常、坏数据、触点越量程、原始过力或严重不平衡时，
 直接进入独立失能清理，不以保持物体覆盖保护。承载不足、预算耗尽等科学失败仅在
