@@ -46,6 +46,11 @@ reference:
         force_n: 8.0
 controller:
   kind: admittance
+  pid:
+    # 取消 PID 固定位置偏置上限；最终请求仍受速度、机械行程和总力矩限制。
+    max_position_adjustment_rad: null
+    # PID 直接按目标力与实时机构雅可比提供力矩前馈；无需消费刚度估计。
+    torque_feedforward_gain: 1.0
   admittance:
     force_deadband_n: 0.1
     prevent_unloading: true

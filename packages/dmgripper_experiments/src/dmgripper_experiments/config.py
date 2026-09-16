@@ -507,23 +507,36 @@ class AdmittanceConfig:
 
 @dataclass(frozen=True, slots=True)
 class PIDConfig:
-    """PID 力跟踪器参数。"""
+    """PID 参数，位置偏置相对实测位置，独立模型力矩前馈不依赖刚度。
+
+    ``torque_feedforward_gain`` 为 0～1 的比例；显式设置时覆盖旧刚度路径的
+    模型力矩前馈，``None`` 保持旧行为，不影响其他控制器。
+    ``max_position_adjustment_rad=None`` 关闭 PID 固定偏置限幅，保留下游保护。
+    """
 
     kp: float = 0.016
     ki: float = 0.2
     kd: float = 0.0
-    max_position_adjustment_rad: float = 0.15
+    max_position_adjustment_rad: float | None = 0.15
+    torque_feedforward_gain: float | None = None
 
     def __post_init__(self) -> None:
         """验证 PID 参数。"""
         for name in ("kp", "ki", "kd"):
             if _finite_number(getattr(self, name), f"controller.pid.{name}") < 0.0:
                 raise ValueError(f"controller.pid.{name} 不得为负")
-        _finite_number(
-            self.max_position_adjustment_rad,
-            "controller.pid.max_position_adjustment_rad",
-            positive=True,
-        )
+        if self.max_position_adjustment_rad is not None:
+            _finite_number(
+                self.max_position_adjustment_rad,
+                "controller.pid.max_position_adjustment_rad",
+                positive=True,
+            )
+        if self.torque_feedforward_gain is not None:
+            gain = _finite_number(
+                self.torque_feedforward_gain, "controller.pid.torque_feedforward_gain"
+            )
+            if not 0.0 <= gain <= 1.0:
+                raise ValueError("controller.pid.torque_feedforward_gain 必须位于 0 与 1 之间")
 
 
 @dataclass(frozen=True, slots=True)
@@ -914,6 +927,8 @@ def _decode_dataclass(data: object, cls: type[Any], name: str) -> Any:
             if isinstance(value, bool) or not isinstance(value, int):
                 raise ValueError(f"{field_name} 必须是整数")
             kwargs[item.name] = value
+        elif type_hints.get(item.name) == float | None:
+            kwargs[item.name] = None if value is None else _finite_number(value, field_name)
         elif _is_optional_dataclass(type_hints.get(item.name)):
             if value is None:
                 kwargs[item.name] = None

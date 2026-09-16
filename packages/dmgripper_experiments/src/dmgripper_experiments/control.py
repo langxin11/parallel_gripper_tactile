@@ -211,7 +211,15 @@ class GripController:
                 kp=controller.pid.kp,
                 ki=controller.pid.ki,
                 kd=controller.pid.kd,
-                max_position_adjustment=controller.pid.max_position_adjustment_rad,
+                max_position_adjustment=(
+                    controller.pid.max_position_adjustment_rad
+                    if controller.kind == "pid"
+                    or controller.pid.max_position_adjustment_rad is not None
+                    else 0.15
+                ),
+                pid_torque_feedforward_gain=(
+                    controller.pid.torque_feedforward_gain if controller.kind == "pid" else None
+                ),
                 filter_cutoff_hz=config.timing.tactile_cutoff_hz,
                 geometry=kinematics,
                 stiffness=stiffness_config,

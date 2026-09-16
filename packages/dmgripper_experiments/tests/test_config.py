@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
 
 import pytest
 
@@ -11,6 +12,7 @@ from dmgripper_experiments.config import (
     CurveReferenceConfig,
     ExperimentConfig,
     HardwareConfig,
+    PIDConfig,
     ReferenceConfig,
     WaypointConfig,
     load_experiment_config,
@@ -35,6 +37,119 @@ def test_default_config_constructs_and_selects_curve():
     assert config.hardware.home_position_rad == pytest.approx(0.0)
     assert config.hardware.home_tolerance_rad == pytest.approx(0.03)
     assert config.hardware.feedback_position_margin_rad == pytest.approx(0.05)
+    assert config.controller.pid.torque_feedforward_gain is None
+    assert config.controller.pid.max_position_adjustment_rad == pytest.approx(0.15)
+
+
+@pytest.mark.parametrize("limit", [None, 0.15, 0.5])
+def test_pid_position_adjustment_accepts_optional_positive_limit(limit):
+    """位置偏置允许显式关闭固定上限，正值继续表达有限上限。"""
+    assert PIDConfig(max_position_adjustment_rad=limit).max_position_adjustment_rad == limit
+
+
+@pytest.mark.parametrize("limit", [0.0, -0.01, float("nan"), float("inf"), True, False])
+def test_pid_position_adjustment_rejects_invalid_limit(limit):
+    """关闭上限必须使用 None，零、负数、非有限值与布尔值均非法。"""
+    with pytest.raises(ValueError, match="max_position_adjustment_rad"):
+        PIDConfig(max_position_adjustment_rad=limit)
+
+
+@pytest.mark.parametrize("literal", ["0.0", "-0.1", ".nan", ".inf", "true"])
+def test_yaml_rejects_invalid_pid_position_adjustment_limit(tmp_path, literal):
+    """严格 YAML 校验可空的位置偏置上限。"""
+    path = tmp_path / "pid.yaml"
+    path.write_text(
+        f"controller:\n  pid:\n    max_position_adjustment_rad: {literal}\n", encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="max_position_adjustment_rad"):
+        load_experiment_config(path)
+
+
+def test_yaml_and_cli_accept_disabled_pid_position_adjustment_limit(tmp_path, capsys):
+    """YAML null 与命令行 None 都可关闭固定偏置上限。"""
+    from dmgripper_experiments.cli import run
+
+    path = tmp_path / "pid.yaml"
+    path.write_text(
+        "controller:\n  kind: pid\n  pid:\n    max_position_adjustment_rad: null\n",
+        encoding="utf-8",
+    )
+    assert load_experiment_config(path).controller.pid.max_position_adjustment_rad is None
+    assert (
+        run(["--controller.kind", "pid", "--controller.pid.max-position-adjustment-rad", "None"])
+        == 0
+    )
+    record = json.loads(capsys.readouterr().out)
+    assert record["mode"] == "dry-run"
+    assert record["config"]["controller"]["pid"]["max_position_adjustment_rad"] is None
+
+
+@pytest.mark.parametrize("gain", [None, 0.0, 0.4, 1.0])
+def test_pid_torque_feedforward_accepts_optional_bounded_gain(gain):
+    """独立 PID 力矩前馈接受兼容默认值与闭区间增益。"""
+    assert PIDConfig(torque_feedforward_gain=gain).torque_feedforward_gain == gain
+
+
+@pytest.mark.parametrize("gain", [-0.01, 1.01, float("nan"), float("inf"), True, False])
+def test_pid_torque_feedforward_rejects_invalid_gain(gain):
+    """负数、越界、非有限值与布尔值不得成为 PID 力矩前馈增益。"""
+    with pytest.raises(ValueError, match="torque_feedforward_gain"):
+        PIDConfig(torque_feedforward_gain=gain)
+
+
+@pytest.mark.parametrize("literal, expected", [("null", None), ("0.0", 0.0), ("1.0", 1.0)])
+def test_yaml_pid_torque_feedforward_does_not_require_estimation(tmp_path, literal, expected):
+    """YAML 可在关闭估计时独立配置 PID 模型力矩前馈。"""
+    path = tmp_path / "pid.yaml"
+    path.write_text(
+        "controller:\n  kind: pid\n  stiffness_consumption: none\n"
+        f"  pid:\n    torque_feedforward_gain: {literal}\n"
+        "estimation:\n  enabled: false\n",
+        encoding="utf-8",
+    )
+    config = load_experiment_config(path)
+    assert config.controller.pid.torque_feedforward_gain == expected
+    assert not config.estimation.enabled
+
+
+@pytest.mark.parametrize("literal", ["-0.1", "1.1", ".nan", "true"])
+def test_yaml_rejects_invalid_pid_torque_feedforward_gain(tmp_path, literal):
+    """严格 YAML 同样拒绝非法前馈增益。"""
+    path = tmp_path / "pid.yaml"
+    path.write_text(
+        f"controller:\n  pid:\n    torque_feedforward_gain: {literal}\n", encoding="utf-8"
+    )
+    with pytest.raises(ValueError, match="torque_feedforward_gain"):
+        load_experiment_config(path)
+
+
+def test_water_bottle_pid_feedforward_can_be_overridden_in_cli_dry_run(capsys):
+    """水瓶配置启用独立前馈，命令行可离线覆盖而不连接设备。"""
+    from dmgripper_experiments.cli import run
+
+    path = (
+        Path(__file__).resolve().parents[3] / "configs/hardware/dmgripper/water_bottle_curve.yaml"
+    )
+    config = load_experiment_config(path)
+    assert config.controller.pid.torque_feedforward_gain == 1.0
+    assert config.controller.pid.max_position_adjustment_rad is None
+    assert config.controller.stiffness_consumption == "none"
+    assert (
+        run(
+            [
+                "--config",
+                str(path),
+                "--controller.kind",
+                "pid",
+                "--controller.pid.torque-feedforward-gain",
+                "0.0",
+            ]
+        )
+        == 0
+    )
+    record = json.loads(capsys.readouterr().out)
+    assert record["mode"] == "dry-run"
+    assert record["config"]["controller"]["pid"]["torque_feedforward_gain"] == 0.0
 
 
 @pytest.mark.parametrize("change", ["risk", "friction", "initial", "rate", "ceiling", "controller"])

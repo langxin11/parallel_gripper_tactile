@@ -117,6 +117,265 @@ def test_controllers_emit_finite_limited_mit_commands(kind: str) -> None:
     assert positions[-1] > positions[0]
 
 
+def test_pid_follows_moving_feedback_beyond_contact_offset_with_velocity_limit() -> None:
+    """真机 PID 可越过旧接触偏置范围，最终指令仍遵守逐周期限速。"""
+    config = _config("pid")
+    controller = GripController(config, kinematics=KINEMATICS, command_config=COMMAND_CONFIG)
+    initial_position = 0.4
+    previous_target = initial_position
+    for index in range(120):
+        feedback = MotorFeedback(initial_position + index * 0.002, 0.0, 0.0, STATUS_ENABLED)
+        operation = controller.begin_contact_tracking if index == 0 else controller.step_tracking
+        step = operation(
+            paired=_paired(feedback, 0.4, 0.4, counter=index + 1),
+            target=_target(config.safety.max_target_force_n),
+            time_s=(index + 1) * 0.01,
+            dt=0.01,
+        )
+        assert abs(step.command.position_rad - previous_target) <= 0.003 + 1e-12
+        assert step.command.position_rad > feedback.position_rad
+        assert abs(step.position_adjustment) <= config.controller.pid.max_position_adjustment_rad
+        previous_target = step.command.position_rad
+    assert previous_target > initial_position + config.controller.pid.max_position_adjustment_rad
+
+
+def _pid_feedforward_config(gain, *, estimation=True, consumption="none", kind="pid"):
+    """配置独立模型前馈与可选旧刚度消费路径。"""
+    config = _config(kind)
+    return replace(
+        config,
+        estimation=replace(config.estimation, enabled=estimation),
+        controller=replace(
+            config.controller,
+            stiffness_consumption=consumption,
+            pid=replace(config.controller.pid, torque_feedforward_gain=gain),
+        ),
+    )
+
+
+def _pid_unbounded_config(*, kind="pid"):
+    """关闭固定偏置上限，保留后端机械、速度与力矩约束。"""
+    config = _pid_feedforward_config(0.0, kind=kind)
+    return replace(
+        config,
+        controller=replace(
+            config.controller,
+            pid=replace(config.controller.pid, max_position_adjustment_rad=None),
+        ),
+    )
+
+
+def test_pid_unbounded_bias_can_exceed_old_limit_with_stationary_feedback():
+    """受力不足且测量位置固定时，积分偏置可超过旧的 0.15 rad 上限。"""
+    controller = GripController(
+        _pid_unbounded_config(), kinematics=KINEMATICS, command_config=COMMAND_CONFIG
+    )
+    feedback = MotorFeedback(0.4, 0.0, 0.0, STATUS_ENABLED)
+    previous_position = feedback.position_rad
+    for index in range(220):
+        operation = controller.begin_contact_tracking if index == 0 else controller.step_tracking
+        step = operation(
+            paired=_paired(feedback, 0.4, 0.4, counter=index + 1),
+            target=_target(0.9),
+            time_s=(index + 1) * 0.01,
+            dt=0.01,
+        )
+        assert abs(step.command.position_rad - previous_position) <= 0.003 + 1e-12
+        previous_position = step.command.position_rad
+    assert step.position_adjustment > 0.15
+    assert step.command.position_rad - feedback.position_rad > 0.15
+
+
+@pytest.mark.parametrize("constraint", ["position", "velocity", "torque"])
+def test_pid_unbounded_bias_obeys_backend_limits_and_recovers_after_error_reversal(constraint):
+    """取消固定偏置裁剪后，后端饱和仍受保护且反向误差能恢复调节。"""
+    options = {
+        "position": {"position_max_rad": 0.405},
+        "velocity": {"velocity_limit_rad_s": 0.01},
+        "torque": {"torque_limit_nm": 0.02, "feedforward_torque_limit_nm": 0.02},
+    }[constraint]
+    command_config = replace(COMMAND_CONFIG, **options)
+    controller = GripController(
+        _pid_unbounded_config(), kinematics=KINEMATICS, command_config=command_config
+    )
+    feedback = MotorFeedback(0.4, 0.0, 0.0, STATUS_ENABLED)
+    previous_position = feedback.position_rad
+    # 最慢速度情形需要至少 6 s 才能撤回前半程的指令行程，留出滤波与反向余量。
+    for index in range(1500):
+        reverse = index >= 600
+        operation = controller.begin_contact_tracking if index == 0 else controller.step_tracking
+        step = operation(
+            paired=_paired(
+                feedback, 1.0 if reverse else 0.4, 1.0 if reverse else 0.4, counter=index + 1
+            ),
+            target=_target(0.2 if reverse else 1.2),
+            time_s=(index + 1) * 0.01,
+            dt=0.01,
+        )
+        command = step.command
+        assert (
+            command_config.position_min_rad
+            <= command.position_rad
+            <= command_config.position_max_rad
+        )
+        assert (
+            abs(command.position_rad - previous_position)
+            <= command_config.velocity_limit_rad_s * 0.01 + 1e-12
+        )
+        torque = (
+            command_config.kp * (command.position_rad - feedback.position_rad)
+            + command_config.kd * (command.velocity_rad_s - feedback.velocity_rad_s)
+            + command.feedforward_torque_nm
+        )
+        assert abs(torque) <= command_config.torque_limit_nm + 1e-12
+        if index == 599 and constraint != "velocity":
+            # 长时间顶住行程或力矩边界，积分不得把请求继续推到远离可执行值的位置。
+            assert abs(step.position_adjustment) < 0.05
+        previous_position = command.position_rad
+    assert step.command.position_rad < feedback.position_rad
+    assert step.position_adjustment < 0.0
+
+
+@pytest.mark.parametrize("kind", ["adrc", "admittance"])
+def test_disabled_pid_bias_limit_preserves_other_controllers(kind):
+    """PID 的 None 上限不改变其他控制器的原有有限位移策略。"""
+    steps = []
+    for config in (_pid_feedforward_config(0.0, kind=kind), _pid_unbounded_config(kind=kind)):
+        controller = GripController(config, kinematics=KINEMATICS, command_config=COMMAND_CONFIG)
+        feedback = MotorFeedback(0.4, 0.0, 0.0, STATUS_ENABLED)
+        trajectory = []
+        for index in range(20):
+            operation = (
+                controller.begin_contact_tracking if index == 0 else controller.step_tracking
+            )
+            trajectory.append(
+                operation(
+                    paired=_paired(feedback, 0.4, 0.4, counter=index + 1),
+                    target=_target(1.0),
+                    time_s=(index + 1) * 0.01,
+                    dt=0.01,
+                )
+            )
+        steps.append(trajectory)
+    assert steps[0] == steps[1]
+
+
+@pytest.mark.parametrize(
+    "estimation, consumption", [(False, "none"), (True, "none"), (True, "feedforward")]
+)
+def test_pid_model_feedforward_tracks_target_and_real_position_without_stiffness(
+    estimation, consumption
+):
+    """无有效刚度时仍按实测位置与当前目标输出模型前馈，且不增加位置修正。"""
+    config = _pid_feedforward_config(0.7, estimation=estimation, consumption=consumption)
+    controller = GripController(config, kinematics=KINEMATICS, command_config=COMMAND_CONFIG)
+    baseline = GripController(
+        _pid_feedforward_config(0.0, estimation=estimation, consumption=consumption),
+        kinematics=KINEMATICS,
+        command_config=COMMAND_CONFIG,
+    )
+    for index, (position, target) in enumerate(((0.4, 0.7), (0.45, 1.1), (0.5, 0.6))):
+        feedback = MotorFeedback(position, 0.0, 0.0, STATUS_ENABLED)
+        arguments = dict(
+            paired=_paired(feedback, 0.4, 0.4, counter=index + 1),
+            target=_target(target),
+            time_s=(index + 1) * 0.01,
+            dt=0.01,
+            stiffness_value=None,
+        )
+        operation = controller.begin_contact_tracking if index == 0 else controller.step_tracking
+        reference_operation = (
+            baseline.begin_contact_tracking if index == 0 else baseline.step_tracking
+        )
+        step = operation(**arguments)
+        reference = reference_operation(**arguments)
+        assert step.command.feedforward_torque_nm == pytest.approx(
+            0.7 * KINEMATICS.closure_jacobian(position) * target
+        )
+        assert step.command.position_rad == pytest.approx(reference.command.position_rad)
+        assert step.position_adjustment == pytest.approx(reference.position_adjustment)
+        assert step.stiffness_estimate_n_per_m is None
+
+
+@pytest.mark.parametrize("gain, expected_gain", [(None, 1.0), (0.0, 0.0), (0.4, 0.4), (1.0, 1.0)])
+def test_pid_explicit_feedforward_replaces_legacy_torque_without_double_counting(
+    gain, expected_gain
+):
+    """显式增益覆盖旧力矩前馈，None 保留兼容行为且刚度位置项不受影响。"""
+    config = _pid_feedforward_config(gain, consumption="feedforward")
+    controller = GripController(config, kinematics=KINEMATICS, command_config=COMMAND_CONFIG)
+    feedback = MotorFeedback(0.4, 0.0, 0.0, STATUS_ENABLED)
+    step = controller.begin_contact_tracking(
+        paired=_paired(feedback, 0.4, 0.4),
+        target=_target(1.0),
+        time_s=0.01,
+        dt=0.01,
+        stiffness_value=1500.0,
+    )
+    jacobian = KINEMATICS.closure_jacobian(feedback.position_rad)
+    assert step.command.feedforward_torque_nm == pytest.approx(expected_gain * jacobian)
+    assert step.position_adjustment == pytest.approx(
+        (0.016 + 0.2 * 0.01) * 0.6 + 0.25 * 0.6 / (1500.0 * jacobian)
+    )
+
+
+def test_pid_legacy_default_without_stiffness_has_no_feedforward():
+    """未设置独立增益且未消费刚度时保持原来的零前馈。"""
+    controller = GripController(
+        _pid_feedforward_config(None), kinematics=KINEMATICS, command_config=COMMAND_CONFIG
+    )
+    step = controller.begin_contact_tracking(
+        paired=_paired(MotorFeedback(0.4, 0.0, 0.0, STATUS_ENABLED), 0.4, 0.4),
+        target=_target(1.0),
+        time_s=0.01,
+        dt=0.01,
+    )
+    assert step.command.feedforward_torque_nm == 0.0
+
+
+@pytest.mark.parametrize("kind", ["adrc", "admittance"])
+def test_pid_feedforward_setting_does_not_change_other_controllers(kind):
+    """PID 专属前馈字段不改变 LADRC 或导纳指令。"""
+    steps = []
+    for gain in (None, 1.0):
+        controller = GripController(
+            _pid_feedforward_config(gain, kind=kind),
+            kinematics=KINEMATICS,
+            command_config=COMMAND_CONFIG,
+        )
+        steps.append(
+            controller.begin_contact_tracking(
+                paired=_paired(MotorFeedback(0.4, 0.0, 0.0, STATUS_ENABLED), 0.4, 0.4),
+                target=_target(1.0),
+                time_s=0.01,
+                dt=0.01,
+            )
+        )
+    assert steps[0] == steps[1]
+
+
+def test_pid_feedforward_still_obeys_total_mit_torque_limit():
+    """独立前馈与位置项合成后仍遵守 MIT 总力矩限制。"""
+    command_config = replace(COMMAND_CONFIG, torque_limit_nm=0.01, feedforward_torque_limit_nm=0.01)
+    controller = GripController(
+        _pid_feedforward_config(1.0), kinematics=KINEMATICS, command_config=command_config
+    )
+    feedback = MotorFeedback(0.4, 0.0, 0.0, STATUS_ENABLED)
+    step = controller.begin_contact_tracking(
+        paired=_paired(feedback, 0.4, 0.4),
+        target=_target(1.5),
+        time_s=0.01,
+        dt=0.01,
+    )
+    assert KINEMATICS.closure_jacobian(feedback.position_rad) * 1.5 > command_config.torque_limit_nm
+    torque = (
+        command_config.kp * (step.command.position_rad - feedback.position_rad)
+        + command_config.kd * (step.command.velocity_rad_s - feedback.velocity_rad_s)
+        + step.command.feedforward_torque_nm
+    )
+    assert abs(torque) <= command_config.torque_limit_nm + 1e-12
+
+
 def test_admittance_holds_position_for_deadband_and_overforce() -> None:
     """导纳进入死区或力偏高时均不得反向穿越传动间隙。"""
     controller = GripController(
