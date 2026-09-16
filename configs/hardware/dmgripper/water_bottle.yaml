@@ -1,0 +1,61 @@
+# 水瓶（PET 薄壁瓶）低载荷统一自适应试运行配置；尚未完成真实设备验收。
+# 基于 unified_adaptive.yaml，仅调整物体名；力上限维持单侧 1.5 N、过力保护 2 N，
+# 避免 30 N 级候选压溃瓶身。首次执行保持外部支撑，不自动撤去。
+metadata:
+  task_name: unified-adaptive
+  object_name: water-bottle
+hardware:
+  dm_port: /dev/dmj4310_can
+  tactile_port: /dev/papillarray
+timing:
+  control_rate_hz: 250
+  max_control_gap_s: 0.1
+  tactile_timeout_s: 0.1
+lifecycle:
+  # 瓶身必须干燥：湿滑表面显著降低摩擦，且水渍影响触觉零偏与读数。
+  verify_zero_force: true
+  contact_on_n: 0.2
+  contact_off_n: 0.1
+  lost_contact_action: fault
+  preload_stable_time_s: 2.0
+  preload_timeout_s: 30.0
+  on_finished: hold
+reference:
+  adaptive:
+    initial_force_n: 0.5
+    duration_s: 20.0
+    max_force_rate_n_s: 0.5
+    risk_validation_passed: false
+    friction_validation_passed: false
+    unified:
+      risk_enabled: false
+      friction_update_enabled: false
+      load:
+        # 平滑 PET 先验摩擦偏低，容量诊断偏保守即可，不据此提高目标。
+        left_friction: 0.5
+        right_friction: 0.5
+        safety_factor: 1.5
+        min_force_n: 0.5
+        max_force_n: 1.5
+        max_force_rate_n_s: 0.5
+      observer:
+        tangential_range_n: 4.0
+        normal_range_n: 15.0
+      tracking_error_n: 0.3
+      failure_timeout_s: 0.5
+      max_sample_gap_s: 0.1
+controller:
+  kind: admittance
+  admittance:
+    force_deadband_n: 0.1
+    prevent_unloading: true
+  stiffness_consumption: none
+safety:
+  # 薄壁水瓶允许抓力远低于机构与传感器极限；上调前先核对瓶身抗变形能力。
+  max_target_force_n: 1.5
+  force_ceiling_n: 2.0
+output:
+  root: outputs/real
+  plots: true
+terminal:
+  mode: auto

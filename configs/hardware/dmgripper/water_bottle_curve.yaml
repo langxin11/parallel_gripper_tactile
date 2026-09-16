@@ -1,0 +1,65 @@
+# 水瓶力跟踪曲线任务：2→4→6→8 N，每级 2 s 平台＋1.5 s smoothstep 平滑过渡，总时长 12 s。
+# 目标力为平均单侧法向力；smoothstep 过渡峰值速率约 2 N/s（1.5×ΔF/T），起止斜率为零。
+# 8 N／侧对薄壁 PET 瓶可能已造成明显变形，首次执行建议先删去 6／8 N 两级验证瓶身响应。
+# 峰值不得大于 safety.max_target_force_n；纯上升段与 prevent_unloading 相容。
+metadata:
+  task_name: force-curve
+  object_name: water-bottle
+hardware:
+  dm_port: /dev/dmj4310_can
+  tactile_port: /dev/papillarray
+timing:
+  control_rate_hz: 100.0
+  max_control_gap_s: 0.1
+  tactile_timeout_s: 0.2
+lifecycle:
+  # 瓶身须干燥；湿滑表面降低摩擦且影响触觉零偏。
+  verify_zero_force: true
+  contact_on_n: 0.2
+  contact_off_n: 0.1
+  contact_transition_s: 0.15
+  lost_contact_scope: any_side
+  lost_contact_action: fault
+  preload_stable_time_s: 2.0
+  preload_timeout_s: 30.0
+  on_finished: hold
+reference:
+  curve:
+    # 每级 2 s 平台＋1.5 s 平滑过渡；换回 hold 可恢复阶跃响应测试。
+    interpolation: smoothstep
+    waypoints:
+      - t_s: 0.0
+        force_n: 2.0
+      - t_s: 2.0
+        force_n: 2.0
+      - t_s: 3.5
+        force_n: 4.0
+      - t_s: 5.5
+        force_n: 4.0
+      - t_s: 7.0
+        force_n: 6.0
+      - t_s: 9.0
+        force_n: 6.0
+      - t_s: 10.5
+        force_n: 8.0
+      - t_s: 12.0
+        force_n: 8.0
+controller:
+  kind: admittance
+  admittance:
+    force_deadband_n: 0.1
+    prevent_unloading: true
+  stiffness_consumption: none
+estimation:
+  enabled: true
+  method: window_linear
+safety:
+  # 曲线峰值 8 N；保护上限留 1 N 与 2 N 余量，仍远低于机构极限。
+  max_target_force_n: 9.0
+  force_ceiling_n: 10.0
+output:
+  root: outputs/real
+  plots: true
+terminal:
+  mode: auto
+  refresh_hz: 5.0
