@@ -120,6 +120,34 @@ def test_tangential_trigger_is_background_and_axes_use_math_symbols():
     plt.close(figure)
 
 
+def test_math_text_uses_stix_without_fonttools_timestamp_noise(tmp_path: Path):
+    """数学字体固定为 STIX：嵌入 PDF 不触发 fontTools 旧时间戳告警。"""
+    import logging
+
+    from dmgripper_experiments.plotting import _plotting_api
+
+    plt, style_context = _plotting_api()
+    records: list[str] = []
+
+    class _Capture(logging.Handler):
+        def emit(self, record: logging.LogRecord) -> None:
+            records.append(record.getMessage())
+
+    logger = logging.getLogger("fontTools")
+    handler = _Capture()
+    logger.addHandler(handler)
+    try:
+        with style_context():
+            assert plt.rcParams["mathtext.fontset"] == "stix"
+            figure, axis = plt.subplots()
+            axis.set_ylabel(r"$\hat{K}$ ($\mathrm{N\,m^{-1}}$)")
+            figure.savefig(tmp_path / "math.pdf")
+            plt.close(figure)
+    finally:
+        logger.removeHandler(handler)
+    assert not [message for message in records if "timestamp seems very low" in message]
+
+
 def test_plot_returns_empty_for_missing_or_empty_trace(tmp_path: Path):
     """缺失或空 trace 返回空元组而不是异常。"""
     assert plot_experiment_run(tmp_path) == ()

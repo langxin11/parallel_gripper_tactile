@@ -154,6 +154,10 @@ def _plotting_api() -> tuple[Any, Any]:
         styles = ["science", "ieee", "no-latex"]
     parameters = {
         "font.family": ["Noto Serif CJK SC", "DejaVu Serif"],
+        # 覆盖 SciencePlots 的 cm 数学字体：cm*.ttf 的 head 时间戳过旧，
+        # PDF 嵌入时 fontTools 会对每个字体打两条无害但扰人的告警；
+        # STIX 同为衬线数学字体，观感与 cm 几乎一致且时间戳合法。
+        "mathtext.fontset": "stix",
         "font.size": 9,
         "axes.labelsize": 9,
         "axes.titlesize": 10,
