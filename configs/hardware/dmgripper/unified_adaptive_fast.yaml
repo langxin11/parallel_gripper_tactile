@@ -1,0 +1,88 @@
+# 真机快速承载候选：仅完成离线验证，不表示 30 N／侧已通过设备安全验收。
+# 35 N／侧过力阈值是独立候选保护值，启动前必须按传感器、机构及物体允许值核对。
+metadata:
+  task_name: unified-adaptive-fast
+  object_name: supported-heavy-object
+hardware:
+  dm_port: /dev/dmj4310_can
+  tactile_port: /dev/papillarray
+timing:
+  control_rate_hz: 250
+  max_control_gap_s: 0.1
+  tactile_timeout_s: 0.1
+  tactile_cutoff_hz: 20.0
+lifecycle:
+  verify_zero_force: true
+  contact_on_n: 0.2
+  contact_off_n: 0.1
+  lost_contact_action: fault
+  preload_stable_time_s: 2.0
+  preload_timeout_s: 30.0
+  on_finished: hold
+reference:
+  adaptive:
+    initial_force_n: 1.0
+    duration_s: 20.0
+    max_force_rate_n_s: 50.0
+    # 只授权本候选的未验收闭环实验；两项 validation_passed 仍保持 false。
+    experimental_closed_loop: true
+    tactile_sampling:
+      period_s: 0.002
+      median_window: 3
+      stale_after_s: 0.01
+      record_raw: true
+    unified:
+      risk_enabled: true
+      friction_update_enabled: true
+      risk_step_n: 1.0
+      risk_rate_n_s: 50.0
+      risk_repeat_interval_s: 0.1
+      risk_budget_n: 12.0
+      risk_max_events: 12
+      risk_duration_s: 20.0
+      # 工程覆盖率门禁：至少四个共同接触点，不是摩擦置信度。
+      friction_quality_min: 0.4
+      load:
+        left_friction: 0.6
+        right_friction: 0.6
+        safety_factor: 1.5
+        min_force_n: 1.0
+        max_force_n: 30.0
+        max_force_rate_n_s: 50.0
+        filter_tau_s: 0.01
+      observer:
+        window_s: 0.04
+        confirmation_s: 0.012
+        cooldown_s: 0.1
+        allow_steady_load_risk: true
+        stable_contact_subset: true
+        tangential_range_n: 4.0
+        normal_range_n: 15.0
+      tracking_error_n: 0.5
+      failure_timeout_s: 0.5
+      max_sample_gap_s: 0.1
+controller:
+  kind: admittance
+  mit_kp: 20.0
+  mit_kd: 0.63793536
+  velocity_limit_rad_s: 0.20
+  torque_limit_nm: 4.0
+  admittance:
+    mass_kg: 0.2
+    damping_ns_m: 15.0
+    stiffness_n_m: 1.0
+    force_deadband_n: 0.0
+    # 按真机实验要求单向保持；负力误差不驱动减小闭合量，显式释放走独立流程。
+    prevent_unloading: true
+    feedforward_ratio: 1.0
+  stiffness_consumption: none
+safety:
+  max_target_force_n: 30.0
+  force_ceiling_n: 35.0
+  approach_feedforward_force_n: 1.0
+  approach_feedforward_ratio: 1.0
+output:
+  root: outputs/real
+  plots: true
+terminal:
+  mode: auto

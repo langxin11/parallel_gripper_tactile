@@ -20,6 +20,7 @@ from papillarray_hardware import DEFAULT_PAPILLARRAY_PORT
 
 from dm_grasp_core import ForceInterpolation
 from dm_grasp_core.grasp.unified import UnifiedAdaptiveConfig
+from dm_grasp_core.tactile.multirate import TactileSamplingConfig
 
 ControllerKind = Literal["admittance", "pid", "adrc"]
 StiffnessConsumption = Literal["none", "feedforward"]
@@ -379,6 +380,7 @@ class AdaptiveReferenceConfig:
         unified: 可选统一策略；省略时保持既有切向增力行为。
         risk_validation_passed: 局部风险真机验收是否通过；仅开放风险闭环时要求。
         friction_validation_passed: 摩擦更新真机验收是否通过；仅开放摩擦闭环时要求。
+        experimental_closed_loop: 显式授权未验收的风险／摩擦闭环实验，不等同于验收通过。
     """
 
     initial_force_n: float = 0.5
@@ -388,20 +390,37 @@ class AdaptiveReferenceConfig:
     shear_threshold_n: float = 0.06
     shear_gain: float = 1.0
     unified: UnifiedAdaptiveConfig | None = None
+    tactile_sampling: TactileSamplingConfig | None = None
     risk_validation_passed: bool = False
     friction_validation_passed: bool = False
+    experimental_closed_loop: bool = False
 
     def __post_init__(self) -> None:
         """验证动态增力参数。"""
         for item in fields(self):
-            if item.name in {"unified", "risk_validation_passed", "friction_validation_passed"}:
+            if item.name in {
+                "unified",
+                "tactile_sampling",
+                "risk_validation_passed",
+                "friction_validation_passed",
+                "experimental_closed_loop",
+            }:
                 continue
             _finite_number(
                 getattr(self, item.name), f"reference.adaptive.{item.name}", positive=True
             )
-        for value in (self.risk_validation_passed, self.friction_validation_passed):
+        for value in (
+            self.risk_validation_passed,
+            self.friction_validation_passed,
+            self.experimental_closed_loop,
+        ):
             if not isinstance(value, bool):
                 raise ValueError("风险与摩擦验收门禁必须为布尔值")
+        if self.tactile_sampling is not None:
+            if not isinstance(self.tactile_sampling, TactileSamplingConfig) or self.unified is None:
+                raise ValueError("多速率预处理要求统一策略和有效采样配置")
+            if self.tactile_sampling.period_s != 0.002:
+                raise ValueError("真机采集固定为 500 Hz")
         if self.unified is not None:
             if not isinstance(self.unified, UnifiedAdaptiveConfig):
                 raise ValueError("unified 必须是 UnifiedAdaptiveConfig")
@@ -409,9 +428,13 @@ class AdaptiveReferenceConfig:
                 raise ValueError("unified 最低力必须等于 initial_force_n")
             if self.unified.load.max_force_rate_n_s != self.max_force_rate_n_s:
                 raise ValueError("unified 与 adaptive 的最大增力速率必须一致")
-            if self.unified.risk_enabled and not self.risk_validation_passed:
+            if self.unified.risk_enabled and not (
+                self.risk_validation_passed or self.experimental_closed_loop
+            ):
                 raise ValueError("风险闭环需要 risk_validation_passed 验收门禁")
-            if self.unified.friction_update_enabled and not self.friction_validation_passed:
+            if self.unified.friction_update_enabled and not (
+                self.friction_validation_passed or self.experimental_closed_loop
+            ):
                 raise ValueError("摩擦闭环需要 friction_validation_passed 验收门禁")
 
 
@@ -463,6 +486,7 @@ class AdmittanceConfig:
     stiffness_n_m: float = 1.0
     force_deadband_n: float = 0.1
     prevent_unloading: bool = True
+    feedforward_ratio: float = 0.0
 
     def __post_init__(self) -> None:
         """验证导纳参数。"""
@@ -476,6 +500,9 @@ class AdmittanceConfig:
             raise ValueError("controller.admittance.force_deadband_n 不得为负")
         if not isinstance(self.prevent_unloading, bool):
             raise ValueError("controller.admittance.prevent_unloading 必须是布尔值")
+        _finite_number(self.feedforward_ratio, "controller.admittance.feedforward_ratio")
+        if not 0 <= self.feedforward_ratio <= 1:
+            raise ValueError("导纳力矩前馈比例必须位于 0 与 1 之间")
 
 
 @dataclass(frozen=True, slots=True)
@@ -769,6 +796,12 @@ class ExperimentConfig:
             unified = self.reference.adaptive.unified
             if unified.load.max_force_n != safety.max_target_force_n:
                 raise ValueError("unified 最大目标力必须等于 safety.max_target_force_n")
+            sampling = self.reference.adaptive.tactile_sampling
+            if sampling is not None and (
+                self.timing.control_rate_hz != 250
+                or sampling.stale_after_s >= self.timing.tactile_timeout_s
+            ):
+                raise ValueError("多速率要求 250 Hz 控制，软 stale 阈值小于硬超时")
         if self.reference.curve is not None:
             curve = self.reference.curve
             peak = max(waypoint.force_n for waypoint in curve.waypoints)

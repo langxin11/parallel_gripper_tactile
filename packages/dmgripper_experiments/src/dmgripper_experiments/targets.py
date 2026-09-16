@@ -8,7 +8,7 @@ active 时冻结基线并启用增长，holding 阶段继续响应新的载荷�
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal
 
 from dm_grasp_core import (
@@ -21,6 +21,7 @@ from dm_grasp_core.grasp.unified import UnifiedAdaptiveCommand, UnifiedAdaptiveP
 
 from .config import AdaptiveReferenceConfig
 from .observation import PairedObservation
+from .tactile import MultirateSnapshot
 
 
 @dataclass(frozen=True, slots=True)
@@ -254,6 +255,39 @@ class UnifiedAdaptiveTargetSource(TargetSource):
 
     def observe(self, paired: PairedObservation, policy_dt_s: float) -> None:
         """设备时间戳决定窗口与积分；接收时间仅供运行时检查新鲜度。"""
+        if self._config.tactile_sampling is not None:
+            snapshot = paired.snapshot
+            if not isinstance(snapshot, MultirateSnapshot) or snapshot.processed is None:
+                raise ValueError("多速率控制缺少同包预处理快照")
+            # 仅调度新鲜度采用主机时基；采样滤波已经以设备时间完成，绝不混减两时钟。
+            event_time = snapshot.processed.event_time_s
+            state = replace(
+                snapshot.processed,
+                sample_time_s=snapshot.received_at_s,
+                event_time_s=(
+                    None
+                    if event_time is None
+                    else snapshot.received_at_s - (snapshot.processed.sample_time_s - event_time)
+                ),
+            )
+            self._command = self.policy.update_tactile_state(
+                state,
+                control_time_s=snapshot.received_at_s + paired.tactile_age_s,
+                stale_after_s=self._config.tactile_sampling.stale_after_s,
+                measured_force_n=paired.measured_force_n,
+                execution_limited=self._execution_limited,
+                enabled=self._activated,
+            )
+            self._sampling_diagnostics = {
+                "sensor_sequence_id": state.sequence_id,
+                "sensor_device_time_s": snapshot.processed.sample_time_s,
+                "sensor_received_at_s": snapshot.received_at_s,
+                "sensor_age_s": paired.tactile_age_s,
+                "sensor_stale": paired.tactile_age_s > self._config.tactile_sampling.stale_after_s,
+                "sensor_dropped_samples": state.dropped_samples,
+                "sensor_observed_events": state.observed_events,
+            }
+            return
         self._command = self.policy.update(
             paired.snapshot.left_taxel_forces_n,
             paired.snapshot.right_taxel_forces_n,
@@ -276,7 +310,10 @@ class UnifiedAdaptiveTargetSource(TargetSource):
 
     def trace_fields(self) -> dict[str, object]:
         """提供与仿真及回放一致的逐触点诊断。"""
-        return self._command.trace_fields() if self._command is not None else {}
+        return {
+            **(self._command.trace_fields() if self._command is not None else {}),
+            **getattr(self, "_sampling_diagnostics", {}),
+        }
 
     def active_reference(self, task_time_s: float) -> ForceTarget:
         """保持最近一次新样本产生的受限目标。"""

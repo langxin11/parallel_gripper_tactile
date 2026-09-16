@@ -82,10 +82,17 @@ TRACE_FIELDS = (
     "adaptive_capacity_limited",
     "adaptive_execution_limited",
     "adaptive_failure_reason",
+    "sensor_sequence_id",
+    "sensor_device_time_s",
+    "sensor_received_at_s",
+    "sensor_age_s",
+    "sensor_stale",
+    "sensor_dropped_samples",
+    "sensor_observed_events",
 )
 
 SCHEMA_NAME = "dmgripper-experiment/v1"
-RECORDER_VERSION = "1.2.0"
+RECORDER_VERSION = "1.3.0"
 
 
 def create_run_directory(root: Path | str, config: ExperimentConfig) -> Path:

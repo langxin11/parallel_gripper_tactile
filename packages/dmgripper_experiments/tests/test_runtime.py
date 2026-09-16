@@ -146,16 +146,24 @@ def test_adaptive_target_increases_under_tangential_load(tmp_path: Path) -> None
         "invalid_timestamp",
     ],
 )
-def test_unified_nine_taxel_lifecycle_and_fault_health_gate(tmp_path: Path, mode: str) -> None:
+@pytest.mark.parametrize("multirate", [False, True])
+def test_unified_nine_taxel_lifecycle_and_fault_health_gate(
+    tmp_path: Path, mode: str, multirate: bool
+) -> None:
     """九点链路按设备时间增力，容量失败可保持，触觉失效必须失能。"""
     from dataclasses import replace
 
     from dm_grasp_core.grasp.adaptive import AdaptiveLoadConfig
     from dm_grasp_core.grasp.unified import UnifiedAdaptiveConfig
     from dm_grasp_core.tactile.risk import TaxelRiskConfig
+    from dm_grasp_core.tactile.multirate import TactileSamplingConfig
 
     class NineTaxelTactile(FakeTactile):
         """提供九点真机形状，设备采样间隔与接收间隔刻意不同。"""
+
+        def __init__(self, *args, snapshot_transform=None, **kwargs):
+            super().__init__(*args, **kwargs)
+            self.transform = snapshot_transform
 
         def latest(self):
             if (mode == "communication" and self.phase.phase == "active") or (
@@ -186,6 +194,8 @@ def test_unified_nine_taxel_lifecycle_and_fault_health_gate(tmp_path: Path, mode
                 snapshot = replace(snapshot, left_taxel_forces_n=((4.0, 0.0, force_n / 9),) * 9)
             if mode == "invalid_timestamp" and self.phase.phase == "active":
                 snapshot = replace(snapshot, timestamp_us=math.nan)
+            if self.transform is not None:
+                snapshot = self.transform(snapshot)
             if sink is not None:
                 sink(
                     {
@@ -206,7 +216,15 @@ def test_unified_nine_taxel_lifecycle_and_fault_health_gate(tmp_path: Path, mode
         config,
         reference=replace(
             config.reference,
-            adaptive=replace(config.reference.adaptive, duration_s=0.08, unified=unified),
+            adaptive=replace(
+                config.reference.adaptive,
+                duration_s=0.08,
+                unified=unified,
+                tactile_sampling=TactileSamplingConfig() if multirate else None,
+            ),
+        ),
+        timing=replace(
+            config.timing, control_rate_hz=250 if multirate else config.timing.control_rate_hz
         ),
         safety=replace(config.safety, max_target_force_n=1.5, force_ceiling_n=2.0),
     )

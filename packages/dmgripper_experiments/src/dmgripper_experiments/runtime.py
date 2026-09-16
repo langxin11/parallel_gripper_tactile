@@ -41,7 +41,7 @@ from .observation import (
 from .plotting import plot_experiment_run
 from .recording import ExperimentRecorder
 from .session import DmSession
-from .tactile import TactileSnapshot, TactileWorker
+from .tactile import TactileSnapshot, TactileWorker, HardwareTactilePreprocessor
 from .targets import ForceTarget, TargetSource, build_target_source
 from .terminal import RunSnapshot, TerminalDisplay, format_event_line
 from .trajectory import ClosureTrajectory
@@ -213,6 +213,12 @@ def run_experiment(
             cutoff_hz=config.timing.tactile_cutoff_hz,
             filter_reset_gap_s=config.timing.tactile_filter_reset_gap_s,
             sample_sink=recorder.sample,
+            **(
+                {"snapshot_transform": HardwareTactilePreprocessor(config)}
+                if config.unified_adaptive_enabled
+                and config.reference.adaptive.tactile_sampling is not None
+                else {}
+            ),
         )
         dm = session_factory(
             config.hardware.dm_port,
@@ -581,7 +587,7 @@ def _run_control_loop_inner(
         closing_direction=dm.deployment.closing_direction,
         kp=config.controller.mit_kp,
         kd=config.controller.mit_kd,
-        feedforward_ratio=0.0,
+        feedforward_ratio=config.controller.admittance.feedforward_ratio,
         feedforward_torque_limit_nm=config.controller.torque_limit_nm,
         torque_limit_nm=config.controller.torque_limit_nm,
     )
@@ -801,6 +807,19 @@ def _run_control_loop_inner(
                     ),
                 }
             )
+        multirate = (
+            config.unified_adaptive_enabled
+            and config.reference.adaptive.tactile_sampling is not None
+        )
+        if multirate and lifecycle.is_tracking:
+            try:
+                target_source.observe(paired, dt)
+            except (ValueError, RuntimeError) as error:
+                raise FatalHardwareFault(
+                    f"多速率观测失败：{error}", phase=lifecycle.phase.value
+                ) from error
+            if target_source.failure_reason is not None:
+                fail(f"统一自适应策略失败：{target_source.failure_reason}")
         if paired.is_new_tactile:
             left_n, right_n = sample.left_force_n, sample.right_force_n
             if lifecycle.phase is LifecyclePhase.APPROACH:
@@ -871,7 +890,8 @@ def _run_control_loop_inner(
                     else sample.received_at_s - last_sample.received_at_s
                 )
                 try:
-                    target_source.observe(paired, policy_dt)
+                    if not multirate:
+                        target_source.observe(paired, policy_dt)
                 except ValueError as error:
                     if config.unified_adaptive_enabled:
                         raise FatalHardwareFault(
@@ -1230,7 +1250,7 @@ def _run_fault_holding_impl(
         closing_direction=dm.deployment.closing_direction,
         kp=config.controller.return_mit_kp,
         kd=config.controller.return_mit_kd,
-        feedforward_ratio=0.0,
+        feedforward_ratio=config.controller.admittance.feedforward_ratio,
         feedforward_torque_limit_nm=config.controller.return_torque_limit_nm,
         torque_limit_nm=config.controller.return_torque_limit_nm,
     )
