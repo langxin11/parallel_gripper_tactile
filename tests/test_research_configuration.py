@@ -251,8 +251,14 @@ def test_remaining_task_groups_match_frozen_domain_values(
     expected = snapshot["tasks"][family][legacy_task]["effective"]
 
     if family == "force_scheduling":
-        # 新增可选先验策略默认为关闭，其余字段仍逐项核对冻结证据。
-        expected = {**expected, "adaptive_prior": None, "unified_adaptive": None}
+        # 新增策略与独立采样均默认为关闭，其余字段逐项核对冻结证据。
+        expected = {
+            **expected,
+            "adaptive_prior": None,
+            "unified_adaptive": None,
+            "tactile_sampling": None,
+            "tactile_fault": None,
+        }
 
     assert resolved.task.model_dump(mode="json") == expected
 

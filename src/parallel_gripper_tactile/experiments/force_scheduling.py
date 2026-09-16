@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import json
 from dataclasses import dataclass, replace
 import math
 from pathlib import Path
@@ -14,6 +15,11 @@ from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, ValidationError,
 import yaml
 from dm_grasp_core.grasp.adaptive import AdaptiveLoadConfig, AdaptiveLoadScheduler
 from dm_grasp_core.grasp.unified import UnifiedAdaptiveConfig, UnifiedAdaptivePolicy
+from dm_grasp_core.tactile.multirate import (
+    LatestTactileBuffer,
+    TactilePreprocessor,
+    TactileSamplingConfig,
+)
 
 from ..control import ForceControlObservation, ForceControlReference, NormalForceController
 from ..dm_admittance import DMAdmittanceController
@@ -161,6 +167,17 @@ class ForceSchedulingSolverConfig(_TaskModel):
     noslip_iterations: Annotated[int, Field(ge=0)] = 5
 
 
+class TactileFaultConfig(_TaskModel):
+    """仅仿真的采样故障注入；时间相对撤支撑，绝不进入控制器输入。"""
+
+    start_s: Annotated[FiniteFloat, Field(ge=0)] = 0.02
+    shear_noise_std_n: Annotated[FiniteFloat, Field(ge=0)] = 0.0
+    spike_n: FiniteFloat = 0.0
+    spike_frames: Annotated[int, Field(ge=0, le=2)] = 0
+    drop_frames: Annotated[int, Field(ge=0, le=500)] = 0
+    jitter: bool = False
+
+
 class ForceSchedulingTask(_TaskModel):
     """目标力调度任务；提供 adaptive_prior 时仅由触觉生成承载需求。"""
 
@@ -173,6 +190,8 @@ class ForceSchedulingTask(_TaskModel):
     scheduler: OracleSchedulerTaskConfig = OracleSchedulerTaskConfig()
     adaptive_prior: AdaptivePriorTaskConfig | None = None
     unified_adaptive: UnifiedAdaptiveConfig | None = None
+    tactile_sampling: TactileSamplingConfig | None = None
+    tactile_fault: TactileFaultConfig | None = None
     downward_load: DownwardLoadReference
     metrics: ForceSchedulingMetricsConfig = ForceSchedulingMetricsConfig()
     solver: ForceSchedulingSolverConfig = ForceSchedulingSolverConfig()
@@ -183,6 +202,13 @@ class ForceSchedulingTask(_TaskModel):
         """显式策略只能选一种，避免两个状态机同时拥有目标。"""
         if self.adaptive_prior is not None and self.unified_adaptive is not None:
             raise ValueError("adaptive_prior 与 unified_adaptive 互斥")
+        if self.tactile_sampling is not None:
+            if self.unified_adaptive is None:
+                raise ValueError("独立触觉采样当前仅接入统一自适应仿真")
+            if self.tactile_sampling.period_s > self.control_period_s:
+                raise ValueError("触觉采样周期不得大于控制周期")
+        if self.tactile_fault is not None and self.tactile_sampling is None:
+            raise ValueError("采样故障注入要求独立触觉采样")
         return self
 
     @classmethod
@@ -344,6 +370,7 @@ def run_force_scheduling(
     task: ForceSchedulingTask,
     output_csv: Path | None = None,
     output_plot: Path | None = None,
+    output_tactile: Path | None = None,
 ) -> ForceSchedulingResult:
     """在共用载荷场景中运行 Oracle 或固定先验自适应调度。"""
     profile = (
@@ -365,9 +392,33 @@ def run_force_scheduling(
     model.opt.noslip_iterations = int(task.solver.noslip_iterations)
     if task.control_period_s + 1e-12 < float(model.opt.timestep):
         raise ValueError("control_period_s must not be smaller than the physics timestep")
+    if task.tactile_sampling is not None:
+        for period in (task.control_period_s, task.tactile_sampling.period_s):
+            ratio = period / float(model.opt.timestep)
+            if ratio < 1 or not math.isclose(ratio, round(ratio), abs_tol=1e-9):
+                raise ValueError("多速率采样和控制周期必须是物理步长的整数倍")
 
     data = mujoco.MjData(model)
     control_timer = SimulationTimer(float(task.control_period_s), float(data.time))
+    sampling = task.tactile_sampling
+    sensor_timer = (
+        SimulationTimer(sampling.period_s, float(data.time)) if sampling is not None else None
+    )
+    preprocessor = (
+        TactilePreprocessor(
+            sampling,
+            load_tau_s=task.unified_adaptive.load.filter_tau_s,
+            observer_config=task.unified_adaptive.observer,
+        )
+        if sampling is not None and task.unified_adaptive is not None
+        else None
+    )
+    tactile_buffer = LatestTactileBuffer()
+    sensor_sequence = 0
+    fault_index = 0
+    next_sensor_time_s = float(data.time)
+    fault_rng = np.random.default_rng(int(profile.normal_force.sensor_noise_seed) + 100000)
+    sensor_rows: list[dict[str, object]] = []
     reader = _prefixed_reader(model, profile)
     controller_type = (
         DMAdmittanceController
@@ -430,6 +481,7 @@ def run_force_scheduling(
     schedule_command = None
     simulation_stable = True
     rows: list[dict[str, float | str]] = []
+    control_rows: list[dict[str, float | str]] = []
     max_duration = (
         float(task.approach.timeout_s)
         + float(task.approach.settle_after_contact_s)
@@ -460,7 +512,44 @@ def run_force_scheduling(
             1.0, time_s / float(task.approach.duration_s)
         ) * (profile.closed_control - profile.open_control)
         control_dt = control_timer.pop_due(time_s)
-        if control_dt is not None:
+        sensor_due = (
+            control_dt is not None
+            if sensor_timer is None
+            else sensor_timer.pop_due(time_s) is not None
+        )
+        fault = task.tactile_fault
+        if sensor_timer is not None and fault is not None and fault.jitter:
+            # 真实采样间隔交替为一个／三个名义周期，不伪造时间戳或补采历史状态。
+            sensor_due = time_s + 1e-12 >= next_sensor_time_s
+            if sensor_due:
+                next_sensor_time_s = time_s + sampling.period_s * (
+                    1 if sensor_sequence % 2 == 0 else 3
+                )
+        fault_active = (
+            fault is not None
+            and scenario_start_time_s is not None
+            and scenario_time_s + 1e-12 >= fault.start_s
+        )
+        current_sequence = sensor_sequence
+        dropped = False
+        spike = False
+        if sensor_due and sampling is not None:
+            sensor_sequence += 1
+            if fault_active:
+                dropped = fault_index < fault.drop_frames
+                spike = fault_index < fault.spike_frames
+                fault_index += 1
+            if dropped:
+                if sampling.record_raw and output_tactile is not None:
+                    sensor_rows.append(
+                        {
+                            "sensor_sequence_id": current_sequence,
+                            "sensor_time_s": time_s,
+                            "injected_drop": True,
+                        }
+                    )
+                sensor_due = False
+        if sensor_due:
             tactile = reader.read(data)
             measurement = _tactile_measurement(
                 tactile,
@@ -470,22 +559,96 @@ def run_force_scheduling(
                 right_shear_std_n=float(profile.normal_force.sensor_taxel_shear_noise_std_n[1]),
                 rng=noise_rng,
             )
-            measured_capacity = measurement.normal_capacity
-            if unified is not None:
-                unified_command = unified.update(
+            if fault_active and (fault.shear_noise_std_n > 0 or spike):
+                # 只扰动观测，不改变物体受到的真实载荷；双侧固定单 taxel 毛刺。
+                for side in (measurement.left, measurement.right):
+                    side[:2] += fault_rng.normal(0, fault.shear_noise_std_n, size=side[:2].shape)
+                    if spike:
+                        side.reshape(3, -1)[0, 0] += fault.spike_n
+            if preprocessor is not None:
+                state = preprocessor.update(
                     measurement.left.reshape(3, -1).T,
                     measurement.right.reshape(3, -1).T,
-                    time_s=time_s,
-                    measured_force_n=0.5 * measured_capacity.normal_force_n,
-                    execution_limited=execution_limited,
-                    enabled=scenario_start_time_s is not None,
+                    sample_time_s=time_s,
+                    sequence_id=current_sequence,
                 )
+                tactile_buffer.publish(state)
+                if sampling.record_raw and output_tactile is not None:
+                    sensor_rows.append(
+                        {
+                            "sensor_sequence_id": state.sequence_id,
+                            "injected_drop": False,
+                            "injected_spike": spike,
+                            "sensor_time_s": state.sample_time_s,
+                            "left_raw_taxels": [
+                                [float(v) if math.isfinite(v) else None for v in row]
+                                for row in measurement.left.reshape(3, -1).T
+                            ],
+                            "right_raw_taxels": [
+                                [float(v) if math.isfinite(v) else None for v in row]
+                                for row in measurement.right.reshape(3, -1).T
+                            ],
+                            "left_filtered_tangential_n": state.load.left_n,
+                            "right_filtered_tangential_n": state.load.right_n,
+                            "load_rate_n_s": state.load.rate_n_s,
+                            "valid": state.valid,
+                            "risk": state.observation.risk,
+                            "event_id": state.observation.event_id,
+                            "left_friction_candidate": state.observation.left_candidate,
+                            "right_friction_candidate": state.observation.right_candidate,
+                            "left_quality": state.observation.left_quality,
+                            "right_quality": state.observation.right_quality,
+                            "observed_events": state.observed_events,
+                            "dropped_samples": state.dropped_samples,
+                            "invalid_samples": state.invalid_samples,
+                        }
+                    )
+        if control_dt is not None:
+            measured_capacity = measurement.normal_capacity
+            if unified is not None:
+                if sampling is not None:
+                    state = tactile_buffer.latest()
+                    if state is None:
+                        raise RuntimeError("控制开始前必须先完成触觉采样")
+                    unified_command = unified.update_tactile_state(
+                        state,
+                        control_time_s=time_s,
+                        stale_after_s=sampling.stale_after_s,
+                        measured_force_n=0.5 * measured_capacity.normal_force_n,
+                        execution_limited=execution_limited,
+                        enabled=scenario_start_time_s is not None,
+                    )
+                else:
+                    unified_command = unified.update(
+                        measurement.left.reshape(3, -1).T,
+                        measurement.right.reshape(3, -1).T,
+                        time_s=time_s,
+                        measured_force_n=0.5 * measured_capacity.normal_force_n,
+                        execution_limited=execution_limited,
+                        enabled=scenario_start_time_s is not None,
+                    )
                 schedule_command = unified_command.load
                 adaptive_diagnostics = {
                     "scheduler_kind": "unified_adaptive",
                     "capacity_limited": schedule_command.capacity_limited,
                     **unified_command.trace_fields(),
                 }
+                if sampling is not None:
+                    adaptive_diagnostics.update(
+                        {
+                            "sensor_sequence_id": state.sequence_id,
+                            "sensor_time_s": state.sample_time_s,
+                            "control_time_s": time_s,
+                            "sensor_age_s": time_s - state.sample_time_s,
+                            "sensor_stale": not state.is_fresh(time_s, sampling.stale_after_s),
+                            "sensor_valid": state.valid,
+                            "sensor_dropped_samples": state.dropped_samples,
+                            "sensor_invalid_samples": state.invalid_samples,
+                            "sensor_observed_events": state.observed_events,
+                            "filtered_left_tangential_n": state.load.left_n,
+                            "filtered_right_tangential_n": state.load.right_n,
+                        }
+                    )
             elif adaptive is not None:
                 # 承载仅从触觉测量产生；场景真值继续供物理施加载荷与离线评分。
                 schedule_command = adaptive.update(
@@ -623,6 +786,9 @@ def run_force_scheduling(
                 **adaptive_diagnostics,
             }
         )
+        # 指标与绘图消费全部物理步行；多速率 trace 只落盘控制行。
+        if control_dt is not None:
+            control_rows.append(rows[-1])
 
     if contact_time_s is None or scenario_start_time_s is None:
         simulation_stable = False
@@ -670,12 +836,18 @@ def run_force_scheduling(
             if row["phase"] == "schedule_load"
         )
 
-    if rows and output_csv is not None:
+    written_rows = rows if sampling is None else control_rows
+    if written_rows and output_csv is not None:
         output_csv.parent.mkdir(parents=True, exist_ok=True)
         with output_csv.open("w", newline="", encoding="utf-8") as stream:
-            writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
+            writer = csv.DictWriter(stream, fieldnames=list(written_rows[0]))
             writer.writeheader()
-            writer.writerows(rows)
+            writer.writerows(written_rows)
+    if output_tactile is not None and sampling is not None and sampling.record_raw:
+        output_tactile.parent.mkdir(parents=True, exist_ok=True)
+        with output_tactile.open("w", encoding="utf-8") as stream:
+            for row in sensor_rows:
+                stream.write(json.dumps(row, allow_nan=False) + "\n")
     if rows and output_plot is not None:
         _plot_force_scheduling(output_plot, rows, task=task)
 

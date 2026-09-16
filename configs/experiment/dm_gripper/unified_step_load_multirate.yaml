@@ -1,0 +1,14 @@
+# @package _global_
+defaults:
+  - /experiment/dm_gripper/unified_step_load_transient
+  - _self_
+
+experiment:
+  name: dm_unified_step_load_multirate
+task:
+  definition:
+    tactile_sampling:
+      period_s: 0.002
+      median_window: 3
+      stale_after_s: 0.01
+      record_raw: true

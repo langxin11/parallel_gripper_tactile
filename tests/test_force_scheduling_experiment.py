@@ -9,7 +9,9 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+from pydantic import ValidationError
 
+from dm_grasp_core.tactile.multirate import TactileSamplingConfig
 from parallel_gripper_tactile.experiments.force_scheduling import (
     AdaptivePriorTaskConfig,
     DownwardLoadReference,
@@ -18,6 +20,7 @@ from parallel_gripper_tactile.experiments.force_scheduling import (
     ForceSchedulingTask,
     _plot_force_scheduling,
     run_force_scheduling,
+    TactileFaultConfig,
 )
 from parallel_gripper_tactile.runners import execute_force_scheduling
 from parallel_gripper_tactile.research import compose_research_run
@@ -27,6 +30,46 @@ ROOT = Path(__file__).resolve().parents[1]
 PROFILE = ROOT / "configs/dm_gripper.yaml"
 GRAVITY_TASK = ROOT / "configs/task/force_scheduling/gravity_hold.yaml"
 FILLING_TASK = ROOT / "configs/task/force_scheduling/dynamic_filling.yaml"
+
+
+@pytest.mark.parametrize(
+    "fault",
+    [
+        TactileFaultConfig(drop_frames=8),
+        TactileFaultConfig(jitter=True),
+        TactileFaultConfig(spike_n=2.0, spike_frames=1),
+        TactileFaultConfig(spike_n=2.0, spike_frames=2),
+    ],
+)
+def test_multirate_fault_injection_obeys_sampling_and_freeze(tmp_path, fault) -> None:
+    """检查真实丢帧／抖动与冻结，不把抓取成功当作故障逻辑的充分证据。"""
+    resolved = compose_research_run(experiment="dm_gripper/unified_step_load_multirate")
+    task = resolved.task.model_copy(update={"tactile_fault": fault})
+    trace, raw = tmp_path / "trace.csv", tmp_path / "tactile.jsonl"
+    result = run_force_scheduling(resolved.profile, task=task, output_csv=trace, output_tactile=raw)
+    assert result.simulation_stable
+    samples = [json.loads(line) for line in raw.read_text().splitlines()]
+    assert sum(s.get("injected_drop", False) for s in samples) == fault.drop_frames
+    assert sum(s.get("injected_spike", False) for s in samples) == fault.spike_frames
+    with trace.open() as handle:
+        rows = list(csv.DictReader(handle))
+    assert np.diff([float(r["control_time_s"]) for r in rows]) == pytest.approx(0.004)
+    if fault.jitter:
+        intervals = np.diff([s["sensor_time_s"] for s in samples])
+        assert min(intervals) == pytest.approx(0.002)
+        assert max(intervals) == pytest.approx(0.006)
+    if fault.drop_frames:
+        stale = [r for r in rows if r["sensor_stale"] == "True"]
+        assert stale
+        assert all(float(r["scheduled_target_force_rate_n_s"]) == 0 for r in stale)
+        assert int(rows[-1]["sensor_dropped_samples"]) == fault.drop_frames
+    for before, after in zip(rows, rows[1:]):
+        increment = float(after["scheduled_target_force_n"]) - float(
+            before["scheduled_target_force_n"]
+        )
+        assert -1e-12 <= increment <= 0.2 + 1e-9
+        if before["sensor_sequence_id"] == after["sensor_sequence_id"]:
+            assert increment == pytest.approx(0)
 
 
 @pytest.mark.parametrize("transient", [False, True])
@@ -167,6 +210,36 @@ downward_load:
         ForceSchedulingTask.load(invalid)
 
 
+def test_tactile_sampling_task_rejects_unsupported_combinations() -> None:
+    """独立采样仅接入统一自适应模式，且采样周期不得慢于控制。"""
+    base = ForceSchedulingTask.load(GRAVITY_TASK).model_dump()
+    with pytest.raises(ValidationError, match="独立触觉采样当前仅接入统一自适应仿真"):
+        ForceSchedulingTask.model_validate({**base, "tactile_sampling": {}})
+    ForceSchedulingTask.model_validate(
+        {**base, "unified_adaptive": {"risk_enabled": True}, "tactile_sampling": {}}
+    )
+    with pytest.raises(ValidationError, match="触觉采样周期不得大于控制周期"):
+        ForceSchedulingTask.model_validate(
+            {
+                **base,
+                "unified_adaptive": {},
+                "control_period_s": 0.002,
+                "tactile_sampling": {"period_s": 0.004},
+            }
+        )
+
+
+def test_multirate_rejects_sampling_period_not_aligned_to_physics() -> None:
+    """与物理步长错相的采样周期在进入仿真循环前直接拒绝。"""
+    resolved = compose_research_run(experiment="dm_gripper/unified_step_load_multirate")
+    misaligned = resolved.task.model_copy(
+        update={"tactile_sampling": TactileSamplingConfig(period_s=0.003)}
+    )
+
+    with pytest.raises(ValueError, match="整数倍"):
+        run_force_scheduling(resolved.profile, task=misaligned)
+
+
 @pytest.mark.parametrize("task_path", [GRAVITY_TASK, FILLING_TASK])
 def test_standard_force_scheduling_tasks_load(task_path: Path) -> None:
     """两个标准目标力调度场景都通过严格配置校验。"""
@@ -240,7 +313,7 @@ def test_noslip_solver_does_not_hide_insufficient_grip(mode: str) -> None:
         assert result.failure_reason is not None
 
 
-@pytest.mark.parametrize("mode", ["oracle", "adaptive_prior", "unified_adaptive"])
+@pytest.mark.parametrize("mode", ["oracle", "adaptive_prior", "unified_adaptive", "multirate"])
 def test_execute_force_scheduling_writes_reproducible_artifacts(
     tmp_path: Path, fast_png_render: None, mode: str
 ) -> None:
@@ -249,14 +322,19 @@ def test_execute_force_scheduling_writes_reproducible_artifacts(
     profile = PROFILE
     if mode == "adaptive_prior":
         task = task.model_copy(update={"adaptive_prior": AdaptivePriorTaskConfig()})
-    elif mode == "unified_adaptive":
-        resolved = compose_research_run(experiment="dm_gripper/unified_adaptive")
+    elif mode in {"unified_adaptive", "multirate"}:
+        experiment = "unified_step_load_multirate" if mode == "multirate" else "unified_adaptive"
+        resolved = compose_research_run(experiment=f"dm_gripper/{experiment}")
         profile = resolved.profile
-        task = resolved.task.model_copy(update={"downward_load": task.downward_load})
+        task = (
+            resolved.task
+            if mode == "multirate"
+            else resolved.task.model_copy(update={"downward_load": task.downward_load})
+        )
 
     run, result = execute_force_scheduling(
         profile=PROFILE,
-        resolved_profile=profile if mode == "unified_adaptive" else None,
+        resolved_profile=profile if mode in {"unified_adaptive", "multirate"} else None,
         task_path=GRAVITY_TASK,
         scheduling_task=task,
         output_root=tmp_path,
@@ -274,14 +352,32 @@ def test_execute_force_scheduling_writes_reproducible_artifacts(
         "metrics.json",
         "manifest.json",
     }
+    if mode == "multirate":
+        expected.add("tactile.jsonl")
     assert expected == {path.name for path in run.path.iterdir()}
     metrics = json.loads((run.path / "metrics.json").read_text(encoding="utf-8"))
     assert metrics["slip_passed"] is True
     effective = json.loads((run.path / "effective_parameters.json").read_text(encoding="utf-8"))
-    assert effective["runtime"]["scheduler_kind"] == mode
-    if mode == "unified_adaptive":
+    assert effective["runtime"]["scheduler_kind"] == (
+        "unified_adaptive" if mode == "multirate" else mode
+    )
+    if mode in {"unified_adaptive", "multirate"}:
         assert metrics["failure_reason"] is None
         assert effective["task"]["unified_adaptive"]["risk_enabled"] is False
+    if mode == "multirate":
+        samples = [
+            json.loads(line) for line in (run.path / "tactile.jsonl").read_text().splitlines()
+        ]
+        with (run.path / "trace.csv").open() as handle:
+            controls = list(csv.DictReader(handle))
+        assert "control_updated" not in controls[0]
+        assert np.diff([s["sensor_sequence_id"] for s in samples]) == pytest.approx(1)
+        assert np.diff([s["sensor_time_s"] for s in samples]) == pytest.approx(0.002)
+        assert np.diff([float(r["control_time_s"]) for r in controls]) == pytest.approx(0.004)
+        assert np.diff([int(r["sensor_sequence_id"]) for r in controls]) == pytest.approx(2)
+        assert all(float(r["sensor_age_s"]) == 0 for r in controls)
+        assert all(r["adaptive_increase_count"] == "0" for r in controls)
+        assert max(abs(float(r["tangential_displacement_m"])) for r in controls) < 0.002
 
 
 @pytest.mark.parametrize("scenario", ["steady", "ramp", "step"])

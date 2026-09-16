@@ -103,14 +103,22 @@ def execute_force_scheduling(
     run.register_artifact(effective_parameters_path)
     trace_path = run.artifact_path("trace.csv")
     plot_path = run.artifact_path("plot.png")
+    tactile_path = (
+        run.artifact_path("tactile.jsonl")
+        if task.tactile_sampling is not None and task.tactile_sampling.record_raw
+        else None
+    )
     result = run_force_scheduling(
         configured,
         task=task,
         output_csv=trace_path,
         output_plot=plot_path,
+        output_tactile=tactile_path,
     )
     for artifact in (trace_path, plot_path, plot_path.with_suffix(".pdf")):
         run.register_artifact(artifact)
+    if tactile_path is not None:
+        run.register_artifact(tactile_path)
     metrics_path = run.artifact_path("metrics.json")
     metrics_path.write_text(
         json.dumps(asdict(result), indent=2, sort_keys=True) + "\n", encoding="utf-8"
