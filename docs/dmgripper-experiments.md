@@ -72,8 +72,12 @@ uv run --package dmgripper-experiments dmgripper-run \
 正常阶段为 `preparing` → `ready` → 必要时 `homing` → `approach` →
 `contact_transition` → `preload` → `active` → `holding` → 显式释放后的 `returning` → `completed`。
 
-- `preparing` 完成触觉预检与零力验证；`ready` 等待 `start`，随后检查 DM 反馈、机械范围、
-  MIT 模式与开始前失能状态，确认使能成功才运动。使能前 `release` 记为 `cancelled`，不发送运动命令。
+- `preparing` 先做电机预检：打开 DM 串口、校验反馈与 MIT 模式、确认失能态（上次异常退出残留的
+  使能态先显式失能一次再确认）；位置不在 home 容差内时按受限回位参数自动回零，完成后回到失能态。
+  操作者约定运行前已移开物体，预检回零因此可以解除上次故障残留的闭合位置，避免零力验证被卡死。
+  预检失败按执行异常直接失能退出，不进入故障保持。随后完成触觉预检与零力验证；
+  `ready` 等待 `start`（期间电机保持失能），收到后复查反馈与失能态、确认使能成功才运动，
+  漂移出 home 容差时先回零再接近。使能前 `release` 记为 `cancelled`，不发送运动命令。
 - `preload` 取曲线首值或动态初始抓力。双侧确认接触且平均力连续达到
   `目标-preload_tolerance_n`，持续 `preload_stable_time_s` 后进入 `active`；**不设高侧稳定窗口**。
   旧动态策略此时冻结预载基线，后续载荷不移动基线；统一策略不从绝对承载中扣除预载载荷。
@@ -87,8 +91,9 @@ uv run --package dmgripper-experiments dmgripper-run \
 命令位置严格限制在 `[0, pi/2] rad`；反馈安全范围为两端各扩展
 `hardware.feedback_position_margin_rad`，默认 `[-0.05, pi/2+0.05] rad`。反馈余量不放宽命令范围。
 
-默认 home 为 `0.0 rad`、容差为 `0.03 rad`。使能后若不在 home 容差内，先按受限速度、加速度和
-加加速度回零，再接近；回零只依赖有效 DM 反馈。越出反馈安全范围时禁止自动运动。
+默认 home 为 `0.0 rad`、容差为 `0.03 rad`。预检阶段发现不在 home 容差内时先按受限速度、加速度和
+加加速度回零，完成后失能等待启动；`start` 后若又漂移出容差，会再次受限回零后才接近。
+两处回零都只依赖有效 DM 反馈。越出反馈安全范围时禁止自动运动。
 轻微负反馈对应的首个位置目标投影到 `0`，合成力矩仍受限；首次验收须无负载、小零偏逐步确认。
 
 配置验证与硬件编码均检查 DM4310P 的速度、力矩、`kp`／`kd` 量程，拒绝越界字段，
@@ -210,6 +215,15 @@ DM 与触觉健康时尝试受限位置保持，等待人工释放；保持期�
 uv run --package dmgripper-experiments dmgripper-plot <运行目录>
 # 写入独占 repaint 目录，保留源记录
 uv run --package dmgripper-experiments dmgripper-plot --repaint <运行目录>
+# 窗口化评价图：只绘 active 段的任务时间 0–12 s，横轴切换为任务时间
+uv run --package dmgripper-experiments dmgripper-plot --repaint \
+  --task-time 0:12 <运行目录>
+# 或按阶段白名单截窗（可组合），窗口条件写入重绘 manifest
+uv run --package dmgripper-experiments dmgripper-plot --repaint \
+  --phase preload,active <运行目录>
 ```
 
 历史 cup v1／v2 仍可用同一命令重绘，读取器将旧 `state` 列解释为 `phase`。
+窗口参数必须配合 `--repaint`，避免覆盖源目录的整段图；`--task-time` 只保留
+任务时钟推进的行，适合以曲线起点为零的评价图，`--phase` 保留所选阶段的全部行
+（横轴仍为运行时间）。未知阶段名或倒置区间直接报错，窗口内无数据时视同无可绘制数据。
