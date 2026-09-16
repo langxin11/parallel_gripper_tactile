@@ -3,6 +3,8 @@
 from dataclasses import dataclass, fields
 import math
 
+from ..tactile.multirate import FilteredTangentialLoad
+
 
 @dataclass(frozen=True, slots=True)
 class AdaptiveLoadConfig:
@@ -78,6 +80,7 @@ class AdaptiveLoadScheduler:
         goal_floor_n: float = 0.0,
         risk_rate_n_s: float = 0.0,
         pause_increase: bool = False,
+        filtered_load: FilteredTangentialLoad | None = None,
     ) -> AdaptiveLoadCommand:
         """以新样本推进目标，返回调度后的剩余缺口。
 
@@ -90,6 +93,7 @@ class AdaptiveLoadScheduler:
             goal_floor_n: 已消费风险事件留下的目标下界。
             risk_rate_n_s: 有界风险附加增长率。
             pause_increase: 执行受限时暂停目标增长，仍更新需求诊断。
+            filtered_load: 采样侧已滤波承载；提供时不重复低通，使用采样侧变化率。
 
         Returns:
             只增不减、满足幅值和速率限制的平均单侧目标与诊断。
@@ -119,6 +123,10 @@ class AdaptiveLoadScheduler:
         total = sum(filtered)
         # 使用滤波状态增量估计载荷趋势，首样本不制造突变导数。
         load_rate = 0.0 if previous is None else (total - sum(previous)) / dt
+        if filtered_load is not None:
+            filtered = (filtered_load.left_n, filtered_load.right_n)
+            total = sum(filtered)
+            load_rate = filtered_load.rate_n_s
         raw = c.safety_factor * max(filtered[0] / mu_left, filtered[1] / mu_right)
         if not all(math.isfinite(v) for v in (total, load_rate, raw)):
             raise ValueError("承载需求或载荷趋势计算溢出")

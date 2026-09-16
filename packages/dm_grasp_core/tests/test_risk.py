@@ -106,3 +106,57 @@ def test_invalid_data_and_configuration_rebuild_window() -> None:
     assert result.reason == "warming_up" and result.event_id == 0
     result = observer.update(np.zeros((9, 3)), _frame(0.5), time_s=0.51)
     assert not result.valid
+
+
+@pytest.mark.parametrize(
+    "mode,expected", [("stopped", True), ("uniform", False), ("normal", False)]
+)
+def test_steady_load_risk_still_requires_local_evidence(mode: str, expected: bool) -> None:
+    """稳载局部重分配可触发，均匀加载与主动法向增力不能仅凭切向力触发。"""
+    observer = TaxelRiskObserver(TaxelRiskConfig(allow_steady_load_risk=True))
+    events = []
+    for index in range(65):
+        time = index * 0.01
+        frame = _frame(time, mode)
+        observation = observer.update(frame, frame, time_s=time)
+        if observation.event_id:
+            events.append(observation)
+    assert bool(events) is expected
+    if expected:
+        assert events[0].left_candidate is not None
+
+
+@pytest.mark.parametrize("redistribute", [False, True])
+def test_stable_subset_ignores_edge_contact_chatter(redistribute: bool) -> None:
+    """边缘点反复进出本身不触发；共同接触点内部的持续重分配仍可确认。"""
+    observer = TaxelRiskObserver(
+        TaxelRiskConfig(
+            allow_steady_load_risk=True,
+            stable_contact_subset=True,
+        )
+    )
+    events = []
+    for index in range(60):
+        time = index * 0.01
+        frame = _frame(time if redistribute else 0, "stopped")
+        frame[8] = [0.01 if index % 2 else 0, 0, 0.03 if index % 2 else 0.005]
+        result = observer.update(frame, frame, time_s=time)
+        if result.event_id:
+            events.append(result)
+    assert bool(events) is redistribute
+    if redistribute:
+        assert events[0].left_quality == pytest.approx(8 / 9)
+    replacement = np.zeros((9, 3))
+    replacement[8, 2] = 0.2
+    result = observer.update(replacement, replacement, time_s=0.6)
+    assert result.contact_changed and result.event_id == 0
+
+
+def test_large_device_time_does_not_reenter_warmup():
+    """绝对时间约千秒时，整 40 ms 窗口不因浮点相减误差反复预热。"""
+    observer = TaxelRiskObserver(TaxelRiskConfig(window_s=0.04))
+    frame = _frame(0, "stopped")
+    for index in range(100):
+        observation = observer.update(frame, frame, time_s=1202.503 + index * 0.002)
+        if index >= 21:
+            assert observation.reason == "observing"

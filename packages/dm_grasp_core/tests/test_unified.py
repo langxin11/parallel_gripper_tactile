@@ -50,13 +50,14 @@ def test_event_budget_deduplication_and_monotonic_target() -> None:
 
 
 def test_asymmetric_friction_quality_and_expiry() -> None:
-    """较低候选立即接受，提高需独立一致事件；低质量、过期与拓扑变化回退。"""
+    """低质量不覆盖已接受低值；提高需独立证据，过期与拓扑变化回退。"""
     policy = UnifiedAdaptivePolicy(
         UnifiedAdaptiveConfig(risk_enabled=True, friction_update_enabled=True)
     )
     evidence = _Evidence()
     policy.observer = evidence
     frame = np.tile([0, 0, 0.1], (9, 1))
+    policy.update(frame, frame, time_s=0, measured_force_n=0.9)
     for event in range(1, 4):
         evidence.observation = TaxelRiskObservation(
             valid=True,
@@ -71,7 +72,8 @@ def test_asymmetric_friction_quality_and_expiry() -> None:
         assert result.right_friction == pytest.approx(0.8 if event == 3 else 0.6)
     evidence.observation = replace(evidence.observation, event_id=4, left_quality=0.1)
     result = policy.update(frame, frame, time_s=0.04, measured_force_n=0.9)
-    assert result.left_friction == 0.6 and result.left_update_reason == "insufficient_quality"
+    assert result.left_friction == pytest.approx(0.4)
+    assert result.left_update_reason == "insufficient_quality"
     evidence.observation = TaxelRiskObservation(valid=True)
     for index in range(5, 510):
         result = policy.update(frame, frame, time_s=index * 0.01, measured_force_n=0.9)
@@ -110,3 +112,60 @@ def test_execution_and_failure_boundaries(failure: str) -> None:
     ):
         with pytest.raises(ValueError):
             replace(config, **changes)
+
+
+@pytest.mark.parametrize("confirmed", [True, False])
+def test_fast_persistent_risk_steps_and_freeze(confirmed: bool) -> None:
+    """持续风险可续增大步；冻结和执行限幅不积攒步数，持续事件不重复更新摩擦。"""
+    config = UnifiedAdaptiveConfig(
+        risk_enabled=True,
+        friction_update_enabled=True,
+        risk_step_n=1,
+        risk_rate_n_s=50,
+        risk_repeat_interval_s=0.1,
+        risk_budget_n=4,
+        risk_max_events=4,
+    )
+    config = replace(config, load=replace(config.load, max_force_rate_n_s=50))
+    policy = UnifiedAdaptivePolicy(config)
+    frame = np.tile([0, 0, 0.1], (9, 1))
+    observation = TaxelRiskObservation(
+        valid=True,
+        risk=1,
+        event_id=1,
+        left_candidate=0.5,
+        left_quality=1,
+        confirmed_risk=confirmed,
+    )
+    policy.update(frame, frame, time_s=0, measured_force_n=0.5)
+    commands = []
+    for index in range(1, 81):
+        command = policy.update(
+            frame,
+            frame,
+            time_s=index * 0.004,
+            measured_force_n=policy.scheduler.target_force_n,
+            observation=observation,
+        )
+        commands.append(command)
+    assert commands[4].load.target_force_n == pytest.approx(1.5)
+    expected_count = 4 if confirmed else 1
+    assert commands[-1].increase_count == expected_count
+    assert commands[-1].left_friction == pytest.approx(0.4)
+    assert sum(c.left_update_reason == "lower_accepted" for c in commands) == 1
+    assert all(0 <= c.load.target_force_rate_n_s <= 50.000001 for c in commands)
+    target = commands[-1].load.target_force_n
+    for index in range(81, 90):
+        command = policy.update(
+            frame,
+            frame,
+            time_s=index * 0.004,
+            measured_force_n=0,
+            observation=replace(observation, event_id=index),
+            execution_limited=True,
+        )
+        assert command.increase_count == expected_count
+        assert command.load.target_force_n == target
+    for value in (0, -1, True, float("nan")):
+        with pytest.raises(ValueError):
+            replace(config, risk_repeat_interval_s=value)

@@ -6,7 +6,8 @@ from numbers import Real
 
 import numpy as np
 
-from ..tactile.risk import TaxelRiskConfig, TaxelRiskObserver
+from ..tactile.risk import TaxelRiskConfig, TaxelRiskObservation, TaxelRiskObserver
+from ..tactile.multirate import FilteredTangentialLoad, TactileState
 from .adaptive import AdaptiveLoadCommand, AdaptiveLoadConfig, AdaptiveLoadScheduler
 
 
@@ -23,6 +24,7 @@ class UnifiedAdaptiveConfig:
     risk_budget_n: float = 0.6
     risk_max_events: int = 4
     risk_duration_s: float = 10.0
+    risk_repeat_interval_s: float | None = None
     friction_quality_min: float = 0.8
     friction_discount: float = 0.8
     friction_min: float = 0.05
@@ -43,6 +45,8 @@ class UnifiedAdaptiveConfig:
         for item in fields(self):
             value = getattr(self, item.name)
             if item.name in {"load", "observer"}:
+                continue
+            if item.name == "risk_repeat_interval_s" and value is None:
                 continue
             if item.name in {"risk_enabled", "friction_update_enabled"}:
                 if not isinstance(value, bool):
@@ -145,11 +149,15 @@ class UnifiedAdaptivePolicy:
             _FrictionState(config.load.right_friction),
         ]
         self._time: float | None = None
+        self._sample_sequence = -1
+        self._invalid_samples = 0
         self._risk_started: float | None = None
         self._risk_goal = config.load.min_force_n
         self._risk_budget = 0.0
         self._events = 0
         self._last_event = 0
+        self._last_risk_step_s = -math.inf
+        self._risk_confirmed_since: float | None = None
         self._failure_since: dict[str, float] = {}
         self._failure: str | None = None
         self.latest: UnifiedAdaptiveCommand | None = None
@@ -176,12 +184,10 @@ class UnifiedAdaptivePolicy:
         if not event:
             return "unchanged"
         if candidate is None or not math.isfinite(candidate) or quality < c.friction_quality_min:
-            state.value, state.updated_s = prior, None
             state.pending, state.count = None, 0
             return "insufficient_quality"
         value = candidate * c.friction_discount
         if not c.friction_min <= value <= c.friction_max:
-            state.value, state.updated_s = prior, None
             state.pending, state.count = None, 0
             return "out_of_range"
         if value <= state.value:
@@ -211,6 +217,9 @@ class UnifiedAdaptivePolicy:
         measured_force_n: float,
         execution_limited: bool = False,
         enabled: bool = True,
+        observation: TaxelRiskObservation | None = None,
+        filtered_load: FilteredTangentialLoad | None = None,
+        freeze_increase: bool = False,
     ) -> UnifiedAdaptiveCommand:
         """消费规范为每侧九点 Fx/Fy/Fn 的新观测；重复样本不积分或重发事件。"""
         if not math.isfinite(time_s) or not math.isfinite(measured_force_n):
@@ -237,9 +246,21 @@ class UnifiedAdaptivePolicy:
         gap = dt > self.config.max_sample_gap_s
         if gap:
             self.observer.reset()
-        observation = self.observer.update(*arrays, time_s=time_s)
+        if observation is None:
+            observation = self.observer.update(*arrays, time_s=time_s)
         self._time = time_s
         c = self.config
+        track_error = self.scheduler.target_force_n - measured_force_n
+        blocked = execution_limited and track_error > c.tracking_error_n
+        actionable = (
+            enabled
+            and observation.valid
+            and not freeze_increase
+            and not blocked
+            and not gap
+            and dt > 0
+            and self._failure is None
+        )
         event = observation.event_id > self._last_event
         if event:
             self._last_event = observation.event_id
@@ -248,7 +269,7 @@ class UnifiedAdaptivePolicy:
                 side,
                 candidate,
                 quality,
-                event and enabled and observation.valid,
+                event and actionable,
                 observation.contact_changed or gap or not observation.valid,
                 time_s,
             )
@@ -257,23 +278,39 @@ class UnifiedAdaptivePolicy:
                 (1, observation.right_candidate, observation.right_quality),
             )
         ]
-        if event and enabled and c.risk_enabled and observation.valid:
+        if not enabled or not observation.valid or blocked or gap or observation.risk < 1:
+            self._risk_confirmed_since = None
+        elif actionable and self._risk_confirmed_since is None:
+            self._risk_confirmed_since = time_s
+        repeat = (
+            c.risk_repeat_interval_s is not None
+            and observation.confirmed_risk
+            and self._risk_confirmed_since is not None
+            and time_s - self._risk_confirmed_since >= c.observer.confirmation_s
+            and time_s - self._last_risk_step_s >= c.risk_repeat_interval_s
+        )
+        if (event or repeat) and actionable and c.risk_enabled:
             if self._risk_started is None:
                 self._risk_started = time_s
             if (
                 self._events < c.risk_max_events
                 and self._risk_budget < c.risk_budget_n
                 and time_s - self._risk_started <= c.risk_duration_s
-            ):
-                increment = min(c.risk_step_n, c.risk_budget_n - self._risk_budget)
-                self._risk_goal = min(
-                    c.load.max_force_n,
-                    max(self._risk_goal, self.scheduler.target_force_n) + increment,
+                and (
+                    c.risk_repeat_interval_s is None
+                    or time_s - self._last_risk_step_s >= c.risk_repeat_interval_s
                 )
+            ):
+                base = max(self._risk_goal, self.scheduler.target_force_n)
+                increment = min(
+                    c.risk_step_n,
+                    c.risk_budget_n - self._risk_budget,
+                    c.load.max_force_n - base,
+                )
+                self._risk_goal = base + increment
                 self._risk_budget += increment
-                self._events += 1
-        track_error = self.scheduler.target_force_n - measured_force_n
-        blocked = execution_limited and track_error > c.tracking_error_n
+                self._events += int(increment > 0)
+                self._last_risk_step_s = time_s
         load = self.scheduler.update(
             left_tangential_n=float(np.linalg.norm(arrays[0][:, :2].sum(axis=0))),
             right_tangential_n=float(np.linalg.norm(arrays[1][:, :2].sum(axis=0))),
@@ -281,8 +318,14 @@ class UnifiedAdaptivePolicy:
             left_friction=self._friction[0].value,
             right_friction=self._friction[1].value,
             goal_floor_n=self._risk_goal,
-            risk_rate_n_s=c.risk_rate_n_s * observation.risk if c.risk_enabled else 0.0,
+            risk_rate_n_s=(
+                c.risk_rate_n_s
+                if c.risk_enabled and self._risk_goal > self.scheduler.target_force_n
+                else 0.0
+            ),
+            filtered_load=filtered_load,
             pause_increase=not enabled
+            or freeze_increase
             or not observation.valid
             or blocked
             or gap
@@ -292,12 +335,14 @@ class UnifiedAdaptivePolicy:
         exhausted = (
             self._events >= c.risk_max_events
             or self._risk_budget >= c.risk_budget_n
+            or (c.risk_enabled and self._risk_goal >= c.load.max_force_n)
             or (self._risk_started is not None and time_s - self._risk_started > c.risk_duration_s)
         )
         conditions = {
             "capacity_limited": load.capacity_limited,
             "tracking_limited": blocked,
-            "invalid_contact": not observation.valid,
+            "invalid_contact": not observation.valid and observation.reason != "stale_sample",
+            "stale_tactile": observation.reason == "stale_sample",
             "sample_gap": gap,
             "risk_budget_exhausted": exhausted and observation.risk > 0,
         }
@@ -329,3 +374,77 @@ class UnifiedAdaptivePolicy:
             self._failure,
         )
         return self.latest
+
+    def update_tactile_state(
+        self,
+        state: TactileState,
+        *,
+        control_time_s: float,
+        stale_after_s: float,
+        measured_force_n: float,
+        execution_limited: bool = False,
+        enabled: bool = True,
+    ) -> UnifiedAdaptiveCommand:
+        """控制侧消费最新状态及短期锁存事件，按序号去重，不回补历史增力。
+
+        采样与控制时间须来自同一时基。硬件适配需先处理设备与主机时基，
+        不得直接把设备时间与主机单调时钟相减。重复或陈旧快照禁止增力，
+        持续陈旧沿用既有失败超时；故障动作仍由后端负责。
+        """
+        if not math.isfinite(stale_after_s) or stale_after_s <= 0:
+            raise ValueError("新鲜度阈值必须为正有限数")
+        previous_sequence = self._sample_sequence
+        if state.sequence_id < previous_sequence:
+            raise ValueError("控制侧触觉序号不得回退")
+        fresh = state.valid and state.is_fresh(control_time_s, stale_after_s)
+        unseen_invalid = state.invalid_samples > self._invalid_samples
+        self._invalid_samples = state.invalid_samples
+        new = state.sequence_id > previous_sequence
+        self._sample_sequence = state.sequence_id
+        observation = state.observation
+        # 锁存候选避免 500/250 Hz 抽取丢失单帧事件；样本和事件时间
+        # 在硬件适配处一起映射到主机时基，计入接收后等待造成的事件年龄。
+        event_fresh = (
+            state.event_time_s is not None
+            and 0 <= control_time_s - state.event_time_s <= stale_after_s
+        )
+        if new and fresh and not unseen_invalid and event_fresh and state.latest_event is not None:
+            observation = replace(
+                observation,
+                event_id=state.latest_event.event_id,
+                left_candidate=state.latest_event.left_candidate,
+                right_candidate=state.latest_event.right_candidate,
+                left_quality=state.latest_event.left_quality,
+                right_quality=state.latest_event.right_quality,
+            )
+        if unseen_invalid:
+            observation = replace(observation, valid=False, reason="invalid_sample")
+        elif not fresh:
+            observation = replace(
+                observation,
+                valid=False,
+                reason="invalid_sample" if not state.valid else "stale_sample",
+            )
+        elif not new:
+            observation = replace(
+                observation,
+                event_id=0,
+                left_candidate=None,
+                right_candidate=None,
+                left_quality=0.0,
+                right_quality=0.0,
+                contact_changed=False,
+                reason="repeated_snapshot",
+            )
+        # 每个控制 tick 推进时钟，即便冻结也不在恢复时补算历史增力。
+        return self.update(
+            state.left_taxels if state.valid else np.zeros((9, 3)),
+            state.right_taxels if state.valid else np.zeros((9, 3)),
+            time_s=control_time_s,
+            measured_force_n=measured_force_n,
+            execution_limited=execution_limited,
+            enabled=enabled,
+            observation=observation,
+            filtered_load=state.load,
+            freeze_increase=not fresh or not new or unseen_invalid,
+        )

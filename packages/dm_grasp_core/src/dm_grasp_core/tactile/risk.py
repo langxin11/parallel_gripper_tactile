@@ -27,11 +27,17 @@ class TaxelRiskConfig:
     max_normal_rate_n_s: float = 0.3
     redistribution_threshold: float = 0.06
     release_ratio: float = 0.5
+    allow_steady_load_risk: bool = False
+    stable_contact_subset: bool = False
 
     def __post_init__(self) -> None:
         """严格拒绝非数值、非有限值及退化窗口和阈值。"""
         for field in fields(self):
             value = getattr(self, field.name)
+            if field.name in {"allow_steady_load_risk", "stable_contact_subset"}:
+                if not isinstance(value, bool):
+                    raise ValueError("稳载风险权限必须为布尔值")
+                continue
             if isinstance(value, bool) or not isinstance(value, Real):
                 raise ValueError(f"{field.name} 必须为有限正数")
             if not math.isfinite(value) or value <= 0:
@@ -61,6 +67,7 @@ class TaxelRiskObservation:
     reason: str = "warming_up"
     left_valid_mask: tuple[bool, ...] = (False,) * 9
     right_valid_mask: tuple[bool, ...] = (False,) * 9
+    confirmed_risk: bool = False
 
 
 class TaxelRiskObserver:
@@ -74,10 +81,13 @@ class TaxelRiskObserver:
 
     def reset(self) -> None:
         """重建窗口，但保留递增事件编号，避免下游把新事件当成旧事件。"""
-        self._history: deque[tuple[float, np.ndarray, np.ndarray, np.ndarray]] = deque()
+        self._history: deque[
+            tuple[float, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]
+        ] = deque()
         self._last_time: float | None = None
         self._masks: tuple[tuple[bool, ...], tuple[bool, ...]] | None = None
         self._pending_s: float | None = None
+        self._continuous_risk_since: float | None = None
         self._release_s: float | None = None
         self._last_event_s = -math.inf
         self._armed = True
@@ -125,6 +135,14 @@ class TaxelRiskObserver:
         active = within & (values[:, :, 2] >= threshold)
         masks = tuple(tuple(bool(v) for v in side) for side in active)
         changed = self._masks is not None and masks != self._masks
+        if c.stable_contact_subset and self._history:
+            # 仅用窗口内始终存在的触点比较，边缘点进出不能制造重分配证据。
+            # 任一侧不足两个共同触点时仍重建，禁止跨接触更换复用摩擦证据。
+            common = active.copy()
+            for item in self._history:
+                if item[0] >= time_s - c.window_s:
+                    common &= item[4]
+            changed = bool((common.sum(axis=1) < 2).any())
         gap = self._last_time is not None and time_s - self._last_time > c.max_gap_s
         valid = bool(within.all() and active.any(axis=1).all())
         self._last_time = time_s
@@ -138,6 +156,7 @@ class TaxelRiskObserver:
         if changed or gap or not valid:
             self._history.clear()
             self._pending_s = self._release_s = None
+            self._continuous_risk_since = None
         if not valid:
             self._last = replace(result, reason="invalid_taxels")
             return self._last
@@ -146,28 +165,82 @@ class TaxelRiskObserver:
         load = np.linalg.norm(np.where(active[:, :, None], values[:, :, :2], 0).sum(axis=1), axis=1)
         share = shear / np.maximum(shear.sum(axis=1, keepdims=True), 1e-12)
         ratios = shear / np.maximum(values[:, :, 2], c.min_normal_n * c.contact_release_ratio)
-        self._history.append((time_s, np.stack((load, normal)), share, ratios))
+        self._history.append(
+            (time_s, np.stack((load, normal)), share, ratios, active.copy(), values.copy())
+        )
         while len(self._history) > 2 and self._history[1][0] <= time_s - c.window_s:
             self._history.popleft()
         first = self._history[0]
         elapsed = time_s - first[0]
-        if elapsed < c.window_s or len(self._history) < 3:
+        # 设备绝对时间较大时，整周期相减会略低于窗口长度，不能反复误判预热。
+        if elapsed + 1e-9 < c.window_s or len(self._history) < 3:
             self._last = replace(result, reason="contact_changed" if changed else "warming_up")
             return self._last
         previous = self._history[-2]
         rate = (self._history[-1][1] - first[1]) / elapsed
         recent_rate = (self._history[-1][1] - previous[1]) / (time_s - previous[0])
-        redistribution = np.abs(share - first[2]).sum(axis=1) / 2
-        # 停止加载和主动增力即刻撤销证据，不能靠旧窗口延续确认。
-        eligible = (recent_rate[0] >= c.min_load_rate_n_s) & (
-            np.maximum(rate[1], recent_rate[1]) <= c.max_normal_rate_n_s
-        )
+        baseline_share = first[2]
+        candidate_mask = active
+        if c.stable_contact_subset:
+            candidate_mask = np.logical_and.reduce([item[4] for item in self._history])
+            if (candidate_mask.sum(axis=1) < 2).any():
+                current = self._history[-1]
+                self._history.clear()
+                self._history.append(current)
+                self._pending_s = self._release_s = None
+                self._continuous_risk_since = None
+                self._last = replace(result, contact_changed=True, reason="contact_changed")
+                return self._last
+
+            def subset(frame):
+                """比较共同触点的切向合力、法向力和内部份额，隔离边缘点进出。"""
+                shear_vectors = np.where(candidate_mask[:, :, None], frame[5][:, :, :2], 0)
+                magnitudes = np.linalg.norm(shear_vectors, axis=2)
+                return (
+                    np.stack(
+                        (
+                            np.linalg.norm(shear_vectors.sum(axis=1), axis=1),
+                            np.where(candidate_mask, frame[5][:, :, 2], 0).sum(axis=1),
+                        )
+                    ),
+                    magnitudes / np.maximum(magnitudes.sum(axis=1, keepdims=True), 1e-12),
+                )
+
+            current_forces, share = subset(self._history[-1])
+            first_forces, baseline_share = subset(first)
+            previous_forces, _ = subset(previous)
+            load = current_forces[0]
+            rate = (current_forces - first_forces) / elapsed
+            recent_rate = (current_forces - previous_forces) / (time_s - previous[0])
+        redistribution = np.abs(share - baseline_share).sum(axis=1) / 2
+        # 默认模式遇到停止加载或主动增力时立即撤销证据。
+        # 共同触点模式使用窗口斜率，避免 2 ms 差分把量程内噪声放大为
+        # 法向增力或卸载；代价是最多一个窗口的撤销延迟。
+        load_trend = rate[0] if c.stable_contact_subset else recent_rate[0]
+        normal_trend = rate[1] if c.stable_contact_subset else np.maximum(rate[1], recent_rate[1])
+        eligible = (load_trend >= c.min_load_rate_n_s) & (normal_trend <= c.max_normal_rate_n_s)
         scores = np.where(
             eligible,
             np.minimum(rate[0] / c.min_load_rate_n_s, redistribution / c.redistribution_threshold),
             0,
         )
+        if c.allow_steady_load_risk:
+            # 持续滑动未必继续增加总切向力；稳载下仍要求局部重分配，
+            # 并排除明显卸载和主动法向增力，不把单纯恒定承载当滑移。
+            steady = (
+                (load > c.min_normal_n)
+                & (load_trend >= -c.min_load_rate_n_s)
+                & (rate[0] >= -c.min_load_rate_n_s)
+                & (normal_trend <= c.max_normal_rate_n_s)
+            )
+            scores = np.maximum(
+                scores, np.where(steady, redistribution / c.redistribution_threshold, 0)
+            )
         score = max(0.0, float(scores.max()))
+        if score < 1:
+            self._continuous_risk_since = None
+        elif self._continuous_risk_since is None:
+            self._continuous_risk_since = time_s
         if score < c.release_ratio:
             self._pending_s = None
             if self._release_s is None:
@@ -196,11 +269,11 @@ class TaxelRiskObserver:
                 # 仅在剪切份额下降且局部力比不再增长的触点上形成摩擦候选。
                 # 风险仍可更敏感；没有这条额外证据时只发风险，不更新摩擦。
                 baseline = np.median(np.stack([frame[3] for frame in self._history][:-1]), axis=0)
-                affected = active & (share < first[2]) & (ratios <= first[3])
+                affected = candidate_mask & (share < baseline_share) & (ratios <= first[3])
                 for side in range(2):
                     if scores[side] >= 1 and affected[side].any():
                         candidates[side] = float(np.median(baseline[side][affected[side]]))
-                        quality[side] = active[side].sum() / 9
+                        quality[side] = candidate_mask[side].sum() / 9
         elif score < 1:
             self._pending_s = None
         self._last = replace(
@@ -212,5 +285,9 @@ class TaxelRiskObserver:
             left_quality=float(quality[0]),
             right_quality=float(quality[1]),
             reason="risk_candidate" if event else "observing",
+            confirmed_risk=(
+                self._continuous_risk_since is not None
+                and time_s - self._continuous_risk_since >= c.confirmation_s
+            ),
         )
         return self._last
