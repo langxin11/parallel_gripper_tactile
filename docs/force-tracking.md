@@ -31,17 +31,28 @@ PID／导纳的统一参数比较见[共享控制核](dm-shared-control.md)。
 ### 位置式 PID 与刚度变体
 
 `pid-only`、`pid-torque-ff`、`pid-stiffness-ff`、`full` 分别选择 PID、机构力矩前馈与刚度位置修正的组合。
-`pid-stiffness-limit` 关闭刚度加法修正，改用刚度约束位置目标增量；该变体仅保留专项复现，
+`pid-stiffness-limit` 关闭刚度加法修正，改用刚度约束位置偏置增量；该变体仅保留专项实验，
 不在默认正式比较矩阵中。`pid-stiffness-rate` 是独立的速率式控制变体。
 
-这里的 PID 输出是相对接触位置的**位置修正**，不是速度命令。令
+这里的 PID 输出是相对每周期实测位置的**位置偏置**，不是速度命令或相邻周期指令增量。令
 \(e_k=F_{\mathrm{ref},k}-F_{n,k}\)、外环周期为 \(T_c\)，则未限幅输出可写为
 
 \[
 \delta q_k^\ast=K_p e_k+K_i\sum_{i=0}^{k}e_iT_c-K_d\frac{F_{n,k}-F_{n,k-1}}{T_c}.
 \]
 
-刚度位置限幅先计算
+普通 PID 将该输出与可选刚度位置修正相加，再裁剪到
+\([-\delta q_{\max},+\delta q_{\max}]\)，最终使用
+\(q_{\mathrm{ref},k}=q_{\mathrm{real},k}+\delta q_k\)。位置参考取当期反馈，
+既不是固定接触位置，也不是上一周期位置指令；限幅约束当前位置附近的偏置，不约束累计闭合行程。
+MIT 内环与后端仍分别执行原有机械行程、速度及力矩限制，力矩前馈开关与增益保持独立。
+
+共享核的 `max_position_adjustment=None` 可单独关闭 PID 的固定偏置及积分幅值限幅；
+后端请求受限且误差继续推向饱和方向时停止本周期积分，反向误差仍允许积分消退。
+真机通过 `controller.pid.max_position_adjustment_rad: null` 启用；现有仿真 profile 的有限上限
+保持原配置。机械行程和力矩等后端保护不随该选项关闭。
+
+刚度位置限幅变体先计算
 
 \[
 \Delta F_{\mathrm{allow},k}=\min\!\left(|e_k|,\dot F_{\mathrm{lim}}T_c\right),\qquad
@@ -51,9 +62,12 @@ PID／导纳的统一参数比较见[共享控制核](dm-shared-control.md)。
 
 再把 \(\delta q_k^\ast\) 裁剪到
 \([\delta q_{k-1}-\Delta q_{\mathrm{lim},k},\delta q_{k-1}+\Delta q_{\mathrm{lim},k}]\)
-与全局位置修正范围的交集，最终令
-\(q_{\mathrm{ref},k}=q_{\mathrm{contact}}+\delta q_k\)。因此只有积分项、微分项和限幅换算显式使用
+与全局位置偏置范围的交集，再加到当期实测位置。它只限制偏置变化，不限制实测位置变化造成的
+指令位移。因此只有积分项、微分项和限幅换算显式使用
 \(T_c\)；不存在“PID 先输出速度，再乘 \(T_c\)”这一步。
+
+此语义从当前 Unreleased 版本起生效；此前固定接触位置参考的运行产物和研究结论保留为历史证据，
+不能当作新控制律的性能验证。一阶 LADRC 与刚度速率变体仍将累计位置修正加到固定接触位置。
 
 `--set controller=dm_gripper/pid_stiffness_rate` 是独立的速率式实验变体，不改变上述位置式 PID。
 它令 PID 输出期望力变化率，再用在线刚度和机构雅可比换算为电机角速度：

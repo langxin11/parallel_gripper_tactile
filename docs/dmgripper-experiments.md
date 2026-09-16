@@ -113,6 +113,12 @@ uv run --package dmgripper-experiments dmgripper-run \
 双侧严重不平衡同样阻断启动。旧模式的逐 taxel 幅值不使用未标定阈值，也不参与零力均值门禁；
 `zero_force_diagnostics` 记录数量、均值、标准差和最大残余力位置，供离线标定。
 
+部分 PapillArray 固件的微秒计时器每 \(2^{32}\) μs（约 71.6 分钟）回绕。
+采集会话仅在包计数正常前进、设备时间跨越该边界且模差不超过一秒时展开回绕，
+使滤波、控制与回放使用的 `timestamp_us` 保持连续；重复包、普通时间回退和计数异常仍报错。
+`tactile.jsonl` 同时记录 `raw_timestamp_us` 与 `timestamp_wrap_count`，保留设备原值和回绕诊断。
+bias 后同时重置展开基线；主机接收时间的新鲜度检查不受影响。记录器版本为 1.4.0，旧记录保持不变。
+
 ## 故障保持与人工释放
 
 旧模式故障处理取决于 DM 通道是否仍可控；统一模式还有下文所述的独立触觉保护：
@@ -147,8 +153,36 @@ uv run --package dmgripper-experiments dmgripper-run \
 死区与单向闭合仅属于导纳。PID／LADRC 将原始力交给共享核 `begin_tracking`／`step_tracking`，
 内部只低通一次。trace 分别记录原始、外层滤波和控制使用力。
 
+PID 使用每周期电机实测位置作为参考：`q_des = q_real + position_adjustment`。
+`controller.pid.max_position_adjustment_rad` 限制的是相对当前反馈的位置偏置，
+不是接触后的累计闭合行程；最终请求仍经过原有速度、机械行程与 MIT 合成力矩限幅。
+该变化与仿真共用控制核；一阶 LADRC 仍使用固定接触参考。
+
+将 `controller.pid.max_position_adjustment_rad` 设为 `null` 可关闭 PID 的固定位置偏置及积分幅值
+限幅，使修正量能够超过旧的 ±0.15 rad；机械行程、逐周期速度、MIT 总力矩与触觉过力保护继续生效。
+此模式在后端位置／速度或力矩饱和且误差继续推向饱和方向时回退本周期积分，反向误差仍允许积分消退。
+原有限数值配置保持既有行为。该开关只取消 PID 的固定偏置上限；一阶 LADRC 不支持无界累计行程，
+切换到 LADRC 时，PID 的 `null` 配置按其原默认 0.15 rad 上限处理。
+
+PID 的独立模型力矩前馈由 `controller.pid.torque_feedforward_gain` 控制：
+
+\[
+\tau_{\mathrm{ff}}=g_{\mathrm{ff}}J_c(q_{\mathrm{real}})F_{\mathrm{target}}.
+\]
+
+目标力为平均单侧力，`J_c` 为总闭合行程对电机角度的雅可比；不额外乘二。
+显式数值须位于 0～1，`1` 为完整模型前馈、`0` 关闭该 PID 模型项；未设置或 `null` 保持旧的
+刚度联动前馈行为。显式比例覆盖旧模型项，不重复叠加；刚度位置修正仍由
+`stiffness_consumption` 独立控制。该字段只作用于 PID，不影响导纳或一阶 LADRC。
+
+`water_bottle_curve.yaml` 已配置 PID 前馈比例 `1.0`、位置偏置上限 `null`，原命令追加 `--controller.kind pid`
+即可使用；`stiffness_consumption: none` 保持刚度仅诊断，即使估计关闭或尚无有效估计也会产生前馈。
+预载、运行与正常保持阶段使用当期目标力，接近／回位保持原有策略。前馈与 PID 的 MIT 合成力矩
+仍受原有力矩限幅约束；`trace.csv` 的 `tau_ff_nm` 记录最终前馈请求。
+
 刚度估计默认 `enabled: true`、`method: window_linear`，`stiffness_consumption: none`，
-只记录数值、有效性与原因。仅 PID／LADRC 显式选择 `feedforward` 才消费估计；默认估计参数尚未经真机辨识。
+只记录数值、有效性与原因。仅 PID／LADRC 显式选择 `feedforward` 才消费估计；
+独立 PID 模型力矩前馈不消费估计。默认估计参数尚未经真机辨识。
 
 ## 统一自适应试运行与旁路回放 {: #unified-adaptive }
 

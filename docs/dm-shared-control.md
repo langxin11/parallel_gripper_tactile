@@ -16,6 +16,8 @@
   `MITTorqueModel`：协议量化与合成力矩计算。
 - 法向外环 `begin_tracking`／`step_tracking`：PID、一阶 LADRC、直接力矩、二阶 LADRC 路径，
   经 `MITTorqueInner` 注入电机访问；另提供三种在线接触刚度估计。
+  PID 可通过 `NormalForceConfig.pid_torque_feedforward_gain` 显式覆盖模型力矩前馈，
+  按当前机构雅可比与目标力计算，不依赖刚度估计；`None` 保持既有仿真配置的前馈选择。
 
 导纳方程为：
 
