@@ -16,9 +16,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+from .lifecycle import LifecyclePhase
+
 
 def plot_experiment_run(
-    directory: Path, *, output_directory: Path | None = None
+    directory: Path,
+    *,
+    output_directory: Path | None = None,
+    phases: tuple[str, ...] | None = None,
+    task_time_range: tuple[float, float] | None = None,
 ) -> tuple[Path, ...]:
     """从通用抓取实验 trace 生成力控诊断图。
 
@@ -26,15 +32,25 @@ def plot_experiment_run(
         directory: 包含 ``trace.csv`` 的实验输出目录。
         output_directory: 离线重绘的独占输出目录；``None`` 时在源目录
             内生成 ``plot.pdf``／``plot.png``。
+        phases: 可选阶段白名单，仅绘制这些阶段的行。
+        task_time_range: 可选任务时间窗口 ``[起, 止]``；仅保留有限
+            ``task_time_s`` 的行，横轴切换为任务时间。
 
     Returns:
-        成功生成时的 PDF 与 PNG 路径；不存在或没有数据的 trace 返回空元组。
+        成功生成时的 PDF 与 PNG 路径；不存在、没有数据或窗口过滤后
+        为空的 trace 返回空元组。
+
+    Raises:
+        ValueError: 阶段名未知，或任务时间窗口不是 ``0 ≤ 起 ≤ 止`` 的有限区间。
     """
     directory = Path(directory)
     rows = _read_rows(directory / "trace.csv")
     if not rows:
         return ()
-    time_s = _values(rows, "time_s")
+    rows, x_field = _select_window(rows, phases, task_time_range)
+    if not rows:
+        return ()
+    time_s = _values(rows, x_field)
     if not any(math.isfinite(value) for value in time_s):
         return ()
     has_stiffness = any(math.isfinite(value) for value in _values(rows, "stiffness_n_per_m"))
@@ -51,9 +67,9 @@ def plot_experiment_run(
         _plot_joint_command(axes[2], time_s, rows)
         if has_stiffness:
             _plot_stiffness(axes[3], time_s, rows)
-            axes[3].set_xlabel(r"$t$ (s)")
+            axes[3].set_xlabel(_x_label(x_field))
         else:
-            axes[2].set_xlabel(r"$t$ (s)")
+            axes[2].set_xlabel(_x_label(x_field))
         for axis in axes:
             axis.grid(True, alpha=0.25)
         target = Path(output_directory) if output_directory is not None else directory
@@ -63,29 +79,39 @@ def plot_experiment_run(
         figure.savefig(pdf_path, format="pdf")
         figure.savefig(png_path, format="png", dpi=600)
         plt.close(figure)
+    window = _window_description(phases, task_time_range)
     if output_directory is None:
         _register_plot_files(directory, (pdf_path, png_path))
     else:
-        _write_repaint_manifest(output_directory, directory, (pdf_path, png_path))
+        _write_repaint_manifest(output_directory, directory, (pdf_path, png_path), window)
     return (pdf_path, png_path)
 
 
-def repaint_run(directory: Path) -> Path:
+def repaint_run(
+    directory: Path,
+    *,
+    phases: tuple[str, ...] | None = None,
+    task_time_range: tuple[float, float] | None = None,
+) -> Path:
     """对历史或既有运行目录执行离线重绘，返回独占重绘目录。
 
     Args:
         directory: 包含 ``trace.csv`` 的源运行目录；源文件不会被修改。
+        phases: 可选阶段白名单，透传给绘图。
+        task_time_range: 可选任务时间窗口，透传给绘图。
 
     Returns:
         新创建的重绘目录（``repaint-<UTC时间戳>-<id>``）。
 
     Raises:
-        ValueError: 源目录没有可绘制数据。
+        ValueError: 源目录没有可绘制数据，或窗口参数非法。
     """
     directory = Path(directory)
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     output = directory / f"repaint-{stamp}-{uuid.uuid4().hex[:8]}"
-    if not plot_experiment_run(directory, output_directory=output):
+    if not plot_experiment_run(
+        directory, output_directory=output, phases=phases, task_time_range=task_time_range
+    ):
         raise ValueError(f"源目录没有可绘制数据：{directory}")
     return output
 
@@ -289,6 +315,68 @@ def _legend(*axes: Any) -> None:
         axes[0].legend(handles, labels, loc="best")
 
 
+def _select_window(
+    rows: list[dict[str, str]],
+    phases: tuple[str, ...] | None,
+    task_time_range: tuple[float, float] | None,
+) -> tuple[list[dict[str, str]], str]:
+    """按阶段白名单与任务时间窗口截取行，返回剩余行与横轴字段名。
+
+    任务时间窗口天然只保留 active 及其后冻结任务时钟的行；此时横轴
+    切换为 ``task_time_s``，使跨运行的评价图共用曲线起点为零的坐标。
+    """
+    if phases is not None:
+        valid = {phase.value for phase in LifecyclePhase}
+        unknown = sorted(set(phases) - valid)
+        if unknown:
+            raise ValueError(f"未知阶段 {unknown}；可用阶段：{sorted(valid)}")
+        wanted = set(phases)
+        rows = [row for row in rows if row.get("phase") in wanted]
+    if task_time_range is not None:
+        start_s, end_s = task_time_range
+        if not math.isfinite(start_s) or not math.isfinite(end_s) or not 0.0 <= start_s <= end_s:
+            raise ValueError("任务时间窗口必须是 0 ≤ 起 ≤ 止 的有限区间")
+        # approach 等阶段把未启动的任务时钟写成 0.0，不属于任务时间轴；
+        # 只保留任务时钟推进或冻结的行，避免接触前数据堆在 t=0。
+        rows = [
+            row
+            for row in rows
+            if row.get("phase") in _TASK_CLOCK_PHASES
+            and math.isfinite(value := _parse_number(row.get("task_time_s", "")))
+            and start_s - 1e-9 <= value <= end_s + 1e-9
+        ]
+    return rows, "task_time_s" if task_time_range is not None else "time_s"
+
+
+_TASK_CLOCK_PHASES = frozenset(
+    {
+        LifecyclePhase.ACTIVE.value,
+        LifecyclePhase.HOLDING.value,
+        LifecyclePhase.RETURNING.value,
+    }
+)
+
+
+def _x_label(x_field: str) -> str:
+    """按横轴字段给出物理量与单位。"""
+    return r"$t_{\mathrm{task}}$ (s)" if x_field == "task_time_s" else r"$t$ (s)"
+
+
+def _window_description(
+    phases: tuple[str, ...] | None,
+    task_time_range: tuple[float, float] | None,
+) -> dict[str, object] | None:
+    """把生效的绘图窗口整理为可追溯的 manifest 字段。"""
+    if phases is None and task_time_range is None:
+        return None
+    window: dict[str, object] = {}
+    if phases is not None:
+        window["phases"] = list(phases)
+    if task_time_range is not None:
+        window["task_time_s"] = [task_time_range[0], task_time_range[1]]
+    return window
+
+
 def _register_plot_files(directory: Path, plots: tuple[Path, ...]) -> None:
     """把生成的图登记进源目录 manifest（兼容新 dict 与旧 list 格式）。"""
     manifest_path = directory / "manifest.json"
@@ -315,6 +403,7 @@ def _write_repaint_manifest(
     output_directory: Path,
     source_directory: Path,
     plots: tuple[Path, ...],
+    window: dict[str, object] | None = None,
 ) -> None:
     """为离线重绘目录写入独立 manifest，指向源 trace。"""
     manifest = {
@@ -324,6 +413,8 @@ def _write_repaint_manifest(
         "created_at": datetime.now(timezone.utc).isoformat(),
         "files": {path.name: path.name for path in plots},
     }
+    if window is not None:
+        manifest["window"] = window
     (output_directory / "manifest.json").write_text(
         json.dumps(manifest, ensure_ascii=False, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",

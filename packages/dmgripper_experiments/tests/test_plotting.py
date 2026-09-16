@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 
 from dmgripper_experiments.plotting import (
     plot_experiment_run,
@@ -145,6 +146,96 @@ def test_repaint_writes_exclusive_directory_and_preserves_source(tmp_path: Path)
     assert repaint_manifest["source_directory"] == str(directory)
     second = repaint_run(directory)
     assert second != output
+
+
+def _recorded_run(tmp_path: Path) -> Path:
+    """生成包含 preload／active 行的完整运行目录。"""
+    config = ExperimentConfig()
+    directory = create_run_directory(tmp_path, config)
+    recorder = ExperimentRecorder(directory, config)
+    _write_rows(recorder, _adaptive_rows())
+    recorder.close()
+    return directory
+
+
+def test_phase_window_filters_rows_and_records_manifest(tmp_path: Path):
+    """阶段白名单窗口只绘制所选阶段，并把条件写入重绘 manifest。"""
+    directory = _recorded_run(tmp_path)
+    output = repaint_run(directory, phases=("active",))
+    assert (output / "plot.pdf").is_file()
+    manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["window"] == {"phases": ["active"]}
+
+
+def test_task_time_window_records_manifest_and_empty_window_returns_nothing(
+    tmp_path: Path,
+) -> None:
+    """任务时间窗口记录区间；无匹配行时返回空元组而不是异常。"""
+    directory = _recorded_run(tmp_path)
+    output = repaint_run(directory, task_time_range=(0.0, 0.06))
+    manifest = json.loads((output / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["window"] == {"task_time_s": [0.0, 0.06]}
+    assert (output / "plot.png").is_file()
+    assert plot_experiment_run(directory, task_time_range=(99.0, 100.0)) == ()
+
+
+def test_task_time_window_excludes_rows_without_running_task_clock(tmp_path: Path) -> None:
+    """approach 阶段占位的任务时间 0.0 不进入任务时间窗口。"""
+    config = ExperimentConfig()
+    directory = create_run_directory(tmp_path, config)
+    recorder = ExperimentRecorder(directory, config)
+    rows = _adaptive_rows()
+    for index in range(3):
+        rows.append(
+            {
+                "time_s": 0.5 + 0.01 * index,
+                "phase": "approach",
+                "task_time_s": 0.0,
+                "contact_segment": 0,
+                "left_fz_n": 0.0,
+                "right_fz_n": 0.0,
+                "measured_force_n": 0.0,
+                "target_source": "curve",
+                "position_rad": 0.1,
+                "q_des_rad": 0.1,
+                "torque_nm": 0.0,
+            }
+        )
+    _write_rows(recorder, rows)
+    recorder.close()
+    # 只含 approach 占位行的窄窗口为空；正常窗口仍绘出 active 行。
+    assert plot_experiment_run(directory, task_time_range=(0.0, 0.001)) == ()
+    output = repaint_run(directory, task_time_range=(0.0, 0.2))
+    assert (output / "plot.pdf").is_file()
+
+
+@pytest.mark.parametrize(
+    ("phases", "task_time_range", "message"),
+    [
+        (("active", "cruise"), None, "未知阶段"),
+        (None, (1.0, 0.0), "有限区间"),
+        (None, (-1.0, 1.0), "有限区间"),
+    ],
+)
+def test_invalid_window_arguments_are_rejected(
+    tmp_path: Path, phases, task_time_range, message: str
+) -> None:
+    """未知阶段或倒置／负数区间在绘图前直接拒绝。"""
+    directory = _recorded_run(tmp_path)
+    with pytest.raises(ValueError, match=message):
+        plot_experiment_run(directory, phases=phases, task_time_range=task_time_range)
+
+
+def test_plot_cli_requires_repaint_for_window(tmp_path: Path, capsys) -> None:
+    """CLI 窗口参数必须配合 --repaint；非法参数返回用法错误码。"""
+    from dmgripper_experiments.plot_cli import run
+
+    directory = _recorded_run(tmp_path / "nested")
+    assert run([str(directory), "--task-time", "0:0.1"]) == 2
+    assert "必须配合 --repaint" in capsys.readouterr().err
+    assert run([str(directory), "--phase", "active", "--repaint"]) == 0
+    assert run([str(directory), "--task-time", "abc"]) == 2
+    assert run([str(directory), "--unknown"]) == 2
 
 
 def test_legacy_cup_trace_with_state_column_renders(tmp_path: Path):
