@@ -68,7 +68,9 @@ Hydra 的 `--cfg job --resolve` 只打印配置，不替代领域校验。
 ## 文档检查
 
 ```bash
-uv run zensical build --strict
+uv run zensical build --clean --strict
 ```
 
-检查改动涉及的导航、内部链接与锚点。纯文档本地验证无需 pytest，提交与 CI 门禁仍照常执行。
+资产正文位于 `docs/` 外，片段变化可能不触发增量缓存失效；验收必须使用 `--clean` 重新构建。
+检查改动涉及的导航、内部链接与锚点，同时核对资产片段已出现在生成页面中。
+纯文档本地验证无需 pytest，提交与 CI 门禁仍照常执行。

@@ -1,4 +1,4 @@
-# 控制算法对比与消融
+# 模型验证、控制对比与消融
 
 本页说明 DMgripper 力控制研究的比较口径与证据边界。控制律见[动态目标力跟踪](force-tracking.md)，
 模块职责见[架构](architecture.md)，执行入口与研究顺序见[工作流](workflows.md#formal-study-route)。
@@ -50,7 +50,57 @@ Ramp 的卸载终点有 2 s 保持段，终端误差可解释为末端稳态误�
 
 `stiffness_estimator_validation` 固定刚度位置修正、关闭机构力矩前馈，隔离估计器对控制的影响；
 它没有独立刚度参考，不能回答“谁估计得最准”。精度研究应采用独立平衡工作点构造的参考刚度，见
-[力控模型的辨识口径](crank-slider-force-control.md#stiffness-identification)。
+[局部刚度辨识](#stiffness-identification)与[平衡工作点参考](#equilibrium-reference)。
+
+控制中使用的刚度与力雅可比定义见[局部接触力模型](force-tracking.md#contact-force-model)，
+机构位移与有效工况见[DM 共享控制核](dm-shared-control.md#dm-kinematics)。以下方法用于评价在线估计精度。
+
+### 局部刚度辨识 {#stiffness-identification}
+
+通过缓慢、小幅的试探压入，可拟合局部关系
+
+\[
+\Delta f_n\simeq J_f(q)\Delta q,
+\]
+
+进而得到 \(\hat J_f\)，或在已知 \(J_c(q)\) 后反算 \(\hat k_{\mathrm{pair}}\)。
+这辨识的是“Pillar—物体—机构／接触链路”组合的整体等效 \(k_{\mathrm{pair}}\)，用于前馈、增益调度
+和实验比较；它不表示材料弹性模量，也不用于在线反推物体参数。
+
+!!! warning "接触参数不是材料刚度"
+
+    MuJoCo 的响应以编译模型中的显式接触对参数为准，不能仅由 geom 参数推断混合结果，
+    也不能把 `solref` 数值当作材料刚度。
+
+### 平衡工作点参考 {#equilibrium-reference}
+
+正式真值研究不把 `solref` 的数值直接当作刚度参考（N/m），而是在相同平均单侧力 \(f_n\) 与总闭合行程
+\(c\) 语义下，对加载、卸载两个分支分别采集平衡工作点。内部点使用中心差分：
+
+\[
+k_{\mathrm{ref}}(c_i)\simeq
+\frac{f_n^{\mathrm{eq}}(c_{i+1})-f_n^{\mathrm{eq}}(c_{i-1})}
+{c_{i+1}-c_{i-1}}.
+\]
+
+实际闭合网格通常不等距，实现使用三点非均匀插值导数。采样窗口须同时满足闭合跨度与力跨度阈值；
+在线估计器独立记录有效比例，未激励的初值不能作为合格估计。在线拟合不参与参考构造。
+同一指令偏移的加载／卸载力差仅为路径依赖诊断，并非严格同一实际闭合位置的材料迟滞。
+此参考仍是数值近似：正式选型前还需缩小扫描间距、物理步长并收紧求解器容差，检查排序是否稳定。
+
+### 评价指标 {#stiffness-validation-metrics}
+
+跨材料比较以对数 RMSE 为主指标：
+
+\[
+\operatorname{RMSE}_{\log k}=\sqrt{\frac{1}{N}\sum_i
+\left(\log\hat{k}_i-\log k_{\mathrm{ref},i}\right)^2}.
+\]
+
+同时报告相对 RMSE、相对偏差、低估率、估计抖动，以及相邻平衡工作点的力增量预测误差
+\(e_{\Delta f}=\Delta f_n-\hat{k}\Delta c\) 的 RMSE 和仅加载分支的正误差 95% 分位数。
+这不是一个控制周期内的动态预测误差。力跟踪 RMSE 只用于
+评价估计器对下游控制的影响，不能替代上述估计精度指标。
 
 ## 已有证据的适用范围
 
@@ -63,3 +113,33 @@ Ramp 的卸载终点有 2 s 保持段，终端误差可解释为末端稳态误�
   跨材料确认，局部最优不能直接成为统一控制器结论。
 - 固定 `pid-stiffness-ff` 的估计器对比未显示窗口法稳定、可推广的跟踪收益；曲线平滑和平均刚度差异
   都不能替代估计精度或控制收益证据。
+
+### 高载荷接触的定性结论 {#collision-geometry-conclusions}
+
+模型文件、变体和生成过程见[DM 资产说明](grippers/dmgripper/index.md#model-selection)，几何布局见
+[Pillar 触觉模型](grippers/dmgripper/index.md#tactile-model)。
+
+在高目标力下，原非共面 mesh 与 `multiccd` 同时启用时会出现接触流形切换、活跃接触数跳变和明显更大的
+跟踪误差。保留高度差但改用球体、使 mesh 共面，或关闭 `multiccd` 后，接触数与力跟踪都会明显稳定。
+
+因此，当前模型中的高载荷振荡不是“非共面”“mesh”或“multiccd”任一单独因素的必然结果，
+而是原非共面 mesh 与多接触点求解方式的交互。该结论描述当前 MuJoCo 模型与任务条件，
+仍需通过实物接触试验验证。
+
+| 用途 | 当前配置 |
+| --- | --- |
+| 常规实验 | 保留高度差球体，启用 `multiccd` |
+| 对照实验 | 原 mesh、共面 mesh 与关闭 `multiccd` 的模型 |
+| 诊断入口 | `research=archive/model_bug_diagnosis/study study.phase=collision-geometry` |
+
+```bash
+uv run python scripts/research/study.py \
+  research=archive/model_bug_diagnosis/study study.phase=collision-geometry
+```
+
+该命令生成诊断计划；执行与产物检查遵循[正式研究流程](workflows.md#formal-study-route)。
+
+!!! warning "接触参数的解释边界"
+
+    `solref` 等效接触参数不是独立硅胶形变模型或已完成的实机力学标定，不能据此推导传感器精度，
+    也不能直接当作材料刚度。刚度参考的构造见[平衡工作点参考](#equilibrium-reference)。

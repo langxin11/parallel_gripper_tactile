@@ -1,4 +1,10 @@
+<!-- --8<-- [start:content] -->
 # DM-J4310P-2EC（24 V）在 MuJoCo / MJCF 中的抽象建模
+
+> **资料范围：**本页保留建模时采用的厂家参数、实机截图记录和输出轴换算假设，
+> 不是对当前在线设备的实时读取。数值来源见文末“资料依据”；其中截图未附采集日期与完整原始记录。
+> 实验采用的配置以所选 profile、Hydra 组合与实际加载的 MJCF 为准。
+> 本页维护电机模型，机构与外环控制的权威说明分别见[共享控制核][shared-control]和[力跟踪][force-tracking]。
 
 ## 1. 建模目标
 
@@ -91,13 +97,13 @@ T_MAX = 4 N·m              # 当前达妙 TMAX，略高于额定 3.5 N·m
 
 理想减速器下：
 
-```math
+$$
 J_out = N^2 J_m
-```
+$$
 
-```math
+$$
 B_out = N^2 B_m
-```
+$$
 
 取 `N=10`：
 
@@ -179,30 +185,7 @@ frictionloss = 0.04 N·m
 
 ---
 
-## 6. `dcmotor.pdf` 的作用
-
-MuJoCo 的 DC motor 模型对后续高保真建模有帮助，尤其是：
-
-- 电压—电流—反电势关系；
-- 转矩常数；
-- 电阻、电感；
-- 转矩—转速包络；
-- 减速器反射惯量；
-- 粘滞摩擦、库仑摩擦；
-- 电流与热饱和。
-
-但当前不建议直接用 `<dcmotor>` 替代 `<motor>`：
-
-1. 实机控制接口是 MIT 的 `t_ff`，驱动器内部已有电流环；
-2. 当前研究重点是 ADRC、机构动力学和接触力；
-3. 手册给出的 `Rs/Ls` 是三相 BLDC 的相参数，不能未经换算直接作为等效 DC 参数；
-4. 厂家给的是额定/峰值转矩，并未明确给出 MuJoCo `dcmotor` 所需的堵转转矩定义。
-
-因此当前采用**输出轴受限力矩源**。若以后研究电压、电流、热和转矩—转速包络，再建立第二版 `<dcmotor>` 模型。
-
----
-
-## 7. 当前建议参数
+## 6. 当前建议参数
 
 | MJCF 参数 | 当前值 |
 |---|---:|
@@ -220,12 +203,12 @@ MuJoCo 的 DC motor 模型对后续高保真建模有帮助，尤其是：
 
 MJCF `<motor>` 的 `ctrl` 单位是输出轴力矩。位置和速度闭环由 Python 显式计算：
 
-```math
+$$
 \tau_{cmd} = \operatorname{clip}\left(
 K_p(p_{des}-p) + K_d(v_{des}-v) + t_{ff},
 -T_{MAX}, T_{MAX}
 \right)
-```
+$$
 
 控制器还会把 `p_des` 限制到 `[P_MIN, P_MAX]`，把 `v_des` 限制到
 `[-V_MAX, V_MAX]`，并把 `t_ff` 单独限制到 `±T_MAX`。当前默认值为：
@@ -243,9 +226,9 @@ K_p(p_{des}-p) + K_d(v_{des}-v) + t_{ff},
 
 达妙电机在 CAN/串口数据帧中不会直接传输浮点物理量，而是先映射到固定 bit 数的无符号整数：
 
-```math
+$$
 u=\frac{x-x_{\min}}{x_{\max}-x_{\min}}(2^N-1)
-```
+$$
 
 仿真控制器会先按该公式量化，再解码回物理量参与 MIT 力矩计算，从而保留实机协议的分辨率影响。
 当前配置下的分辨率为：
@@ -262,47 +245,32 @@ u=\frac{x-x_{\min}}{x_{\max}-x_{\min}}(2^N-1)
 `[-V_MAX, V_MAX]` 与 `[-T_MAX, T_MAX]`。Stiffness 和 Damping 使用达妙协议固定范围，
 因此 profile 中 `kp` 必须在 `0..500`，`kd` 必须在 `0..5`。
 
-这些参数统一配置在 `configs/dm_gripper.yaml`；控制实现位于
-`src/parallel_gripper_tactile/control.py`。因此修改 MIT 命令范围不需要改 MJCF，但
-`T_MAX` 必须同时不超过 `<motor ctrlrange>` 和 `<motor forcerange>`。
+`configs/dm_gripper.yaml` 保留基础 profile；科研运行还会按所选 Hydra 配置组合控制器参数。
+MIT 算法位于 `packages/dm_grasp_core/src/dm_grasp_core/control/mit.py`，
+`src/parallel_gripper_tactile/control.py` 负责配置与 MuJoCo 适配。
+命令范围由配置给出，但 `T_MAX` 必须同时不超过 `<motor ctrlrange>` 和 `<motor forcerange>`；
+提高命令范围时需要核对模型限幅。
 
 ### 预接触与目标法向力跟踪
 
-抓取控制在 MIT 内环之外增加 `simple-pid` 法向力外环。预接触阶段按位置斜坡低速闭合；
-左右两侧 taxel 的法向力均超过接触阈值并保持若干仿真步后，记录当前输出轴位置
-`p_contact` 并切换到力跟踪：
+DM 力控制器在 MIT 内环之外组织接近、接触过渡和力跟踪。左右指尖的有效法向合力分别记为
+`F_L`、`F_R`，控制主量为**平均单侧力**：
 
-```math
-F_n = \sum_i F_{n,i},\qquad
-\Delta p = PID(F_{target}-F_n),\qquad
-p_{des}=p_{contact}+\operatorname{clip}(\Delta p,-\Delta p_{max},\Delta p_{max})
-```
+$$
+f_n = \frac{F_L+F_R}{2}
+$$
 
-当前控制器还使用曲柄滑块开度公式计算闭合行程雅可比 \(J_c(q)\)，并在线估计
-\(\hat K_c\simeq \Delta F_n/\Delta c\)。力跟踪阶段的实际位置修正为：
+目标力、跟踪误差和在线等效刚度均采用这一语义；双侧总力 `F_L+F_R` 只作为派生量。
+测量坐标系、符号和聚合规则见[触觉接口约定][tactile-contract]。
 
-```math
-\Delta p =
-\operatorname{clip}\left(
-\alpha\frac{F_{target}-F_n}{\hat K_cJ_c(q)}
-+ \Delta p_{PID},
--\Delta p_{max},\Delta p_{max}
-\right)
-```
-
-同时加入准静态力矩前馈：
-
-```math
-t_{ff}=\beta\frac{F_{target}}{2}J_c(q)
-```
-
-总法向力先经过一阶低通滤波。`simple-pid` 的输出限幅同时实现积分抗饱和，随后仍由
-MIT 内环、达妙协议量化和 `T_MAX` 执行最终力矩保护。当前默认 `F_target=8 N`，配置位于
-`configs/dm_gripper.yaml` 的 `control.force`。
+具体 PID、刚度辅助反馈、力矩前馈与 ADRC 的公式由[力跟踪控制律][force-control-laws]统一维护；
+关节角、开度和闭合雅可比由[共享控制核][shared-control]维护。
+接触确认、丢失接触处理、目标曲线与滤波参数以所选控制器／任务配置为准。
+本资产摘要不再维护另一套外环公式、默认目标或调参值。
 
 ---
 
-## 8. 后续实验修正项
+## 7. 后续实验修正项
 
 1. 确认 `Inertia`、`Damp` 是否明确为转子侧参数；
 2. 辨识低速库仑摩擦和静摩擦；
@@ -316,4 +284,10 @@ MIT 内环、达妙协议量化和 `T_MAX` 执行最终力矩保护。当前默�
 
 1. 《DM-J4310P-2EC 减速电机使用说明书 V1.1》，达妙科技，2025-11-21。
 2. 当前实机串口助手截图：24 V 供电、MIT 模式、电机辨识参数及驱动配置。
-3. MuJoCo DC Motor Model：<https://mujoco.readthedocs.io/en/latest/_static/dcmotor.pdf>
+
+<!-- --8<-- [end:content] -->
+
+[shared-control]: ../../../docs/dm-shared-control.md
+[force-tracking]: ../../../docs/force-tracking.md
+[tactile-contract]: ../../../docs/tactile-conventions.md
+[force-control-laws]: ../../../docs/force-tracking.md#force-control-laws

@@ -3,30 +3,36 @@ site_name = "平行夹爪指尖触觉仿真"
 docs_dir = "docs"
 nav = [
   { "快速开始" = "index.md" },
-  { "常用工作流" = "workflows.md" },
-  { "推荐路线" = [
-    { "1. 触觉读数约定" = "tactile-conventions.md" },
-    { "2. Onshape 导出" = "onshape-export-upgrade.md" },
-    { "3. 曲柄滑块力控模型" = "crank-slider-force-control.md" },
-    { "4. 动态目标力跟踪" = "force-tracking.md" },
-    { "5. 自适应抓取" = [
-      { "主题总览" = "adaptive-grasping.md" },
-      { "Oracle 抓取目标力调度" = "force-scheduling.md" },
-      { "切向扰动下的触觉增力" = "tangential-disturbance.md" },
-      { "纯触觉接触变化检测、摩擦能力估计与力调度" = "friction-estimation.md" },
-    ] },
-    { "6. Robotiq 离散力控制" = "discrete-force-control.md" },
-    { "7. 控制算法对比与消融" = "control-comparison-ablation.md" },
+  { "夹爪与模型" = [
+    { "Robotiq 2F-85" = "grippers/robotiq-2f85/index.md" },
+    { "DMgripper" = "grippers/dmgripper/index.md" },
+    { "DM 电机建模依据" = "grippers/dmgripper/motor-model.md" },
   ] },
-  { "工程基线" = [
-    { "DMgripper 配置与执行器基线" = "dmgripper-configuration.md" },
-    { "项目架构" = "architecture.md" },
-    { "DMgripper 通用抓取实验" = "dmgripper-experiments.md" },
-    { "DMgripper 共享控制核" = "dm-shared-control.md" },
-    { "科研配置" = "research-configuration.md" },
-    { "测试规范" = "testing.md" },
+  { "使用指南" = [
+    { "常用工作流" = "workflows.md" },
+    { "DM 真机抓取实验" = "dmgripper-experiments.md" },
+  ] },
+  { "接口与控制原理" = [
+    { "触觉接口与读取" = "tactile-conventions.md" },
+    { "DM 控制基础与共享核" = "dm-shared-control.md" },
+    { "DM 动态目标力跟踪" = "force-tracking.md" },
+    { "Robotiq 离散力控制" = "discrete-force-control.md" },
+    { "自适应抓取" = [
+      { "路线总览" = "adaptive-grasping.md" },
+      { "Oracle 目标力调度" = "force-scheduling.md" },
+      { "切向扰动下的触觉增力" = "tangential-disturbance.md" },
+      { "接触变化检测与摩擦估计" = "friction-estimation.md" },
+    ] },
+  ] },
+  { "实验与复现" = [
+    { "科研配置与编排" = "research-configuration.md" },
+    { "模型验证与控制对比" = "control-comparison-ablation.md" },
     { "科研报告" = "reports.md" },
-    { "代码与注释规范" = "coding-conventions.md" },
+  ] },
+  { "开发与贡献" = [
+    { "项目架构" = "architecture.md" },
+    { "代码与文档规范" = "coding-conventions.md" },
+    { "测试策略" = "testing.md" },
   ] },
 ]
 extra_javascript = [
@@ -36,6 +42,9 @@ extra_javascript = [
 
 [project.markdown_extensions]
 attr_list = {}
+admonition = {}
+tables = {}
+pymdownx.snippets = { base_path = ["."], check_paths = true }
 pymdownx.arithmatex.generic = true
 pymdownx.superfences.custom_fences = [
   { name = "mermaid", class = "mermaid", format = "pymdownx.superfences.fence_code_format" },
@@ -49,7 +58,6 @@ pygments_lang_class = true
 [project.theme]
 language = "zh"
 features = [
-  "navigation.expand",
   "navigation.top",
   "toc.follow",
   "content.code.copy",

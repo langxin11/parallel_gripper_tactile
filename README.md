@@ -61,17 +61,21 @@ uv run python scripts/research/study.py \
 正式研究的矩阵、执行顺序、`refinement`／`confirmation` 流程和数值结论统一维护在[常用工作流](docs/workflows.md)
 及各专题文档中；study 不会自动回写候选参数。
 
-## 专题文档
+## 按夹爪进入
 
-- [常用工作流](docs/workflows.md)：单次运行、Hydra study、计划与执行。
-- [动态目标力跟踪](docs/force-tracking.md)：控制任务与接触状态。
-- [Oracle 抓取目标力调度](docs/force-scheduling.md)：已知摩擦系数下的基线调度。
-- [纯触觉接触变化检测、摩擦能力估计与力调度](docs/friction-estimation.md)：当前触觉检测器、估计边界和固定种子结果。
-- [Robotiq 2F-85 离散力控制](docs/discrete-force-control.md)：整数命令与 `ΔF_tick` 控制。
-- [控制算法对比与消融](docs/control-comparison-ablation.md)：比较矩阵与统计口径。
-- [科研报告的组织与维护](docs/reports.md)：报告目录、数据冻结与编译入口。
+| 夹爪 | 模型、控制与实验 | 资产维护 |
+| --- | --- | --- |
+| **Robotiq 2F-85** | [使用入口](docs/grippers/robotiq-2f85/index.md)：触觉变体、整数命令控制与离散力研究 | [模型资产](assets/grippers/robotiq_2f85/README.md) |
+| **DMgripper** | [使用入口](docs/grippers/dmgripper/index.md)：Pillar 触觉、MIT 控制、力跟踪与真机任务 | [模型资产](assets/grippers/dm_gripper/README.md) |
 
-摩擦估计结果与适用范围见[摩擦估计专题](docs/friction-estimation.md)。
+## 文档导航
+
+| 你要完成的任务 | 阅读入口 |
+| --- | --- |
+| 从第一次运行开始 | [文档首页](docs/index.md)、[常用工作流](docs/workflows.md) |
+| 理解接口与控制原理 | [公共触觉接口](docs/tactile-conventions.md)、[DM 控制基础](docs/dm-shared-control.md)、[Robotiq 离散力控制](docs/discrete-force-control.md) |
+| 实验配置与结果复现 | [科研配置](docs/research-configuration.md)、[控制对比与消融](docs/control-comparison-ablation.md)、[科研报告](docs/reports.md) |
+| 维护 CAD、MJCF 与触觉模型 | [资产维护约定](assets/README.md) |
 
 ## 开发入口
 

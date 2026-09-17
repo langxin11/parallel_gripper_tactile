@@ -47,6 +47,19 @@ flowchart LR
 正式研究在 `research/study.py` 的 `_STUDY_ADAPTERS` 登记 schema、路径规范、预检函数和
 protocol；计划与执行持有同一 `StudyPlan`。Torque 调参先校验谱系并生成候选，再按候选预检。
 
+## 模型资产与文档边界
+
+`assets/grippers/robotiq_2f85` 与 `assets/grippers/dm_gripper` 分别拥有模型、网格、
+模型专属触觉布局和生成说明。主包读取器负责转换成[公共触觉接口](tactile-conventions.md)，
+控制核消费规范化数值；具体生成工具的现有位置与资产独立性验收标准见[资产维护约定](#asset-maintenance)。
+
+资产正文在 `assets/` 下维护，站点主题页通过 `pymdownx.snippets` 引用同一正文片段。
+主题页维护阅读路线与站点链接映射，不复制资产正文；运行时不读取文档或依赖站点构建。
+
+--8<-- "assets/README.md:maintenance"
+
+[testing]: testing.md
+
 ## 仿真循环所有权
 
 任一实验运行中只能有一个组件推进对应的 `MjData`。`SimulationSession` 提供物理、控制与采样时钟
@@ -61,7 +74,7 @@ MuJoCo 物理步长。
 
 Pillar 碰撞几何属于 asset/profile，`scenes.custom` 负责把它装配进实验，并可为诊断切换
 `multiccd`。碰撞近似的当前默认、五条件因果对照与适用范围见
-[触觉读数约定](tactile-conventions.md#collision-geometry-conclusions)。
+[模型与测量验证](control-comparison-ablation.md#collision-geometry-conclusions)。
 
 ## 运行产物流
 

@@ -1,72 +1,88 @@
-# ✋ 触觉读数约定
+# 触觉接口与读取
 
-项目对外使用的触觉数组均遵循以下约定：
+本页定义仿真触觉读取器交给控制、记录与分析层的数据契约。
+具体模型的传感器布局见 [Robotiq 触觉模型](grippers/robotiq-2f85/index.md#tactile-model)与
+[DMgripper 触觉模型](grippers/dmgripper/index.md#tactile-model)；本页同时说明[读取适配](#readers)与[仿真测量噪声](#measurement-noise)。
 
-<pre><code>
-shape   = (3, rows, cols)
-channel = (Fx, Fy, Fz)
-unit    = N
-frame   = 对应指尖触觉 site 的局部坐标系
-</code></pre>
+## 数组、单位与坐标 {#array-contract}
 
-压向传感表面的法向力定义为正，因此正确朝向的触觉 site 在压缩时应报告 `Fz > 0`。
-左右指尖各有自己的局部坐标系；不能直接逐分量相加。若要比较左右总力或扰动响应，先使用
-该 site 的 `data.site_xmat` 旋转到世界坐标系。
+| 属性 | 约定 |
+| --- | --- |
+| 每侧数组形状 | `(3, rows, cols)` |
+| 通道顺序 | `(Fx, Fy, Fz)` |
+| 力单位 | N |
+| 参考坐标系 | 对应指尖触觉 site 的局部坐标系 |
+| 法向符号 | 压向传感表面为正，正确朝向的 site 在压缩时报告 `Fz > 0` |
 
-## Robotiq 离散 taxel
+!!! warning "左右局部坐标不能直接相加"
 
-`2f85_taxels.xml` 的每个指尖包含 3×3 个 taxel。每个 taxel 是 pad 下的子 body，具有
-对齐的 site 与 MuJoCo `force` sensor。MuJoCo 原始传感器力表示“taxel 子 body 施加给 pad
-父 body 的力”，因此 `tactile.py` 的读取器对完整三维向量取反，记录为“物体施加给
-taxel 表面的力”。这样记录中的压缩 `Fz` 为正。
+    左右指尖各有自己的局部坐标系。比较左右总力或扰动响应前，须使用各自
+    site 的 `data.site_xmat` 将向量旋转到世界坐标系。
 
-taxel 合力仅代表这些离散触觉单元传递的力，不等同于整个 pad 的完整外力。`pad_force` 与
-`pad_torque` 是不同层级的测量，不应与九个 taxel 通道混用。
+## 法向力与控制主量 {#normal-force}
 
-## Robotiq `touch_grid`
+左右有效法向合力分别记为 \(F_L\)、\(F_R\)，均以正值表示压缩。
+平均单侧法向力与总法向力分别为：
 
-`touch_grid` 是 MuJoCo 插件，而非离散几何 taxel。插件原始通道顺序为 `(Fz, Fx, Fy)`；
-演示和记录代码会整理为统一的 `(Fx, Fy, Fz)`。其输出保留牛顿单位，不作归一化或对数变换。
+\[
+f_n=\frac{F_L+F_R}{2},\qquad F_\Sigma=F_L+F_R.
+\]
 
-`touch_grid` 的 FOV 是以触觉 site 为中心的半角。修改 pad 尺寸、site 位置或朝向时，必须
-重新检查 FOV 是否覆盖整个接触面，否则物理接触存在但部分力不会进入插件输出。
+| 量 | 用途 |
+| --- | --- |
+| `F_L`、`F_R` | 保留分侧观测，检查接触与不平衡 |
+| `f_n` | 控制目标、跟踪误差与等效刚度的统一力口径 |
+| `F_Σ` | 派生记录量，以及摩擦容量计算中的总接触力 |
 
-## DMgripper Pillars
+控制器只消费规范化后的测量，不依赖 Pillar 使用 mesh 还是球体碰撞代理。
+刚度与力矩映射采用相同力定义，见[DM 控制基础](dm-shared-control.md)与[力跟踪](force-tracking.md)。
 
-DMgripper 每侧有 3×3 个 Pillar 通道。默认 `height_spheres` 模型使用保留高度差的球体碰撞代理；
-`ContactTaxelReader` 按 `left/right_taxel_geom_00` 至 `22` 聚合 `mj_contactForce`，从接触系经
-世界系转换到触觉 site 局部系。多个接触点累加，无接触单元为零；每侧数组为 `(3, 3, 3)`。
-中心比四角高约 0.50 mm，边中间比四角高约 0.30 mm，不能按平整阵列解释接触顺序。
+## 读取适配 {#readers}
 
-### 高载荷接触的定性结论 {: #collision-geometry-conclusions }
+读取适配负责将模型或设备数据转换为上述契约，统一通道、符号与坐标；目标力、控制状态和实验阶段由上层负责。
 
-在高目标力下，原非共面 mesh 与 `multiccd` 同时启用时会出现接触流形切换、活跃接触数跳变和明显更大的
-跟踪误差。保留高度差但改用球体、使 mesh 共面，或关闭 `multiccd` 后，接触数与力跟踪都会明显稳定。
+### 仿真读取路径
 
-因此，当前模型中的高载荷振荡不是“非共面”“mesh”或“multiccd”任一单独因素的必然结果，而是原非共面
-mesh 与多接触点求解方式的交互。该结论描述当前 MuJoCo 模型与任务条件，仍需通过实物接触试验验证。
+| 模型与后端 | 读取入口 | 转换职责 | 模型细节 |
+| --- | --- | --- | --- |
+| Robotiq 离散 taxel | `tactile.py` | 对原始 `force` sensor 三维向量取反，统一表面受力符号 | [离散 taxel](grippers/robotiq-2f85/index.md#tactile-model) |
+| Robotiq `touch_grid` | `tactile.py` | 将插件原始 `(Fz, Fx, Fy)` 整理为 `(Fx, Fy, Fz)`，保留 N 单位 | [插件布局与覆盖](grippers/robotiq-2f85/index.md#tactile-model) |
+| DM Pillar 接触几何 | `ContactTaxelReader` | 按命名 geom 聚合 `mj_contactForce`，由接触系经世界系转换到 site 局部系 | [接触几何映射](grippers/dmgripper/index.md#tactile-model) |
 
-默认保持高度差球体与 `multiccd` 开启；原 mesh、共面 mesh 与关闭 `multiccd` 的模型只用于对照。
-碰撞诊断可选择 `research=archive/model_bug_diagnosis/study study.phase=collision-geometry`。
-`solref` 等效接触参数不是独立硅胶形变模型或已完成的实机力学标定，不能由它推导传感器精度。
+DM 读取器累加同一单元的多个接触点，无接触单元填零。
+这些力来自 MuJoCo 接触求解；离散 taxel 合力与整个 pad 的完整外力属于不同测量层级。
 
-## 实机传感器接口
+### 实机输入边界
 
-实机传感器接口直接提供以 N 为单位的测量力；本项目不负责将原始电信号、图像或位移标定为力。
-适配层只需把左右传感器的有效法向合力规范为 `F_L`、`F_R`，再统一派生控制主量
-`f_n=(F_L+F_R)/2`。仿真中的 taxel/Pillar 读取是 MuJoCo 接触力的聚合，不能与实机传感器的
-内部信号处理混为一谈。
+实机传感器接口直接提供以 N 为单位的测量力。本项目不负责将原始电信号、图像或位移标定为力；
+适配层规范左右有效法向合力为 `F_L`、`F_R`，再派生 `f_n=(F_L+F_R)/2`。
+仿真接触聚合与实机传感器内部处理应分别验证。
 
-抓取验收中的仿真触觉观测在理想接触力之上加入依据空载记录建立的测量噪声模型。当前 DMgripper
-profile 使用 2026-08-14 Contactile/PapillArray 空载记录的指尖总力噪声，并按 9 个 taxel 独立同分布
-假设除以 `sqrt(9)`：左右单 taxel 法向 `sigma=0.0067/0.0133 N`，左右单 taxel 切向
-`sigma=0.0033/0.0100 N`。汇总后的法向测量再以 `20 Hz` 一阶低通进入 PID。
-这只模拟测量链路，不向 MuJoCo 接触物理施加随机外力。
+!!! note "算法共享与设备验证"
 
-## 显示与记录
+    使用同一控制核不表示传感器采样、协议量化或设备响应相同。
+    设备与共享核职责见[项目架构](architecture.md)，DM 控制时序见[共享控制核](dm-shared-control.md)。
 
-Rerun 中的压力图、切向箭头是可视化；箭头可能为便于观察而聚合或缩放，不能根据屏幕长度
-反推牛顿值。CSV 与 RRD 保存的是数值记录，应作为后处理和比较的依据。
+## 记录与显示
 
-用于策略学习时，如需归一化、滤波或对数压缩，应在观测包装层显式完成，不要改变传感器
-语义或原始日志。
+Rerun 中的压力图和切向箭头用于可视化；箭头可能经过聚合或缩放，不能根据屏幕长度反推牛顿值。
+CSV、Parquet 与 RRD 中的数值记录用于后处理和比较，具体字段与采样语义见对应实验文档。
+
+用于策略学习时，归一化、滤波或对数压缩应在观测包装层显式完成，并保持传感器语义和原始日志。
+多速率生产者、消费者与失鲜处理的权威约定见[项目架构](architecture.md)。
+
+## 仿真测量噪声 {#measurement-noise}
+
+抓取验收中的仿真触觉观测在理想接触力之上加入依据空载记录建立的测量噪声模型。
+当前 DMgripper profile 使用 2026-08-14 Contactile/PapillArray 空载记录的指尖总力噪声，
+并按每侧 9 个 taxel 独立同分布的假设除以 `sqrt(9)`。
+
+| 单 taxel 标准差 | 左侧 | 右侧 |
+| --- | ---: | ---: |
+| 法向 `sigma` | 0.0067 N | 0.0133 N |
+| 切向 `sigma` | 0.0033 N | 0.0100 N |
+
+汇总后的法向测量再以 `20 Hz` 一阶低通进入 PID。
+这只模拟测量链路，不向 MuJoCo 接触物理施加随机外力；数值也不应作为其他控制器或设备的通用默认值。
+
+空载噪声建模不等于接触状态下的传感器标定，独立同分布假设不证明真实 taxel 之间没有相关性。

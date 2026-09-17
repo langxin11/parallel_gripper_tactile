@@ -5,17 +5,28 @@
 
 ## 单次运行与交互检查
 
+先从 [Robotiq 2F-85](grippers/robotiq-2f85/index.md) 或 [DMgripper](grippers/dmgripper/index.md)
+确认支持的模型与控制方式。两种夹爪使用不同执行器语义。
+
+### Robotiq：触觉演示与对照
+
 ```bash
 uv run pgt validate configs/robotiq_2f85.yaml
 uv run pgt configs list
 uv run pgt run demo --set model=robotiq_2f85/touch_grid_3x3
 uv run pgt compare tactile --left-set model=robotiq_2f85/box_force_sensor --right-set model=robotiq_2f85/touch_grid_3x3
+```
+
+### DMgripper：抓取与力跟踪
+
+```bash
 uv run pgt run grasp --video
 uv run pgt run force-track --set task=force_tracking/default_waypoints
 ```
 
 其他实验按主题进入：[自适应抓取](adaptive-grasping.md)、[离散力控制](discrete-force-control.md)。
-资产生成、运行参数与管理子命令可用 `uv run pgt --help` 逐级查看。
+资产生成与导出见[资产维护约定](architecture.md#asset-maintenance)及各模型页面；运行参数与管理子命令可用
+`uv run pgt --help` 逐级查看。
 `execution.multiccd_enabled=false` 仅用于接触数量诊断，常规实验无需添加。
 
 ## Hydra 科研运行

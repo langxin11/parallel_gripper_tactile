@@ -22,17 +22,81 @@ PID／导纳的统一参数比较见[共享控制核](dm-shared-control.md)。
 `step.yaml`、`ramp.yaml`、`mixed.yaml`。Ramp 在卸载至 1 N 后保持 2 s，以统计终端稳态误差。
 比较控制器时固定同一任务与 `metrics.ignore_initial_s` 评价时间窗。
 
-## 控制律
+## 局部接触力模型 {#contact-force-model}
 
-所有目标与误差均使用 \(f_n=(F_L+F_R)/2\)。运动学、等效刚度和静态力矩映射见
-[力控模型](crank-slider-force-control.md)。控制算法位于 `packages/dm_grasp_core`，
+本节在 DM [机构运动学](dm-shared-control.md#dm-kinematics)定义的总闭合行程
+\(c(q)\) 和闭合雅可比 \(J_c(q)\) 上建立力控制关系；
+使用前须满足[局部接触假设与适用边界](dm-shared-control.md#contact-model-boundaries)。
+力的统一语义见[触觉接口约定](tactile-conventions.md)。
+
+### 等效法向刚度 {#equivalent-normal-stiffness}
+
+设 \(c_{\mathrm{contact}}\) 是双侧刚建立接触时的闭合行程，并定义接触压入量
+\(\Delta c=c(q)-c_{\mathrm{contact}}\)。在当前稳定接触集合和小范围行程内，使用整体等效刚度
+\(k_{\mathrm{pair}}\) 近似描述 Pillar—物体—机构／接触链路：
+
+\[
+f_n=F_{\mathrm{side}}=k_{\mathrm{pair}}\,\Delta c,\qquad
+\]
+
+`k_pair` 是控制用的组合局部斜率，不是材料弹性模量，也不拆分或在线反推任何单独部件参数。
+触觉读数仍分别保留左右法向力，并可派生总法向力：
+
+\[
+F_\Sigma=F_L+F_R,\qquad f_n=\frac{F_\Sigma}{2}.
+\]
+
+后续控制主量采用平均单侧力 \(f_n\)，而不是总法向力 \(F_\Sigma\)。这样目标力、跟踪误差和刚度估计都直接对应夹爪实际施加在物体每一侧的法向夹持力；\(F_\Sigma\) 仅作为派生记录量或摩擦容量计算中的总接触力使用。
+
+这只适用于接触柱集合不变、法向近似一致的局部线性化；不能把所有九个柱简单相加后视为全行程常数。
+
+在线刚度的辨识、独立参考构造与评价指标见[刚度辨识与验证](control-comparison-ablation.md#stiffness-identification)。
+
+### 力雅可比与静态力矩 {#force-jacobian}
+
+平均单侧法向力相对曲柄角的局部雅可比为：
+
+\[
+\boxed{
+J_f(q)=\frac{\partial f_n}{\partial q}
+\simeq k_{\mathrm{pair}}J_c(q)
+}
+\]
+
+单位为 N/rad。这是把目标力误差转化为曲柄位置修正时应使用的量。
+
+理想对称、每侧一根刚度 \(k_p\) 的 Pillar 且物体足够硬时，\(k_{pair}=k_p/2\)。
+改用总法向力时，对应力雅可比才是上述值的两倍。
+
+虚功关系还给出理想准静态的力矩映射：
+
+\[
+\tau\simeq f_nJ_c(q).
+\]
+
+因此，电机力矩可作为力估计的辅助信息，但不应取代触觉反馈：关节摩擦、连杆摩擦、闭环约束、惯性和接触切向力都会使该估计产生偏差。
+
+## 控制律 {#force-control-laws}
+
+所有目标与误差均使用 \(f_n=(F_L+F_R)/2\)。控制算法位于 `packages/dm_grasp_core`，
 `src/parallel_gripper_tactile/control.py` 负责配置与 MuJoCo 适配。
 
-### 位置式 PID 与刚度变体
+### 位置式 PID 与刚度变体 {#pid-stiffness-variants}
 
 `pid-only`、`pid-torque-ff`、`pid-stiffness-ff`、`full` 分别选择 PID、机构力矩前馈与刚度位置修正的组合。
 `pid-stiffness-limit` 关闭刚度加法修正，改用刚度约束位置偏置增量；该变体仅保留专项实验，
 不在默认正式比较矩阵中。`pid-stiffness-rate` 是独立的速率式控制变体。
+
+令 \(e_f=f_{ref}-f_n\)，逆刚度位置修正与机构力矩前馈分别为：
+
+\[
+\Delta q_{stiff}=\alpha\frac{e_f}{\hat k_{pair}J_c(q)},\qquad
+\tau_{ff}=\beta f_{ref}J_c(q).
+\]
+
+逆刚度项与 PI 相加时，二者均依赖实时力误差，因此属于模型辅助反馈，可能重复补偿；
+它不是严格意义上的参考前馈。刚度也可用于限制每周期位置增量或把期望力变化率换算成关节速度。
+下面分别说明位置式、刚度限幅与刚度速率三种实现的离散公式、限幅和控制频率语义。
 
 这里的 PID 输出是相对每周期实测位置的**位置偏置**，不是速度命令或相邻周期指令增量。令
 \(e_k=F_{\mathrm{ref},k}-F_{n,k}\)、外环周期为 \(T_c\)，则未限幅输出可写为
@@ -90,15 +154,27 @@ e_k &= F_{\mathrm{ref},k}-F_{n,k},\\
 
 位置式 PID 也以实际 \(T_c\) 计算积分与微分；采样保持、离散相位、量化及接触动力学仍使闭环性能受频率影响。
 
-### 直接力矩 MB-ADRC
+### 直接力矩 MB-ADRC {#direct-torque-mb-adrc}
 
 `controller=dm_gripper/adrc_torque` 在接近阶段保留 MIT 位置伺服，跟踪阶段旁路 MIT `kp/kd`，
-由三状态 current LESO 估计力、力变化率与残差扰动。控制导向模型为：
+由三状态 current LESO 估计力、力变化率与残差扰动。电机输出轴的控制导向模型为：
+
+\[
+I_{eq}(q)\ddot q+B_{eq}(q)\dot q+\tau_f(\dot q)+J_c(q)f_n=\tau+d_\tau,
+\qquad
+f_n\simeq k_{pair}(c-c_{contact})+d_{pair}\dot c+d_f.
+\]
+
+把惯量、摩擦、接触阻尼、雅可比变化和刚度误差并入残差扰动，在目标频段内近似为以下模型；
+其中 \(F\) 与前文 \(f_n\) 均表示平均单侧法向力：
 
 \[
 \ddot F=f_{res}+b_0\tau_{res},\qquad
 b_0=\operatorname{clip}\!\left(s_b\frac{\hat k_{pair}J_c(q)}{I_{eq}},b_{min},b_{max}\right).
 \]
+
+\(I_{eq}\) 是输出轴等效惯量，不能用伪造惯量代替输入增益尺度 \(s_b\) 的辨识。
+当前实现没有参数收敛律，不能称为在线参数学习控制器。
 
 机构前馈 \(\tau_{model}=F_{ref}J_c(q)\) 承担名义静态力矩；LESO 的已知输入为最终实际力矩减去同周期
 模型前馈，避免重复补偿。控制律内部以 \(\omega_c^2\)、\(2\omega_c\) 提供名义 PD 动态，

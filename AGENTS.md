@@ -12,6 +12,10 @@ MuJoCo 平行夹爪触觉仿真与力控实验库。核心链路：YAML profile 
 
 先读 `CONTRIBUTING.md` 的文档更新判断与本次相关规范，再按改动范围选择专题。
 
+- `docs/grippers/robotiq-2f85/index.md`、`docs/grippers/dmgripper/index.md`：按夹爪选择模型、控制与实验。
+- `assets/README.md`：资产独立性标准；模型专属正文随资产维护，站点引用同一正文。
+- `docs/tactile-conventions.md`：公共触觉契约、读取适配与测量噪声。
+- `docs/dm-shared-control.md`、`docs/control-comparison-ablation.md`：DM 控制与执行器基础、模型及刚度验证。
 - `docs/architecture.md`：模块职责、仿真循环所有权、依赖规则。
 - `docs/workflows.md`：`pgt` 演示／检查、Hydra 科研命令与正式研究执行顺序。
 - `docs/research-configuration.md`：Hydra 科研入口、配置组、计划/执行、路径与产物契约。
