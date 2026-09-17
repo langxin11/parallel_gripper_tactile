@@ -13,6 +13,10 @@ dependencies = ["robotiq-grasp-core==0.1.0"]
 
 [project.optional-dependencies]
 pyrobotiq = ["pyrobotiqgripper==3.3.12"]
+teleop = ["pyrobotiqgripper==3.3.12", "pygame>=2.6,<3"]
+
+[project.scripts]
+robotiq-teleop = "robotiq_hardware.teleop:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

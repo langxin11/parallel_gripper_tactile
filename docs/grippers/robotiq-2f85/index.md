@@ -30,12 +30,13 @@ uv run pgt run discrete-force --experiment robotiq_2f85/discrete_force
 | 仿真模型 | 离散 force sensor 与 `touch_grid` 变体 | 按所选模型确认触觉覆盖与读数 |
 | 共享控制核 | `robotiq_grasp_core`：稳定判定、tick 增益、HOLD 与整数动作决策 | 不依赖 DM 控制核 |
 | 仿真实验 | 量化 PI、固定步长、自适应死区、预测和动态步长变体 | 研究当前 MuJoCo 条件下的法向力稳定 |
-| 硬件适配 | `robotiq_hardware`：位置命令后端与单步控制衔接 | 测试使用 fake backend，尚未完成真实设备验证 |
+| 硬件适配 | `robotiq_hardware`：位置命令后端、单步控制衔接，以及可选鼠标／手柄遥控 | 测试使用模拟设备，尚未完成真实设备验证 |
 
 !!! note "接入真实设备前"
 
-    当前硬件包要求调用方管理连接、激活与生命周期。
-    包内 `packages/robotiq_hardware/README.md` 是后端接入说明；仿真结果不证明设备已完成标定。
+    基础适配器要求调用方管理连接、激活与生命周期。可选 `robotiq-teleop` 入口提供
+    USB／RS485 鼠标和手柄开闭控制，短按目标 ±1、长按连续运动；启动方式、TC-G50 按钮核对与停止边界见
+    `packages/robotiq_hardware/README.md`。仿真结果不证明设备已完成标定。
 
 <!-- 模型与触觉正文随资产维护。 -->
 
