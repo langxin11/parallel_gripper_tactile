@@ -19,6 +19,7 @@ def test_custom_scene_fixes_reserved_base_and_keeps_free_cube() -> None:
     """场景固定预留 base 自由关节且方块保持自由。"""
     profile = load_profile(ROOT / "configs/dm_gripper.yaml")
     model = scene.build_custom_grasp_model(profile)
+    assert model.opt.timestep == pytest.approx(0.001)
 
     assert mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, "gripper/base_freejoint") == -1
     assert mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, "cube/target_cube_free_joint") >= 0

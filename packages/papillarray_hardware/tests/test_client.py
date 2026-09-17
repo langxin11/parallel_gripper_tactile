@@ -66,7 +66,7 @@ def test_config_defaults_and_sampling_rate_validation_do_not_open_serial() -> No
 
     assert config.port == DEFAULT_PAPILLARRAY_PORT
     assert config.baud_rate == 115200
-    assert config.sampling_rate == 500
+    assert config.sampling_rate == 1000
     assert config.expected_sensors == 2
     assert config.packet_timeout_s == 3.0
     with pytest.raises(ValueError, match="采样率"):
@@ -102,7 +102,7 @@ def test_open_and_commands_are_explicit_and_use_expected_wire_values() -> None:
     client.close()
 
     assert calls == [(DEFAULT_PAPILLARRAY_PORT, 115200, 1.0)]
-    assert serial_port.writes == [b"f500\n", b"z\n", b"S\n", b"s\n"]
+    assert serial_port.writes == [b"f1000\n", b"z\n", b"S\n", b"s\n"]
     assert serial_port.flush_count == 4
     assert serial_port.reset_input_buffer_count == 1
     assert serial_port.close_count == 1

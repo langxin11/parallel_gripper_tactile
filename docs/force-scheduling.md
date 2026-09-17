@@ -100,8 +100,8 @@ uv run pgt run force-schedule --experiment dm_gripper/adaptive_prior
 附加高斯噪声标准差，使用独立随机流；`spike_n`／`spike_frames` 在两侧第一个 taxel 的 Fx
 施加一帧或两帧加性毛刺。注入仅修改观测，不向物体施加真实外力。
 `drop_frames` 丢弃起点后的指定数量采样，保留序号缺口，不更新 latest；
-`jitter=true` 从采集启动起交替使用一个／三个名义周期，500 Hz 名义设置下为真实 2／6 ms 间隔，
-平均有效频率因此为 250 Hz，此压力测试不代表平均频率保持 500 Hz 的随机抖动。
+`jitter=true` 从采集启动起交替使用一个／三个名义周期，1000 Hz 名义设置下为真实 1／3 ms 间隔，
+平均有效频率因此为 500 Hz，此压力测试不代表平均频率保持 1000 Hz 的随机抖动。
 采样仍落在物理步上，不伪造时间戳。高频日志以 `injected_drop` 标记未采样记录，
 相应记录无 taxel 字段；已采样记录的 `injected_spike` 标记毛刺。
 短 stale 只冻结目标增长，控制器仍执行原目标；不能据此宣称陈旧反馈下的闭环力控已安全。
@@ -115,7 +115,7 @@ uv run pgt run force-schedule --experiment dm_gripper/unified_step_load
 uv run pgt run force-schedule --experiment dm_gripper/unified_step_load_fast
 # 进一步缩短载荷观测滤波，检查撤支撑后的最初 200 ms
 uv run pgt run force-schedule --experiment dm_gripper/unified_step_load_transient
-# 独立 500 Hz 触觉预处理与 250 Hz 控制，保留高频触觉日志
+# 独立 1000 Hz 触觉预处理与 250 Hz 控制，保留高频触觉日志
 uv run pgt run force-schedule --experiment dm_gripper/unified_step_load_multirate
 # 保留相同上层策略，比较位置式 PID＋机构力矩前馈
 uv run pgt run force-schedule --experiment dm_gripper/unified_step_load_pid
@@ -141,8 +141,10 @@ uv run pgt run force-schedule --experiment dm_gripper/unified_step_load_pid
 更短滤波对噪声更敏感，跨材料、噪声水平及真机表现仍需独立验证。
 
 `unified_step_load_multirate` 在瞬态候选上显式启用 `task.tactile_sampling`：
-`period_s=0.002`、`median_window=3`、`stale_after_s=0.01`、`record_raw=true`。
-未配置此字段的历史组合保持原采样与数值路径。切向分量先做三点因果中值，再聚合分侧合力模，
+`period_s=0.001`、`median_window=3`、`stale_after_s=0.01`、`record_raw=true`。
+共享场景默认物理步长为 1 ms，控制周期仍为 4 ms，每个控制周期对应四个触觉采样。
+未配置此字段的组合保持原观测调用路径，也使用新的默认物理步长；历史产物与实验结论不回溯改写。
+切向分量先做三点因果中值，再聚合分侧合力模，
 最后使用 `unified_adaptive.load.filter_tau_s` 在采样侧进行唯一一次低通；法向反馈保持不变。
 首帧播种中值历史；长间断或坏帧后重建历史，不把不连续数据拼成载荷导数。
 
@@ -180,7 +182,7 @@ uv run pgt run force-schedule --experiment dm_gripper/unified_step_load_pid
 持续风险的确认标志由采样侧生成，避免控制抽取漏过短暂证据中断后错误认定持续风险。
 已确认的大步请求通过 `risk_rate_n_s` 快速完成，但始终受总目标变化率和力上限约束。
 重复、陈旧、坏帧或执行限幅不生成新步数，不补算冻结期间增力。
-采样快照短期锁存最近事件及候选，避免 500/250 Hz 抽取遗漏；接触变化、坏帧、长间断或
+采样快照短期锁存最近事件及候选，避免 1000/250 Hz 抽取遗漏；接触变化、坏帧、长间断或
 超过采样新鲜度窗口即清除，控制侧只消费一次，不逐个补发漏过的历史事件。
 摩擦候选额外要求相关触点剪切份额下降且局部力比不再增长，取事件前有效比值中位数；
 质量分数仅是有效触点覆盖率，不是统计置信度或真实摩擦的保证。
@@ -194,7 +196,7 @@ uv run pgt run force-schedule --experiment dm_gripper/unified_step_load_pid
 这些为待验证参数，纯力信号没有局部变化时仍可能漏检持续滑动，不能声称一定接住真实物体。
 该候选同时启用 `observer.stable_contact_subset`：仅比较窗口内始终存在的触点，双侧各至少两个，
 边缘点进出不清空整个窗口，也不直接算作局部重分配；不足时仍重建窗口。
-此模式的切向／法向趋势由同一窗口斜率给出，不使用噪声敏感的 2 ms 瞬时差分；
+此模式的切向／法向趋势由同一窗口斜率给出，不使用噪声敏感的单采样间隔瞬时差分；
 代价是卸载或主动增力证据撤销最多延迟一个窗口，需在目标硬件上验证误触发。
 摩擦质量是共同触点数除以九，候选阈值 0.4 要求至少四点，不是统计置信度。
 设备绝对时间的浮点减法采用纳秒级窗口容差，避免整周期窗口被反复误判为预热。

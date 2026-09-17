@@ -101,6 +101,10 @@ Torque ADRC 的 `coarse → confirm` 强制校验谱系：coarse manifest 的生
 `object_material`。解析先构造最终 profile，再按实际材料编译 scene，检查 MIT 法向控制及
 `control_period_s` 不小于物理步长。它支持单次与探索性 Multirun，未定义正式 study。
 
+共享仿真场景默认使用 `0.001 s` 物理步长，显式多速率触觉默认同为 `0.001 s`；
+控制周期仍由任务配置独立指定。采样与读取边界见[公共触觉契约](tactile-conventions.md#readers)。
+历史产物保留其原有时序条件，不因默认值调整而重新解释。
+
 ## 路径、产物与复现
 
 配置搜索路径由入口确定；profile、task、study 和输出根目录的相对路径统一基于仓库根，

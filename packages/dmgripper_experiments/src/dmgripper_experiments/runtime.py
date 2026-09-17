@@ -204,7 +204,7 @@ def run_experiment(
         tactile = tactile_factory(
             PapillArraySerialConfig(
                 port=config.hardware.tactile_port,
-                sampling_rate=500,
+                sampling_rate=1000,
                 expected_sensors=2,
                 timeout_s=0.05,
                 packet_timeout_s=config.timing.tactile_timeout_s,

@@ -187,4 +187,4 @@ def test_robotiq_material_scenes_compile_with_full_command_range(material: str) 
 
     assert model.actuator_ctrlrange[actuator].tolist() == [0.0, 255.0]
     assert model.npair >= 18
-    assert model.opt.timestep == pytest.approx(0.002)
+    assert model.opt.timestep == pytest.approx(0.001)

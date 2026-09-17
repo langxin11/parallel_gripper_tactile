@@ -14,7 +14,7 @@ from .risk import TaxelRiskConfig, TaxelRiskObservation, TaxelRiskObserver
 class TactileSamplingConfig:
     """采样与切向预处理配置；法向反馈滤波仍由原控制器独立拥有。"""
 
-    period_s: float = 0.002
+    period_s: float = 0.001
     median_window: int = 3
     stale_after_s: float = 0.01
     record_raw: bool = False

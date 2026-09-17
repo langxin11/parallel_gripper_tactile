@@ -35,7 +35,7 @@ FILLING_TASK = ROOT / "configs/task/force_scheduling/dynamic_filling.yaml"
 @pytest.mark.parametrize(
     "fault",
     [
-        TactileFaultConfig(drop_frames=8),
+        TactileFaultConfig(drop_frames=16),
         TactileFaultConfig(jitter=True),
         TactileFaultConfig(spike_n=2.0, spike_frames=1),
         TactileFaultConfig(spike_n=2.0, spike_frames=2),
@@ -56,8 +56,8 @@ def test_multirate_fault_injection_obeys_sampling_and_freeze(tmp_path, fault) ->
     assert np.diff([float(r["control_time_s"]) for r in rows]) == pytest.approx(0.004)
     if fault.jitter:
         intervals = np.diff([s["sensor_time_s"] for s in samples])
-        assert min(intervals) == pytest.approx(0.002)
-        assert max(intervals) == pytest.approx(0.006)
+        assert min(intervals) == pytest.approx(0.001)
+        assert max(intervals) == pytest.approx(0.003)
     if fault.drop_frames:
         stale = [r for r in rows if r["sensor_stale"] == "True"]
         assert stale
@@ -233,7 +233,7 @@ def test_multirate_rejects_sampling_period_not_aligned_to_physics() -> None:
     """与物理步长错相的采样周期在进入仿真循环前直接拒绝。"""
     resolved = compose_research_run(experiment="dm_gripper/unified_step_load_multirate")
     misaligned = resolved.task.model_copy(
-        update={"tactile_sampling": TactileSamplingConfig(period_s=0.003)}
+        update={"tactile_sampling": TactileSamplingConfig(period_s=0.0015)}
     )
 
     with pytest.raises(ValueError, match="整数倍"):
@@ -372,9 +372,9 @@ def test_execute_force_scheduling_writes_reproducible_artifacts(
             controls = list(csv.DictReader(handle))
         assert "control_updated" not in controls[0]
         assert np.diff([s["sensor_sequence_id"] for s in samples]) == pytest.approx(1)
-        assert np.diff([s["sensor_time_s"] for s in samples]) == pytest.approx(0.002)
+        assert np.diff([s["sensor_time_s"] for s in samples]) == pytest.approx(0.001)
         assert np.diff([float(r["control_time_s"]) for r in controls]) == pytest.approx(0.004)
-        assert np.diff([int(r["sensor_sequence_id"]) for r in controls]) == pytest.approx(2)
+        assert np.diff([int(r["sensor_sequence_id"]) for r in controls]) == pytest.approx(4)
         assert all(float(r["sensor_age_s"]) == 0 for r in controls)
         assert all(r["adaptive_increase_count"] == "0" for r in controls)
         assert max(abs(float(r["tangential_displacement_m"])) for r in controls) < 0.002

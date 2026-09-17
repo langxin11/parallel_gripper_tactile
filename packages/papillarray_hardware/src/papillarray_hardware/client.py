@@ -63,7 +63,7 @@ class PapillArraySerialConfig:
 
     port: str = DEFAULT_PAPILLARRAY_PORT
     baud_rate: int = 115200
-    sampling_rate: int = 500
+    sampling_rate: int = 1000
     expected_sensors: int = 2
     timeout_s: float = 1.0
     packet_timeout_s: float = 3.0

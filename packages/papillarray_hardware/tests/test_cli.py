@@ -86,7 +86,7 @@ def test_probe_parser_uses_udev_port_and_has_safe_finite_defaults() -> None:
     assert default_args.port == DEFAULT_PAPILLARRAY_PORT
     assert args.port == "/dev/fake"
     assert args.baud == 115200
-    assert args.rate == 500
+    assert args.rate == 1000
     assert args.expected_sensors == 2
     assert args.count == 10
     assert args.timeout == 1.0

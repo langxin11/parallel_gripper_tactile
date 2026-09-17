@@ -46,8 +46,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--rate",
         type=int,
         choices=sorted(SUPPORTED_SAMPLING_RATES),
-        default=500,
-        help="采样率（Hz），默认 500",
+        default=1000,
+        help="采样率（Hz），默认 1000",
     )
     parser.add_argument("--expected-sensors", type=int, default=2, help="期望传感器数，默认 2")
     parser.add_argument("--count", type=int, default=1000, help="采集包数，默认 1000")

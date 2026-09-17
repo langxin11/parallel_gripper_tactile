@@ -84,14 +84,14 @@ def test_no_limit_preserves_torque_feedforward() -> None:
 
 
 def test_pilot_decouples_control_and_physics_frequencies() -> None:
-    """快速研究以 250 Hz 外环控制 500 Hz MuJoCo 物理步进。"""
+    """快速研究以 250 Hz 外环控制 1000 Hz MuJoCo 物理步进。"""
     resolved = _resolved()
     config = resolved.domain_config
     assert isinstance(config, ForceTrackingStiffnessLimitConfig)
     task = ForceTrackingTask.load(config.tasks[0])
     model = validate_force_tracking_configuration(resolved.profile, task=task)
     assert task.control_period_s == pytest.approx(0.004)
-    assert model.opt.timestep == pytest.approx(0.002)
+    assert model.opt.timestep == pytest.approx(0.001)
 
 
 def test_trace_safety_metrics_use_contact_window_and_positive_rate() -> None:

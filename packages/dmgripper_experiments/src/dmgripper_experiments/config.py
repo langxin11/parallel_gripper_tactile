@@ -419,8 +419,8 @@ class AdaptiveReferenceConfig:
         if self.tactile_sampling is not None:
             if not isinstance(self.tactile_sampling, TactileSamplingConfig) or self.unified is None:
                 raise ValueError("多速率预处理要求统一策略和有效采样配置")
-            if self.tactile_sampling.period_s != 0.002:
-                raise ValueError("真机采集固定为 500 Hz")
+            if self.tactile_sampling.period_s != 0.001:
+                raise ValueError("真机采集固定为 1000 Hz")
         if self.unified is not None:
             if not isinstance(self.unified, UnifiedAdaptiveConfig):
                 raise ValueError("unified 必须是 UnifiedAdaptiveConfig")

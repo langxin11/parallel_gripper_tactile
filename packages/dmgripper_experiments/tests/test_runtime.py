@@ -221,7 +221,7 @@ def test_unified_nine_taxel_lifecycle_and_fault_health_gate(
                 config.reference.adaptive,
                 duration_s=0.08,
                 unified=unified,
-                tactile_sampling=TactileSamplingConfig() if multirate else None,
+                tactile_sampling=TactileSamplingConfig(period_s=0.001) if multirate else None,
             ),
         ),
         timing=replace(

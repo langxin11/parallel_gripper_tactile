@@ -66,7 +66,7 @@ uv run pgt run discrete-force \
 
 CLI 使用可重复的 `--set` 选择控制器、材料、task 字段和 `seed`，例如
 `--set controller=robotiq_2f85/predictive --set material=hard --set seed=1`。
-接触前后均使用 30 Hz 控制时钟；在 500 Hz 物理步长上由仿真时间调度器交替落到相邻物理步，长期平均
+接触前后均使用 30 Hz 控制时钟；在 1000 Hz 物理步长上由仿真时间调度器交替落到相邻物理步，长期平均
 周期严格保持为 1/30 s。接近阶段另受 50 ms 动作间隔限制，因此接近动作频率不超过 20 Hz。
 主任务接触稳定后执行 `2→4→6→8→6→4→2 N` 曲线，首平台用于辨识，其余平台检验
 HOLD 再激活与加载／卸载响应。任务、时钟和安全限幅以 `configs/task/discrete_force/` 为准。
@@ -74,7 +74,7 @@ HOLD 再激活与加载／卸载响应。任务、时钟和安全限幅以 `conf
 
 每次运行保存 `task.yaml`、`effective_parameters.json`、`trace.csv.gz`、`metrics.json`、600 DPI PNG 和
 manifest。常规 trace 由独立 `record_period_s` 定时器采样，默认 100 Hz 并使用 gzip 压缩；
-动作生效、动作重新稳定、状态切换及首尾行强制保留。仿真不会为每个 500 Hz 物理步构造或保存完整记录；
+动作生效、动作重新稳定、状态切换及首尾行强制保留。仿真不会为每个 1000 Hz 物理步构造或保存完整记录；
 安全超限、峰值和有限性等必须覆盖物理步的量以在线标量方式累计，绘图使用事件增强 trace，RMSE、
 HOLD 占比与逐平台统计仍使用均匀的 30 Hz 控制周期样本，避免记录频率或额外事件行改变统计权重。
 trace 包含力、状态、动作、稳定性、局部增益、预测候选，以及请求命令、实际写入命令和机械位置。

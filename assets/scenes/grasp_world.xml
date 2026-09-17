@@ -2,7 +2,7 @@
   <compiler angle="radian"/>
   <!-- Keep the contact settings used by the Robotiq assets.  MjSpec.attach()
        keeps parent options when they conflict with a child specification. -->
-  <option timestep="0.002" gravity="0 0 -9.81" cone="elliptic" impratio="10"/>
+  <option timestep="0.001" gravity="0 0 -9.81" cone="elliptic" impratio="10"/>
   <!-- touch_grid requires a 128 MiB plugin arena.  MuJoCo forbids mixing this
        modern memory setting with the legacy njmax/nconmax size attributes. -->
   <size memory="134217728"/>

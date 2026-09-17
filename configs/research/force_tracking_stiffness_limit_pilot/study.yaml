@@ -9,7 +9,7 @@ study:
     question: 刚度位置限幅能否降低阶跃跟踪初段的峰值与实际力增长率，同时保持可接受的跟踪误差？
     decision: 判断 pid-stiffness-limit 是否进入自适应轻柔抓取主线。
     inclusion_criteria: [相同 PID 与机构力矩前馈, window_linear 固定默认, 三臂按材料与 seed 配对]
-    task_rationale: 首轮只用 Step 快速暴露峰值、增长率与跟踪速度之间的取舍；500 Hz 物理步进与 250 Hz 外环解耦。
+    task_rationale: 首轮只用 Step 快速暴露峰值、增长率与跟踪速度之间的取舍；1000 Hz 物理步进与 250 Hz 外环解耦。
     primary_metrics: [接触后局部峰值, 最大正力增长率, RMSE, 超调, 限幅介入率]
     stop_conditions: [完成三模式乘三材料乘三 seed 共 27 条条件]
     exclusions:

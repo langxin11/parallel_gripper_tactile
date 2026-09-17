@@ -52,11 +52,12 @@ def test_experimental_permissions_are_explicit_and_do_not_claim_validation():
         replace(adaptive, experimental_closed_loop=False)
     with pytest.raises(ValueError, match="布尔"):
         replace(adaptive, experimental_closed_loop=1)
-    with pytest.raises(ValueError, match="500 Hz"):
-        replace(adaptive, tactile_sampling=replace(adaptive.tactile_sampling, period_s=0.004))
+    with pytest.raises(ValueError, match="1000 Hz"):
+        replace(adaptive, tactile_sampling=replace(adaptive.tactile_sampling, period_s=0.002))
 
 
-def test_preprocessing_uses_device_clock_and_preserves_immutable_same_packet():
+@pytest.mark.parametrize("period_us", [1000, 2000])
+def test_preprocessing_uses_device_clock_and_preserves_immutable_same_packet(period_us):
     """中间采样参与中值，主机接收抖动不改变滤波，计数回绕不倒退序号。"""
     config = _config()
     assert config.reference.adaptive.initial_force_n == 1.0
@@ -68,6 +69,7 @@ def test_preprocessing_uses_device_clock_and_preserves_immutable_same_packet():
     for index, (counter, gap) in enumerate(((65535, 0), (0, 0), (3, 2))):
         raw = replace(
             _snapshot(index, shear=0.0 if index == 0 else 1.0),
+            timestamp_us=7_000_000 + index * period_us,
             packet_counter=counter,
             counter_gap=gap,
             counter_event="wrap" if index == 1 else "gap" if gap else "first",
@@ -82,8 +84,8 @@ def test_preprocessing_uses_device_clock_and_preserves_immutable_same_packet():
     assert [item.processed.sequence_id for item in outputs] == [0, 1, 4]
     assert outputs[-1].processed.dropped_samples == 2
     assert outputs[1].processed.load.left_n == 0.0
-    assert outputs[-1].processed.load.left_n == pytest.approx(-math.expm1(-0.002 / 0.01))
-    assert outputs[-1].processed.sample_time_s == pytest.approx(7.004)
+    assert outputs[-1].processed.load.left_n == pytest.approx(-math.expm1(-period_us * 1e-6 / 0.01))
+    assert outputs[-1].processed.sample_time_s == pytest.approx(7.0 + 2 * period_us * 1e-6)
     with pytest.raises(FrozenInstanceError):
         outputs[-1].received_at_s = 0.0
     with pytest.raises(FrozenInstanceError):
