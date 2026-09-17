@@ -229,11 +229,18 @@ dependencies = [
     { name = "pyserial" },
 ]
 
+[package.optional-dependencies]
+teleop = [
+    { name = "pygame" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "dm-grasp-core", editable = "packages/dm_grasp_core" },
+    { name = "pygame", marker = "extra == 'teleop'", specifier = ">=2.6,<3" },
     { name = "pyserial", specifier = ">=3.5,<4" },
 ]
+provides-extras = ["teleop"]
 
 [[package]]
 name = "docstring-parser"

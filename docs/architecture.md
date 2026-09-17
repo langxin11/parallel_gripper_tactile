@@ -134,7 +134,9 @@ DM 的 PID、ADRC、导纳、刚度估计、运动学、目标曲线与触觉增
 Robotiq 使用独立的 `robotiq_grasp_core` 与 `robotiq_hardware`，不与 DM 共用命令类型或控制状态机。
 Robotiq 的可选 `robotiq-teleop` 入口通过显式启动的单线程会话连接 USB／RS485，
 鼠标／手柄只提交输入，不直接访问串口；它不接入触觉或实验闭环。基础位置后端契约不变。
-硬件对象构造不发生 I/O；连接、使能与动作必须显式调用。DM 真机入口与故障处理见
+DM 的可选 `dmgripper-teleop` 入口独立拥有摇杆速度映射、角目标积分、回中保持和
+输入失效失能策略，单个设备线程复用 `DmSession`，不依赖触觉或实验包；这些策略不下沉到会话类。
+硬件对象构造不发生 I/O；连接、使能与动作必须显式调用。DM 真机实验入口与故障处理见
 [DMgripper 通用抓取实验](dmgripper-experiments.md)。
 
 ## 依赖规则

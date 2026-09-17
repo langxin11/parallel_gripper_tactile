@@ -13,8 +13,15 @@ DMgripper 使用单电机驱动曲柄滑块机构，左右 Pillar 提供接触�
 | 选择仿真平台与执行器限幅 | [配置与执行器基线](../../dm-shared-control.md#actuator-baseline) |
 | 跟踪目标力、选择 PID／ADRC／导纳 | [动态目标力跟踪](../../force-tracking.md)、[共享控制核](../../dm-shared-control.md) |
 | 根据载荷和触觉反馈调整抓力 | [自适应抓取](../../adaptive-grasping.md) |
+| 单独用手柄控制关节角 | [独立手柄遥控](#joystick-teleop) |
 | 运行真机任务与检查设备状态 | [通用抓取实验](../../dmgripper-experiments.md) |
 | 复现模型、刚度或控制器研究 | [模型验证、控制对比与消融](../../control-comparison-ablation.md) |
+
+## 独立手柄遥控 {#joystick-teleop}
+
+只需手柄控制连续关节角时，可使用 `dmgripper-teleop`，不必启动触觉或抓取实验。
+默认完全离线模拟；真机启动、轴映射、回中保持与失能边界见
+`packages/dmgripper_hardware/README.md` 的“独立手柄遥控”。
 
 ## 最小仿真与计划
 

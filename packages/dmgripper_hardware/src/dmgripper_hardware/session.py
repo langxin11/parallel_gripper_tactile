@@ -154,9 +154,10 @@ class DmSession:
         return self.command(command)
 
     def disable(self) -> MotorFeedback:
-        """失能并以新反馈确认状态码。"""
+        """失能并以该命令自身的反馈确认状态码。"""
         self._write(self.protocol.make_control_packet(self.deployment.motor_id, CMD_DISABLE))
-        feedback = self._accept_feedback(self.refresher.refresh_once())
+        # 失能命令自身会回复；追加查询会残留一条反馈，使再次使能的确认错位。
+        feedback = self._accept_feedback(self.receiver.receive_feedback())
         if feedback.status_code != STATUS_DISABLED:
             raise RuntimeError(f"DM 最终失能确认失败：status_code={feedback.status_code}")
         return feedback

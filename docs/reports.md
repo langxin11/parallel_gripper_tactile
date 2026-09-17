@@ -35,6 +35,11 @@ uv run python scripts/reports/study_results_data.py
 uv run python scripts/reports/study_results_data.py --check
 ```
 
+脚本顶部 `STUDIES` 指向 `outputs/studies/` 下的固定 run 目录；该树对应合集冻结时的产物，
+**现已清理**，因此脚本当前无法运行（`--check` 会以「缺少产物文件」退出 1）。这不影响报告编译：
+合集数字是已冻结的字面量，清理后报告仍然可读。待重跑对应 study 后，需先把 `STUDIES` 的路径
+更新为新的 run 目录，再刷新数据块。
+
 已有合集是阶段性证据，不自动代表当前配置。历史摩擦图按其检测器版本解释，不能用作新检测器的验证。
 新增章节后编译并检查数字、公式、引用及最终尺寸下的可读性。
 

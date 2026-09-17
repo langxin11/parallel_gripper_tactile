@@ -211,7 +211,7 @@ def test_hold_rejects_without_latest_enabled_feedback() -> None:
 
 
 def test_disable_only_returns_after_disabled_feedback_is_validated() -> None:
-    """失能确认仍需完整写入、主动刷新和真实 status=0 反馈。"""
+    """失能确认需要完整写入和命令自身的 status=0 反馈，不追加查询。"""
     session, transport = _open_session()
     transport.inject_received(_feedback(session, 0.1, STATUS_DISABLED))
 
@@ -221,7 +221,6 @@ def test_disable_only_returns_after_disabled_feedback_is_validated() -> None:
     assert session.last_feedback is feedback
     assert transport.written_payloads == [
         session.protocol.make_control_packet(1, CMD_DISABLE),
-        session.protocol.make_feedback_request(1),
     ]
 
 
@@ -235,8 +234,57 @@ def test_disable_does_not_confirm_when_fresh_feedback_is_not_disabled() -> None:
 
     assert transport.written_payloads == [
         session.protocol.make_control_packet(1, CMD_DISABLE),
-        session.protocol.make_feedback_request(1),
     ]
+
+
+def test_disable_does_not_confirm_without_feedback() -> None:
+    """缺少失能回复时仍报告超时，不以成功写入替代状态确认。"""
+    session, transport = _open_session()
+
+    with pytest.raises(TimeoutError, match="等待目标电机状态反馈超时"):
+        session.disable()
+
+    assert session.last_feedback is None
+    assert transport.written_payloads == [
+        session.protocol.make_control_packet(1, CMD_DISABLE),
+    ]
+
+
+class _ControlReplyTransport(FakeTransport):
+    """每条控制或查询命令即时产生一条反映电机状态的回复。"""
+
+    session: DmSession
+    status_code = STATUS_DISABLED
+
+    def write(self, payload: bytes, timeout_s: float | None = None) -> int:
+        """模拟命令生效后回复，保留尚未读取的历史回复。"""
+        written = super().write(payload, timeout_s=timeout_s)
+        protocol = self.session.protocol
+        motor_id = self.session.deployment.motor_id
+        if payload == protocol.make_control_packet(motor_id, CMD_ENABLE):
+            self.status_code = STATUS_ENABLED
+        elif payload == protocol.make_control_packet(motor_id, CMD_DISABLE):
+            self.status_code = STATUS_DISABLED
+        else:
+            assert payload == protocol.make_feedback_request(motor_id)
+        self.inject_received(_feedback(self.session, 0.7, self.status_code))
+        return written
+
+
+def test_repeated_enable_stop_with_idle_queries_does_not_lag_feedback() -> None:
+    """反复启停并穿插待机查询时，不得将上一命令的回复当成新确认。"""
+    transport = _ControlReplyTransport()
+    session = DmSession("fake://usb2can", 0.1, transport=transport)
+    transport.session = session
+    session.open()
+    try:
+        for _ in range(20):
+            assert session.enable().status_code == STATUS_ENABLED
+            assert session.disable().status_code == STATUS_DISABLED
+            for _ in range(3):
+                assert session.require_disabled().status_code == STATUS_DISABLED
+    finally:
+        session.close()
 
 
 class _ShortWriteTransport(FakeTransport):

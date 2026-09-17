@@ -11,9 +11,13 @@ requires-python = ">=3.12"
 license = {file = "LICENSE"}
 dependencies = ["dm-grasp-core==0.1.0", "pyserial>=3.5,<4"]
 
+[project.optional-dependencies]
+teleop = ["pygame>=2.6,<3"]
+
 [project.scripts]
 dmgripper-state-probe = "dmgripper_hardware.cli:main"
 dmgripper-motion-probe = "dmgripper_hardware.motion_cli:main"
+dmgripper-teleop = "dmgripper_hardware.teleop:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
