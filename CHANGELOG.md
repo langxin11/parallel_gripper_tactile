@@ -108,6 +108,10 @@
 
 ### 变更
 
+- 力调度配置按职责拆分：`task=load/*` 只保存物体、外载、时钟与验收，
+  `scheduler=force/{oracle,adaptive}` 独立保存目标抓力算法。撤支撑场景与自适应实验改用
+  `support_release` 和 `adaptive_*` 语义名，不再用 `unified` 表示研究演化阶段。
+
 - DM controller 配置继承拆分为算法无关的 `_common.yaml` 与 PID 专属的 `_pid_base.yaml`，
   避免 ADRC／导纳携带无效位置式 PID 参数；唯一导纳选择由
   `controller=dm_gripper/admittance_unified` 简化为 `controller=dm_gripper/admittance`，
@@ -325,6 +329,9 @@
   文档导航补齐科研配置、测试策略和报告维护。
 
 ### 移除
+
+- 完整移除早期 `adaptive_prior` 调度模式、实验入口、任务字段和测试；
+  不保留旧配置别名或运行时兼容分支。
 
 - 退役 `force_controller_ablation`（PID 模块消融）与旧估计器对比两条研究线：
   前者的问题已由历史 36 条件运行回答，后者没有独立刚度真值，

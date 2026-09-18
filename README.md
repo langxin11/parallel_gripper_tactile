@@ -34,7 +34,7 @@ uv run pgt run discrete-force --experiment robotiq_2f85/discrete_force
 资源生成与诊断命令包括 `pgt assets generate-taxels`、`pgt assets generate-touch-grid`、
 `pgt compare tactile`、`pgt compare contact` 和 `pgt view taxels`；参数与示例见[常用工作流](docs/workflows.md)。
 
-`pgt configs list [GROUP]` 用于查看可用配置组（如 `experiment`、`controller`、`task`、`research`），
+`pgt configs list [GROUP]` 用于查看可用配置组（如 `experiment`、`controller`、`scheduler`、`task`、`research`），
 也可用 `--search TEXT` 按文本搜索：
 
 ```bash

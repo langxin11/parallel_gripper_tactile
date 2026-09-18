@@ -198,7 +198,7 @@ uv run --package dmgripper-experiments python -m dmgripper_experiments.replay \
 `reference.adaptive.unified` 非空时替代旧剪切增量策略，保持 `adaptive` 生命周期和交互入口。
 它要求双侧恰好九点，按设备时间戳只消费新观测；直接使用采集层局部三轴力，
 部署前必须核对左右身份、坐标、正压缩符号、触点量程与摩擦先验。适配器不自动推断这些标定。
-算法和仿真边界见[统一策略初步验证](force-scheduling.md#unified-adaptive)。
+算法和仿真边界见[自适应调度器验证](force-scheduling.md#adaptive-scheduler)。
 
 新配置初始目标 0.5 N/侧、目标上限 1.5 N/侧、原始单侧保护线 2 N、目标限速 0.5 N/s；
 这些仅是待验收的低载荷起点，不保证物体耐受或实际增力能力。仅支持导纳，固定 MIT 增益，

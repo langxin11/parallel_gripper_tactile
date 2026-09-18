@@ -85,7 +85,8 @@ Torque ADRC 的 `coarse → confirm` 强制校验谱系：coarse manifest 的生
 | `model` | MJCF、碰撞几何与触觉布局。 |
 | `controller` | 算法及独有参数。 |
 | `estimator` | 刚度估计方法或显式关闭。 |
-| `task` | 任务家族和曲线。 |
+| `scheduler` | 根据真值或触觉观测生成目标抓力；非调度实验显式选择 `none`。 |
+| `task` | 目标曲线或外载场景，不包含调度算法参数。 |
 | `material` | 接触材料。 |
 | `execution` | 计划／执行、目录、进程数、viewer、记录与恢复检查。 |
 | `experiment` | 常用配置组合与有意覆盖。 |
@@ -97,6 +98,7 @@ Torque ADRC 的 `coarse → confirm` 强制校验谱系：coarse manifest 的生
 
 导纳必须配 `estimator=none`；非导纳仅 `pid-only` 可显式关闭估计器。Torque ADRC 参数仅可随
 `adrc-torque` 出现。platform 选择不连接或使能设备，未支持的硬件组合由 schema 拒绝。
+目标力调度实验必须组合 `task=load/*` 与 `scheduler=force/*`；其他实验禁止携带力调度器。
 
 切向扰动仅支持 DM 的 `pid-torque-ff`／`pid-only`，拒绝 viewer、导纳与 ADRC；material 写入任务的
 `object_material`。解析先构造最终 profile，再按实际材料编译 scene，检查 MIT 法向控制及

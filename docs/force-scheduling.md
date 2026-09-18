@@ -1,4 +1,4 @@
-# 抓取目标力调度：Oracle 与统一自适应
+# 抓取目标力调度：Oracle 与自适应调度器
 
 [自适应抓取](adaptive-grasping.md)的已知摩擦参考基线：`force-schedule` 使用场景真值摩擦系数和
 切向载荷需求生成平均单侧目标力，再由法向力控制器跟踪。它不估计摩擦，也不自动构成性能上界。
@@ -23,7 +23,8 @@ f_{ref}=\operatorname{clip}\!\left(\frac{\gamma D}{2\max(\mu,\mu_{floor})},f_{mi
 \]
 
 `f_ref` 是平均单侧法向力，双侧理想摩擦容量为 `2μf_n`。`friction_floor` 防止分母退化；
-目标受幅值与对称变化率约束。任务在 `configs/task/force_scheduling/` 中定义物体、载荷、调度与验收参数。
+目标受幅值与对称变化率约束。`configs/task/load/` 只定义物体、外载、时钟与验收参数；
+`configs/scheduler/force/` 独立定义如何生成目标抓力。底层 PID、ADRC 或导纳只负责跟踪该目标。
 
 标准场景采用 50 g 方块、`μ=0.8`、`γ=1.5`、力范围 `0.5～8 N/侧`、变化率 `1 N/s`。
 显式 `solver.noslip_iterations=5` 抑制摩擦锥内数值爬移，不增加摩擦容量；动态载荷下将目标上限
@@ -31,8 +32,9 @@ f_{ref}=\operatorname{clip}\!\left(\frac{\gamma D}{2\max(\mu,\mu_{floor})},f_{mi
 
 ## 输出与指标
 
-独占目录 `outputs/dm_gripper/force-schedule/<run>/` 保存输入快照、`effective_parameters.json`、
-`trace.csv`、`metrics.json`、`plot.png`、矢量 `plot.pdf` 与 manifest；有效参数声明 `scheduler_kind=oracle`。
+独占目录 `outputs/dm_gripper/force-schedule/<run>/` 保存 `task.yaml`、`scheduler.yaml`、`effective_parameters.json`、
+`trace.csv`、`metrics.json`、`plot.png`、矢量 `plot.pdf` 与 manifest；有效参数明确声明
+`scheduler_kind=oracle` 或 `scheduler_kind=adaptive`。
 
 trace 记录切向需求、真值摩擦、原始／受限目标、触觉力、摩擦裕量与位移。验收同时检查仿真稳定、
 力跟踪 RMSE 和撤支撑后最大切向位移；目标摘要、摩擦利用率与限幅占比用于解释失败。
@@ -65,35 +67,7 @@ trace 记录切向需求、真值摩擦、原始／受限目标、触觉力、�
 调度器的纯算法位于 `src/parallel_gripper_tactile/force_scheduling.py`，场景、任务 schema、指标和绘图
 位于 `src/parallel_gripper_tactile/experiments/force_scheduling.py`。
 
-## 固定摩擦先验的初步仿真 {: #adaptive-prior }
-
-```bash
-uv run pgt run force-schedule --experiment dm_gripper/adaptive_prior
-```
-
-该组合复用载荷场景、记录与评价，使用现有 `admittance` 导纳与固定 MIT 增益，
-控制周期为 4 ms。它验证上层调度，不代表方案所列真机底层参数已经标定。
-`task.adaptive_prior` 非空时启用新策略；省略时保持 Oracle 行为。
-左右摩擦先验均为 0.6，场景真实摩擦为 0.8，两者独立配置。
-
-每侧触觉先求切向合力再取模，按实际观测间隔作 50 ms 一阶低通。承载需求为
-`safety_factor * max(T_left / mu_left, T_right / mu_right)`，不扣预载基线。
-目标只增不减，增长率由剩余目标缺口和滤波切向载荷的正增长率决定，最大为 1 N/s。
-首样本直接播种承载量，趋势导数为零；目标上限、下限、安全系数沿用 `scheduler` 配置，
-`friction_floor` 仅供 Oracle，先验模式要求两侧摩擦严格为正。
-
-新增 trace 列保留分侧实测切向量、滤波总切向量、载荷趋势、受限需求、调度后剩余缺口与
-`capacity_limited`。`raw_target_force_n` 保存未作上下限裁剪的需求；有效配置的
-`scheduler_kind=adaptive_prior` 明确在线依据。真值载荷、摩擦裕量与物体位移只供施加载荷和评分。
-先验模式的最大位移统计包含撤支撑后的整个阶段；力跟踪 RMSE 仍沿用原忽略窗口。
-能力需求一旦超上限，指标 `capacity_limited=true`，总验收失败，裁剪不会被视为需求满足。
-
-初步回归用同一参数覆盖恒定重力、四秒增加 2 N、物体自重 2.5 N 时撤支撑，并复用抓力不足负例。
-固定先验基线保留 0.5 N 初始力与 1 N/s 限速，统一撤支撑组合使用下述快速响应候选；
-二者仍保留位移未达标的失败边界回归，不放宽验收；低估摩擦或物体已加速滑落时，
-接触切向力仍可能低估所需承载。该先验组合本身不开放局部风险或摩擦更新。
-
-## 统一策略的初步验证 {: #unified-adaptive }
+## 自适应调度器验证 {: #adaptive-scheduler }
 
 多速率仿真支持可选 `task.definition.tactile_fault` 注入，默认 `null`，不影响旧组合。
 `start_s` 为撤支撑后的注入起点（默认 0.02 s）；`shear_noise_std_n` 是两侧逐 taxel 切向分量
@@ -108,22 +82,21 @@ uv run pgt run force-schedule --experiment dm_gripper/adaptive_prior
 真机故障规则和权限保持原样。故障配置用于有限探索，不是正式 study 或完整硬件故障模型。
 
 ```bash
-uv run pgt run force-schedule --experiment dm_gripper/unified_adaptive
+uv run pgt run force-schedule --experiment dm_gripper/adaptive_dynamic_filling
 # 自重 2.5 N 的撤支撑工况，1 N 初始抓力、50 N/s 限速；当前位移仍未达标
-uv run pgt run force-schedule --experiment dm_gripper/unified_step_load
+uv run pgt run force-schedule --experiment dm_gripper/adaptive_support_release
 # 独立 1000 Hz 触觉预处理与 250 Hz 控制，保留高频触觉日志
-uv run pgt run force-schedule --experiment dm_gripper/unified_step_load_multirate
+uv run pgt run force-schedule --experiment dm_gripper/adaptive_support_release_multirate
 # 保留相同上层策略，比较位置式 PID＋机构力矩前馈
-uv run pgt run force-schedule --experiment dm_gripper/unified_step_load_pid
+uv run pgt run force-schedule --experiment dm_gripper/adaptive_support_release_pid
 ```
 
-`task.unified_adaptive` 与 `adaptive_prior` 互斥；省略两者仍使用 Oracle。
-统一模式独立使用 `unified_adaptive.load` 的摩擦先验、力范围与速率，旧 `scheduler` 不参与目标生成。
+调度参数只来自 `scheduler=force/adaptive`，外载任务不再携带算法参数。
 共享的 `UnifiedAdaptivePolicy` 在完成预载前只观测，之后按新样本时间推进绝对承载需求。
 它只接收双侧各九点三轴力、实测平均单侧力、时间和上一控制周期执行限幅；
 场景摩擦、外加载荷和物体位移不进入策略。导纳开启最终 MIT 请求限幅的状态回投。
 
-`unified_step_load_multirate` 直接继承 `unified_step_load`，集中保存当前候选的三项覆盖：
+`adaptive_support_release_multirate` 直接继承 `adaptive_support_release`，集中保存当前候选的三项覆盖：
 导纳速度上限为 0.20 rad/s、力矩前馈比例为 1.0、承载调度的 `load.filter_tau_s` 为 0.01 s。
 原基线继续保留 0.05 rad/s、0.2 和 0.05 s。中间的 `fast`、`transient` 入口已移除，
 多速率候选及继承它的 `risk` 候选有效参数保持不变；无需再逐层查找这些覆盖。
@@ -135,12 +108,12 @@ uv run pgt run force-schedule --experiment dm_gripper/unified_step_load_pid
 该组合用于硬物体、自重 2.5 N 的仿真工况；更短滤波对噪声更敏感，跨材料、噪声水平及真机表现
 仍需独立验证，不能据此替换真机参数。
 
-`unified_step_load_multirate` 同时显式启用 `task.tactile_sampling`：
+`adaptive_support_release_multirate` 同时显式启用 `task.tactile_sampling`：
 `period_s=0.001`、`median_window=3`、`stale_after_s=0.01`、`record_raw=true`。
 共享场景默认物理步长为 1 ms，控制周期仍为 4 ms，每个控制周期对应四个触觉采样。
 未配置此字段的组合保持原观测调用路径，也使用新的默认物理步长；历史产物与实验结论不回溯改写。
 切向分量先做三点因果中值，再聚合分侧合力模，
-最后使用 `unified_adaptive.load.filter_tau_s` 在采样侧进行唯一一次低通；法向反馈保持不变。
+最后使用自适应调度器的 `load.filter_tau_s` 在采样侧进行唯一一次低通；法向反馈保持不变。
 首帧播种中值历史；长间断或坏帧后重建历史，不把不连续数据拼成载荷导数。
 
 多速率组合只允许统一策略，可显式开启风险增力／摩擦更新；采样与控制周期须为物理步长的整数倍，
@@ -154,10 +127,10 @@ uv run pgt run force-schedule --experiment dm_gripper/unified_step_load_pid
 
 可用 `--set task.definition.tactile_sampling.median_window=1` 旁路中值，或改
 `period_s=0.004` 比较 250/250 Hz；比较 5 ms 低通时使用
-`--set task.definition.unified_adaptive.load.filter_tau_s=0.005`。
+`--set scheduler.definition.load.filter_tau_s=0.005`。
 这些都是独立探索覆盖，不自动改变原瞬态候选，亦不代表异常、材料和真机评测已经全部完成。
 
-`unified_step_load_pid` 是仿真专用对照：保持同一任务、先验、1 N 初始力、50 N/s 目标限速、
+`adaptive_support_release_pid` 是仿真专用对照：保持同一任务、调度器、1 N 初始力、50 N/s 目标限速、
 20 Hz 法向低通、4 ms 外环、MIT 增益、协议力矩上限与配对 seed，仅替换下层完整控制结构。
 复用 `pid-torque-ff` 的位置式 PID；机构模型力矩前馈只由目标力与机构雅可比计算，
 `window_linear` 的估计值不进入该前馈或上层调度。
@@ -184,7 +157,7 @@ uv run pgt run force-schedule --experiment dm_gripper/unified_step_load_pid
 较低候选经折减后可即时接受，提高需多个独立一致事件；低质量或越界候选不覆盖已有估计，
 接触变化及过期回退到先验。不能把普通稳态切法向力比直接解释为真实静摩擦系数。
 
-`dm_gripper/unified_step_load_risk` 是独立实验候选：开启两条权限，风险窗口 40 ms、确认 12 ms，
+`dm_gripper/adaptive_support_release_risk` 是独立实验候选：开启两条权限，风险窗口 40 ms、确认 12 ms，
 每步 1 N、续增间隔 100 ms、风险附加速率 50 N/s，累计预算 12 N／12 步／20 s，
 保留仿真原 8 N 上限。它显式开启 `observer.allow_steady_load_risk`，允许稳载下局部剪切
 重分配形成风险，但仍排除明显卸载与主动法向增力；恒定载荷本身不触发。
@@ -199,13 +172,13 @@ uv run pgt run force-schedule --experiment dm_gripper/unified_step_load_pid
 默认 `risk_enabled=false`、`friction_update_enabled=false`，观测仅诊断。
 受控事件注入验证权限、去重、预算和摩擦状态逻辑，不验证真实传感器起滑识别。
 仿真复用恒载、缓增载、自重 2.5 N 的撤支撑及承载不足负例，未扩大为完整材料或重量评测。
-`unified_step_load` 使用约 0.254842 kg 物体，在默认重力加速度 9.81 m/s² 下自重为 2.5 N；
+`support_release` 载荷场景使用约 0.254842 kg 物体，在默认重力加速度 9.81 m/s² 下自重为 2.5 N；
 质量与几何共同决定惯性，全程无额外向下外力。夹爪进入力跟踪并经过原有 0.3 s 预载等待后，
 关闭支撑接触，撤支撑时刻定义为场景时间零，随后观察 4 s。
 该组合初始平均单侧抓力 `load.min_force_n=1.0`，目标速率上限 `load.max_force_rate_n_s=50.0`；
 接近前馈 `approach.feedforward_force_n=1.0` 是另一个量，不等同于接触后实测预载。
 滤波、导纳、MIT、8 N 目标上限及 2 mm 位移阈值保持不变。高限速仅是仿真候选，不是实际增力保证，
-目标仍受缺口增益与载荷趋势限制。常规 `unified_adaptive` 和真机 YAML 保留原设置。
+目标仍受缺口增益与载荷趋势限制。常规 `adaptive_dynamic_filling` 和真机 YAML 保留各自设置。
 这是半瓶水总重量的刚性方块近似，不包含瓶体变形和液体晃动。
 
 该入口已纠正早期“50 g 方块额外施加 2.5 N”的建模。旧运行快照仍保留原始输入和结果，

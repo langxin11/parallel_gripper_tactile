@@ -1,7 +1,7 @@
 # 配置组合入口
 
 人工配置按所有权拆分，由 Hydra 只在入口层组合，再交给 Pydantic 领域模型做完整校验。runner 只消费
-组合后冻结的 profile 和 task，不读取片段或旧完整 profile 覆盖结果。
+组合后冻结的 profile、task 和可选 scheduler，不读取片段或旧完整 profile 覆盖结果。
 
 ## 单次实验
 
@@ -35,7 +35,8 @@ uv run python scripts/research/run.py \
   `name` 与差异字段，模块启停差异由 `configure_force_controller` 在组合后按
   `controller.name` 派生；
 - `estimator/`：刚度估计方法和参数，或显式 `none`；
-- `task/`：目标曲线、时序、扰动和任务验收参数；
+- `task/`：目标曲线、外载场景、时序、扰动和任务验收参数；
+- `scheduler/`：根据真值或触觉观测生成目标抓力，与外载场景和底层控制器独立；
 - `material/`：接触材料 preset；
 - `execution/`：计划／执行、输出、viewer、记录和求解选项；
 - `experiment/`：只选择上述已有组并命名常用组合。
@@ -57,6 +58,8 @@ uv run python scripts/research/run.py \
   experiment=dm_gripper/force_scheduling_gravity_hold execution=plan
 uv run python scripts/research/run.py \
   experiment=dm_gripper/force_scheduling_dynamic_filling execution=plan
+uv run python scripts/research/run.py \
+  experiment=dm_gripper/adaptive_dynamic_filling execution=plan
 
 # 摩擦估计；可用 task=friction_estimation/high_friction 等替换任务。
 uv run python scripts/research/run.py \
