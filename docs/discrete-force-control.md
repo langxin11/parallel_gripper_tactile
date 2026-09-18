@@ -64,8 +64,8 @@ uv run pgt run discrete-force \
   --experiment robotiq_2f85/discrete_force
 ```
 
-CLI 使用可重复的 `--set` 选择控制器、材料、task 字段和 `seed`，例如
-`--set controller=robotiq_2f85/predictive --set material=hard --set seed=1`。
+CLI 使用可重复的 `--set` 选择材料、task 字段和 `seed`，例如
+`--set material=hard --set seed=1`。公开控制器入口只保留选型胜出的 `dynamic_step`；其余四个消融变体的配置入口已移除，变体能力保留在代码层。
 接触前后均使用 30 Hz 控制时钟；在 1000 Hz 物理步长上由仿真时间调度器交替落到相邻物理步，长期平均
 周期严格保持为 1/30 s。接近阶段另受 50 ms 动作间隔限制，因此接近动作频率不超过 20 Hz。
 主任务接触稳定后执行 `2→4→6→8→6→4→2 N` 曲线，首平台用于辨识，其余平台检验

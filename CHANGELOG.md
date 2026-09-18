@@ -108,6 +108,13 @@
 
 ### 变更
 
+- 退役已否决或已完成选型的公开配置入口：删除
+  `controller/dm_gripper/pid_stiffness_limit`（stiff Step 极限环，正式选型排除）、
+  Robotiq 消融控制器 `adaptive_deadband`／`fixed_step`／`predictive`／`quantized_pi`
+  （选型结论为 `dynamic_step`）、刚度估计器 `secant_ewma` 与 `window_quadratic`
+  （公开入口只保留 `none` 与 `window_linear`）以及 DM 历史碰撞模型 `original_mesh`。
+  上述变体的代码层派生能力保留；历史复现以对应 git 提交为准。
+
 - 正式研究收敛为四个活跃入口：删除已完成或已有结论的
   `stiffness_ground_truth_validation`、`force_tracking_stiffness_limit_pilot`、
   `force_tracking_stiffness_rate_validation`、`force_tracking_stiffness_rate_tuning`、

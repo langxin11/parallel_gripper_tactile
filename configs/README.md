@@ -14,12 +14,9 @@ uv run python scripts/research/run.py execution=plan
 执行时去掉 `execution=plan`。常见变化只替换一个配置组：
 
 ```bash
-# 使用保留的原始 mesh 复现历史碰撞行为。
-uv run python scripts/research/run.py model=dm_gripper/original_mesh execution=plan
-
-# 换 PID 与估计器。
+# 换控制器与估计器。
 uv run python scripts/research/run.py \
-  controller=dm_gripper/pid_torque_ff estimator=window_quadratic execution=plan
+  controller=dm_gripper/pid_torque_ff estimator=window_linear execution=plan
 
 # 使用统一导纳组合；该 experiment 会同时选择相容的 controller、estimator 和 task。
 uv run python scripts/research/run.py \
@@ -41,7 +38,8 @@ uv run python scripts/research/run.py \
 - `execution/`：计划／执行、输出、viewer、记录和求解选项；
 - `experiment/`：只选择上述已有组并命名常用组合。
 
-`model=dm_gripper/{height_spheres,original_mesh}` 分别选择当前默认球体代理与保留的原始 mesh。
+`model=dm_gripper/height_spheres` 选择当前默认球体碰撞代理；历史 `original_mesh` 复现入口已移除，
+需要时以对应 git 版本为准。
 `multiccd` 不属于 model，使用 `execution.multiccd_enabled=false` 单独切换。一阶 `adrc` 与
 `direct_torque` 两个历史复现配置入口已移除，不进入默认正式控制器对比；变体派生能力
 仍保留在代码层，历史数据复现以当时的 git 版本为准。
