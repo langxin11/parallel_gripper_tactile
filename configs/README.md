@@ -33,7 +33,8 @@ uv run python scripts/research/run.py \
   `controller.name` 派生；
 - `estimator/`：刚度估计方法和参数，或显式 `none`；
 - `task/`：目标曲线、外载场景、时序、扰动和任务验收参数；
-- `scheduler/`：根据真值或触觉观测生成目标抓力，与外载场景和底层控制器独立；
+- `scheduler/`：生成目标抓力的独立来源：`force/{oracle,adaptive}` 依真值或触觉调度抓力，
+  `disturbance/dynamic_step` 为切向扰动的反应式增力策略；与外载场景和底层控制器独立；
 - `material/`：接触材料 preset；
 - `execution/`：计划／执行、输出、viewer、记录和求解选项；
 - `experiment/`：只选择上述已有组并命名常用组合。

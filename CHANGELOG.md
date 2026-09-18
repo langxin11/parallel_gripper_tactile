@@ -108,6 +108,11 @@
 
 ### 变更
 
+- 切向扰动任务的目标力策略拆分到独立调度器组：新增
+  `scheduler/disturbance/dynamic_step`，任务文件只保留外载波形、指标与时钟；
+  组合校验强制切向实验必须配 disturbance 调度器。策略参数逐值迁移，
+  计划锚点比对确认除归属字段外无差异。
+
 - 退役已否决或已完成选型的公开配置入口：删除
   `controller/dm_gripper/pid_stiffness_limit`（stiff Step 极限环，正式选型排除）、
   Robotiq 消融控制器 `adaptive_deadband`／`fixed_step`／`predictive`／`quantized_pi`

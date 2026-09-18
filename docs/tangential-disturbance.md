@@ -47,8 +47,9 @@ F_\mathrm{envelope}=\min\!\left(F_\max,\;F_0+g\max(0,S-S_0)\right).
 
 ## 任务、指标和产物
 
-任务组为 `tangential_disturbance/ramp`、`step`、`pulse`；`policy`、`disturbance`、`metrics`
-与周期以有效 task 为准。真值摩擦只用于场景，Hydra `material` 写入 task 的 `object_material`。
+任务组为 `tangential_disturbance/ramp`、`step`、`pulse`；外载波形、`metrics` 与周期以有效 task
+为准，增力策略由 `scheduler/disturbance/dynamic_step` 独立提供。真值摩擦只用于场景，Hydra
+`material` 写入 task 的 `object_material`。
 
 `passed` 同时要求数值稳定、完整完成、初始保持合格、扰动阶段最大切向位移未超过滑移阈值，以及恢复窗口成立。峰值实际法向力、最终实际法向力与最大切向位移均只在 `disturbance` 阶段评分；初始保持的位移以独立的 `initial_hold_displacement_m` 评估。恢复从最后一次载荷变化之后开始计时：物体切向速度、实际法向力相对目标的误差和控制状态必须连续满足 `recovery_dwell_s`，并一直维持到扰动结束。`recovery_time_s` 是该连续窗口开始相对最后载荷变化的时间；它为空即不通过。
 
@@ -86,5 +87,5 @@ uv run pgt run tangential-disturbance --experiment dm_gripper/tangential_disturb
 
 切换纯 PID 使用 `--set controller=dm_gripper/pid_only --set estimator=none`。
 科研入口可通过 `experiment=dm_gripper/tangential_disturbance execution=plan` 校验组合；
-探索性 Multirun 可扫描 task、`task.definition.policy.strategy` 与 seed，尚无正式 study。
+探索性 Multirun 可扫描 task、`scheduler.definition.strategy` 与 seed，尚无正式 study。
 MIT 接收法向外环生成的关节请求；法向目标不直接作为电机力矩。仿真结果不替代实机验证。
