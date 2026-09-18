@@ -59,8 +59,8 @@ uv run python scripts/test_changed.py --base origin/main
 
 ```bash
 uv run python scripts/research/run.py execution=plan
-uv run python scripts/research/study.py research=force_controller_ablation/study
-uv run python scripts/research/study.py research=torque_adrc_tuning/study
+uv run python scripts/research/study.py research=dm_force_controller_selection/study
+uv run python scripts/research/study.py research=friction_estimator_validation/study
 ```
 
 Hydra 的 `--cfg job --resolve` 只打印配置，不替代领域校验。

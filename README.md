@@ -53,9 +53,9 @@ uv run pgt configs list --search friction
 
 ```bash
 uv run python scripts/research/study.py \
-  research=force_controller_selection/study
+  research=dm_force_controller_selection/study
 uv run python scripts/research/study.py \
-  research=force_controller_selection/study execution=study_run
+  research=dm_force_controller_selection/study execution=study_run
 ```
 
 正式研究的矩阵、执行顺序、`refinement`／`confirmation` 流程和数值结论统一维护在[常用工作流](docs/workflows.md)

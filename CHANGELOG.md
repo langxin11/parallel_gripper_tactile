@@ -108,6 +108,17 @@
 
 ### 变更
 
+- 正式研究收敛为四个活跃入口：删除已完成或已有结论的
+  `stiffness_ground_truth_validation`、`force_tracking_stiffness_limit_pilot`、
+  `force_tracking_stiffness_rate_validation`、`force_tracking_stiffness_rate_tuning`、
+  `force_tracking_stiffness_rate_refinement`、`torque_adrc_tuning`、
+  `robotiq_discrete_force_validation` 七项研究及其专属协议实现（结论以 `reports/`
+  与当时产物为准）；`force_controller_selection`→`dm_force_controller_selection`、
+  `force_tracking_stiffness_rate_confirmation`→`dm_stiffness_rate_confirmation` 改名保留；
+  `friction_local_slip_validation` 重写为 `friction_estimator_validation`
+  （kind 与协议模块同步改名，矩阵保持 5 场景 × 3 seed，历史通过率不再沿用）。
+  Torque ADRC 的 coarse／confirm 阶段谱系机制随研究一并退役。
+
 - experiment 入口按研究线收敛改名：`force_tracking_default`→`force_tracking`、
   `force_tracking_admittance_unified`→`force_tracking_admittance`、
   `force_scheduling_gravity_hold` 与 `force_scheduling_dynamic_filling` 合并为

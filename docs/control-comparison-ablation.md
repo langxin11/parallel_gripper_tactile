@@ -11,8 +11,11 @@
 
 | 研究名 | 比较对象与控制变量 |
 | --- | --- |
-| `force_controller_selection` | PID 基线 `pid-torque-ff`、`pid-only`、`pid-stiffness-rate` 与 `adrc-torque`；固定 Step／Ramp／Mixed，配对材料与 seed。 |
-| `torque_adrc_tuning` | 扫描测量滤波、控制带宽与观测带宽比，经连续任务约束后确认候选。 |
+| `dm_force_controller_selection` | PID 基线 `pid-torque-ff`、`pid-only`、`pid-stiffness-rate` 与 `adrc-torque`；固定 Step／Ramp／Mixed，配对材料与 seed。 |
+| `dm_stiffness_rate_confirmation` | 在固定 250 Hz 外环和三种材料下确认刚度速率候选参数。 |
+
+历史研究 `torque_adrc_tuning`（未找到优于基线的候选）、刚度位置限幅与速率调优系列已完成并退役，
+结论以 `reports/` 与当时的研究产物为准。
 
 默认控制器对比排除 `direct-torque`、一阶位置式 `adrc` 与 `pid-stiffness-limit`；退出原因分别是
 历史跨任务表现退化、控制导向模型与 MIT 位置闭环阶次不匹配，以及 stiff Step 平台极限环。

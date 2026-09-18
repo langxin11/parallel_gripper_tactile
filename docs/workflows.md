@@ -45,8 +45,8 @@ uv run python scripts/research/run.py \
 正式 study 使用统一命令，把 `research` 替换为下表中的研究名加 `/study`：
 
 ```bash
-uv run python scripts/research/study.py research=force_controller_selection/study
-uv run python scripts/research/study.py research=force_controller_selection/study \
+uv run python scripts/research/study.py research=dm_force_controller_selection/study
+uv run python scripts/research/study.py research=dm_force_controller_selection/study \
   execution=study_run execution.workers=8
 ```
 
@@ -56,25 +56,14 @@ uv run python scripts/research/study.py research=force_controller_selection/stud
 ## 推荐的正式研究执行顺序 {#formal-study-route}
 
 各阶段之间审查产物；候选参数经人工冻结后再进入最终比较。Study 不会自动向下一项研究传递最优参数。
+历史已完成的结构验证、刚度速率调优与 Torque ADRC 调参研究已退役，结论以当时产物和 git 提交为准。
 
 | 顺序 | `research` 名称（省略 `/study`） | 决策作用 |
 | --- | --- | --- |
-| 1 | `stiffness_ground_truth_validation` | 检查默认估计器的量级、有效性与参考边界。 |
-| 2 | `force_tracking_stiffness_limit_pilot` | 比较无限幅、在线限幅与准静态参考限幅。 |
-| 3 | `force_tracking_stiffness_rate_validation` | 在统一 250 Hz 外环下检查控制结构的极限环。 |
-| 5 | `force_tracking_stiffness_rate_tuning` → `force_tracking_stiffness_rate_refinement` → `force_tracking_stiffness_rate_confirmation` | 初筛、最坏工况再调优、固定 250 Hz 的跨材料确认。 |
-| 6 | `torque_adrc_tuning` | coarse 筛选，再由 confirm 复验候选。 |
+| 1 | `dm_stiffness_rate_confirmation` | 在固定 250 Hz 外环和三种材料下确认刚度速率候选参数。 |
 | 决策门 | 人工审查 | 检查状态、科学失败、执行异常、排名与配对统计；更新并提交配置、测试和文档。 |
-| 7 | `force_controller_selection` | 比较已经冻结的控制器。 |
-| 独立研究 | `friction_local_slip_validation`、`robotiq_discrete_force_validation` | 分别验证局部起滑与整数命令控制，不阻塞 DM 选型。 |
-
-Torque ADRC 的 confirm 是入口强制要求上游谱系的阶段，必须指定已完成 coarse 的绝对目录：
-
-```bash
-uv run python scripts/research/study.py research=torque_adrc_tuning/study \
-  study.stage=confirm study.coarse_study_dir=/absolute/path/to/completed-coarse-study \
-  execution=study_run
-```
+| 2 | `dm_force_controller_selection` | 比较已经冻结的控制器。 |
+| 独立研究 | `friction_estimator_validation` | 验证摩擦估计与局部起滑检测，不阻塞 DM 选型。 |
 
 矩阵、准入规则与科学结论见[控制算法对比与消融](control-comparison-ablation.md)，条件列表以
 `configs/research/<purpose>/study.yaml` 及生成计划为准。

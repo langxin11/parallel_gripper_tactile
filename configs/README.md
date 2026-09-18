@@ -107,32 +107,19 @@ uv run pgt compare tactile \
 任务与 seed 由 `study.definition` 的条件矩阵唯一拥有，输出目录由 `execution.output_root` 唯一拥有。
 因此 `study.definition` 不再重复保存完整 profile 路径或 `output_root`。
 
-推荐的科学决策顺序是“默认 `window_linear` 合理性检查、刚度位置限幅三臂验证、刚度速率控制频率验证 → 刚度速率参数调优、Torque ADRC coarse／confirm
-→ 人工审查并冻结配置 → 最终控制器比较”。局部起滑与 Robotiq 离散力属于独立研究。这个顺序不改变
-配置所有权：各 Study 不会自动回写优胜参数，只有 Torque ADRC 的 `coarse → confirm` 构成程序强制的
-谱系依赖。
+推荐的科学决策顺序是“刚度速率控制参数确认 → 人工审查并冻结配置 → 最终控制器比较”；
+摩擦估计器验证与自适应抓取研究独立推进。历史已完成的结构验证、参数调优与
+Torque ADRC 调参研究已退役，结论与复现版本以当时的研究产物和 git 提交为准。
 
 ```bash
-# 基础组件验证。
-uv run python scripts/research/study.py research=stiffness_ground_truth_validation/study
-uv run python scripts/research/study.py research=force_tracking_stiffness_limit_pilot/study
-uv run python scripts/research/study.py research=force_tracking_stiffness_rate_validation/study
-
-# 参数调优；速率调优保留 pid-torque-ff 性能基线，ADRC confirm 必须绑定已完成 coarse 的绝对目录。
-uv run python scripts/research/study.py research=force_tracking_stiffness_rate_tuning/study
-uv run python scripts/research/study.py research=force_tracking_stiffness_rate_refinement/study
-uv run python scripts/research/study.py research=force_tracking_stiffness_rate_confirmation/study
-uv run python scripts/research/study.py research=torque_adrc_tuning/study
-uv run python scripts/research/study.py \
-  research=torque_adrc_tuning/study study.stage=confirm \
-  study.coarse_study_dir=/absolute/path/to/coarse-study
+# 刚度速率候选确认；保留 pid-torque-ff 性能基线。
+uv run python scripts/research/study.py research=dm_stiffness_rate_confirmation/study
 
 # 人工冻结候选配置后再生成最终控制器比较计划。
-uv run python scripts/research/study.py research=force_controller_selection/study
+uv run python scripts/research/study.py research=dm_force_controller_selection/study
 
-# 独立研究。
-uv run python scripts/research/study.py research=friction_local_slip_validation/study
-uv run python scripts/research/study.py research=robotiq_discrete_force_validation/study
+# 独立研究：摩擦估计器验证。
+uv run python scripts/research/study.py research=friction_estimator_validation/study
 ```
 
 以上命令默认只生成计划；显式追加 `execution=study_run` 才执行仿真。执行时可再追加

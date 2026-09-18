@@ -84,14 +84,9 @@ trace 包含力、状态、动作、稳定性、局部增益、预测候选，�
 
 ## 完整 study
 
-```bash
-uv run python scripts/research/study.py \
-  research=robotiq_discrete_force_validation/study
-uv run python scripts/research/study.py \
-  research=robotiq_discrete_force_validation/study \
-  execution=study_run \
-  execution.workers=8
-```
+`robotiq_discrete_force_validation` 研究已完成并退役：选型结论为 `dynamic_step` 成为默认候选，
+历史矩阵与结论以当时的研究产物和 git 提交为准。单次实验仍可用
+`experiment=robotiq_2f85/discrete_force` 组合入口运行。
 
 默认矩阵为 5 个控制器 × 4 种刚度 × 3 种噪声，共 60 个条件。每个条件均运行完整主曲线。study
 同时输出逐次、逐平台和聚合 CSV/Parquet、JSON 摘要、控制器总览/消融链/逐平台比较 PNG、
