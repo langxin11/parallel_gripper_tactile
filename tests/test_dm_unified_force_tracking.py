@@ -33,7 +33,6 @@ def test_all_dm_force_controllers_enable_shared_contact_supervisor() -> None:
         "adrc_torque": "window_linear",
         "adrc_torque_td": "window_linear",
         "admittance": "none",
-        "pid_only_unified": "none",
         "admittance_unified": "none",
     }
 

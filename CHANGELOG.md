@@ -316,6 +316,9 @@
 
 ### 移除
 
+- 移除与 `pid_only` 逐字段相同的冗余控制器配置 `controller=dm_gripper/pid_only_unified`；
+  统一 PID 力跟踪实验 `experiment=dm_gripper/force_tracking_pid_unified` 改用
+  `controller=dm_gripper/pid_only`，组合结果不变。
 - 移除依赖仓库外 ROS 节点的 `test_dm_ros_alignment.py`，以及共享控制核迁移期的
   `golden_tracking.json` 和生成脚本；共享核继续由仓库内独立数学期望、边界测试和仿真集成验证。
 - 移除不再使用的 DMgripper 共面 mesh、共面球体配置与 MJCF 资产；模型生成脚本收敛为只生成

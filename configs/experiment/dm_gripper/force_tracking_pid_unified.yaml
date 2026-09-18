@@ -1,18 +1,9 @@
 # @package _global_
 defaults:
-  - override /platform: dm_gripper/simulation
-  - override /model: dm_gripper/height_spheres
-  - override /controller: dm_gripper/pid_only_unified
-  - override /estimator: none
-  - override /task: force_tracking/dm_unified_ramp
-  - override /material: hard
-  - override /execution: run
+  - /experiment/dm_gripper/force_tracking_admittance_unified
+  - override /controller: dm_gripper/pid_only
   - _self_
 
 experiment:
   name: dm_pid_unified
-  kind: force_tracking
   profile_name: dm_gripper_pid_unified
-
-execution:
-  trace_sample_period_s: 0.004
