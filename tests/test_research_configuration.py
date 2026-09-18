@@ -21,6 +21,7 @@ from parallel_gripper_tactile.research.hydra_support import register_resolvers, 
 
 CONFIG_ROOT = REPOSITORY_ROOT / "configs"
 BASELINE_PATH = REPOSITORY_ROOT / "tests/baselines/configuration_refactor_v1.json"
+ROBOTIQ_TASK_PATH = CONFIG_ROOT / "task/discrete_force/robotiq_delta_f_tick.yaml"
 
 
 def _compose(overrides: list[str] | None = None):
@@ -39,6 +40,31 @@ def _baseline(name: str) -> dict[str, object]:
 def _migration_snapshot() -> dict[str, object]:
     """读取完整迁移快照。"""
     return json.loads(BASELINE_PATH.read_text(encoding="utf-8"))
+
+
+def _control_periods(value: object) -> tuple[float, ...]:
+    """递归提取任务配置中的控制周期。"""
+    periods: list[float] = []
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if key == "control_period_s":
+                periods.append(float(item))
+            else:
+                periods.extend(_control_periods(item))
+    elif isinstance(value, list):
+        for item in value:
+            periods.extend(_control_periods(item))
+    return tuple(periods)
+
+
+def test_simulation_control_periods_follow_gripper_defaults() -> None:
+    """DM 任务统一为 250 Hz，Robotiq 离散任务保持 30 Hz。"""
+    for task_path in sorted((CONFIG_ROOT / "task").rglob("*.yaml")):
+        raw = OmegaConf.to_container(OmegaConf.load(task_path), resolve=True)
+        periods = _control_periods(raw)
+        assert len(periods) == 1, task_path
+        expected = 1.0 / 30.0 if task_path == ROBOTIQ_TASK_PATH else 0.004
+        assert periods[0] == pytest.approx(expected), task_path
 
 
 def _with_repository_root(value: object) -> object:
@@ -78,11 +104,13 @@ def test_default_run_matches_frozen_legacy_domain_parameters() -> None:
     """默认统一入口的 profile 与 task 保持迭代 1 基线等价。"""
     resolved = resolve_research_run(resolved_mapping(_compose()))
     expected = _baseline("dm_force_track")
+    expected_task = dict(expected["task"])
+    expected_task["control_period_s"] = 0.004
 
     assert resolved.profile.model_dump(mode="json") == _with_current_dm_supervisor(
         expected["profile"]
     )
-    assert resolved.task.model_dump(mode="json") == expected["task"]
+    assert resolved.task.model_dump(mode="json") == expected_task
     assert resolved.selection.model.name == "height_spheres"
     assert resolved.selection.execution.trace_sample_period_s == 0.004
 
@@ -122,34 +150,19 @@ def test_admittance_combination_preserves_profile_and_uses_canonical_ramp() -> N
     "model_name, expected_resource",
     [
         ("height_spheres", "parallel_gripper_height_sphere_collision.xml"),
-        ("flat_spheres", "parallel_gripper_flat_sphere_collision.xml"),
-        ("coplanar_mesh", "parallel_gripper_coplanar_mesh_collision.xml"),
         ("original_mesh", "parallel_gripper_prepared.xml"),
     ],
 )
 def test_model_group_switches_only_the_selected_collision_resource(
     model_name: str, expected_resource: str
 ) -> None:
-    """四种 DM 碰撞模型都能在计划预检中完成 scene 编译。"""
+    """两个受支持的 DM 碰撞模型都能在计划预检中完成 scene 编译。"""
     resolved = resolve_research_run(
         resolved_mapping(_compose([f"model=dm_gripper/{model_name}", "execution=plan"]))
     )
 
     assert resolved.selection.model.name == model_name
     assert resolved.profile.model_path.name == expected_resource
-
-
-def test_flat_model_preserves_legacy_identity_and_changes_no_control_fields() -> None:
-    """平面球体选择保持旧 profile 名，并且只替换模型资源。"""
-    default = resolve_research_run(resolved_mapping(_compose()))
-    flat = resolve_research_run(resolved_mapping(_compose(["model=dm_gripper/flat_spheres"])))
-    default_mapping = default.profile.model_dump(mode="json")
-    flat_mapping = flat.profile.model_dump(mode="json")
-
-    assert flat.profile.name == "dm_gripper_flat_spheres"
-    assert flat_mapping["control"] == default_mapping["control"]
-    assert flat_mapping["mount"] == default_mapping["mount"]
-    assert flat_mapping["tactile"] == default_mapping["tactile"]
 
 
 def test_estimator_group_replaces_its_fragment_and_reaches_final_profile() -> None:
@@ -172,14 +185,12 @@ def test_estimator_group_replaces_its_fragment_and_reaches_final_profile() -> No
         "pid_stiffness_limit",
         "pid_stiffness_rate",
         "full",
-        "direct_torque",
-        "adrc",
         "adrc_torque",
         "adrc_torque_td",
     ],
 )
 def test_all_dm_non_admittance_controller_groups_resolve(controller: str) -> None:
-    """全部 DM PID／ADRC 与独立复现控制器均能形成严格领域对象。"""
+    """全部 DM PID／ADRC 控制器配置组均能形成严格领域对象。"""
     resolved = resolve_research_run(
         resolved_mapping(_compose([f"controller=dm_gripper/{controller}"]))
     )
@@ -240,7 +251,7 @@ def test_all_dm_non_admittance_controller_groups_resolve(controller: str) -> Non
 def test_remaining_task_groups_match_frozen_domain_values(
     experiment: str, task_group: str, legacy_task: str
 ) -> None:
-    """力调度、摩擦估计和离散力 task 保持迁移前完整领域值。"""
+    """任务除显式更新的 DM 控制周期外保持迁移前完整领域值。"""
     resolved = resolve_research_run(
         resolved_mapping(
             _compose([f"experiment={experiment}", f"task={task_group}", "execution=plan"])
@@ -249,6 +260,21 @@ def test_remaining_task_groups_match_frozen_domain_values(
     snapshot = _migration_snapshot()
     family = legacy_task.split("/")[1]
     expected = snapshot["tasks"][family][legacy_task]["effective"]
+    if family != "discrete_force":
+        expected = {**expected, "control_period_s": 0.004}
+    if legacy_task.endswith("noisy_friction.yaml"):
+        expected = {
+            **expected,
+            "tactile_slip": {**expected["tactile_slip"], "trend_window_s": 0.048},
+        }
+    if legacy_task.endswith("hardware_scale_nominal.yaml"):
+        expected = {
+            **expected,
+            "tactile_slip": {
+                **expected["tactile_slip"],
+                "minimum_ratio_coherence": 0.9,
+            },
+        }
 
     if family == "force_scheduling":
         # 新增策略与独立采样均默认为关闭，其余字段逐项核对冻结证据。

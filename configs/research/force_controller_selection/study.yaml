@@ -15,8 +15,8 @@ study:
     primary_metrics: [RMSE, 超调, 调节时间, 力矩饱和率]
     stop_conditions: [完成全部配对条件, 任一执行异常须单独登记]
     exclusions:
-      direct-torque: 历史 135-run 证据显示跨任务 RMSE 分别恶化约 37.7%、204.5% 与 121%，仅保留独立复现。
-      adrc: 一阶位置式模型阶次不匹配，仅保留独立复现。
+      direct-torque: 历史 135-run 证据显示跨任务 RMSE 分别恶化约 37.7%、204.5% 与 121%，配置入口已移除。
+      adrc: 一阶位置式模型阶次不匹配，配置入口已移除。
       pid-stiffness-limit: 250 Hz stiff Step 出现约 0.326 N 平台标准差和明显极限环，不进入最终比较。
   definition:
     name: force_tracking_controller_comparison
@@ -33,7 +33,8 @@ study:
       # 2026-09-01 历史 108-run 基准的复现以当时 manifest 与本文件 git 历史为准。
       #- direct-torque
       - pid-stiffness-rate
-      # 一阶位置式 adrc 因模型阶次不匹配，不再参加默认正式矩阵；保留 CLI 供历史复现。
+      # 一阶位置式 adrc 因模型阶次不匹配，不再参加默认正式矩阵；CLI 配置入口已移除，
+      # 变体派生仍保留在代码层。
       # adrc-torque 为二阶直接力矩 MB-ADRC；默认矩阵为 162 条。
       - adrc-torque
     # 当前控制结构验证与调优统一固定 window_linear；历史基准按其 manifest 解释。

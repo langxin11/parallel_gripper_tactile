@@ -1,8 +1,0 @@
-# @package controller
-# 直接力矩式对照：力误差全额注入 MIT 前馈力矩，当前明显欠阻尼；
-# 仅用于独立历史复现，不进入默认正式矩阵。
-defaults:
-  - /controller/dm_gripper/_base
-  - _self_
-
-name: direct-torque

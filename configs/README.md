@@ -40,8 +40,9 @@ uv run python scripts/research/run.py \
 - `experiment/`：只选择上述已有组并命名常用组合。
 
 `model=dm_gripper/{height_spheres,original_mesh}` 分别选择当前默认球体代理与保留的原始 mesh。
-`multiccd` 不属于 model，使用 `execution.multiccd_enabled=false` 单独切换。`direct_torque` 与一阶
-`adrc` 仅供独立历史复现，不进入默认正式控制器对比。
+`multiccd` 不属于 model，使用 `execution.multiccd_enabled=false` 单独切换。一阶 `adrc` 与
+`direct_torque` 两个历史复现配置入口已移除，不进入默认正式控制器对比；变体派生能力
+仍保留在代码层，历史数据复现以当时的 git 版本为准。
 
 根目录的 `dm_gripper.yaml` 与 `robotiq_2f85.yaml` 只保留为独立 profile schema 示例和底层 Python API
 的兼容默认值，不是组合入口的参数来源。派生完整 profile 已删除；单次实验和正式研究均从上述配置组

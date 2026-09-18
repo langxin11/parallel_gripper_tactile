@@ -316,6 +316,9 @@
 
 ### 移除
 
+- 移除一阶位置式 ADRC 与直接力矩两个历史复现配置入口
+  （`controller=dm_gripper/adrc`、`controller=dm_gripper/direct_torque`）；
+  两者不进入默认正式矩阵，变体派生能力仍保留在代码层，历史数据复现以当时的 git 版本为准。
 - 移除与 `pid_only` 逐字段相同的冗余控制器配置 `controller=dm_gripper/pid_only_unified`；
   统一 PID 力跟踪实验 `experiment=dm_gripper/force_tracking_pid_unified` 改用
   `controller=dm_gripper/pid_only`，组合结果不变。

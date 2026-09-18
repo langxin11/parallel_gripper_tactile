@@ -1,8 +1,0 @@
-# @package controller
-# 一阶位置式 ADRC：LADRC 外环取代刚度位置前馈；
-# 仅用于独立历史复现，不进入默认正式矩阵。
-defaults:
-  - /controller/dm_gripper/_base
-  - _self_
-
-name: adrc

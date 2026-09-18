@@ -188,8 +188,9 @@ LESO 使用独立 40 Hz 低通，不复用 PID、刚度估计及指标的 20 Hz 
 
 `adrc_torque_td` 另加 180 rad/s 临界阻尼线性 TD，只整形 `hold` 等参考跳变，模型前馈同步使用整形参考；
 `linear`、`smoothstep` 使用解析导数并旁路 TD。它不改变测量链路，也不进入默认比较矩阵。
-`direct_torque` 与一阶位置式 `adrc` 保留独立复现入口：前者直接输出反馈力矩，后者保留 MIT 位置环，
-由 LADRC 闭合速度积分生成位置修正。
+`direct_torque` 与一阶位置式 `adrc` 的 CLI 配置入口已移除：前者直接输出反馈力矩，后者保留 MIT 位置环，
+由 LADRC 闭合速度积分生成位置修正。两者的变体派生仍由 `configure_force_controller` 在代码层支持，
+历史数据复现以当时的 git 版本为准。
 
 ### 公共低通
 
@@ -217,7 +218,7 @@ run 保存 `profile.yaml`、`task.yaml`、`effective_parameters.json`、`trace.p
 默认只生成 `plots/tracking.png`；diagnostic 模式或科学失败增加触觉与控制器诊断图。
 重绘与论文导出见[工作流](workflows.md)，产物／路径约定见[科研配置](research-configuration.md)。
 
-常规 trace 默认按普通控制器 100 Hz、直接力矩 ADRC 250 Hz 存储；首尾、状态／限幅切换、waypoint
+常规 trace 默认按普通控制器 125 Hz、直接力矩 ADRC 250 Hz 存储；首尾、状态／限幅切换、waypoint
 前后 0.2 s 保留完整控制频率。指标与初次绘图使用降采样前数据；重绘读取原指标，不重新统计。
 `execution.trace_sample_period_s` 必须不小于且为控制周期的整数倍，设为控制周期可保留全频；
 事件窗口由 `execution.trace_event_window_s` 配置。旧 `trace.csv` 仍可读取。
