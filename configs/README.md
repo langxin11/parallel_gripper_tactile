@@ -35,7 +35,8 @@ uv run python scripts/research/run.py \
 - `task/`：目标曲线、外载场景、时序、扰动和任务验收参数；
 - `scheduler/`：生成目标抓力的独立来源：`force/{oracle,adaptive}` 依真值或触觉调度抓力，
   `disturbance/dynamic_step` 为切向扰动的反应式增力策略；与外载场景和底层控制器独立；
-- `material/`：接触材料 preset；
+- `material/`：接触材料 preset；YAML 完整保存两个夹爪家族的 solref／solimp／friction，
+  组合期与场景层领域预设强制一致，配置本身即完整实验输入；
 - `execution/`：计划／执行、输出、viewer、记录和求解选项；
 - `experiment/`：只选择上述已有组并命名常用组合。
 

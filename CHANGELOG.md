@@ -116,6 +116,10 @@
 
 ### 变更
 
+- `material/*.yaml` 补全两个夹爪家族的显式接触参数（solref／solimp／friction），
+  组合期与场景层领域预设逐值强校验，漂移即组合失败；配置文件本身即完整实验输入，
+  不再只有材料名而参数隐藏在 Python 中。
+
 - 根目录完整 profile `configs/dm_gripper.yaml`、`configs/robotiq_2f85.yaml` 移至
   `tests/fixtures/profiles/` 作为独立 schema 示例；配置目录不再维护与组合入口重复的
   第二份真值。旧演示命令（抓取、接触比较、视频）默认值随迁，行为不变；新代码一律
