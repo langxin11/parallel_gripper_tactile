@@ -1,0 +1,38 @@
+# @package controller
+# DM 力控变体的公共基线：变体文件经组内 defaults 继承本基座，只声明 name 与差异字段。
+# 变体间的模块启停与增益差异由组合层按 controller.name 调用 configure_force_controller
+# 派生（见 src/parallel_gripper_tactile/experiments/force_tracking.py）；
+# 本文件中的 stiffness_control 等基线字段会被该派生按变体覆盖，单独修改
+# 不会改变 PID 消融变体的实际行为。
+family: dm
+# MIT 内环增益：接近阶段位置伺服与跟踪阶段 MIT 力矩命令共用。
+mit_gains: {kp: 20.0, kd: 0.63793536}
+force:
+  # 平均单侧法向力目标与接触／释放状态机阈值，全部变体共享。
+  target_n: 8.0
+  contact_threshold_n: 0.15
+  contact_confirm_steps: 5
+  release_threshold_n: 0.05
+  release_confirm_steps: 25
+  # simple-pid 位置修正外环基线增益；导纳变体覆盖为 0，各模块启停在派生层决定。
+  kp: 0.016
+  ki: 0.2
+  kd: 0.0
+  max_position_adjustment: 0.15
+  # 平均单侧法向力测量的一阶低通截止频率。
+  filter_cutoff_hz: 20.0
+  # 公共接触阶段监督参数：稳定保持、过渡时长与释放判定策略。
+  supervisor:
+    contact_stable_time_s: 0.0
+    contact_transition_time_s: 0.05
+    release_policy: any_side
+# 在线刚度估计驱动的前馈与限幅基线；会被变体派生覆盖（见文件头说明）。
+stiffness_control:
+  position_feedforward_gain: 0.25
+  torque_feedforward_gain: 1.0
+  position_limit_enabled: false
+  position_limit_force_rate_n_s: 10.0
+  position_limit_stiffness_safety_factor: 1.0
+# 二阶直接力矩 LADRC 与导纳外环参数块；非对应变体保持 null。
+torque_adrc: null
+admittance: null

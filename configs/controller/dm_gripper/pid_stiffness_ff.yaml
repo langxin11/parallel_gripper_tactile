@@ -1,27 +1,7 @@
 # @package controller
-family: dm
+# PID 加刚度位置前馈、关闭机构力矩前馈；隔离刚度位置前馈贡献的消融变体。
+defaults:
+  - /controller/dm_gripper/_base
+  - _self_
+
 name: pid-stiffness-ff
-mit_gains: {kp: 20.0, kd: 0.63793536}
-force:
-  target_n: 8.0
-  contact_threshold_n: 0.15
-  contact_confirm_steps: 5
-  release_threshold_n: 0.05
-  release_confirm_steps: 25
-  kp: 0.016
-  ki: 0.2
-  kd: 0.0
-  max_position_adjustment: 0.15
-  filter_cutoff_hz: 20.0
-  supervisor:
-    contact_stable_time_s: 0.0
-    contact_transition_time_s: 0.05
-    release_policy: any_side
-stiffness_control:
-  position_feedforward_gain: 0.25
-  torque_feedforward_gain: 1.0
-  position_limit_enabled: false
-  position_limit_force_rate_n_s: 10.0
-  position_limit_stiffness_safety_factor: 1.0
-torque_adrc: null
-admittance: null

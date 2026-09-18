@@ -14,8 +14,8 @@ uv run python scripts/research/run.py execution=plan
 执行时去掉 `execution=plan`。常见变化只替换一个配置组：
 
 ```bash
-# 换碰撞模型。
-uv run python scripts/research/run.py model=dm_gripper/flat_spheres execution=plan
+# 使用保留的原始 mesh 复现历史碰撞行为。
+uv run python scripts/research/run.py model=dm_gripper/original_mesh execution=plan
 
 # 换 PID 与估计器。
 uv run python scripts/research/run.py \
@@ -30,20 +30,22 @@ uv run python scripts/research/run.py \
 
 - `platform/`：设备家族、后端、机构、安装和硬边界；
 - `model/`：MJCF、碰撞近似、触觉布局和传感器噪声标定；
-- `controller/`：完整控制律、MIT 可调增益、滤波及接触状态参数；
+- `controller/`：完整控制律、MIT 可调增益、滤波及接触状态参数；DM 变体共享
+  `dm_gripper/_base.yaml` 公共基线，变体文件只声明 `name` 与差异字段，模块启停差异
+  由 `configure_force_controller` 在组合后按 `controller.name` 派生；
 - `estimator/`：刚度估计方法和参数，或显式 `none`；
 - `task/`：目标曲线、时序、扰动和任务验收参数；
 - `material/`：接触材料 preset；
 - `execution/`：计划／执行、输出、viewer、记录和求解选项；
 - `experiment/`：只选择上述已有组并命名常用组合。
 
-`model=dm_gripper/{height_spheres,flat_spheres,coplanar_mesh,original_mesh}` 覆盖四个现有碰撞资源。
+`model=dm_gripper/{height_spheres,original_mesh}` 分别选择当前默认球体代理与保留的原始 mesh。
 `multiccd` 不属于 model，使用 `execution.multiccd_enabled=false` 单独切换。`direct_torque` 与一阶
 `adrc` 仅供独立历史复现，不进入默认正式控制器对比。
 
 根目录的 `dm_gripper.yaml` 与 `robotiq_2f85.yaml` 只保留为独立 profile schema 示例和底层 Python API
 的兼容默认值，不是组合入口的参数来源。派生完整 profile 已删除；单次实验和正式研究均从上述配置组
-构造对象，正式研究解析还会逐字段检查组合基础对象与兼容默认值一致。
+构造对象，正式研究直接验证并冻结组合结果。
 
 其余单次实验也从同一个 `run.yaml` 组合，并共享严格领域解析：
 
@@ -98,8 +100,7 @@ uv run pgt compare tactile \
 
 活跃研究只在 `study.profile` 中选择基础 experiment 和确有必要的 controller、estimator 或 model 覆盖；
 任务与 seed 由 `study.definition` 的条件矩阵唯一拥有，输出目录由 `execution.output_root` 唯一拥有。
-因此 `study.definition` 不再重复保存完整 profile 路径或 `output_root`。归档模型诊断是唯一例外：它必须
-保留历史 profile 来源，才能改写旧碰撞模型并复现诊断端点。
+因此 `study.definition` 不再重复保存完整 profile 路径或 `output_root`。
 
 推荐的科学决策顺序是“默认 `window_linear` 合理性检查、刚度位置限幅三臂验证、刚度速率控制频率验证与 PID 模块消融 → 刚度速率参数调优、Torque ADRC coarse／confirm 和独立导纳调优
 → 人工审查并冻结配置 → 最终控制器比较”。局部起滑与 Robotiq 离散力属于独立研究。这个顺序不改变
@@ -137,6 +138,6 @@ uv run python scripts/research/study.py research=robotiq_discrete_force_validati
 [`docs/workflows.md`](../docs/workflows.md#推荐的正式研究执行顺序)，硬依赖、配置冻结和生命周期语义见
 [`docs/research-configuration.md`](../docs/research-configuration.md#推荐执行路线与决策门)。
 
-已完成使命的碰撞／接触模型诊断只保留在
-`research/archive/model_bug_diagnosis/study.yaml`，默认入口和正式控制器矩阵都不引用它。当前字段所有权、
-组合规则和执行语义见 `docs/research-configuration.md`；历史迁移快照仅用于兼容回归。
+旧碰撞／接触模型诊断入口及专属实现已退役，历史结论与复现版本见
+[`模型验证结论`](../docs/control-comparison-ablation.md#collision-geometry-conclusions)。
+当前字段所有权、组合规则和执行语义见 `docs/research-configuration.md`；历史迁移快照保持不变。
