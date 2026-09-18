@@ -25,7 +25,7 @@ class ForceTrackingComparisonConfig(_ComparisonStudyModel):
 
     name: str = Field(default="force_tracking_controller_comparison", min_length=1)
     # 仅供旧的 protocol 直调入口使用；正式 Hydra 研究由 experiment 组合 profile。
-    profile: Path = Field(default=Path("configs/dm_gripper.yaml"), exclude=True)
+    profile: Path = Field(default=Path("tests/fixtures/profiles/dm_gripper.yaml"), exclude=True)
     tasks: tuple[Path, ...]
     controllers: tuple[ControllerVariant, ...]
     stiffness_estimator_method: StiffnessEstimatorMethod = "window_linear"

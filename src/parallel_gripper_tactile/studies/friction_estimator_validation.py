@@ -29,7 +29,7 @@ class FrictionEstimatorValidationStudyConfig(_StudyModel):
 
     name: str = Field(default="friction_estimator_validation", min_length=1)
     # 仅供旧的 protocol 直调入口使用；正式 Hydra 研究由 experiment 组合 profile。
-    profile: Path = Field(default=Path("configs/dm_gripper.yaml"), exclude=True)
+    profile: Path = Field(default=Path("tests/fixtures/profiles/dm_gripper.yaml"), exclude=True)
     scenarios: tuple[LocalSlipScenario, ...]
     seeds: SeedSweep = SeedSweep()
     # 仅供旧的 protocol 直调入口使用；正式研究目录由 execution 组唯一管理。

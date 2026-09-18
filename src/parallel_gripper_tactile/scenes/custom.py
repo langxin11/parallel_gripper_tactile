@@ -14,7 +14,8 @@ from ..config.profiles import GripperProfile
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_PROFILE = REPOSITORY_ROOT / "configs" / "dm_gripper.yaml"
+DEFAULT_PROFILE = REPOSITORY_ROOT / "tests/fixtures/profiles/dm_gripper.yaml"
+# 历史 schema 示例默认值；正式科研与单次实验一律使用 research 组合入口。
 GRASP_WORLD_XML = REPOSITORY_ROOT / "assets" / "scenes" / "grasp_world.xml"
 TARGET_CUBE_XML = REPOSITORY_ROOT / "assets" / "objects" / "target_cube.xml"
 GRIPPER_PREFIX = "gripper/"

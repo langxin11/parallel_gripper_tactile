@@ -84,7 +84,7 @@ def test_execute_force_tracking_writes_complete_run_artifacts(
         return result
 
     monkeypatch.setattr(force_tracking, "run_force_tracking", fake_run)
-    profile = ROOT / "configs" / "dm_gripper.yaml"
+    profile = ROOT / "tests/fixtures/profiles/dm_gripper.yaml"
     task = ROOT / "configs" / "task" / "force_tracking" / "step.yaml"
     run, returned = force_tracking.execute_force_tracking(
         profile=profile,

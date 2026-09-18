@@ -181,7 +181,7 @@ def test_task_rejects_unknown_fields_and_unsafe_force_limit() -> None:
 @pytest.mark.parametrize("material", ["soft", "medium", "hard", "stiff"])
 def test_robotiq_material_scenes_compile_with_full_command_range(material: str) -> None:
     """四种刚度场景均保留 0～255 actuator 命令范围。"""
-    profile = load_profile(ROOT / "configs/robotiq_2f85.yaml")
+    profile = load_profile(ROOT / "tests/fixtures/profiles/robotiq_2f85.yaml")
     model = load_grasp_model(None, profile.model_path, object_material=material)
     actuator = model.actuator("gripper/fingers_actuator").id
 

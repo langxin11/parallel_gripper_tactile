@@ -45,9 +45,9 @@ uv run python scripts/research/run.py \
 `direct_torque` 两个历史复现配置入口已移除，不进入默认正式控制器对比；变体派生能力
 仍保留在代码层，历史数据复现以当时的 git 版本为准。
 
-根目录的 `dm_gripper.yaml` 与 `robotiq_2f85.yaml` 只保留为独立 profile schema 示例和底层 Python API
-的兼容默认值，不是组合入口的参数来源。派生完整 profile 已删除；单次实验和正式研究均从上述配置组
-构造对象，正式研究直接验证并冻结组合结果。
+历史根目录的 `dm_gripper.yaml` 与 `robotiq_2f85.yaml` 已移至
+`tests/fixtures/profiles/`，仅作为独立 profile schema 示例与旧演示命令的兼容默认值，
+不再是配置真值；单次实验和正式研究均从上述配置组构造对象，正式研究直接验证并冻结组合结果。
 
 其余单次实验也从同一个 `run.yaml` 组合，并共享严格领域解析：
 

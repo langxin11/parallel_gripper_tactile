@@ -3,7 +3,7 @@ name: robotiq_2f85
 
 model:
   # Robotiq 2F-85 的 3×3 taxel 力传感器版本 MJCF。
-  path: ../assets/grippers/robotiq_2f85/2f85_taxels.xml
+  path: ../../../assets/grippers/robotiq_2f85/2f85_taxels.xml
 
 control:
   # Robotiq 示例模型使用位置执行器；控制量为模型内定义的 actuator 命令。

@@ -48,7 +48,7 @@ def test_profiles_compile_and_satisfy_contract(
     profile_name: str, actuator: str, channels: int
 ) -> None:
     """两个 profile 均可编译且满足触觉通道契约。"""
-    profile = load_profile(ROOT / "configs" / profile_name)
+    profile = load_profile(ROOT / "tests" / "fixtures" / "profiles" / profile_name)
     report = validate_profile(profile)
     assert report.actuator == actuator
     assert report.tactile_channels == channels
@@ -56,7 +56,7 @@ def test_profiles_compile_and_satisfy_contract(
 
 def test_tactile_names_are_row_major() -> None:
     """taxel 命名按行优先（00..22）排列。"""
-    profile = load_profile(ROOT / "configs" / "dm_gripper.yaml")
+    profile = load_profile(ROOT / "tests/fixtures/profiles/dm_gripper.yaml")
     assert profile.tactile.names("left") == (
         "left_taxel_geom_00",
         "left_taxel_geom_01",
@@ -72,7 +72,7 @@ def test_tactile_names_are_row_major() -> None:
 
 def test_custom_profile_defines_bounded_mit_torque_control() -> None:
     """DM_Gripper 默认使用保留高度差的稳定碰撞代理与有界 MIT 控制。"""
-    profile = load_profile(ROOT / "configs" / "dm_gripper.yaml")
+    profile = load_profile(ROOT / "tests/fixtures/profiles/dm_gripper.yaml")
 
     assert profile.model_path.name == "parallel_gripper_height_sphere_collision.xml"
     assert profile.control_mode == "mit_torque"
@@ -118,7 +118,7 @@ def test_custom_profile_defines_bounded_mit_torque_control() -> None:
 
 def test_stiffness_profile_validates_window_method_requirements() -> None:
     """窗口拟合方法必须配置足够且不超过窗口大小的样本数。"""
-    profile = load_profile(ROOT / "configs/dm_gripper.yaml")
+    profile = load_profile(ROOT / "tests/fixtures/profiles/dm_gripper.yaml")
     assert profile.normal_force is not None
     assert profile.normal_force.stiffness is not None
 

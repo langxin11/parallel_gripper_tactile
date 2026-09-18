@@ -19,7 +19,7 @@ from parallel_gripper_tactile.visualization import friction as friction_plot
 
 
 ROOT = Path(__file__).resolve().parents[1]
-PROFILE = ROOT / "configs/dm_gripper.yaml"
+PROFILE = ROOT / "tests/fixtures/profiles/dm_gripper.yaml"
 TASK_PATH = ROOT / "configs/task/friction_probe/nominal_friction.yaml"
 
 

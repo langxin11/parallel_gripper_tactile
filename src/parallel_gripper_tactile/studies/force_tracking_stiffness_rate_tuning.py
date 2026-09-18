@@ -38,7 +38,7 @@ class ForceTrackingStiffnessRateTuningConfig(_TuningModel):
 
     name: str = Field(default="force_tracking_stiffness_rate_tuning", min_length=1)
     analysis_mode: Literal["tuning", "confirmation"] = "tuning"
-    profile: Path = Field(default=Path("configs/dm_gripper.yaml"), exclude=True)
+    profile: Path = Field(default=Path("tests/fixtures/profiles/dm_gripper.yaml"), exclude=True)
     tasks: tuple[Path, ...]
     stiffness_estimator_method: StiffnessEstimatorMethod = "window_linear"
     materials: tuple[ObjectMaterial, ...]

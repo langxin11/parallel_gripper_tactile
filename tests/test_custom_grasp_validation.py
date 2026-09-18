@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def test_custom_scene_fixes_reserved_base_and_keeps_free_cube() -> None:
     """场景固定预留 base 自由关节且方块保持自由。"""
-    profile = load_profile(ROOT / "configs/dm_gripper.yaml")
+    profile = load_profile(ROOT / "tests/fixtures/profiles/dm_gripper.yaml")
     model = scene.build_custom_grasp_model(profile)
     assert model.opt.timestep == pytest.approx(0.001)
 
@@ -57,7 +57,7 @@ def test_custom_scene_adds_18_explicit_tactile_object_pairs(
     material: str, solref: tuple[float, float]
 ) -> None:
     """每档材料都为左右 3×3 taxel 生成独立显式 pair。"""
-    profile = load_profile(ROOT / "configs/dm_gripper.yaml")
+    profile = load_profile(ROOT / "tests/fixtures/profiles/dm_gripper.yaml")
     model = scene.build_custom_grasp_model(profile, object_material=material)  # type: ignore[arg-type]
 
     assert model.npair == 18
@@ -78,7 +78,7 @@ def test_custom_scene_adds_18_explicit_tactile_object_pairs(
 
 def test_custom_scene_uses_independent_sliding_friction_coefficient() -> None:
     """自定义摩擦系数仅覆盖两个切向滑动方向。"""
-    profile = load_profile(ROOT / "configs/dm_gripper.yaml")
+    profile = load_profile(ROOT / "tests/fixtures/profiles/dm_gripper.yaml")
     model = scene.build_custom_grasp_model(profile, friction_coefficient=0.35)
 
     assert np.allclose(model.pair_friction, (0.35, 0.35, 0.02, 0.001, 0.001))
@@ -89,7 +89,7 @@ def test_custom_scene_rejects_invalid_friction_coefficient(
     friction_coefficient: float,
 ) -> None:
     """摩擦系数必须为有限正数。"""
-    profile = load_profile(ROOT / "configs/dm_gripper.yaml")
+    profile = load_profile(ROOT / "tests/fixtures/profiles/dm_gripper.yaml")
 
     with pytest.raises(ValueError, match="friction_coefficient must be finite and positive"):
         scene.build_custom_grasp_model(profile, friction_coefficient=friction_coefficient)
@@ -97,7 +97,7 @@ def test_custom_scene_rejects_invalid_friction_coefficient(
 
 def test_custom_scene_rejects_unknown_object_material() -> None:
     """材料档位必须来自受支持的显式接触 preset。"""
-    profile = load_profile(ROOT / "configs/dm_gripper.yaml")
+    profile = load_profile(ROOT / "tests/fixtures/profiles/dm_gripper.yaml")
 
     with pytest.raises(ValueError, match="object_material must be one of"):
         scene.build_custom_grasp_model(profile, object_material="rubber")  # type: ignore[arg-type]
@@ -106,7 +106,9 @@ def test_custom_scene_rejects_unknown_object_material() -> None:
 def test_custom_horizontal_hold_and_zero_disturbance_baseline_passes() -> None:
     """水平无支撑保持与零扰动基线验收通过。"""
     protocol = validation.DisturbanceProtocol(force_n=0.0)
-    result = validation.run_acceptance(ROOT / "configs/dm_gripper.yaml", protocol=protocol)
+    result = validation.run_acceptance(
+        ROOT / "tests/fixtures/profiles/dm_gripper.yaml", protocol=protocol
+    )
 
     assert result.hold_passed
     assert result.disturbance_passed
@@ -115,7 +117,7 @@ def test_custom_horizontal_hold_and_zero_disturbance_baseline_passes() -> None:
 
 def test_custom_grasp_rejects_cube_mass_below_fifty_grams() -> None:
     """DM_Gripper 验收场景拒绝低于 50 g 的测试块。"""
-    profile = load_profile(ROOT / "configs/dm_gripper.yaml")
+    profile = load_profile(ROOT / "tests/fixtures/profiles/dm_gripper.yaml")
 
     with pytest.raises(ValueError, match="at least 0.05 kg"):
         scene.build_custom_grasp_model(profile, cube_mass=0.049)
@@ -126,7 +128,7 @@ def test_custom_grasp_trace_plot_is_written(tmp_path: Path, fast_png_render: Non
     output_csv = tmp_path / "custom_grasp.csv"
     output_plot = tmp_path / "custom_grasp.png"
     validation.run_acceptance(
-        ROOT / "configs/dm_gripper.yaml",
+        ROOT / "tests/fixtures/profiles/dm_gripper.yaml",
         protocol=validation.DisturbanceProtocol(force_n=0.0),
         output_csv=output_csv,
         output_plot=output_plot,

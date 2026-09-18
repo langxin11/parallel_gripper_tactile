@@ -26,7 +26,8 @@ from .custom_demo import build_demo_model
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
-CONTACT_PROFILE = REPOSITORY_ROOT / "configs" / "dm_gripper.yaml"
+CONTACT_PROFILE = REPOSITORY_ROOT / "tests/fixtures/profiles/dm_gripper.yaml"
+# 历史 schema 示例默认值；正式科研与单次实验一律使用 research 组合入口。
 DEFAULT_OUTPUT_DIR = REPOSITORY_ROOT / "outputs/custom_gripper/experiments/contact_model_ab"
 
 

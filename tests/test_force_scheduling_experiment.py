@@ -42,7 +42,7 @@ def _support_release_arm(name: str, *, seed: int = 0):
     return compose_support_release_arm(arm, seed=seed)
 
 
-PROFILE = ROOT / "configs/dm_gripper.yaml"
+PROFILE = ROOT / "tests/fixtures/profiles/dm_gripper.yaml"
 GRAVITY_TASK = ROOT / "configs/task/load/gravity_hold.yaml"
 FILLING_TASK = ROOT / "configs/task/load/dynamic_filling.yaml"
 ORACLE = OracleForceSchedulerConfig(max_force_rate_n_s=1.0)

@@ -69,7 +69,7 @@ def test_root_and_subcommand_help_are_available() -> None:
 
 def test_validate_profile_and_invalid_yaml_exit_codes(tmp_path: Path) -> None:
     """配置校验成功，配置错误时使用退出码二。"""
-    profile = ROOT / "configs" / "robotiq_2f85.yaml"
+    profile = ROOT / "tests/fixtures/profiles/robotiq_2f85.yaml"
     assert RUNNER.invoke(app, ["validate", str(profile)]).exit_code == 0
 
     invalid = tmp_path / "invalid.yaml"

@@ -42,7 +42,8 @@ if TYPE_CHECKING:
     from .friction_estimation import FrictionEstimationTask
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_PROFILE = REPOSITORY_ROOT / "configs" / "dm_gripper.yaml"
+DEFAULT_PROFILE = REPOSITORY_ROOT / "tests/fixtures/profiles/dm_gripper.yaml"
+# 历史 schema 示例默认值；正式科研与单次实验一律使用 research 组合入口。
 DEFAULT_RAMP_TASK = REPOSITORY_ROOT / "configs" / "task" / "force_tracking" / "ramp.yaml"
 DEFAULT_FRICTION_TASK = (
     REPOSITORY_ROOT / "configs" / "task" / "friction_estimation" / "nominal_friction.yaml"

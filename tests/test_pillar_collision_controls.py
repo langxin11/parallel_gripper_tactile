@@ -57,7 +57,7 @@ def test_height_sphere_generator_preserves_taxel_site_heights(tmp_path: Path) ->
 
 def test_custom_scene_can_disable_multiccd_without_changing_the_model() -> None:
     """关闭 multiccd 只设置求解选项，不替换 Pillar mesh。"""
-    default_profile = load_profile(ROOT / "configs" / "dm_gripper.yaml")
+    default_profile = load_profile(ROOT / "tests/fixtures/profiles/dm_gripper.yaml")
     profile = default_profile.model_copy(
         update={"model": default_profile.model.model_copy(update={"path": SOURCE})}
     )

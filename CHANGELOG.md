@@ -116,6 +116,11 @@
 
 ### 变更
 
+- 根目录完整 profile `configs/dm_gripper.yaml`、`configs/robotiq_2f85.yaml` 移至
+  `tests/fixtures/profiles/` 作为独立 schema 示例；配置目录不再维护与组合入口重复的
+  第二份真值。旧演示命令（抓取、接触比较、视频）默认值随迁，行为不变；新代码一律
+  使用 `run.yaml` 组合入口。
+
 - 摩擦任务组更名 `task/friction_estimation`→`task/friction_probe`，任务家族同步改名，
   明确任务拥有的是探测场景及其按场景调参的观测与调度条件（各场景的估计器、
   局部起滑检测与调度参数属于研究矩阵的实验条件，保留在任务内不抽共享组）。
