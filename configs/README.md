@@ -107,7 +107,7 @@ uv run pgt compare tactile \
 因此 `study.definition` 不再重复保存完整 profile 路径或 `output_root`。
 
 推荐的科学决策顺序是“刚度速率控制参数确认 → 人工审查并冻结配置 → 最终控制器比较”；
-摩擦估计器验证与自适应抓取研究独立推进。历史已完成的结构验证、参数调优与
+摩擦估计器验证与自适应撤支撑调度验证独立推进。历史已完成的结构验证、参数调优与
 Torque ADRC 调参研究已退役，结论与复现版本以当时的研究产物和 git 提交为准。
 
 ```bash
@@ -117,8 +117,9 @@ uv run python scripts/research/study.py research=dm_stiffness_rate_confirmation/
 # 人工冻结候选配置后再生成最终控制器比较计划。
 uv run python scripts/research/study.py research=dm_force_controller_selection/study
 
-# 独立研究：摩擦估计器验证。
+# 独立研究：摩擦估计器验证与自适应撤支撑调度验证。
 uv run python scripts/research/study.py research=friction_estimator_validation/study
+uv run python scripts/research/study.py research=adaptive_support_release_validation/study
 ```
 
 以上命令默认只生成计划；显式追加 `execution=study_run` 才执行仿真。执行时可再追加

@@ -63,7 +63,7 @@ uv run python scripts/research/study.py research=dm_force_controller_selection/s
 | 1 | `dm_stiffness_rate_confirmation` | 在固定 250 Hz 外环和三种材料下确认刚度速率候选参数。 |
 | 决策门 | 人工审查 | 检查状态、科学失败、执行异常、排名与配对统计；更新并提交配置、测试和文档。 |
 | 2 | `dm_force_controller_selection` | 比较已经冻结的控制器。 |
-| 独立研究 | `friction_estimator_validation` | 验证摩擦估计与局部起滑检测，不阻塞 DM 选型。 |
+| 独立研究 | `friction_estimator_validation`、`adaptive_support_release_validation` | 分别验证摩擦估计与自适应撤支撑调度（六臂 × 三 seed），不阻塞 DM 选型。 |
 
 矩阵、准入规则与科学结论见[控制算法对比与消融](control-comparison-ablation.md)，条件列表以
 `configs/research/<purpose>/study.yaml` 及生成计划为准。

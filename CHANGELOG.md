@@ -106,6 +106,14 @@
 - `scripts/test_changed.py` 的 workspace 包分支升级为消费者映射：共享核改动同时覆盖真机实验包
   与仿真力跟踪回归，实验包与设备包改动覆盖对应契约测试。
 
+### 新增
+
+- 新增正式研究 `adaptive_support_release_validation`（kind
+  `force_scheduling_support_release`，六臂 × 三 seed 共 18 条）：oracle 与 adaptive
+  共享力限和速率，臂间唯一系统差异是目标力信息来源；同时比较多速率与风险增强。
+  原 `adaptive_support_release`、`_pid`、`_multirate`、`_risk` 四个单次 experiment
+  入口随之退役，由研究矩阵的对照臂表达。
+
 ### 变更
 
 - 摩擦任务组更名 `task/friction_estimation`→`task/friction_probe`，任务家族同步改名，

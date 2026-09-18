@@ -84,12 +84,9 @@ trace 记录切向需求、真值摩擦、原始／受限目标、触觉力、�
 
 ```bash
 uv run pgt run force-schedule --experiment dm_gripper/force_scheduling_adaptive
-# 自重 2.5 N 的撤支撑工况，1 N 初始抓力、50 N/s 限速；当前位移仍未达标
-uv run pgt run force-schedule --experiment dm_gripper/adaptive_support_release
-# 独立 1000 Hz 触觉预处理与 250 Hz 控制，保留高频触觉日志
-uv run pgt run force-schedule --experiment dm_gripper/adaptive_support_release_multirate
-# 保留相同上层策略，比较位置式 PID＋机构力矩前馈
-uv run pgt run force-schedule --experiment dm_gripper/adaptive_support_release_pid
+# 自重 2.5 N 撤支撑的六臂 × 三 seed 正式矩阵（oracle／adaptive／多速率／风险）。
+uv run python scripts/research/study.py \
+  research=adaptive_support_release_validation/study
 ```
 
 调度参数只来自 `scheduler=force/adaptive`，外载任务不再携带算法参数。
@@ -97,7 +94,7 @@ uv run pgt run force-schedule --experiment dm_gripper/adaptive_support_release_p
 它只接收双侧各九点三轴力、实测平均单侧力、时间和上一控制周期执行限幅；
 场景摩擦、外加载荷和物体位移不进入策略。导纳开启最终 MIT 请求限幅的状态回投。
 
-`adaptive_support_release_multirate` 直接继承 `adaptive_support_release`，集中保存当前候选的三项覆盖：
+`adaptive-admittance-multirate` 研究臂集中保存当前候选的三项覆盖：
 导纳速度上限为 0.20 rad/s、力矩前馈比例为 1.0、承载调度的 `load.filter_tau_s` 为 0.01 s。
 原基线继续保留 0.05 rad/s、0.2 和 0.05 s。中间的 `fast`、`transient` 入口已移除，
 多速率候选及继承它的 `risk` 候选有效参数保持不变；无需再逐层查找这些覆盖。
@@ -109,7 +106,7 @@ uv run pgt run force-schedule --experiment dm_gripper/adaptive_support_release_p
 该组合用于硬物体、自重 2.5 N 的仿真工况；更短滤波对噪声更敏感，跨材料、噪声水平及真机表现
 仍需独立验证，不能据此替换真机参数。
 
-`adaptive_support_release_multirate` 同时显式启用 `task.tactile_sampling`：
+`adaptive-admittance-multirate` 臂同时显式启用 `task.tactile_sampling`：
 `period_s=0.001`、`median_window=3`、`stale_after_s=0.01`、`record_raw=true`。
 共享场景默认物理步长为 1 ms，控制周期仍为 4 ms，每个控制周期对应四个触觉采样。
 未配置此字段的组合保持原观测调用路径，也使用新的默认物理步长；历史产物与实验结论不回溯改写。
@@ -131,7 +128,7 @@ uv run pgt run force-schedule --experiment dm_gripper/adaptive_support_release_p
 `--set scheduler.definition.load.filter_tau_s=0.005`。
 这些都是独立探索覆盖，不自动改变原瞬态候选，亦不代表异常、材料和真机评测已经全部完成。
 
-`adaptive_support_release_pid` 是仿真专用对照：保持同一任务、调度器、1 N 初始力、50 N/s 目标限速、
+`adaptive-pid` 臂是仿真专用对照：保持同一任务、调度器、1 N 初始力、50 N/s 目标限速、
 20 Hz 法向低通、4 ms 外环、MIT 增益、协议力矩上限与配对 seed，仅替换下层完整控制结构。
 复用 `pid-torque-ff` 的位置式 PID；机构模型力矩前馈只由目标力与机构雅可比计算，
 `window_linear` 的估计值不进入该前馈或上层调度。
@@ -158,7 +155,7 @@ uv run pgt run force-schedule --experiment dm_gripper/adaptive_support_release_p
 较低候选经折减后可即时接受，提高需多个独立一致事件；低质量或越界候选不覆盖已有估计，
 接触变化及过期回退到先验。不能把普通稳态切法向力比直接解释为真实静摩擦系数。
 
-`dm_gripper/adaptive_support_release_risk` 是独立实验候选：开启两条权限，风险窗口 40 ms、确认 12 ms，
+`adaptive-admittance-risk` 臂是独立候选：开启两条权限，风险窗口 40 ms、确认 12 ms，
 每步 1 N、续增间隔 100 ms、风险附加速率 50 N/s，累计预算 12 N／12 步／20 s，
 保留仿真原 8 N 上限。它显式开启 `observer.allow_steady_load_risk`，允许稳载下局部剪切
 重分配形成风险，但仍排除明显卸载与主动法向增力；恒定载荷本身不触发。
