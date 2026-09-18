@@ -161,27 +161,9 @@ def test_step_tracking_tracks_rising_reference():
     assert controller._filtered_force is not None  # noqa: SLF001  检查滤波状态存在
 
 
-@pytest.mark.parametrize("position_feedforward_gain", [None, 0.0, 0.25])
-def test_pid_position_bias_follows_measurement_not_contact_or_previous_command(
-    position_feedforward_gain,
-):
-    """纯 PI、力矩前馈和刚度加法均以每周期实测位置为偏置参考。"""
-    stiffness = (
-        None
-        if position_feedforward_gain is None
-        else ContactStiffnessConfig(
-            enabled=True,
-            initial_n_per_m=2000.0,
-            min_n_per_m=100.0,
-            max_n_per_m=100_000.0,
-            filter_alpha=0.15,
-            min_delta_closure_m=1e-5,
-            min_delta_force_n=1e-3,
-            position_feedforward_gain=position_feedforward_gain,
-            torque_feedforward_gain=1.0,
-        )
-    )
-    controller = _controller(stiffness=stiffness)
+def test_pid_position_bias_follows_measurement_not_contact_or_previous_command():
+    """PI 位置偏置始终以每周期实测位置为参考。"""
+    controller = _controller()
     inner = FakeInner(position=0.3)
     controller.begin_tracking(inner, observation=_observation(0.4, 0.4), reference=_reference(0.5))
 
@@ -198,15 +180,6 @@ def test_pid_position_bias_follows_measurement_not_contact_or_previous_command(
         assert target == pytest.approx(measured_position + command.position_adjustment)
         assert target != pytest.approx(0.3 + command.position_adjustment)
         assert target != pytest.approx(previous_target + command.position_adjustment)
-        if stiffness is not None:
-            assert command.force_feedforward_torque == pytest.approx(
-                KINEMATICS.closure_jacobian(measured_position) * 0.5
-            )
-            assert command.stiffness_position_adjustment == pytest.approx(
-                position_feedforward_gain
-                * 0.1
-                / (2000.0 * KINEMATICS.closure_jacobian(measured_position))
-            )
 
 
 @pytest.mark.parametrize(
@@ -355,7 +328,6 @@ def test_independent_pid_torque_feedforward_overrides_model_without_changing_bia
             filter_alpha=0.15,
             min_delta_closure_m=1e-5,
             min_delta_force_n=1e-3,
-            position_feedforward_gain=0.0,
         )
         if with_stiffness
         else None
@@ -380,7 +352,6 @@ def test_independent_pid_torque_feedforward_overrides_model_without_changing_bia
         assert command.force_feedforward_torque == pytest.approx(expected)
         assert inner.commands[-1]["feedforward_torque"] == pytest.approx(expected)
         assert command.position_adjustment == pytest.approx(baseline.position_adjustment)
-        assert command.stiffness_position_adjustment == 0.0
 
 
 @pytest.mark.parametrize("gain", [-0.1, 1.1, float("nan"), float("inf"), True])

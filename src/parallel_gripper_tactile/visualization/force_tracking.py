@@ -54,11 +54,6 @@ def _has_values(values: np.ndarray) -> bool:
     return bool(_finite_mask(values).any())
 
 
-def _has_contribution(values: np.ndarray) -> bool:
-    """判断诊断分量是否真实贡献过，避免为全零占位字段增加面板。"""
-    return bool(np.any(np.abs(values[_finite_mask(values)]) > 1e-12))
-
-
 def _as_bool(value: object) -> bool:
     """兼容内存／Parquet 布尔值与 CSV 序列化后的 ``true`` 字符串。"""
     return value is True or (isinstance(value, str) and value.lower() == "true")
@@ -515,15 +510,6 @@ def _render_controller_figure(
         "adrc_disturbance",
         _values(trace, "torque_adrc_estimated_disturbance_n_s2"),
     )
-    pid_adjustment = _values(trace, "pid_position_adjustment_rad")
-    stiffness_adjustment = _values(trace, "stiffness_position_adjustment_rad")
-    if _has_contribution(stiffness_adjustment):
-        panels.append(
-            (
-                "position_adjustment",
-                {"pid": pid_adjustment, "stiffness": stiffness_adjustment},
-            )
-        )
     if not panels:
         return None
     plt = science_pyplot(font_scale=FULL_WIDTH_FONT_SCALE)

@@ -95,7 +95,7 @@ class CrankSliderGeometry(_FrozenModel):
 
 
 class ContactStiffnessControl(_FrozenModel):
-    """在线接触刚度估计、前馈与刚度感知位置限幅参数。"""
+    """在线接触刚度估计、机构力矩前馈与刚度感知位置限幅参数。"""
 
     enabled: bool = True
     method: StiffnessEstimatorMethod = "window_linear"
@@ -107,7 +107,6 @@ class ContactStiffnessControl(_FrozenModel):
     min_delta_force_n: Annotated[FiniteFloat, Field(gt=0)]
     window_size: Annotated[int, Field(gt=0)] = 25
     min_samples: Annotated[int, Field(gt=0)] = 8
-    position_feedforward_gain: Annotated[FiniteFloat, Field(ge=0, le=1)] = 0.25
     torque_feedforward_gain: Annotated[FiniteFloat, Field(ge=0, le=1)] = 1.0
     position_limit_enabled: bool = False
     position_limit_force_rate_n_s: Annotated[FiniteFloat, Field(gt=0)] = 10.0
@@ -125,10 +124,6 @@ class ContactStiffnessControl(_FrozenModel):
         degree = {"window_linear": 1, "window_quadratic": 2}.get(self.method)
         if degree is not None and self.min_samples < degree + 1:
             raise ValueError("min_samples must provide enough samples for the selected method")
-        if self.position_limit_enabled and self.position_feedforward_gain > 0:
-            raise ValueError(
-                "stiffness position feedforward and position limit are mutually exclusive"
-            )
         return self
 
 

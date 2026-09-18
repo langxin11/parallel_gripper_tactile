@@ -9,7 +9,7 @@
 
 ## 运行边界与时序
 
-实验只接受仿真 DM `full` 或 `pid-only` 组合。两者使用现有的 MIT 法向 PID 外环；外环在 `control_period_s` 到期时读取触觉并生成目标，MIT 内环则在每个 MuJoCo 物理步用最新关节状态保持执行该目标。`admittance`、ADRC 变体和 viewer 会在计划预检时拒绝。
+实验只接受仿真 DM `pid-torque-ff` 或 `pid-only` 组合。两者使用现有的 MIT 法向 PID 外环；外环在 `control_period_s` 到期时读取触觉并生成目标，MIT 内环则在每个 MuJoCo 物理步用最新关节状态保持执行该目标。`admittance`、ADRC 变体和 viewer 会在计划预检时拒绝。
 
 本实验固定使用 `multiccd_enabled=true`，不接受显式轨迹降采样周期；
 `execution.trace_sample_period_s=null` 表示按完整物理步保存。

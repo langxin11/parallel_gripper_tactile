@@ -1,0 +1,14 @@
+# @package controller
+# DM PID 系列的公共位置修正外环。具体变体只声明名称及其算法差异。
+defaults:
+  - /controller/dm_gripper/_common
+  - _self_
+
+force:
+  # 误差定义为目标法向力减测量法向力；PID 输出为电机关节位置修正量。
+  # kp、ki、kd 单位依次为 rad/N、rad/(N·s)、rad·s/N。
+  kp: 0.016
+  ki: 0.2
+  kd: 0.0
+  # 相对接触位置的累计修正绝对上限，单位为 rad，同时承担积分抗饱和边界。
+  max_position_adjustment: 0.30

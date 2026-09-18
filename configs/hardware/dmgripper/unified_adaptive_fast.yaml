@@ -75,7 +75,6 @@ controller:
     # 按真机实验要求单向保持；负力误差不驱动减小闭合量，显式释放走独立流程。
     prevent_unloading: true
     feedforward_ratio: 1.0
-  stiffness_consumption: none
 safety:
   max_target_force_n: 30.0
   force_ceiling_n: 35.0

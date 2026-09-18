@@ -54,7 +54,6 @@ controller:
   admittance:
     force_deadband_n: 0.1
     prevent_unloading: true
-  stiffness_consumption: none
 estimation:
   enabled: true
   method: window_linear

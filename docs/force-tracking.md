@@ -81,24 +81,12 @@ J_f(q)=\frac{\partial f_n}{\partial q}
 所有目标与误差均使用 \(f_n=(F_L+F_R)/2\)。控制算法位于 `packages/dm_grasp_core`，
 `src/parallel_gripper_tactile/control.py` 负责配置与 MuJoCo 适配。
 
-### 位置式 PID 与刚度变体 {#pid-stiffness-variants}
+### 位置式 PID 与刚度约束变体 {#pid-stiffness-variants}
 
-PID 基线控制器为 `pid-torque-ff`：PID 位置修正加机构力矩前馈，不含刚度位置前馈。
-`pid-stiffness-limit` 关闭刚度加法修正，改用刚度约束位置偏置增量；该变体仅保留专项实验，
-不在默认正式比较矩阵中。`pid-stiffness-rate` 是独立的速率式控制变体。
-`pid-stiffness-ff` 与 `full` 两个含刚度位置修正的历史变体已退役配置入口
-（消融证据显示刚度加法修正的附加收益有限），仅在代码层保留自包含派生供历史研究复现。
-
-令 \(e_f=f_{ref}-f_n\)，逆刚度位置修正与机构力矩前馈分别为：
-
-\[
-\Delta q_{stiff}=\alpha\frac{e_f}{\hat k_{pair}J_c(q)},\qquad
-\tau_{ff}=\beta f_{ref}J_c(q).
-\]
-
-逆刚度项与 PI 相加时，二者均依赖实时力误差，因此属于模型辅助反馈，可能重复补偿；
-它不是严格意义上的参考前馈。刚度也可用于限制每周期位置增量或把期望力变化率换算成关节速度。
-下面分别说明位置式、刚度限幅与刚度速率三种实现的离散公式、限幅和控制频率语义。
+PID 基线控制器为 `pid-torque-ff`：PID 根据力误差生成唯一的位置修正，机构力矩前馈只由目标力与
+机构雅可比计算。在线刚度不生成额外位置控制量，只用于限制 PID 位置偏置的周期变化、把期望力变化率
+换算成关节速度，或调度 ADRC 输入增益。`pid-stiffness-limit` 仅保留专项实验，不在默认正式比较矩阵中；
+`pid-stiffness-rate` 是独立的速率式控制变体。
 
 这里的 PID 输出是相对每周期实测位置的**位置偏置**，不是速度命令或相邻周期指令增量。令
 \(e_k=F_{\mathrm{ref},k}-F_{n,k}\)、外环周期为 \(T_c\)，则未限幅输出可写为
@@ -107,7 +95,7 @@ PID 基线控制器为 `pid-torque-ff`：PID 位置修正加机构力矩前馈�
 \delta q_k^\ast=K_p e_k+K_i\sum_{i=0}^{k}e_iT_c-K_d\frac{F_{n,k}-F_{n,k-1}}{T_c}.
 \]
 
-普通 PID 将该输出与可选刚度位置修正相加，再裁剪到
+普通 PID 将该输出裁剪到
 \([-\delta q_{\max},+\delta q_{\max}]\)，最终使用
 \(q_{\mathrm{ref},k}=q_{\mathrm{real},k}+\delta q_k\)。位置参考取当期反馈，
 既不是固定接触位置，也不是上一周期位置指令；限幅约束当前位置附近的偏置，不约束累计闭合行程。

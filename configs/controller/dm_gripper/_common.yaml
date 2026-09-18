@@ -1,0 +1,29 @@
+# @package controller
+# DM 力控器的算法无关公共参数：各控制器共享 MIT 接近内环、目标力、接触判定、
+# 测量滤波、接触阶段监督、机构模型力矩补偿和刚度感知限幅边界。
+family: dm
+# MIT 内环增益：kp 单位为 N·m/rad，kd 单位为 N·m·s/rad。
+# 所有控制器的接近阶段共用；跟踪阶段是否旁路由具体控制律决定。
+mit_gains: {kp: 20.0, kd: 0.63793536}
+force:
+  # 力均指左右指尖法向力的单侧平均值，单位为 N。
+  target_n: 8.0
+  contact_threshold_n: 0.15
+  # 接触与释放均需连续满足指定控制周期数，避免单帧噪声触发状态切换。
+  contact_confirm_steps: 5
+  release_threshold_n: 0.05
+  release_confirm_steps: 25
+  # 平均单侧法向力测量的一阶低通截止频率。
+  filter_cutoff_hz: 20.0
+  # 时间参数单位为 s；release_policy=any_side 表示任一侧失去接触即开始释放确认。
+  supervisor:
+    contact_stable_time_s: 0.0
+    contact_transition_time_s: 0.05
+    release_policy: any_side
+# 机构模型力矩前馈与刚度感知限幅基线。torque_feedforward_gain 为无量纲比例；
+# force_rate 单位为 N/s，safety_factor 乘在估计刚度上形成保守边界。
+stiffness_control:
+  torque_feedforward_gain: 1.0
+  position_limit_enabled: false
+  position_limit_force_rate_n_s: 10.0
+  position_limit_stiffness_safety_factor: 1.0

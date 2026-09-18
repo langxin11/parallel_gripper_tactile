@@ -145,7 +145,6 @@ def test_custom_grasp_trace_plot_is_written(tmp_path: Path, fast_png_render: Non
         "filtered_normal_force_n",
         "normal_force_error_n",
         "force_position_adjustment_rad",
-        "stiffness_position_adjustment_rad",
         "stiffness_position_limit_rad",
         "stiffness_position_limited",
         "force_feedforward_torque_n_m",

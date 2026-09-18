@@ -373,7 +373,6 @@ def test_normal_force_controller_switches_after_bilateral_contact() -> None:
     assert command.measured_force_n == pytest.approx(0.2)
     assert command.filtered_force_n == pytest.approx(0.2)
     assert command.position_adjustment > 0
-    assert command.stiffness_position_adjustment > 0
     assert profile.normal_force.stiffness is not None
     assert command.estimated_contact_stiffness_n_per_m == pytest.approx(
         profile.normal_force.stiffness.initial_n_per_m
@@ -526,9 +525,8 @@ def test_normal_force_controller_direct_torque_branch_assembles_feedforward() ->
         )
 
     assert command.state == "force_tracking"
-    # PID 与刚度位置修正不进入命令。
+    # PID 位置修正不进入命令。
     assert command.pid_position_adjustment == 0.0
-    assert command.stiffness_position_adjustment == 0.0
     assert command.position_adjustment == 0.0
     assert command.mit.target_position == pytest.approx(command.mit.position, abs=1e-9)
     # t_ff = 1.0 * (8.0-0.2) * Jc + 1.0 * 8.0 * Jc（average_side 语义缩放为 1）。
@@ -546,7 +544,7 @@ def test_normal_force_controller_direct_torque_branch_assembles_feedforward() ->
     )
 
 
-@pytest.mark.parametrize("variant", ["pid-only", "pid-torque-ff", "full"])
+@pytest.mark.parametrize("variant", ["pid-only", "pid-torque-ff"])
 def test_simulation_pid_uses_current_joint_feedback_as_position_reference(variant: str) -> None:
     """仿真状态机进入跟踪后，位置偏置随当前关节反馈移动。"""
     profile = configure_force_controller(
@@ -622,7 +620,7 @@ def test_default_torque_feedback_gain_keeps_positional_tracking_path() -> None:
     assert default_command.mit.torque != pytest.approx(default_command.mit.feedforward_torque)
 
 
-def test_stiffness_position_limit_bounds_pid_increment_without_position_feedforward() -> None:
+def test_stiffness_position_limit_bounds_pid_increment() -> None:
     """刚度感知变体限制 PID 周期增量，并保留机构力矩前馈。"""
     source = load_profile(ROOT / "configs/dm_gripper.yaml")
     profile = configure_force_controller(source, variant="pid-stiffness-limit")
@@ -646,7 +644,6 @@ def test_stiffness_position_limit_bounds_pid_increment_without_position_feedforw
     assert command.estimated_contact_stiffness_n_per_m == pytest.approx(3000.0)
     assert command.closure_jacobian_m_per_rad is not None
     expected_limit = 10.0 * 0.002 / (3000.0 * command.closure_jacobian_m_per_rad)
-    assert command.stiffness_position_adjustment == 0.0
     assert command.stiffness_position_limit_rad == pytest.approx(expected_limit)
     assert command.stiffness_position_limited is True
     assert command.position_adjustment == pytest.approx(expected_limit)
@@ -698,7 +695,6 @@ def test_stiffness_rate_controller_integrates_velocity_with_control_period() -> 
     # MIT 协议会对速度字段量化；控制器诊断保留量化前的连续命令。
     assert command.mit.target_velocity == pytest.approx(expected_velocity, abs=2e-4)
     assert command.pid_position_adjustment == 0.0
-    assert command.stiffness_position_adjustment == 0.0
 
 
 def _profile_with_adrc(profile: GripperProfile, adrc: AdrcControl | None) -> GripperProfile:
@@ -751,7 +747,6 @@ def test_normal_force_controller_torque_adrc_bypasses_mit_impedance() -> None:
     assert command.state == "force_tracking"
     assert command.position_adjustment == 0.0
     assert command.pid_position_adjustment == 0.0
-    assert command.stiffness_position_adjustment == 0.0
     assert command.force_feedforward_torque > 0.0
     # MIT 位置弹簧与速度阻尼均被旁路，最终力矩只等于 LADRC 前馈通道。
     assert command.mit.torque == pytest.approx(command.mit.feedforward_torque)
@@ -825,7 +820,6 @@ def test_normal_force_controller_adrc_branch_integrates_velocity_into_adjustment
     assert jacobian is not None and jacobian > 0.0
     assert command.position_adjustment == pytest.approx(0.02 / jacobian * 0.002)
     assert command.pid_position_adjustment == 0.0
-    assert command.stiffness_position_adjustment == 0.0
     # MIT 内环增益未被 override：输出力矩仍含位置弹簧项（目标位置高于当前位形）。
     assert command.mit.target_position > command.mit.position
     assert command.mit.torque != pytest.approx(command.mit.feedforward_torque)

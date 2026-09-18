@@ -86,6 +86,9 @@ def _with_current_dm_supervisor(value: object) -> object:
         if isinstance(control, dict):
             force = control.get("force")
             if isinstance(force, dict):
+                stiffness = force.get("stiffness")
+                if isinstance(stiffness, dict):
+                    stiffness.pop("position_feedforward_gain", None)
                 if restored.get("name") == "dm_gripper_admittance":
                     force["contact_threshold_n"] = 0.15
                 force.setdefault("stiffness_rate", None)
@@ -164,6 +167,20 @@ def test_all_dm_non_admittance_controller_groups_resolve(controller: str) -> Non
     )
 
     assert resolved.profile.normal_force is not None
+
+
+def test_dm_controller_fragments_keep_pid_parameters_in_pid_base() -> None:
+    """PID 参数只属于 PID 配置层，ADRC 与导纳片段不携带无效字段。"""
+    pid = resolved_mapping(_compose(["controller=dm_gripper/pid_torque_ff"]))["controller"]
+    adrc = resolved_mapping(_compose(["controller=dm_gripper/adrc_torque"]))["controller"]
+    admittance = resolved_mapping(_compose(["controller=dm_gripper/admittance", "estimator=none"]))[
+        "controller"
+    ]
+
+    pid_fields = {"kp", "ki", "kd", "max_position_adjustment"}
+    assert pid_fields <= pid["force"].keys()
+    for controller in (adrc, admittance):
+        assert pid_fields.isdisjoint(controller["force"])
 
 
 @pytest.mark.parametrize(
@@ -286,7 +303,7 @@ def test_robotiq_model_groups_match_frozen_profiles(model_group: str, legacy_pro
 @pytest.mark.parametrize(
     "overrides",
     [
-        ["controller=dm_gripper/admittance_unified"],
+        ["controller=dm_gripper/admittance"],
         ["estimator=none"],
         ["controller.torque_adrc.measurement_filter_cutoff_hz=-1"],
     ],

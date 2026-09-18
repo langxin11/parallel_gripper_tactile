@@ -823,7 +823,7 @@ def test_comparison_protocol_continues_after_a_condition_exception(
     original = load_comparison_config(source)
     config = original.model_copy(
         update={
-            "controllers": ("pid-only", "full"),
+            "controllers": ("pid-only", "pid-torque-ff"),
             "tasks": (original.tasks[0],),
             "materials": ("medium",),
             "seeds": original.seeds.model_copy(update={"count": 1}),

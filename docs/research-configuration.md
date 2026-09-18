@@ -98,7 +98,7 @@ Torque ADRC 的 `coarse → confirm` 强制校验谱系：coarse manifest 的生
 导纳必须配 `estimator=none`；非导纳仅 `pid-only` 可显式关闭估计器。Torque ADRC 参数仅可随
 `adrc-torque` 出现。platform 选择不连接或使能设备，未支持的硬件组合由 schema 拒绝。
 
-切向扰动仅支持 DM 的 `full`／`pid-only`，拒绝 viewer、导纳与 ADRC；material 写入任务的
+切向扰动仅支持 DM 的 `pid-torque-ff`／`pid-only`，拒绝 viewer、导纳与 ADRC；material 写入任务的
 `object_material`。解析先构造最终 profile，再按实际材料编译 scene，检查 MIT 法向控制及
 `control_period_s` 不小于物理步长。它支持单次与探索性 Multirun，未定义正式 study。
 

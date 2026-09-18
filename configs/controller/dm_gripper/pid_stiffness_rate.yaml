@@ -1,18 +1,21 @@
 # @package controller
 # 力变化率空间 PID：以 K·Jc 把力误差直接映射为电机速度目标，
-# 不使用加法位置前馈或动态位置边界。
+# 该速率外环独立取代位置式 PID，不与 PID 位置修正叠加。
 defaults:
-  - /controller/dm_gripper/_base
+  - /controller/dm_gripper/_pid_base
   - _self_
 
 name: pid-stiffness-rate
 # 基座中的位置式 PID kp/ki/kd 在该变体中不参与跟踪，只为共享 schema 保留。
 force:
   stiffness_rate:
+    # 在力变化率空间计算 PID；三项增益量纲分别为 s⁻¹、s⁻² 和无量纲。
     kp_s_inv: 20.0
     ki_s_inv2: 0.0
     kd: 0.0
+    # 先限期望力变化率，再通过在线刚度与机构雅可比换算并限制关节速度。
     max_force_rate_n_s: 50.0
     max_joint_velocity_rad_s: 0.5
 stiffness_control:
+  # 与 stiffness_rate.max_force_rate_n_s 保持一致，供公共刚度边界和快照使用。
   position_limit_force_rate_n_s: 50.0

@@ -116,7 +116,6 @@ def _stiffness_config(config: ContactStiffnessControl) -> ContactStiffnessConfig
         min_delta_force_n=config.min_delta_force_n,
         window_size=config.window_size,
         min_samples=config.min_samples,
-        position_feedforward_gain=config.position_feedforward_gain,
         torque_feedforward_gain=config.torque_feedforward_gain,
         position_limit_enabled=config.position_limit_enabled,
         position_limit_force_rate_n_s=config.position_limit_force_rate_n_s,

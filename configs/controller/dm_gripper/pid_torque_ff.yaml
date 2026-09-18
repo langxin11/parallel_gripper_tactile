@@ -1,7 +1,8 @@
 # @package controller
-# PID 加机构力矩前馈、关闭刚度位置前馈；隔离力矩前馈模块贡献的消融变体。
+# PID 加机构模型力矩前馈；用于隔离目标力前馈对跟踪性能的贡献。
+# torque_feedforward_gain=1 继承自 _common，表示按目标力完整补偿名义机构力矩。
 defaults:
-  - /controller/dm_gripper/_base
+  - /controller/dm_gripper/_pid_base
   - _self_
 
 name: pid-torque-ff

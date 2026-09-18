@@ -348,7 +348,16 @@ def _profile_from_fragments(
     else:
         stiffness["enabled"] = True
         stiffness["method"] = estimator.name
+    # 最终 profile 的共享数据模型和历史科学哈希仍保留位置式 PID 字段。非 PID
+    # 控制器在 YAML 中不拥有这些参数；此处只补齐兼容值，实际模块启停仍由变体决定。
+    legacy_position_pid: dict[str, object] = {
+        "kp": 0.016,
+        "ki": 0.2,
+        "kd": 0.0,
+        "max_position_adjustment": 0.15,
+    }
     force: dict[str, object] = {
+        **legacy_position_pid,
         **controller.force,
         "geometry": platform.geometry,
         "sensor_taxel_normal_noise_std_n": model.sensor_taxel_normal_noise_std_n,
@@ -417,7 +426,6 @@ def _legacy_to_fragment_mapping(
     stiffness_control = {
         key: stiffness_mapping.pop(key)
         for key in (
-            "position_feedforward_gain",
             "torque_feedforward_gain",
             "position_limit_enabled",
             "position_limit_force_rate_n_s",

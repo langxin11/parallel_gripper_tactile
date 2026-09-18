@@ -33,7 +33,6 @@ def test_default_config_constructs_and_selects_curve():
     assert config.reference.duration_s == pytest.approx(10.0)
     assert config.reference.initial_force_n == pytest.approx(0.5)
     assert config.estimation.enabled is True
-    assert config.controller.stiffness_consumption == "none"
     assert config.hardware.home_position_rad == pytest.approx(0.0)
     assert config.hardware.home_tolerance_rad == pytest.approx(0.03)
     assert config.hardware.feedback_position_margin_rad == pytest.approx(0.05)
@@ -102,7 +101,7 @@ def test_yaml_pid_torque_feedforward_does_not_require_estimation(tmp_path, liter
     """YAML 可在关闭估计时独立配置 PID 模型力矩前馈。"""
     path = tmp_path / "pid.yaml"
     path.write_text(
-        "controller:\n  kind: pid\n  stiffness_consumption: none\n"
+        "controller:\n  kind: pid\n"
         f"  pid:\n    torque_feedforward_gain: {literal}\n"
         "estimation:\n  enabled: false\n",
         encoding="utf-8",
@@ -133,7 +132,6 @@ def test_water_bottle_pid_feedforward_can_be_overridden_in_cli_dry_run(capsys):
     config = load_experiment_config(path)
     assert config.controller.pid.torque_feedforward_gain == 1.0
     assert config.controller.pid.max_position_adjustment_rad is None
-    assert config.controller.stiffness_consumption == "none"
     assert (
         run(
             [
@@ -289,25 +287,6 @@ def test_adaptive_rejects_reapproach_lost_contact_action():
 
     with pytest.raises(ValueError, match="fault"):
         replace(base, lifecycle=replace(base.lifecycle, lost_contact_action="reapproach"))
-
-
-def test_stiffness_feedforward_requires_supported_controller_and_estimation():
-    """刚度前馈消费只支持 PID／LADRC 且要求启用估计。"""
-    from dataclasses import replace
-
-    from dmgripper_experiments.config import EstimationConfig
-
-    base = ExperimentConfig()
-    pid = replace(base.controller, kind="pid", stiffness_consumption="feedforward")
-    ExperimentConfig(controller=pid)
-    admittance = replace(base.controller, stiffness_consumption="feedforward")
-    with pytest.raises(ValueError, match="导纳"):
-        ExperimentConfig(controller=admittance)
-    with pytest.raises(ValueError, match="estimation.enabled"):
-        ExperimentConfig(
-            controller=pid,
-            estimation=replace(EstimationConfig(), enabled=False),
-        )
 
 
 def test_curve_minimum_force_must_not_cross_release_threshold():

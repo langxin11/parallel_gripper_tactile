@@ -23,7 +23,6 @@ from dm_grasp_core.grasp.unified import UnifiedAdaptiveConfig
 from dm_grasp_core.tactile.multirate import TactileSamplingConfig
 
 ControllerKind = Literal["admittance", "pid", "adrc"]
-StiffnessConsumption = Literal["none", "feedforward"]
 LostContactScope = Literal["any_side", "both_sides"]
 LostContactAction = Literal["fault", "reapproach"]
 FinishBehavior = Literal["hold", "return"]
@@ -574,7 +573,6 @@ class ControllerConfig:
         return_mit_kp: 回位段 MIT 位置增益。
         return_mit_kd: 回位段 MIT 阻尼增益。
         return_torque_limit_nm: 回位段力矩限幅。
-        stiffness_consumption: 是否消费刚度估计前馈；默认只诊断。
     """
 
     kind: ControllerKind = "admittance"
@@ -588,14 +586,11 @@ class ControllerConfig:
     return_mit_kp: float = 10.0
     return_mit_kd: float = 0.5
     return_torque_limit_nm: float = 2.0
-    stiffness_consumption: StiffnessConsumption = "none"
 
     def __post_init__(self) -> None:
         """验证控制器选择与 MIT 参数范围。"""
         if self.kind not in get_args(ControllerKind):
             raise ValueError("controller.kind 必须是 admittance、pid 或 adrc")
-        if self.stiffness_consumption not in get_args(StiffnessConsumption):
-            raise ValueError("controller.stiffness_consumption 必须是 none 或 feedforward")
         for name in (
             "mit_kp",
             "mit_kd",
@@ -836,11 +831,6 @@ class ExperimentConfig:
             raise ValueError("统一自适应模式只支持导纳控制器")
         if adaptive and self.lifecycle.lost_contact_action == "reapproach":
             raise ValueError("动态增力模式只接受失接触 fault；重接近的基线语义尚未定义")
-        if self.controller.stiffness_consumption == "feedforward":
-            if self.controller.kind == "admittance":
-                raise ValueError("导纳路径不消费刚度前馈；请将 stiffness_consumption 设为 none")
-            if not self.estimation.enabled:
-                raise ValueError("刚度前馈消费要求 estimation.enabled 为真")
 
     @property
     def unified_adaptive_enabled(self) -> bool:
@@ -867,7 +857,6 @@ _STRING_ENUM_FIELDS: dict[tuple[type, str], tuple[str, ...]] = {
     (LifecycleConfig, "lost_contact_action"): get_args(LostContactAction),
     (LifecycleConfig, "on_finished"): get_args(FinishBehavior),
     (ControllerConfig, "kind"): get_args(ControllerKind),
-    (ControllerConfig, "stiffness_consumption"): get_args(StiffnessConsumption),
     (EstimationConfig, "method"): get_args(EstimationMethod),
     (TerminalConfig, "mode"): get_args(TerminalMode),
 }

@@ -49,7 +49,6 @@ controller:
   admittance:
     force_deadband_n: 0.1
     prevent_unloading: true
-  stiffness_consumption: none
 safety:
   # 薄壁水瓶允许抓力远低于机构与传感器极限；上调前先核对瓶身抗变形能力。
   max_target_force_n: 1.5

@@ -61,10 +61,8 @@ from .grasp import (
 ControllerVariant = Literal[
     "pid-only",
     "pid-torque-ff",
-    "pid-stiffness-ff",
     "pid-stiffness-limit",
     "pid-stiffness-rate",
-    "full",
     "direct-torque",
     "adrc",
     "adrc-torque",
@@ -74,10 +72,8 @@ ControllerVariant = Literal[
 CONTROLLER_VARIANTS: tuple[ControllerVariant, ...] = (
     "pid-only",
     "pid-torque-ff",
-    "pid-stiffness-ff",
     "pid-stiffness-limit",
     "pid-stiffness-rate",
-    "full",
     "direct-torque",
     "adrc",
     "adrc-torque",
@@ -160,69 +156,46 @@ def configure_force_controller(
     if force.admittance is not None:
         raise ValueError("control.force.admittance requires the admittance controller variant")
     stiffness = force.stiffness
-    if stiffness is None and variant not in {"pid-only", "full"}:
+    if stiffness is None and variant != "pid-only":
         raise ValueError("controller ablation requires control.force.stiffness")
 
     if variant == "pid-only" and stiffness is not None:
         stiffness = stiffness.model_copy(update={"enabled": False})
     elif variant == "pid-torque-ff" and stiffness is not None:
-        stiffness = stiffness.model_copy(update={"enabled": True, "position_feedforward_gain": 0.0})
-    elif variant == "pid-stiffness-ff" and stiffness is not None:
-        # 历史研究变体：增益自包含，不随基线配置变化（基线已退役刚度位置前馈）。
-        stiffness = stiffness.model_copy(
-            update={
-                "enabled": True,
-                "position_feedforward_gain": 0.25,
-                "torque_feedforward_gain": 0.0,
-            }
-        )
-    elif variant == "full" and stiffness is not None:
-        # 历史研究变体：完整模块组合，增益自包含，不随基线配置变化。
-        stiffness = stiffness.model_copy(
-            update={
-                "enabled": True,
-                "position_feedforward_gain": 0.25,
-                "torque_feedforward_gain": 1.0,
-            }
-        )
+        stiffness = stiffness.model_copy(update={"enabled": True, "torque_feedforward_gain": 1.0})
     elif variant == "pid-stiffness-limit" and stiffness is not None:
-        # 在线刚度只约束 PID 位置目标的周期增量，不再把同一力误差作为
-        # 第二条位置修正与 PID 叠加；机构力矩前馈继续保留。
+        # 在线刚度只约束 PID 位置目标的周期增量；机构力矩前馈继续保留。
         stiffness = stiffness.model_copy(
             update={
                 "enabled": True,
-                "position_feedforward_gain": 0.0,
                 "torque_feedforward_gain": 1.0,
                 "position_limit_enabled": True,
             }
         )
     elif variant == "pid-stiffness-rate" and stiffness is not None:
         # PID 在力变化率空间工作；在线刚度与机构雅可比连续映射为电机速度，
-        # 不再使用加法位置前馈或动态位置边界。
+        # 该速率外环独立取代位置式 PID。
         stiffness = stiffness.model_copy(
             update={
                 "enabled": True,
-                "position_feedforward_gain": 0.0,
                 "torque_feedforward_gain": 1.0,
                 "position_limit_enabled": False,
             }
         )
     elif variant == "direct-torque" and stiffness is not None:
-        # 直接力矩式对照：保留刚度估计（trace 中刚度曲线可比）并关闭刚度位置前馈，
-        # 力矩前馈增益不动。MIT kp/kd 不在 profile 层清零——接近阶段共享同一组
+        # 直接力矩式对照保留刚度估计，使 trace 中刚度曲线可比；MIT kp/kd 不在
+        # profile 层清零——接近阶段共享同一组
         # 位置伺服增益建立接触，清零动作由控制器在跟踪阶段逐周期 override。
-        stiffness = stiffness.model_copy(update={"enabled": True, "position_feedforward_gain": 0.0})
+        stiffness = stiffness.model_copy(update={"enabled": True})
     elif variant == "adrc" and stiffness is not None:
-        # LADRC 外环取代刚度位置前馈的角色：保留刚度估计（trace 中刚度曲线
-        # 可比），位置前馈置 0，力矩前馈增益不动（对标 full 变体）。
-        stiffness = stiffness.model_copy(update={"enabled": True, "position_feedforward_gain": 0.0})
+        # LADRC 外环保留刚度估计，使 trace 中刚度曲线可比；机构力矩前馈增益不动。
+        stiffness = stiffness.model_copy(update={"enabled": True})
     elif variant in {"adrc-torque", "adrc-torque-td"} and stiffness is not None:
         # 二阶直接力矩 LADRC 使用刚度估计调度 b0；机构力矩前馈作为名义模型
         # 输入，LESO 仅观察实际总力矩扣除该前馈后的残差通道。
         stiffness = stiffness.model_copy(
             update={
                 "enabled": True,
-                "position_feedforward_gain": 0.0,
                 "torque_feedforward_gain": 1.0,
             }
         )
@@ -999,9 +972,6 @@ def run_force_tracking(
                     ),
                     "force_position_adjustment_rad": force_command.position_adjustment,
                     "pid_position_adjustment_rad": force_command.pid_position_adjustment,
-                    "stiffness_position_adjustment_rad": (
-                        force_command.stiffness_position_adjustment
-                    ),
                     "stiffness_position_limit_rad": (
                         force_command.stiffness_position_limit_rad
                         if force_command.stiffness_position_limit_rad is not None

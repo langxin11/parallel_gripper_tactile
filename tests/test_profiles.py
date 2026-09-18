@@ -108,7 +108,6 @@ def test_custom_profile_defines_bounded_mit_torque_control() -> None:
     assert profile.normal_force.stiffness.min_n_per_m == pytest.approx(250.0)
     assert profile.normal_force.stiffness.max_n_per_m == pytest.approx(25000.0)
     assert profile.normal_force.stiffness.min_delta_force_n == pytest.approx(0.025)
-    assert profile.normal_force.stiffness.position_feedforward_gain == pytest.approx(0.25)
     assert profile.normal_force.stiffness.torque_feedforward_gain == pytest.approx(1.0)
     assert profile.normal_force.stiffness.position_limit_enabled is False
     assert profile.normal_force.stiffness.position_limit_force_rate_n_s == pytest.approx(10.0)
@@ -132,11 +131,6 @@ def test_stiffness_profile_validates_window_method_requirements() -> None:
     with pytest.raises(ValidationError, match="must not exceed window_size"):
         type(profile.normal_force.stiffness).model_validate(
             values | {"window_size": 3, "min_samples": 4}
-        )
-
-    with pytest.raises(ValidationError, match="mutually exclusive"):
-        type(profile.normal_force.stiffness).model_validate(
-            values | {"position_limit_enabled": True}
         )
 
 

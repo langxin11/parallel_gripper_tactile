@@ -37,6 +37,15 @@ def test_catalog_search_filters_metadata_and_results_are_stably_ordered() -> Non
     )
 
 
+def test_catalog_hides_internal_controller_fragments() -> None:
+    """控制器目录只展示可直接选择的入口，不暴露继承片段。"""
+    controllers = {entry.name for entry in list_configurations("controller")}
+
+    assert "dm_gripper/admittance" in controllers
+    assert "dm_gripper/admittance_unified" not in controllers
+    assert all(not part.startswith("_") for name in controllers for part in name.split("/"))
+
+
 def test_catalog_rejects_unknown_group_without_reading_paths() -> None:
     """组名白名单拒绝路径遍历和未支持组。"""
     with pytest.raises(ConfigCatalogError, match="未知配置组"):

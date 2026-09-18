@@ -171,18 +171,16 @@ PID 的独立模型力矩前馈由 `controller.pid.torque_feedforward_gain` 控�
 \]
 
 目标力为平均单侧力，`J_c` 为总闭合行程对电机角度的雅可比；不额外乘二。
-显式数值须位于 0～1，`1` 为完整模型前馈、`0` 关闭该 PID 模型项；未设置或 `null` 保持旧的
-刚度联动前馈行为。显式比例覆盖旧模型项，不重复叠加；刚度位置修正仍由
-`stiffness_consumption` 独立控制。该字段只作用于 PID，不影响导纳或一阶 LADRC。
+显式数值须位于 0～1，`1` 为完整模型前馈、`0` 或 `null` 关闭该 PID 模型项。
+该字段只作用于 PID，不影响导纳或一阶 LADRC，也不依赖在线刚度估计。
 
 `water_bottle_curve.yaml` 已配置 PID 前馈比例 `1.0`、位置偏置上限 `null`，原命令追加 `--controller.kind pid`
-即可使用；`stiffness_consumption: none` 保持刚度仅诊断，即使估计关闭或尚无有效估计也会产生前馈。
+即可使用；即使刚度估计关闭或尚无有效估计也会产生前馈。
 预载、运行与正常保持阶段使用当期目标力，接近／回位保持原有策略。前馈与 PID 的 MIT 合成力矩
 仍受原有力矩限幅约束；`trace.csv` 的 `tau_ff_nm` 记录最终前馈请求。
 
-刚度估计默认 `enabled: true`、`method: window_linear`，`stiffness_consumption: none`，
-只记录数值、有效性与原因。仅 PID／LADRC 显式选择 `feedforward` 才消费估计；
-独立 PID 模型力矩前馈不消费估计。默认估计参数尚未经真机辨识。
+刚度估计默认 `enabled: true`、`method: window_linear`，只记录数值、有效性与原因，
+不生成控制量。独立 PID 模型力矩前馈不消费估计。默认估计参数尚未经真机辨识。
 
 ## 统一自适应试运行与旁路回放 {: #unified-adaptive }
 

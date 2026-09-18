@@ -139,15 +139,14 @@ def test_pid_follows_moving_feedback_beyond_contact_offset_with_velocity_limit()
     assert previous_target > initial_position + config.controller.pid.max_position_adjustment_rad
 
 
-def _pid_feedforward_config(gain, *, estimation=True, consumption="none", kind="pid"):
-    """配置独立模型前馈与可选旧刚度消费路径。"""
+def _pid_feedforward_config(gain, *, estimation=True, kind="pid"):
+    """配置独立模型前馈与可选刚度诊断。"""
     config = _config(kind)
     return replace(
         config,
         estimation=replace(config.estimation, enabled=estimation),
         controller=replace(
             config.controller,
-            stiffness_consumption=consumption,
             pid=replace(config.controller.pid, torque_feedforward_gain=gain),
         ),
     )
@@ -260,17 +259,13 @@ def test_disabled_pid_bias_limit_preserves_other_controllers(kind):
     assert steps[0] == steps[1]
 
 
-@pytest.mark.parametrize(
-    "estimation, consumption", [(False, "none"), (True, "none"), (True, "feedforward")]
-)
-def test_pid_model_feedforward_tracks_target_and_real_position_without_stiffness(
-    estimation, consumption
-):
+@pytest.mark.parametrize("estimation", [False, True])
+def test_pid_model_feedforward_tracks_target_and_real_position_without_stiffness(estimation):
     """无有效刚度时仍按实测位置与当前目标输出模型前馈，且不增加位置修正。"""
-    config = _pid_feedforward_config(0.7, estimation=estimation, consumption=consumption)
+    config = _pid_feedforward_config(0.7, estimation=estimation)
     controller = GripController(config, kinematics=KINEMATICS, command_config=COMMAND_CONFIG)
     baseline = GripController(
-        _pid_feedforward_config(0.0, estimation=estimation, consumption=consumption),
+        _pid_feedforward_config(0.0, estimation=estimation),
         kinematics=KINEMATICS,
         command_config=COMMAND_CONFIG,
     )
@@ -281,7 +276,6 @@ def test_pid_model_feedforward_tracks_target_and_real_position_without_stiffness
             target=_target(target),
             time_s=(index + 1) * 0.01,
             dt=0.01,
-            stiffness_value=None,
         )
         operation = controller.begin_contact_tracking if index == 0 else controller.step_tracking
         reference_operation = (
@@ -297,12 +291,10 @@ def test_pid_model_feedforward_tracks_target_and_real_position_without_stiffness
         assert step.stiffness_estimate_n_per_m is None
 
 
-@pytest.mark.parametrize("gain, expected_gain", [(None, 1.0), (0.0, 0.0), (0.4, 0.4), (1.0, 1.0)])
-def test_pid_explicit_feedforward_replaces_legacy_torque_without_double_counting(
-    gain, expected_gain
-):
-    """显式增益覆盖旧力矩前馈，None 保留兼容行为且刚度位置项不受影响。"""
-    config = _pid_feedforward_config(gain, consumption="feedforward")
+@pytest.mark.parametrize("gain, expected_gain", [(None, 0.0), (0.0, 0.0), (0.4, 0.4), (1.0, 1.0)])
+def test_pid_model_feedforward_is_controlled_only_by_explicit_gain(gain, expected_gain):
+    """机构模型力矩前馈仅由独立增益控制，不消费刚度估计。"""
+    config = _pid_feedforward_config(gain)
     controller = GripController(config, kinematics=KINEMATICS, command_config=COMMAND_CONFIG)
     feedback = MotorFeedback(0.4, 0.0, 0.0, STATUS_ENABLED)
     step = controller.begin_contact_tracking(
@@ -310,13 +302,10 @@ def test_pid_explicit_feedforward_replaces_legacy_torque_without_double_counting
         target=_target(1.0),
         time_s=0.01,
         dt=0.01,
-        stiffness_value=1500.0,
     )
     jacobian = KINEMATICS.closure_jacobian(feedback.position_rad)
     assert step.command.feedforward_torque_nm == pytest.approx(expected_gain * jacobian)
-    assert step.position_adjustment == pytest.approx(
-        (0.016 + 0.2 * 0.01) * 0.6 + 0.25 * 0.6 / (1500.0 * jacobian)
-    )
+    assert step.position_adjustment == pytest.approx((0.016 + 0.2 * 0.01) * 0.6)
 
 
 def test_pid_legacy_default_without_stiffness_has_no_feedforward():

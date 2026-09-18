@@ -66,9 +66,12 @@ def list_configurations(
         if not directory.is_dir():
             continue
         for source in sorted(directory.rglob("*.yaml")):
+            relative_source = source.relative_to(directory)
+            if any(part.startswith("_") for part in relative_source.parts):
+                continue
             entry = ConfigCatalogEntry(
                 group=selected_group,
-                name=source.relative_to(directory).with_suffix("").as_posix(),
+                name=relative_source.with_suffix("").as_posix(),
                 purpose=_purpose(_load_mapping(source), selected_group),
             )
             if normalized_search and normalized_search not in (

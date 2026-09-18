@@ -108,14 +108,16 @@
 
 ### 变更
 
-- 控制器比较研究矩阵重定义：移除随刚度位置前馈退役的 `full` 与 `pid-stiffness-ff`，
-  PID 代表改为基线 `pid-torque-ff`，矩阵为 4 控制器 × 3 任务 × 3 材料 × 3 seed 共 108 条；
+- DM controller 配置继承拆分为算法无关的 `_common.yaml` 与 PID 专属的 `_pid_base.yaml`，
+  避免 ADRC／导纳携带无效位置式 PID 参数；唯一导纳选择由
+  `controller=dm_gripper/admittance_unified` 简化为 `controller=dm_gripper/admittance`，
+  实验组合、文档与测试同步迁移，配置目录不再展示下划线开头的内部继承片段，最终控制参数保持不变。
+
+- 控制器比较研究矩阵重定义：PID 代表改为基线 `pid-torque-ff`，
+  矩阵为 4 控制器 × 3 任务 × 3 材料 × 3 seed 共 108 条；
   历史 162 条矩阵的复现以当时 manifest 与配置 git 历史为准。
-- PID 基线控制器切换为 `pid-torque-ff`（PID 位置修正＋机构力矩前馈），退役刚度位置前馈：
-  消融证据显示刚度加法修正的附加收益接近于零（RMSE 差约 2.5e-05 N）。基线配置
-  `position_feedforward_gain` 置 0，`full` 与 `pid-stiffness-ff` 变体改为代码内自包含派生
-  （行为与历史逐字段一致），引用 `dm_gripper/full` 的切向扰动、摩擦估计、力调度实验与各研究
-  预检基线同步切换；直连 API 默认变体同步改为 `pid-torque-ff`。
+- PID 基线控制器切换为 `pid-torque-ff`（PID 位置修正＋机构模型力矩前馈）；
+  直连 API 默认变体及相关实验基线同步切换。
 
 - DM controller 配置组统合公共基线：变体文件经组内 defaults 继承 `_base.yaml`，只声明
   `name` 与差异字段，并按变体角色规范注释；组合后的 resolved 配置与重构前逐字段一致，
@@ -199,8 +201,7 @@
   不平衡及其他运行期安全保护不变。
 - `dmgripper_experiments` 的 PID／LADRC 路径改为把原始力交给共享核、由核心内部做唯一一次
   低通（此前外层滤波后再滤波一次）；导纳路径维持外层滤波力输入。trace 同时记录三层力信息，
-  滤波时延可追溯。等效接触刚度估计默认启用但只诊断，控制消费需显式
-  `controller.stiffness_consumption: feedforward`。
+  滤波时延可追溯。等效接触刚度估计默认启用但只诊断，不生成控制量。
 - `dmgripper-force-demo` 与 `dmgripper-cup` 旧入口改为迁移提示并拒绝执行，不再把旧场景交互
   映射成自动阶段推进；`dmgripper-cup-plot` 保留为通用历史读取器薄别名，历史 v1／v2 cup
   trace 仍可重绘。旧 `cup_*` 专用实现与基础状态机移除，包版本升至 0.2.0。
@@ -325,14 +326,12 @@
 
 ### 移除
 
-- 退役 `force_controller_ablation`（PID 模块消融）与 `force_tracking_stiffness_estimator_comparison`
-  （固定 `pid-stiffness-ff` 的估计器对比）两条研究线：前者的问题已由历史 36 条件运行回答
-  （力矩前馈贡献约 32%，刚度位置前馈接近于零），后者的存在前提随刚度位置前馈退役消失，
+- 退役 `force_controller_ablation`（PID 模块消融）与旧估计器对比两条研究线：
+  前者的问题已由历史 36 条件运行回答，后者没有独立刚度真值，
   结论均已存档于 `docs/control-comparison-ablation.md` 与科研报告；研究配置、协议、专属实现
   与测试同步移除，共用 `SeedSweep`／`StudyConfigError` 抽至 `studies/common.py`。
-- 移除 `controller=dm_gripper/full` 与 `controller=dm_gripper/pid_stiffness_ff` 两个 CLI
-  配置入口（刚度位置前馈退役）；变体派生与行为测试保留在代码层，历史研究复现以当时
-  git 版本或内存派生为准。
+- 删除由力误差并联生成第二位置修正的整条控制路径，包括配置字段、代码内历史变体、
+  真机 `stiffness_consumption` 开关、命令诊断和 trace 列；历史研究仅按原 manifest 与对应 git 版本解释。
 - 移除 `controller=dm_gripper/adrc_torque_td` CLI 配置入口：线性 TD 是带微分状态输出的
   二阶临界阻尼参考低通，解析参考（smoothstep／linear）本身就是零额外相位滞后的替代，
   且该变体从未进入任何正式研究矩阵；变体派生与行为测试仍保留在代码层，
@@ -534,9 +533,8 @@
   单 tick 力增益、HOLD／再激活与有限动作预测；仿真旧导入路径保留兼容出口，且该核心不依赖
   ROS、MuJoCo、profile 或仿真主包。
 - 新增平行夹爪力控制方法说明报告，采用中文适配的 IEEE 双栏会议版式和 Times 系西文字体，集中整理位置式 PID、刚度感知位置增量限幅、二阶导纳与二阶直接力矩 ADRC 的控制律及验证边界；报告表格统一为三线表。
-- 新增 `pid-stiffness-limit` 力跟踪变体：保留 PID 与机构力矩前馈，关闭基于同一力误差的刚度位置前馈，
-  改用在线刚度和机构雅可比把允许力变化率换算为 PID 位置目标的周期增量边界；trace 与 metrics 记录
-  边界值、触发状态和触发比例。既有 `pid-stiffness-ff`、`full` 及默认比较矩阵保持不变。
+- 新增 `pid-stiffness-limit` 力跟踪变体：保留 PID 与机构力矩前馈，使用在线刚度和机构雅可比
+  把允许力变化率换算为 PID 位置目标的周期增量边界；trace 与 metrics 记录边界值、触发状态和触发比例。
 - 新增独立 `dm-grasp-core==0.1.0`，与 ROS 2 DMgripper 共用二阶导纳、运动学、
   平滑接近/接触过渡及 MIT 请求映射；仿真以 uv workspace 引用，ROS 安装固定 wheel。
 - `pgt run force-track` 新增显式 `--controller-variant admittance`、可选

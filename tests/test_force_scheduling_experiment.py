@@ -125,7 +125,7 @@ def test_unified_pid_comparison_preserves_policy_and_feedforward(tmp_path, seed)
     assert resolved.profile.mit == baseline.profile.mit
     force = resolved.profile.normal_force
     assert force.filter_cutoff_hz == baseline.profile.normal_force.filter_cutoff_hz
-    assert force.stiffness.enabled and force.stiffness.position_feedforward_gain == 0
+    assert force.stiffness.enabled
     assert force.stiffness.torque_feedforward_gain == 1
     trace = tmp_path / "trace.csv"
     result = run_force_scheduling(resolved.profile, task=resolved.task, output_csv=trace)

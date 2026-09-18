@@ -2,17 +2,22 @@
 # 二阶直接力矩 MB-ADRC：跟踪阶段旁路 MIT，由 current LESO 估计并补偿残差扰动；
 # torque_adrc 参数经组合层作为覆盖传入控制器构造。
 defaults:
-  - /controller/dm_gripper/_base
+  - /controller/dm_gripper/_common
   - _self_
 
 name: adrc-torque
 torque_adrc:
+  # 电机侧等效转动惯量，单位为 kg·m²；input_gain_scale 为无量纲模型修正比例。
   equivalent_inertia_kg_m2: 0.0021617741125
   input_gain_scale: 2.0
+  # 控制器与 LESO 带宽单位为 rad/s；观测器带宽通常高于控制器带宽。
   controller_bandwidth_rad_s: 60.0
   observer_bandwidth_rad_s: 240.0
+  # 力测量低通截止频率，单位为 Hz；null 表示直接使用任务生成的解析参考。
   measurement_filter_cutoff_hz: 40.0
   tracking_differentiator_bandwidth_rad_s: null
+  # b0 调度边界单位为 N/(N·m·s²)，防止刚度或雅可比异常导致输入增益失真。
   min_input_gain_n_per_n_m_s2: 5000.0
   max_input_gain_n_per_n_m_s2: 200000.0
+  # 输出力矩变化率上限，单位为 N·m/s。
   max_torque_rate_n_m_s: 50.0

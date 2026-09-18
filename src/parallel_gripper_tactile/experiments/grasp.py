@@ -588,7 +588,6 @@ def run_acceptance(
                 "filtered_normal_force_n": force_command.filtered_force_n,
                 "normal_force_error_n": force_command.force_error_n,
                 "force_position_adjustment_rad": force_command.position_adjustment,
-                "stiffness_position_adjustment_rad": (force_command.stiffness_position_adjustment),
                 "stiffness_position_limit_rad": (
                     force_command.stiffness_position_limit_rad
                     if force_command.stiffness_position_limit_rad is not None

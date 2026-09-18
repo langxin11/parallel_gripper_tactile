@@ -79,7 +79,6 @@ def test_no_limit_preserves_torque_feedforward() -> None:
     )
     stiffness = profile.normal_force.stiffness
     assert not stiffness.position_limit_enabled
-    assert stiffness.position_feedforward_gain == pytest.approx(0.0)
     assert stiffness.torque_feedforward_gain == pytest.approx(1.0)
 
 

@@ -33,7 +33,7 @@ control:
     # 双侧法向力都低于释放阈值并持续若干控制步后，退出力跟踪并重新接近。
     release_threshold_n: 0.05
     release_confirm_steps: 25
-    # simple-pid 位置修正外环，输出单位 rad；后续会与刚度估计得到的位置前馈相加。
+    # simple-pid 位置修正外环，输出单位 rad。
     kp: 0.016
     ki: 0.200
     kd: 0.0
@@ -66,11 +66,10 @@ control:
       # 滑动窗口样本数与拟合所需最小样本数；窗口方法使用全部最近样本。
       window_size: 25
       min_samples: 8
-      # 历史位置前馈用平均单侧力误差除以 K*Jc；力矩前馈用 f_target*Jc。
-      position_feedforward_gain: 0.25
+      # 机构力矩前馈只由目标力与闭合雅可比计算，不消费力误差或刚度估计。
       torque_feedforward_gain: 1.0
-      # pid-stiffness-limit 变体会启用刚度感知位置限幅并关闭历史位置前馈：
-      # 每周期允许的预测力变化不超过 force_rate*dt，安全系数放大刚度后再换算为角度边界。
+      # pid-stiffness-limit 变体会启用刚度感知位置限幅：每周期允许的预测力变化
+      # 不超过 force_rate*dt，安全系数放大刚度后再换算为 PID 位置增量边界。
       position_limit_enabled: false
       position_limit_force_rate_n_s: 10.0
       position_limit_stiffness_safety_factor: 1.0

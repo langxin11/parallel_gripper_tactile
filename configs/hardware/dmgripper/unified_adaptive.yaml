@@ -49,7 +49,6 @@ controller:
   admittance:
     force_deadband_n: 0.1
     prevent_unloading: true
-  stiffness_consumption: none
 safety:
   max_target_force_n: 1.5
   force_ceiling_n: 2.0

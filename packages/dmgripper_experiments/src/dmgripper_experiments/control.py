@@ -15,7 +15,6 @@ from dmgripper_hardware import MotorFeedback
 
 from dm_grasp_core import (
     AdrcConfig,
-    ContactStiffnessConfig,
     ForceControlObservation,
     ForceControlReference,
     MITCommand,
@@ -188,19 +187,6 @@ class GripController:
             controller.admittance.stiffness_n_m,
         )
         self._admittance_params = controller.admittance
-        stiffness_config = None
-        if controller.stiffness_consumption == "feedforward":
-            # 外部估计模式：内部估计器关闭，仅保留前馈增益；估计由
-            # 运行时的唯一所有者更新并经快照传入。
-            stiffness_config = ContactStiffnessConfig(
-                enabled=False,
-                initial_n_per_m=config.estimation.initial_n_per_m,
-                min_n_per_m=config.estimation.min_n_per_m,
-                max_n_per_m=config.estimation.max_n_per_m,
-                filter_alpha=config.estimation.filter_alpha,
-                min_delta_closure_m=config.estimation.min_delta_closure_m,
-                min_delta_force_n=config.estimation.min_delta_force_n,
-            )
         self.normal = NormalForceController(
             NormalForceConfig(
                 target_n=config.reference.initial_force_n,
@@ -222,7 +208,7 @@ class GripController:
                 ),
                 filter_cutoff_hz=config.timing.tactile_cutoff_hz,
                 geometry=kinematics,
-                stiffness=stiffness_config,
+                stiffness=None,
                 adrc=(
                     AdrcConfig(
                         b0_n_per_m=controller.adrc.b0_n_per_m,
@@ -235,7 +221,6 @@ class GripController:
                 ),
             )
         )
-        self._stiffness_consumption = controller.stiffness_consumption
         self._inner = _MitRequestAdapter(
             kinematics=kinematics,
             command_config=command_config,
@@ -257,7 +242,6 @@ class GripController:
         target: ForceTarget,
         time_s: float,
         dt: float,
-        stiffness_value: float | None = None,
     ) -> TrackingStep:
         """接触建立后初始化跟踪控制律并生成首个命令。"""
         if self._contact_reference_rad is None:
@@ -269,7 +253,6 @@ class GripController:
             time_s=time_s,
             dt=dt,
             begin=True,
-            stiffness_value=stiffness_value,
         )
 
     def step_tracking(
@@ -279,7 +262,6 @@ class GripController:
         target: ForceTarget,
         time_s: float,
         dt: float,
-        stiffness_value: float | None = None,
     ) -> TrackingStep:
         """执行一次跟踪计算。"""
         self._inner.bind(paired.feedback, dt)
@@ -289,7 +271,6 @@ class GripController:
             time_s=time_s,
             dt=dt,
             begin=False,
-            stiffness_value=stiffness_value,
         )
 
     def _require_contact_reference(self) -> float:
@@ -306,7 +287,6 @@ class GripController:
         time_s: float,
         dt: float,
         begin: bool,
-        stiffness_value: float | None,
     ) -> TrackingStep:
         """按控制器类型生成受限命令与诊断。"""
         _check_target_bounds(target.force_n, self._config)
@@ -318,7 +298,6 @@ class GripController:
             time_s=time_s,
             dt=dt,
             begin=begin,
-            stiffness_value=stiffness_value,
         )
 
     def _step_admittance(
@@ -366,7 +345,6 @@ class GripController:
         time_s: float,
         dt: float,
         begin: bool,
-        stiffness_value: float | None,
     ) -> TrackingStep:
         """PID／LADRC 路径：原始力交给共享核，由核心内部唯一滤波。"""
         observation = ForceControlObservation(
@@ -384,24 +362,17 @@ class GripController:
                 target.acceleration_n_s2 if target.acceleration_n_s2 is not None else 0.0
             ),
         )
-        external_stiffness = (
-            stiffness_value
-            if self._stiffness_consumption == "feedforward" and stiffness_value is not None
-            else None
-        )
         if begin:
             result = self.normal.begin_tracking(
                 self._inner,
                 observation=observation,
                 reference=reference,
-                external_stiffness_n_per_m=external_stiffness,
             )
         else:
             result = self.normal.step_tracking(
                 self._inner,
                 observation=observation,
                 reference=reference,
-                external_stiffness_n_per_m=external_stiffness,
             )
         assert self._inner.last_command is not None, "跟踪计算必须产生 MIT 请求"
         return TrackingStep(
@@ -410,7 +381,7 @@ class GripController:
             unloading_blocked=False,
             filtered_force_n=result.filtered_force_n,
             position_adjustment=result.position_adjustment,
-            stiffness_estimate_n_per_m=external_stiffness,
+            stiffness_estimate_n_per_m=None,
             force_error_n=result.force_error_n,
         )
 

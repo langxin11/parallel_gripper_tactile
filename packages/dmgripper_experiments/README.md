@@ -58,8 +58,7 @@ uv run --package dmgripper-experiments dmgripper-plot --repaint <运行目录>
 Rich 面板停止后会额外输出一行稳定摘要，包含最终状态、失能确认和运行目录；若主故障或 `Ctrl+C`
 同时伴随清理失败，终端会直接显示清理警告和 manifest 所在目录。终端刷新不参与控制时钟。
 
-等效接触刚度估计默认启用但只诊断：估计量、有效性、更新时刻与原因写入 trace，不改变控制命令。
-控制器显式配置 `stiffness_consumption: feedforward`（仅 PID／LADRC）时才消费估计前馈。
+等效接触刚度估计只用于诊断：估计量、有效性、更新时刻与原因写入 trace，不改变控制命令。
 估计初值与门限沿用仿真验证起点，尚不是真机辨识值。
 
 PID／LADRC 路径把原始力交给共享核，由核心内部做唯一一次低通（trace 同时记录原始力、外层

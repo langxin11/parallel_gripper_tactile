@@ -45,7 +45,6 @@ controller:
     controller_bandwidth_rad_s: 5.0
     observer_bandwidth_rad_s: 20.0
     max_closing_velocity_m_s: 0.002
-  stiffness_consumption: none
 estimation:
   # 默认只诊断不改变控制律；数值沿用仿真验证起点，不是真机辨识值。
   enabled: true

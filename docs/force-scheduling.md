@@ -71,7 +71,7 @@ trace 记录切向需求、真值摩擦、原始／受限目标、触觉力、�
 uv run pgt run force-schedule --experiment dm_gripper/adaptive_prior
 ```
 
-该组合复用载荷场景、记录与评价，使用现有 `admittance_unified` 导纳与固定 MIT 增益，
+该组合复用载荷场景、记录与评价，使用现有 `admittance` 导纳与固定 MIT 增益，
 控制周期为 4 ms。它验证上层调度，不代表方案所列真机底层参数已经标定。
 `task.adaptive_prior` 非空时启用新策略；省略时保持 Oracle 行为。
 左右摩擦先验均为 0.6，场景真实摩擦为 0.8，两者独立配置。
@@ -159,8 +159,8 @@ uv run pgt run force-schedule --experiment dm_gripper/unified_step_load_pid
 
 `unified_step_load_pid` 是仿真专用对照：保持同一任务、先验、1 N 初始力、50 N/s 目标限速、
 20 Hz 法向低通、4 ms 外环、MIT 增益、协议力矩上限与配对 seed，仅替换下层完整控制结构。
-复用历史 `pid-torque-ff` 的位置式 PID；启用 `window_linear` 以进入原有模型前馈路径，
-但刚度位置前馈增益严格为零，估计值不进入上层调度。不能只切换配置名称而关闭实际前馈。
+复用 `pid-torque-ff` 的位置式 PID；机构模型力矩前馈只由目标力与机构雅可比计算，
+`window_linear` 的估计值不进入该前馈或上层调度。
 
 两组每个物理步均重新施加保持的 MIT 请求。PID 保留原有积分限幅，上层消费位置修正、
 协议位置及力矩触边诊断；并不宣称它具有导纳式状态回投。两组的内部运动约束和前馈比例不同：

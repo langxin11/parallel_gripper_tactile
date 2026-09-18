@@ -1,0 +1,27 @@
+# @package controller
+# 统一力跟踪状态机的导纳控制器：与其他控制器共享 MIT 接近内环、目标力、
+# 滤波与接触阶段语义；导纳外环独占的参数集中在本文件，需搭配 estimator=none。
+defaults:
+  - /controller/dm_gripper/_common
+  - _self_
+
+name: admittance
+admittance:
+  # 虚拟质量、阻尼、刚度依次使用 kg、N·s/m、N/m，决定力误差到闭合位移的动态响应。
+  mass_kg: 0.2
+  damping_ns_m: 15.0
+  stiffness_n_m: 1.0
+  # 目标力经机构雅可比换算为前馈力矩的比例；0 关闭，1 表示完整名义补偿。
+  feedforward_ratio: 0.2
+  # 接触后稳定等待与控制律平滑接管时间，单位为 s。
+  contact_stable_time_s: 0.0
+  contact_transition_time_s: 0.05
+  # 接近阶段的速度、加速度和 jerk 上限，单位依次为 rad/s、rad/s²、rad/s³。
+  approach_velocity_rad_s: 0.05
+  approach_acceleration_rad_s2: 0.5
+  approach_jerk_rad_s3: 2.0
+  # 接近阶段使用 0.5 N 名义力的完整力矩前馈，减小首次接触前的位置误差积累。
+  approach_feedforward_force_n: 0.5
+  approach_feedforward_ratio: 1.0
+  # 导纳跟踪阶段的关节速度绝对上限，单位为 rad/s。
+  velocity_limit_rad_s: 0.05

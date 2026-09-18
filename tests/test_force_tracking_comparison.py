@@ -30,7 +30,7 @@ def test_comparison_config_resolves_paths_and_expands_ordered_matrix(tmp_path: P
             """name: smoke
 profile: profile.yaml
 tasks: [tasks/step.yaml, tasks/ramp.yaml]
-controllers: [pid-only, full]
+controllers: [pid-only, pid-torque-ff]
 materials: [soft, hard]
 seeds: {start: 2, count: 3}
 output_root: results
@@ -43,7 +43,7 @@ output_root: results
     assert config.output_root == tmp_path / "results"
     assert len(config.conditions()) == 24
     assert config.conditions()[0] == ("pid-only", tmp_path / "tasks/step.yaml", "soft", 2)
-    assert config.conditions()[-1] == ("full", tmp_path / "tasks/ramp.yaml", "hard", 4)
+    assert config.conditions()[-1] == ("pid-torque-ff", tmp_path / "tasks/ramp.yaml", "hard", 4)
 
 
 def test_default_comparison_uses_shifted_contact_presets() -> None:
@@ -67,7 +67,7 @@ def test_default_comparison_uses_shifted_contact_presets() -> None:
         "tasks: []",
         "tasks: [step.yaml, step.yaml]",
         "controllers: []",
-        "controllers: [full, full]",
+        "controllers: [pid-only, pid-only]",
         "materials: []",
         "materials: [hard, hard]",
     ],
@@ -80,7 +80,7 @@ def test_comparison_config_rejects_empty_or_duplicate_dimensions(
         tmp_path,
         """profile: profile.yaml
 tasks: [step.yaml]
-controllers: [full]
+controllers: [pid-only]
 materials: [hard]
 """
         + contents
@@ -108,7 +108,7 @@ def test_comparison_config_rejects_invalid_values_and_unknown_fields(
         tmp_path,
         """profile: profile.yaml
 tasks: [step.yaml]
-controllers: [full]
+controllers: [pid-only]
 materials: [hard]
 """
         + contents

@@ -61,7 +61,7 @@ class NormalForceConfig:
             相对每周期实测位置，``None`` 关闭 PID 固定偏置限幅；一阶 LADRC／
             刚度速率路径相对固定接触位置，仍要求正数上限。
         filter_cutoff_hz: 公共法向力一阶低通截止频率 (Hz)。
-        geometry: 曲柄滑块运动学；刚度前馈、限幅与两条 ADRC 路径必需。
+        geometry: 曲柄滑块运动学；机构力矩前馈、刚度限幅与两条 ADRC 路径必需。
         stiffness: 在线接触刚度估计配置；``None`` 表示不启用。
         torque_feedback_gain: 直接力矩路径增益；大于 0 时替代 PID 位置修正。
         adrc: 一阶 LADRC 外环配置；与 PID 及二阶路径互斥。
@@ -69,7 +69,7 @@ class NormalForceConfig:
         torque_adrc: 二阶直接力矩 LADRC 配置；与前两条路径互斥。
         supervisor: 可选的公共双侧接触阶段机；``None`` 保持历史两阶段行为。
         pid_torque_feedforward_gain: PID 独立模型力矩前馈比例（0～1）；显式设置时
-            覆盖刚度路径的力矩前馈，不依赖刚度估计，``None`` 保持旧行为。
+            覆盖共享模型力矩前馈比例，不依赖刚度估计，``None`` 保持 profile 配置。
     """
 
     target_n: float
@@ -175,7 +175,6 @@ class NormalForceControlCommand:
     position_adjustment: float
     mit: MITControlCommand
     pid_position_adjustment: float = 0.0
-    stiffness_position_adjustment: float = 0.0
     force_feedforward_torque: float = 0.0
     estimated_contact_stiffness_n_per_m: float | None = None
     closure_jacobian_m_per_rad: float | None = None
@@ -211,7 +210,6 @@ class _ForceTrackingStep:
     mit: MITControlCommand
     position_adjustment: float
     pid_position_adjustment: float
-    stiffness_position_adjustment: float
     force_feedforward_torque: float
     estimated_contact_stiffness_n_per_m: float | None
     closure_jacobian_m_per_rad: float | None
@@ -614,7 +612,6 @@ class NormalForceController:
             position_adjustment=step.position_adjustment,
             mit=step.mit,
             pid_position_adjustment=step.pid_position_adjustment,
-            stiffness_position_adjustment=step.stiffness_position_adjustment,
             force_feedforward_torque=step.force_feedforward_torque,
             estimated_contact_stiffness_n_per_m=step.estimated_contact_stiffness_n_per_m,
             closure_jacobian_m_per_rad=step.closure_jacobian_m_per_rad,
@@ -660,14 +657,14 @@ class NormalForceController:
     ) -> _ForceTrackingStep:
         """生成力跟踪阶段的组合位置修正和力矩前馈。
 
-        当 ``config.torque_feedback_gain > 0`` 时改走直接力矩路径：PID 与刚度
-        位置修正置零，力误差经 ``torque_feedback_gain`` 放大后与既有模型前馈
+        当 ``config.torque_feedback_gain > 0`` 时改走直接力矩路径：位置式 PID
+        不参与，力误差经 ``torque_feedback_gain`` 放大后与既有模型前馈
         （``torque_feedforward_gain`` 路径、以目标力计算）合并为 MIT 前馈力矩，
         并仅在本周期以 override 把 MIT kp、kd 覆盖为 0。刚度估计器两条路径都
         照常更新，保持 trace 中刚度曲线可比。
 
         当 ``config.adrc`` 非 ``None`` 时改走一阶 LADRC 路径（与直接力矩路径
-        互斥，构造时已校验）：PID 与刚度位置修正均不参与，扩张状态观测器
+        互斥，构造时已校验）：位置式 PID 不参与，扩张状态观测器
         （LESO）估计滤波力 ``z1`` 与总扰动 ``z2``，控制律输出闭合速度 ``u``
         并逐周期积分成持久位置修正（裁剪到 ``±max_position_adjustment``）。
         每周期先用上一周期的 ``u`` 更新 LESO，再计算本周期 ``u``。MIT 内环
@@ -697,7 +694,6 @@ class NormalForceController:
         config = self._config
         current_position = inner.position()
         force_error = target_force_n - measured_force_n
-        stiffness_adjustment = 0.0
         force_feedforward_torque = 0.0
         stiffness_estimate = None
         closure_jacobian = None
@@ -716,19 +712,8 @@ class NormalForceController:
             and closure_jacobian > 1e-12
             and config.stiffness is not None
         ):
-            # 外部刚度快照：估计由唯一所有者更新，此处仅消费；增益仍来自
-            # 配置，保证诊断估计不改变控制命令，除非显式启用前馈消费。
+            # 外部刚度快照：估计由唯一所有者更新，此处仅供刚度感知限幅消费。
             stiffness_estimate = float(external_stiffness_n_per_m)
-            joint_stiffness = stiffness_estimate * closure_jacobian
-            stiffness_adjustment = (
-                float(config.stiffness.position_feedforward_gain)
-                * force_error
-                / max(joint_stiffness, 1e-12)
-            )
-            force_feedforward_torque, closure_jacobian, aperture = self._force_feedforward_torque(
-                position_rad=current_position,
-                target_force_n=target_force_n,
-            )
         elif (
             self._stiffness_estimator is not None
             and self._kinematics is not None
@@ -740,12 +725,7 @@ class NormalForceController:
                 position_rad=current_position,
                 normal_force_n=measured_force_n,
             )
-            joint_stiffness = stiffness_estimate * closure_jacobian
-            stiffness_adjustment = (
-                float(config.stiffness.position_feedforward_gain)
-                * force_error
-                / max(joint_stiffness, 1e-12)
-            )
+        if config.stiffness is not None and config.stiffness.enabled:
             force_feedforward_torque, closure_jacobian, aperture = self._force_feedforward_torque(
                 position_rad=current_position,
                 target_force_n=target_force_n,
@@ -800,7 +780,6 @@ class NormalForceController:
                 mit=mit,
                 position_adjustment=0.0,
                 pid_position_adjustment=0.0,
-                stiffness_position_adjustment=0.0,
                 force_feedforward_torque=force_feedforward_torque,
                 estimated_contact_stiffness_n_per_m=stiffness_estimate,
                 closure_jacobian_m_per_rad=closure_jacobian,
@@ -838,7 +817,6 @@ class NormalForceController:
                 mit=mit,
                 position_adjustment=0.0,
                 pid_position_adjustment=0.0,
-                stiffness_position_adjustment=0.0,
                 force_feedforward_torque=force_feedforward_torque,
                 estimated_contact_stiffness_n_per_m=stiffness_estimate,
                 closure_jacobian_m_per_rad=closure_jacobian,
@@ -868,7 +846,6 @@ class NormalForceController:
                 mit=mit,
                 position_adjustment=rate_step.position_adjustment_rad,
                 pid_position_adjustment=0.0,
-                stiffness_position_adjustment=0.0,
                 force_feedforward_torque=force_feedforward_torque,
                 estimated_contact_stiffness_n_per_m=stiffness_estimate,
                 closure_jacobian_m_per_rad=closure_jacobian,
@@ -923,7 +900,6 @@ class NormalForceController:
                 mit=mit,
                 position_adjustment=self._adrc_adjustment,
                 pid_position_adjustment=0.0,
-                stiffness_position_adjustment=0.0,
                 force_feedforward_torque=force_feedforward_torque,
                 estimated_contact_stiffness_n_per_m=stiffness_estimate,
                 closure_jacobian_m_per_rad=closure_jacobian,
@@ -982,13 +958,7 @@ class NormalForceController:
                 rel_tol=0.0,
                 abs_tol=1e-12,
             )
-        adjustment = float(
-            np.clip(
-                stiffness_adjustment + pid_adjustment,
-                lower_limit,
-                upper_limit,
-            )
-        )
+        adjustment = float(np.clip(pid_adjustment, lower_limit, upper_limit))
         self._position_adjustment = adjustment
         # PI／PID 偏置跟随实测位置，避免把限幅误作接触后的累计行程上限。
         mit = inner.apply(
@@ -1010,7 +980,6 @@ class NormalForceController:
             mit=mit,
             position_adjustment=adjustment,
             pid_position_adjustment=pid_adjustment,
-            stiffness_position_adjustment=stiffness_adjustment,
             force_feedforward_torque=force_feedforward_torque,
             estimated_contact_stiffness_n_per_m=stiffness_estimate,
             closure_jacobian_m_per_rad=closure_jacobian,
@@ -1099,7 +1068,6 @@ class NormalForceController:
             right_normal_force_n=right_normal_force_n,
             dt=dt,
         )
-        stiffness_adjustment = 0.0
         pid_adjustment = 0.0
         force_feedforward_torque = 0.0
         stiffness_estimate = None
@@ -1164,7 +1132,6 @@ class NormalForceController:
                 mit = tracking.mit
                 adjustment = tracking.position_adjustment
                 pid_adjustment = tracking.pid_position_adjustment
-                stiffness_adjustment = tracking.stiffness_position_adjustment
                 force_feedforward_torque = tracking.force_feedforward_torque
                 stiffness_estimate = tracking.estimated_contact_stiffness_n_per_m
                 closure_jacobian = tracking.closure_jacobian_m_per_rad
@@ -1186,7 +1153,6 @@ class NormalForceController:
                 mit = tracking.mit
                 adjustment = tracking.position_adjustment
                 pid_adjustment = tracking.pid_position_adjustment
-                stiffness_adjustment = tracking.stiffness_position_adjustment
                 force_feedforward_torque = tracking.force_feedforward_torque
                 stiffness_estimate = tracking.estimated_contact_stiffness_n_per_m
                 closure_jacobian = tracking.closure_jacobian_m_per_rad
@@ -1255,7 +1221,6 @@ class NormalForceController:
                 mit = tracking.mit
                 adjustment = tracking.position_adjustment
                 pid_adjustment = tracking.pid_position_adjustment
-                stiffness_adjustment = tracking.stiffness_position_adjustment
                 force_feedforward_torque = tracking.force_feedforward_torque
                 stiffness_estimate = tracking.estimated_contact_stiffness_n_per_m
                 closure_jacobian = tracking.closure_jacobian_m_per_rad
@@ -1289,7 +1254,6 @@ class NormalForceController:
                 mit = tracking.mit
                 adjustment = tracking.position_adjustment
                 pid_adjustment = tracking.pid_position_adjustment
-                stiffness_adjustment = tracking.stiffness_position_adjustment
                 force_feedforward_torque = tracking.force_feedforward_torque
                 stiffness_estimate = tracking.estimated_contact_stiffness_n_per_m
                 closure_jacobian = tracking.closure_jacobian_m_per_rad
@@ -1312,7 +1276,6 @@ class NormalForceController:
             position_adjustment=adjustment,
             mit=mit,
             pid_position_adjustment=pid_adjustment,
-            stiffness_position_adjustment=stiffness_adjustment,
             force_feedforward_torque=force_feedforward_torque,
             estimated_contact_stiffness_n_per_m=stiffness_estimate,
             closure_jacobian_m_per_rad=closure_jacobian,

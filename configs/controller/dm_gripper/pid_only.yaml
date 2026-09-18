@@ -1,8 +1,8 @@
 # @package controller
 # 纯 PID 位置修正基线：不使用刚度估计与前馈，消融研究的下界参照；
-# 也是唯一支持 estimator=none 的 PID 变体。
+# 也是唯一支持 estimator=none 的 PID 变体；本文件无增益覆盖，全部继承 _pid_base。
 defaults:
-  - /controller/dm_gripper/_base
+  - /controller/dm_gripper/_pid_base
   - _self_
 
 name: pid-only

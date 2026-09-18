@@ -87,8 +87,6 @@ controller:
     observer_bandwidth_rad_s: 20.0
     # LADRC 允许的最大闭合速度（m/s）。
     max_closing_velocity_m_s: 0.002
-  # 刚度估计仅记录诊断，不作为 PID／LADRC 前馈输入。
-  stiffness_consumption: none
 estimation:
   # 启用等效接触刚度估计；当前配置只记录结果，不改变控制命令。
   enabled: true

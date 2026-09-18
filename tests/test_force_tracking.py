@@ -166,28 +166,24 @@ def test_force_tracking_trace_downsampling_preserves_events_and_boundaries() -> 
     (
         "variant",
         "enabled",
-        "position_gain",
         "torque_gain",
         "feedback_gain",
         "position_limit_enabled",
     ),
     [
-        ("pid-only", False, 0.25, 1.0, 0.0, False),
-        ("pid-torque-ff", True, 0.0, 1.0, 0.0, False),
-        ("pid-stiffness-ff", True, 0.25, 0.0, 0.0, False),
-        ("pid-stiffness-limit", True, 0.0, 1.0, 0.0, True),
-        ("pid-stiffness-rate", True, 0.0, 1.0, 0.0, False),
-        ("full", True, 0.25, 1.0, 0.0, False),
-        ("direct-torque", True, 0.0, 1.0, 1.0, False),
-        ("adrc", True, 0.0, 1.0, 0.0, False),
-        ("adrc-torque", True, 0.0, 1.0, 0.0, False),
-        ("adrc-torque-td", True, 0.0, 1.0, 0.0, False),
+        ("pid-only", False, 1.0, 0.0, False),
+        ("pid-torque-ff", True, 1.0, 0.0, False),
+        ("pid-stiffness-limit", True, 1.0, 0.0, True),
+        ("pid-stiffness-rate", True, 1.0, 0.0, False),
+        ("direct-torque", True, 1.0, 1.0, False),
+        ("adrc", True, 1.0, 0.0, False),
+        ("adrc-torque", True, 1.0, 0.0, False),
+        ("adrc-torque-td", True, 1.0, 0.0, False),
     ],
 )
 def test_controller_variants_apply_reproducible_ablation_settings(
     variant: str,
     enabled: bool,
-    position_gain: float,
     torque_gain: float,
     feedback_gain: float,
     position_limit_enabled: bool,
@@ -203,7 +199,6 @@ def test_controller_variants_apply_reproducible_ablation_settings(
     assert configured.normal_force.torque_feedback_gain == feedback_gain
     assert configured.normal_force.stiffness is not None
     assert configured.normal_force.stiffness.enabled is enabled
-    assert configured.normal_force.stiffness.position_feedforward_gain == position_gain
     assert configured.normal_force.stiffness.torque_feedforward_gain == torque_gain
     assert configured.normal_force.stiffness.position_limit_enabled is position_limit_enabled
     assert source.normal_force is not None
@@ -246,7 +241,7 @@ def test_direct_torque_variant_keeps_mit_gains_for_approach_servo() -> None:
 
 
 def test_adrc_variant_enables_ladrc_outer_loop_with_default_parameters() -> None:
-    """adrc 变体注入默认 LADRC 参数，位置前馈置 0，力矩前馈与 MIT 增益不动。"""
+    """adrc 变体注入默认 LADRC 参数，机构力矩前馈与 MIT 增益不动。"""
     source = load_profile(ROOT / "configs/dm_gripper.yaml")
     configured = configure_force_controller(source, variant="adrc")
 
@@ -256,9 +251,8 @@ def test_adrc_variant_enables_ladrc_outer_loop_with_default_parameters() -> None
     assert configured.normal_force.adrc == AdrcControl()
     assert configured.normal_force.torque_feedback_gain == 0.0
     assert configured.normal_force.stiffness is not None
-    # 刚度估计照常运行（trace 可比），位置前馈由 LADRC 取代，力矩前馈对标 full。
+    # 刚度估计照常运行，使 trace 中的估计曲线可比。
     assert configured.normal_force.stiffness.enabled is True
-    assert configured.normal_force.stiffness.position_feedforward_gain == 0.0
     assert source.normal_force is not None
     assert source.normal_force.stiffness is not None
     assert (
@@ -286,7 +280,6 @@ def test_adrc_torque_variant_enables_model_scheduled_direct_torque_loop() -> Non
     assert configured.normal_force.torque_feedback_gain == 0.0
     assert configured.normal_force.stiffness is not None
     assert configured.normal_force.stiffness.enabled is True
-    assert configured.normal_force.stiffness.position_feedforward_gain == 0.0
     assert configured.normal_force.stiffness.torque_feedforward_gain == 1.0
     # 接近阶段仍复用相同 MIT 阻抗参数，旁路只发生在跟踪控制周期。
     assert configured.mit == source.mit
@@ -310,7 +303,7 @@ def test_adrc_torque_variant_accepts_explicit_tuning_override() -> None:
     assert configured.normal_force is not None
     assert configured.normal_force.torque_adrc == override
     with pytest.raises(ValueError, match="requires a torque ADRC"):
-        configure_force_controller(source, variant="full", torque_adrc_override=override)
+        configure_force_controller(source, variant="pid-torque-ff", torque_adrc_override=override)
 
 
 def test_adrc_torque_td_variant_only_adds_reference_shaping() -> None:
@@ -371,14 +364,14 @@ def test_stiffness_estimator_method_is_a_runtime_profile_override() -> None:
 
     configured = configure_force_controller(
         source,
-        variant="pid-stiffness-ff",
+        variant="pid-torque-ff",
         stiffness_estimator_method="window_quadratic",
     )
 
     assert configured.normal_force is not None
     assert configured.normal_force.stiffness is not None
     assert configured.normal_force.stiffness.method == "window_quadratic"
-    assert configured.normal_force.stiffness.torque_feedforward_gain == 0.0
+    assert configured.normal_force.stiffness.torque_feedforward_gain == 1.0
     assert source.normal_force is not None
     assert source.normal_force.stiffness is not None
     assert source.normal_force.stiffness.method == "window_linear"
@@ -518,7 +511,6 @@ def test_force_tracking_direct_torque_run_tracks_reference(tmp_path: Path) -> No
     assert tracking_rows
     # 直接力矩路径：PID 与刚度位置修正诊断字段为 0，刚度估计仍在运行。
     assert all(float(row["pid_position_adjustment_rad"]) == 0.0 for row in tracking_rows)
-    assert all(float(row["stiffness_position_adjustment_rad"]) == 0.0 for row in tracking_rows)
     assert all(
         math.isfinite(float(row["estimated_contact_stiffness_n_per_m"])) for row in tracking_rows
     )
@@ -559,7 +551,6 @@ def test_force_tracking_adrc_torque_run_writes_observer_diagnostics(
     assert tracking_rows
     assert all(float(row["force_position_adjustment_rad"]) == 0.0 for row in tracking_rows)
     assert all(float(row["pid_position_adjustment_rad"]) == 0.0 for row in tracking_rows)
-    assert all(float(row["stiffness_position_adjustment_rad"]) == 0.0 for row in tracking_rows)
     assert all(float(row["force_feedforward_torque_n_m"]) > 0.0 for row in tracking_rows)
     assert all(math.isfinite(float(row["torque_adrc_measurement_n"])) for row in tracking_rows)
     assert all(math.isfinite(float(row["torque_adrc_reference_force_n"])) for row in tracking_rows)

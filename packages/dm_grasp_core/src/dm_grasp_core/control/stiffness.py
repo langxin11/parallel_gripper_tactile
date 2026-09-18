@@ -52,7 +52,7 @@ class StiffnessSnapshot:
 
 @dataclass(frozen=True, slots=True)
 class ContactStiffnessConfig:
-    """在线接触刚度估计、前馈与刚度感知位置限幅参数。
+    """在线接触刚度估计、机构力矩前馈与刚度感知位置限幅参数。
 
     Attributes:
         enabled: 是否启用刚度估计；关闭时控制器不得读取估计值路径。
@@ -65,7 +65,6 @@ class ContactStiffnessConfig:
         min_delta_force_n: 有效样本要求的最小力增量 (N)。
         window_size: 滑动窗口容量（样本数）。
         min_samples: 触发拟合的最少样本数。
-        position_feedforward_gain: 刚度前馈位置修正增益。
         torque_feedforward_gain: 目标力到输出轴力矩的前馈增益。
         position_limit_enabled: 是否启用刚度感知的 PID 位置目标限幅。
         position_limit_force_rate_n_s: 限幅路径允许的法向力变化率 (N/s)。
@@ -82,7 +81,6 @@ class ContactStiffnessConfig:
     method: StiffnessEstimatorMethod = "window_linear"
     window_size: int = 25
     min_samples: int = 8
-    position_feedforward_gain: float = 0.25
     torque_feedforward_gain: float = 1.0
     position_limit_enabled: bool = False
     position_limit_force_rate_n_s: float = 10.0
@@ -103,10 +101,6 @@ class ContactStiffnessConfig:
         degree = {"window_linear": 1, "window_quadratic": 2}.get(self.method)
         if degree is not None and self.min_samples < degree + 1:
             raise ValueError("min_samples must provide enough samples for the selected method")
-        if self.position_limit_enabled and self.position_feedforward_gain > 0:
-            raise ValueError(
-                "stiffness position feedforward and position limit are mutually exclusive"
-            )
 
 
 class ContactStiffnessEstimator:

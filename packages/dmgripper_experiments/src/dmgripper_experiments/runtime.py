@@ -1155,18 +1155,12 @@ def _run_control_loop_inner(
                 current_target = _preload_force_target(target_source, task_time_s)
             else:
                 current_target = target_source.active_reference(task_time_s)
-            stiffness_value = (
-                stiffness.control_value()
-                if config.controller.stiffness_consumption == "feedforward"
-                else None
-            )
             if not tracking_begun:
                 controller_step = controller.begin_contact_tracking(
                     paired=paired,
                     target=current_target,
                     time_s=now - started,
                     dt=dt,
-                    stiffness_value=stiffness_value,
                 )
                 tracking_begun = True
                 emit(
@@ -1181,7 +1175,6 @@ def _run_control_loop_inner(
                     target=current_target,
                     time_s=now - started,
                     dt=dt,
-                    stiffness_value=stiffness_value,
                 )
             command = controller_step.command
             target_source.set_execution_limited(controller.admittance.execution_limited)

@@ -14,9 +14,8 @@
 | `force_controller_selection` | PID 基线 `pid-torque-ff`、`pid-only`、`pid-stiffness-rate` 与 `adrc-torque`；固定 Step／Ramp／Mixed，配对材料与 seed。 |
 | `torque_adrc_tuning` | 扫描测量滤波、控制带宽与观测带宽比，经连续任务约束后确认候选。 |
 
-默认控制器对比排除 `direct-torque`、一阶位置式 `adrc`、`pid-stiffness-limit`，以及随刚度位置前馈
-退役的 `full` 与 `pid-stiffness-ff`；退出原因分别是历史跨任务表现退化、控制导向模型与 MIT 位置闭环
-阶次不匹配、stiff Step 平台极限环，以及消融证据显示刚度加法修正附加收益接近于零。
+默认控制器对比排除 `direct-torque`、一阶位置式 `adrc` 与 `pid-stiffness-limit`；退出原因分别是
+历史跨任务表现退化、控制导向模型与 MIT 位置闭环阶次不匹配，以及 stiff Step 平台极限环。
 不要把历史 study 的成员或运行结果解释为当前矩阵已经执行。
 
 正式接触 preset 为 `medium`、`hard`、`stiff`，它们描述显式 contact pair 的求解器参数，
@@ -47,9 +46,8 @@ Ramp 的卸载终点有 2 s 保持段，终端误差可解释为末端稳态误�
 样本数、闭合跨度和力跨度必须满足门限；退化拟合或非正斜率保持上一次估计，输出受正刚度范围约束。
 估计器没有显式分离接触阻尼、迟滞和各部件刚度，也没有仅凭滑移或 taxel 集合变化自动冻结的机制。
 
-已退役的 `stiffness_estimator_validation` 曾固定刚度位置修正、关闭机构力矩前馈，隔离估计器对控制的影响；
-它没有独立刚度参考，不能回答“谁估计得最准”。精度研究应采用独立平衡工作点构造的参考刚度，见
-[局部刚度辨识](#stiffness-identification)与[平衡工作点参考](#equilibrium-reference)。
+早期估计器对比没有独立刚度参考，不能回答“谁估计得最准”。精度研究应采用独立平衡工作点构造的
+参考刚度，见[局部刚度辨识](#stiffness-identification)与[平衡工作点参考](#equilibrium-reference)。
 
 控制中使用的刚度与力雅可比定义见[局部接触力模型](force-tracking.md#contact-force-model)，
 机构位移与有效工况见[DM 共享控制核](dm-shared-control.md#dm-kinematics)。以下方法用于评价在线估计精度。
@@ -63,8 +61,8 @@ Ramp 的卸载终点有 2 s 保持段，终端误差可解释为末端稳态误�
 \]
 
 进而得到 \(\hat J_f\)，或在已知 \(J_c(q)\) 后反算 \(\hat k_{\mathrm{pair}}\)。
-这辨识的是“Pillar—物体—机构／接触链路”组合的整体等效 \(k_{\mathrm{pair}}\)，用于前馈、增益调度
-和实验比较；它不表示材料弹性模量，也不用于在线反推物体参数。
+这辨识的是“Pillar—物体—机构／接触链路”组合的整体等效 \(k_{\mathrm{pair}}\)，用于位置增量限幅、
+ADRC 输入增益调度和实验比较；它不表示材料弹性模量，也不用于在线反推物体参数。
 
 !!! warning "接触参数不是材料刚度"
 
@@ -105,15 +103,13 @@ k_{\mathrm{ref}}(c_i)\simeq
 
 详细数据与复现来源统一进入[科研报告](reports.md)，本页只保留影响当前选择的结论：
 
-- 位置式 MIT 控制中，机构力矩前馈是稳定的改善来源；刚度加法修正的附加收益有限
-  （消融 36 条件中 `pid-stiffness-ff` 对 `pid-only` 的 RMSE 差约 2.5e-05 N）。据此刚度位置前馈
-  已退役，PID 基线为 `pid-torque-ff`，消融与固定 `pid-stiffness-ff` 的估计器对比研究 concluded 退役。
-- 已完成研究中，`adrc-torque` 对 Ramp／Mixed 连续参考优于位置式 `full`，Step 误差与超调更高；
+- 位置式 MIT 控制中，机构模型力矩前馈是稳定的改善来源；由力误差并联生成第二个位置修正的历史方案
+  属于重复反馈，已从接口与实现删除。PID 基线为 `pid-torque-ff`。
+- 已完成研究中，`adrc-torque` 对 Ramp／Mixed 连续参考优于当时的位置式基线，Step 误差与超调更高；
   不能据此宣布其对所有任务更优。
 - `pid-stiffness-limit` 的平台极限环使其退出默认比较；`pid-stiffness-rate` 的局部调优结果仍需在统一
   250 Hz 外环下跨材料确认，局部最优不能直接成为统一控制器结论。历史多频率结果只描述当时条件。
-- 固定 `pid-stiffness-ff` 的估计器对比未显示窗口法稳定、可推广的跟踪收益；曲线平滑和平均刚度差异
-  都不能替代估计精度或控制收益证据。
+- 早期估计器对比未显示窗口法稳定、可推广的跟踪收益；曲线平滑和平均刚度差异不能替代估计精度证据。
 
 ### 高载荷接触的定性结论 {#collision-geometry-conclusions}
 

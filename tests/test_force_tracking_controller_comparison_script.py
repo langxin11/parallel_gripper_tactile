@@ -76,7 +76,7 @@ def test_describe_conditions_is_stable_and_complete(tmp_path: Path) -> None:
     config = ForceTrackingComparisonConfig(
         profile=tmp_path / "profile.yaml",
         tasks=(tmp_path / "step.yaml",),
-        controllers=("pid-only", "full"),
+        controllers=("pid-only", "pid-torque-ff"),
         materials=("soft", "hard"),
         seeds=SeedSweep(start=3, count=2),
         output_root=tmp_path / "outputs",
@@ -86,7 +86,7 @@ def test_describe_conditions_is_stable_and_complete(tmp_path: Path) -> None:
 
     assert "Conditions: 8" in description
     assert "001 controller=pid-only task=step.yaml material=soft seed=3" in description
-    assert "008 controller=full task=step.yaml material=hard seed=4" in description
+    assert "008 controller=pid-torque-ff task=step.yaml material=hard seed=4" in description
 
 
 def test_summary_plots_are_generated(tmp_path: Path, fast_plot_render: None) -> None:
