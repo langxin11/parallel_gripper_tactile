@@ -30,6 +30,7 @@ STUDY_GROUPS = {
     "force_tracking_controller_comparison": ("dm_force_controller_selection/study", []),
     "friction_estimator_validation": ("friction_estimator_validation/study", []),
     "force_tracking_stiffness_rate_confirmation": ("dm_stiffness_rate_confirmation/study", []),
+    "force_scheduling_support_release": ("adaptive_support_release_validation/study", []),
 }
 
 
@@ -39,6 +40,7 @@ STUDY_GROUPS = {
         "dm_force_controller_selection/study",
         "friction_estimator_validation/study",
         "dm_stiffness_rate_confirmation/study",
+        "adaptive_support_release_validation/study",
     ],
 )
 def test_active_research_groups_do_not_repeat_cross_layer_fields(
@@ -232,6 +234,7 @@ def test_formal_friction_estimator_validation_preserves_scenario_and_seed_matrix
     ("study_name", "condition_count"),
     [
         ("friction_estimator_validation", 15),
+        ("force_scheduling_support_release", 18),
     ],
 )
 def test_plan_registers_expected_condition_count(

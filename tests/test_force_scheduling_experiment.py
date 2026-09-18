@@ -24,9 +24,24 @@ from parallel_gripper_tactile.experiments.force_scheduling import (
 )
 from parallel_gripper_tactile.runners import execute_force_scheduling
 from parallel_gripper_tactile.research import compose_research_run
+from parallel_gripper_tactile.studies.force_scheduling_support_release import (
+    load_force_scheduling_support_release_config,
+)
+from parallel_gripper_tactile.research.study import compose_support_release_arm
 
 
 ROOT = Path(__file__).resolve().parents[1]
+_SUPPORT_RELEASE_STUDY = load_force_scheduling_support_release_config(
+    ROOT / "configs/research/adaptive_support_release_validation/study.yaml"
+)
+
+
+def _support_release_arm(name: str, *, seed: int = 0):
+    """按正式研究矩阵组合撤支撑对照臂。"""
+    arm = next(item for item in _SUPPORT_RELEASE_STUDY.arms if item.name == name)
+    return compose_support_release_arm(arm, seed=seed)
+
+
 PROFILE = ROOT / "configs/dm_gripper.yaml"
 GRAVITY_TASK = ROOT / "configs/task/load/gravity_hold.yaml"
 FILLING_TASK = ROOT / "configs/task/load/dynamic_filling.yaml"
@@ -44,7 +59,7 @@ ORACLE = OracleForceSchedulerConfig(max_force_rate_n_s=1.0)
 )
 def test_multirate_fault_injection_obeys_sampling_and_freeze(tmp_path, fault) -> None:
     """检查真实丢帧／抖动与冻结，不把抓取成功当作故障逻辑的充分证据。"""
-    resolved = compose_research_run(experiment="dm_gripper/adaptive_support_release_multirate")
+    resolved = _support_release_arm("adaptive-admittance-multirate")
     task = resolved.task.model_copy(update={"tactile_fault": fault})
     trace, raw = tmp_path / "trace.csv", tmp_path / "tactile.jsonl"
     result = run_force_scheduling(
@@ -81,8 +96,8 @@ def test_multirate_fault_injection_obeys_sampling_and_freeze(tmp_path, fault) ->
 
 def test_adaptive_multirate_preserves_transient_admittance_and_filter_overrides(tmp_path) -> None:
     """多速率组合保留瞬态导纳、前馈和载荷滤波覆盖。"""
-    baseline = compose_research_run(experiment="dm_gripper/adaptive_support_release")
-    candidate = compose_research_run(experiment="dm_gripper/adaptive_support_release_multirate")
+    baseline = _support_release_arm("adaptive-admittance")
+    candidate = _support_release_arm("adaptive-admittance-multirate")
     config = baseline.scheduler
     expected_task = baseline.task.model_copy(
         update={
@@ -127,12 +142,8 @@ def test_adaptive_multirate_preserves_transient_admittance_and_filter_overrides(
 @pytest.mark.parametrize("seed", [0, 1, 2])
 def test_adaptive_pid_comparison_preserves_policy_and_feedforward(tmp_path, seed) -> None:
     """同一上层配置接入真实 PID 力矩前馈；临界滑移结果不能统一标成成功。"""
-    baseline = compose_research_run(
-        experiment="dm_gripper/adaptive_support_release", overrides=[f"seed={seed}"]
-    )
-    resolved = compose_research_run(
-        experiment="dm_gripper/adaptive_support_release_pid", overrides=[f"seed={seed}"]
-    )
+    baseline = _support_release_arm("adaptive-admittance", seed=seed)
+    resolved = _support_release_arm("adaptive-pid", seed=seed)
     assert resolved.task == baseline.task
     assert resolved.scheduler == baseline.scheduler
     assert resolved.profile.mit == baseline.profile.mit
@@ -244,7 +255,7 @@ def test_tactile_sampling_task_rejects_unsupported_combinations() -> None:
 
 def test_multirate_rejects_sampling_period_not_aligned_to_physics() -> None:
     """与物理步长错相的采样周期在进入仿真循环前直接拒绝。"""
-    resolved = compose_research_run(experiment="dm_gripper/adaptive_support_release_multirate")
+    resolved = _support_release_arm("adaptive-admittance-multirate")
     misaligned = resolved.task.model_copy(
         update={"tactile_sampling": TactileSamplingConfig(period_s=0.0015)}
     )
@@ -334,12 +345,11 @@ def test_execute_force_scheduling_writes_reproducible_artifacts(
     scheduler_config = ORACLE
     scheduler_source = None
     if mode in {"adaptive", "multirate"}:
-        experiment = (
-            "adaptive_support_release_multirate"
+        resolved = (
+            _support_release_arm("adaptive-admittance-multirate")
             if mode == "multirate"
-            else "force_scheduling_adaptive"
+            else compose_research_run(experiment="dm_gripper/force_scheduling_adaptive")
         )
-        resolved = compose_research_run(experiment=f"dm_gripper/{experiment}")
         profile = resolved.profile
         scheduler_config = resolved.scheduler
         scheduler_source = resolved.scheduler_source
@@ -407,7 +417,7 @@ def test_adaptive_simulation_tracks_measured_load(tmp_path: Path, scenario: str)
     if scenario == "steady":
         load = {"waypoints": [{"t_s": 0, "force_n": 0}, {"t_s": 3, "force_n": 0}]}
     elif scenario == "step":
-        step = compose_research_run(experiment="dm_gripper/adaptive_support_release")
+        step = _support_release_arm("adaptive-admittance")
         step_task = step.task
         task = task.model_copy(update={"cube_mass_kg": step_task.cube_mass_kg})
         scheduler_config = step.scheduler

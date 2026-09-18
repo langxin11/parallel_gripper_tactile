@@ -24,6 +24,10 @@ from ..studies.force_tracking_comparison import (
 from ..studies.force_tracking_stiffness_rate_tuning import (
     ForceTrackingStiffnessRateTuningConfig,
 )
+from ..studies.force_scheduling_support_release import (
+    ForceSchedulingSupportReleaseConfig,
+    SupportReleaseArm,
+)
 from ..studies.friction_estimator_validation import (
     FrictionEstimatorValidationStudyConfig,
 )
@@ -42,6 +46,9 @@ from ..studies.protocols import (
 from ..studies.protocols import (
     friction_estimator_validation as friction_estimator_validation_protocol,
 )
+from ..studies.protocols import (
+    force_scheduling_support_release as support_release_protocol,
+)
 from .configuration import REPOSITORY_ROOT, ResearchConfigurationError
 from .composition import compose_research_run
 
@@ -51,6 +58,7 @@ StudyKind = Literal[
     "friction_estimator_validation",
     "force_tracking_stiffness_rate_tuning",
     "force_tracking_stiffness_rate_confirmation",
+    "force_scheduling_support_release",
 ]
 SetupFailureStage = Literal["configuration", "preflight"]
 
@@ -121,6 +129,7 @@ StudyDomainConfig = (
     ForceTrackingComparisonConfig
     | FrictionEstimatorValidationStudyConfig
     | ForceTrackingStiffnessRateTuningConfig
+    | ForceSchedulingSupportReleaseConfig
 )
 
 
@@ -272,6 +281,13 @@ def _profile_options(selection: StudySelection, profile: GripperProfile) -> dict
     return {"resolved_profile": profile}
 
 
+def _support_release_options(
+    selection: StudySelection, profile: GripperProfile
+) -> dict[str, object]:
+    """撤支撑研究向协议注入冻结 profile 与对照臂组合器。"""
+    return {"resolved_profile": profile, "arm_composer": compose_support_release_arm}
+
+
 def _rate_options(selection: StudySelection, profile: GripperProfile) -> dict[str, object]:
     """共享速率协议显式区分调优与确认研究身份。"""
     return {"resolved_profile": profile, "study_kind": selection.kind}
@@ -326,6 +342,52 @@ class _StudyAdapter:
         return plan
 
 
+def _deep_merge(base: Mapping[str, object], patch: Mapping[str, object]) -> dict[str, object]:
+    """深合并补丁；标量与列表整体替换，映射递归合并。"""
+    merged = dict(base)
+    for name, value in patch.items():
+        if isinstance(merged.get(name), Mapping) and isinstance(value, Mapping):
+            merged[name] = _deep_merge(merged[name], value)
+        else:
+            merged[name] = value
+    return merged
+
+
+def compose_support_release_arm(arm: SupportReleaseArm, *, seed: int):
+    """按基座 experiment、组覆盖与结构补丁组合一个冻结对照臂。
+
+    研究协议层不得反向依赖 research 组合服务，因此经适配器注入本函数。
+    """
+    from pydantic import TypeAdapter
+
+    resolved = compose_research_run(
+        experiment=arm.experiment,
+        overrides=(*arm.overrides, f"seed={seed}"),
+    )
+    if arm.task_patch:
+        task = TypeAdapter(type(resolved.task)).validate_python(
+            _deep_merge(resolved.task.model_dump(mode="python"), arm.task_patch)
+        )
+        resolved = type(resolved)(
+            **{
+                field: task if field == "task" else getattr(resolved, field)
+                for field in resolved.__dataclass_fields__
+            }
+        )
+    if arm.scheduler_patch:
+        adapter = TypeAdapter(type(resolved.scheduler))
+        scheduler = adapter.validate_python(
+            _deep_merge(adapter.dump_python(resolved.scheduler, mode="python"), arm.scheduler_patch)
+        )
+        resolved = type(resolved)(
+            **{
+                field: scheduler if field == "scheduler" else getattr(resolved, field)
+                for field in resolved.__dataclass_fields__
+            }
+        )
+    return resolved
+
+
 _STUDY_ADAPTERS: dict[StudyKind, _StudyAdapter] = {
     "force_tracking_controller_comparison": _StudyAdapter(
         ForceTrackingComparisonConfig,
@@ -350,6 +412,13 @@ _STUDY_ADAPTERS: dict[StudyKind, _StudyAdapter] = {
         stiffness_rate_tuning_protocol,
         _validate_stiffness_rate_tuning,
         options=_rate_options,
+    ),
+    "force_scheduling_support_release": _StudyAdapter(
+        ForceSchedulingSupportReleaseConfig,
+        support_release_protocol,
+        None,
+        sequence_paths=(),
+        options=_support_release_options,
     ),
 }
 

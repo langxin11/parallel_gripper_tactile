@@ -1,0 +1,95 @@
+# @package _global_
+# 目的导向研究定义；本文件同时拥有研究元数据与唯一条件矩阵。
+study:
+  kind: force_scheduling_support_release
+  source: configs/research/adaptive_support_release_validation/study.yaml
+  profile:
+    experiment: dm_gripper/force_scheduling_adaptive
+    # 撤支撑场景由各对照臂的任务覆盖唯一拥有；共享基座只决定夹爪物理与材料。
+  rationale:
+    question: 撤去支撑后，触觉自适应调度能否以接近真值上界的法向力维持稳定抓取？
+    decision: 判断 adaptive 调度是否具备替代 oracle 真值调度的证据，并比较多速率与风险增强的增益。
+    inclusion_criteria: [oracle 与 adaptive 使用相同力限与速率, 同场景同 seed 配对, 六臂矩阵]
+    task_rationale: 0.2548 kg 刚性方块撤支撑产生 2.5 N 阶跃自重，覆盖调度的突变载荷响应。
+    primary_metrics: [通过率, 滑移率, 最终目标力, 最小摩擦裕度, 力跟踪 RMSE]
+    stop_conditions: [完成六臂乘三 seed 共十八条条件]
+    exclusions: {真机能力: max_force_rate_n_s=50 为仿真候选，不代表真机已验证增力能力。}
+  definition:
+    name: force_scheduling_support_release
+    # 对照臂 = 基座 experiment + 组覆盖 + 结构补丁；oracle 与 adaptive 共享力限，
+    # 保证“信息来源”是臂间唯一系统差异。
+    arms:
+      - name: oracle-admittance
+        experiment: dm_gripper/force_scheduling_oracle
+        overrides:
+          - task=load/support_release
+          - controller=dm_gripper/admittance
+          - estimator=none
+          - scheduler.definition.min_force_n=1.0
+          - scheduler.definition.max_force_rate_n_s=50.0
+      - name: oracle-pid
+        experiment: dm_gripper/force_scheduling_oracle
+        overrides:
+          - task=load/support_release
+          - scheduler.definition.min_force_n=1.0
+          - scheduler.definition.max_force_rate_n_s=50.0
+      - name: adaptive-admittance
+        experiment: dm_gripper/force_scheduling_adaptive
+        overrides: [task=load/support_release]
+        scheduler_patch:
+          load:
+            min_force_n: 1.0
+            max_force_rate_n_s: 50.0
+      - name: adaptive-pid
+        experiment: dm_gripper/force_scheduling_adaptive
+        overrides:
+          - task=load/support_release
+          - controller=dm_gripper/pid_torque_ff
+          - estimator=window_linear
+        scheduler_patch:
+          load:
+            min_force_n: 1.0
+            max_force_rate_n_s: 50.0
+      - name: adaptive-admittance-multirate
+        experiment: dm_gripper/force_scheduling_adaptive
+        overrides:
+          - task=load/support_release
+          - controller.admittance.velocity_limit_rad_s=0.2
+          - controller.admittance.feedforward_ratio=1.0
+        task_patch:
+          tactile_sampling:
+            period_s: 0.001
+            median_window: 3
+            stale_after_s: 0.01
+            record_raw: true
+        scheduler_patch:
+          load:
+            min_force_n: 1.0
+            max_force_rate_n_s: 50.0
+            filter_tau_s: 0.01
+      - name: adaptive-admittance-risk
+        experiment: dm_gripper/force_scheduling_adaptive
+        overrides: [task=load/support_release]
+        scheduler_patch:
+          load:
+            min_force_n: 1.0
+            max_force_rate_n_s: 50.0
+          risk_enabled: true
+          friction_update_enabled: true
+          friction_quality_min: 0.4
+          risk_step_n: 1.0
+          risk_rate_n_s: 50.0
+          risk_repeat_interval_s: 0.1
+          risk_budget_n: 12.0
+          risk_max_events: 12
+          risk_duration_s: 20.0
+          observer:
+            window_s: 0.04
+            confirmation_s: 0.012
+            cooldown_s: 0.1
+            allow_steady_load_risk: true
+            stable_contact_subset: true
+    # 统一配对种子，便于臂间配对比较。
+    seeds:
+      start: 0
+      count: 3
