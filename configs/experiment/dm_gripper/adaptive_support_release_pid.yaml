@@ -4,14 +4,20 @@ defaults:
   - override /model: dm_gripper/height_spheres
   - override /controller: dm_gripper/pid_torque_ff
   - override /estimator: window_linear
-  - override /task: force_scheduling/unified_step_load
+  - override /scheduler: force/adaptive
+  - override /task: load/support_release
   - override /material: hard
   - override /execution: run
   - _self_
 
 experiment:
-  name: dm_unified_step_load_pid
+  name: dm_adaptive_support_release_pid
   kind: force_scheduling
+scheduler:
+  definition:
+    load:
+      min_force_n: 1.0
+      max_force_rate_n_s: 50.0
 controller:
   stiffness_control:
     # 复用 pid-torque-ff 的完整机构模型力矩前馈。

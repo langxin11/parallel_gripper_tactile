@@ -18,6 +18,7 @@ CONFIG_GROUPS: tuple[str, ...] = (
     "model",
     "controller",
     "estimator",
+    "scheduler",
     "task",
     "material",
     "execution",
@@ -128,6 +129,8 @@ def _purpose(document: Mapping[str, Any], group: str) -> str:
         return _join_description(_text(document.get("family")), _text(document.get("name")))
     if group == "estimator":
         return _text(document.get("name"))
+    if group == "scheduler":
+        return _join_description(_text(document.get("family")), _text(document.get("name")))
     if group == "material":
         return _text(document.get("name"))
     if group == "execution":

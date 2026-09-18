@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Literal, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError, model_validator
+from dm_grasp_core.grasp.unified import UnifiedAdaptiveConfig
 
 from ..config.profiles import (
     GripperProfile,
@@ -22,7 +23,7 @@ from ..experiments.force_tracking import (
     configure_force_controller,
     validate_force_tracking_configuration,
 )
-from ..experiments.force_scheduling import ForceSchedulingTask
+from ..experiments.force_scheduling import ForceSchedulingTask, OracleForceSchedulerConfig
 from ..experiments.friction_estimation import FrictionEstimationTask
 from ..experiments.tangential_disturbance import (
     TangentialDisturbanceTask,
@@ -154,12 +155,30 @@ class EstimatorSelection(_ResearchModel):
     stiffness: dict[str, object]
 
 
+class SchedulerSelection(_ResearchModel):
+    """目标力调度器选择；与外载任务、力跟踪控制器分离。"""
+
+    family: Literal["none", "force"]
+    name: Literal["none", "oracle", "adaptive"]
+    path: Path | None = None
+    definition: dict[str, object]
+
+    @model_validator(mode="after")
+    def validate_family_name(self) -> "SchedulerSelection":
+        """要求空调度器和力调度器的名称与家族一致。"""
+        if (self.family == "none") != (self.name == "none"):
+            raise ValueError("scheduler family and name are inconsistent")
+        if self.family == "force" and self.path is None:
+            raise ValueError("force scheduler requires a source path")
+        return self
+
+
 class TaskSelection(_ResearchModel):
     """任务家族、来源配置和可直接构造的任务片段。"""
 
     family: Literal[
         "force_tracking",
-        "force_scheduling",
+        "load",
         "friction_estimation",
         "discrete_force",
         "tangential_disturbance",
@@ -211,6 +230,7 @@ class ResearchRunConfig(_ResearchModel):
     model: ModelSelection
     controller: ControllerSelection
     estimator: EstimatorSelection
+    scheduler: SchedulerSelection
     task: TaskSelection
     material: MaterialSelection
     seed: int = Field(ge=0)
@@ -224,8 +244,16 @@ class ResearchRunConfig(_ResearchModel):
         expected_family = "robotiq" if self.experiment.kind == "discrete_force" else "dm"
         if self.platform.family != expected_family:
             raise ValueError("experiment kind is incompatible with the selected platform")
-        if self.task.family != self.experiment.kind:
+        expected_task_family = (
+            "load" if self.experiment.kind == "force_scheduling" else self.experiment.kind
+        )
+        if self.task.family != expected_task_family:
             raise ValueError("experiment kind and task family must match")
+        if self.experiment.kind == "force_scheduling":
+            if self.scheduler.family != "force":
+                raise ValueError("force scheduling requires a force scheduler")
+        elif self.scheduler.family != "none":
+            raise ValueError("force scheduler is only valid for force-scheduling experiments")
         if self.experiment.kind == "tangential_disturbance":
             if self.execution.viewer:
                 raise ValueError("tangential disturbance does not support viewer")
@@ -271,8 +299,10 @@ class ResolvedResearchRun:
     selection: ResearchRunConfig
     profile_source: Path
     task_source: Path
+    scheduler_source: Path | None
     profile: GripperProfile
     task: RunTask
+    scheduler: OracleForceSchedulerConfig | UnifiedAdaptiveConfig | None
 
     def effective_parameters(self) -> dict[str, object]:
         """返回可追溯且可 JSON 序列化的最终有效参数。"""
@@ -281,10 +311,18 @@ class ResolvedResearchRun:
             "selection": self.selection.model_dump(mode="json"),
             "profile": self.profile.model_dump(mode="json"),
             "task": self.task.model_dump(mode="json"),
+            "scheduler": (
+                None
+                if self.scheduler is None
+                else TypeAdapter(type(self.scheduler)).dump_python(self.scheduler, mode="json")
+            ),
             "runtime": {
                 "profile_path": "composed_profile",
                 "profile_composition_source": str(self.profile_source),
                 "task_path": str(self.task_source),
+                "scheduler_path": (
+                    None if self.scheduler_source is None else str(self.scheduler_source)
+                ),
                 "object_material": self.selection.material.name,
                 "controller_variant": self.selection.controller.name,
                 "stiffness_estimator_method": (
@@ -492,6 +530,7 @@ def _legacy_to_fragment_mapping(
             "admittance": admittance,
         },
         "estimator": {"name": estimator_raw["name"], "stiffness": stiffness_mapping},
+        "scheduler": {"family": "none", "name": "none", "definition": {}},
         "task": {
             "family": task_raw["family"],
             "path": task_path,
@@ -528,12 +567,32 @@ def resolve_research_run(
         task_source = _repository_path(selection.task.path, repository_root=root)
         task_model: dict[str, type[BaseModel]] = {
             "force_tracking": ForceTrackingTask,
-            "force_scheduling": ForceSchedulingTask,
+            "load": ForceSchedulingTask,
             "friction_estimation": FrictionEstimationTask,
             "discrete_force": RobotiqDiscreteForceTask,
             "tangential_disturbance": TangentialDisturbanceTask,
         }
         task = task_model[selection.task.family].model_validate(selection.task.definition)
+        scheduler_source = (
+            None
+            if selection.scheduler.path is None
+            else _repository_path(selection.scheduler.path, repository_root=root)
+        )
+        scheduler: OracleForceSchedulerConfig | UnifiedAdaptiveConfig | None
+        if selection.scheduler.name == "oracle":
+            scheduler = OracleForceSchedulerConfig.model_validate(selection.scheduler.definition)
+        elif selection.scheduler.name == "adaptive":
+            scheduler = TypeAdapter(UnifiedAdaptiveConfig).validate_python(
+                selection.scheduler.definition
+            )
+        else:
+            scheduler = None
+        if (
+            isinstance(task, ForceSchedulingTask)
+            and task.tactile_sampling is not None
+            and not isinstance(scheduler, UnifiedAdaptiveConfig)
+        ):
+            raise ValueError("独立触觉采样仅支持 adaptive 目标力调度器")
         if isinstance(task, TangentialDisturbanceTask):
             task = task.model_copy(update={"object_material": selection.material.name})
         profile = _profile_from_fragments(selection, repository_root=root)
@@ -589,6 +648,10 @@ def resolve_research_run(
                 **selection.task.model_dump(mode="python"),
                 "path": task_source,
             },
+            "scheduler": {
+                **selection.scheduler.model_dump(mode="python"),
+                "path": scheduler_source,
+            },
             "execution": {
                 **resolved_execution.model_dump(mode="python"),
                 "output_root": _repository_path(
@@ -607,8 +670,10 @@ def resolve_research_run(
             / "simulation.yaml"
         ),
         task_source=task_source,
+        scheduler_source=scheduler_source,
         profile=profile,
         task=task,
+        scheduler=scheduler,
     )
 
 
@@ -630,6 +695,7 @@ __all__ = [
     "ResearchConfigurationError",
     "ResearchRunConfig",
     "ResolvedResearchRun",
+    "SchedulerSelection",
     "TaskSelection",
     "resolve_research_run",
 ]

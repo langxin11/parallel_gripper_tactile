@@ -4,6 +4,7 @@ defaults:
   - model: dm_gripper/height_spheres
   - controller: dm_gripper/adrc_torque
   - estimator: window_linear
+  - scheduler: none
   - task: force_tracking/ramp
   - material: hard
   - execution: run

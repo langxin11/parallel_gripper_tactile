@@ -187,16 +187,6 @@ def test_dm_controller_fragments_keep_pid_parameters_in_pid_base() -> None:
     ("experiment", "task_group", "legacy_task"),
     [
         (
-            "dm_gripper/force_scheduling_gravity_hold",
-            "force_scheduling/gravity_hold",
-            "configs/force_scheduling/gravity_hold.yaml",
-        ),
-        (
-            "dm_gripper/force_scheduling_dynamic_filling",
-            "force_scheduling/dynamic_filling",
-            "configs/force_scheduling/dynamic_filling.yaml",
-        ),
-        (
             "dm_gripper/friction_estimation_nominal",
             "friction_estimation/nominal_friction",
             "configs/friction_estimation/nominal_friction.yaml",
@@ -261,17 +251,21 @@ def test_remaining_task_groups_match_frozen_domain_values(
             },
         }
 
-    if family == "force_scheduling":
-        # 新增策略与独立采样均默认为关闭，其余字段逐项核对冻结证据。
-        expected = {
-            **expected,
-            "adaptive_prior": None,
-            "unified_adaptive": None,
-            "tactile_sampling": None,
-            "tactile_fault": None,
-        }
-
     assert resolved.task.model_dump(mode="json") == expected
+
+
+def test_force_scheduling_composes_load_and_scheduler_independently() -> None:
+    """载荷场景和目标力调度器分属独立配置组。"""
+    resolved = resolve_research_run(
+        resolved_mapping(
+            _compose(["experiment=dm_gripper/adaptive_dynamic_filling", "execution=plan"])
+        )
+    )
+
+    assert resolved.selection.task.family == "load"
+    assert resolved.selection.scheduler.name == "adaptive"
+    assert resolved.task.name == "dynamic_filling"
+    assert resolved.scheduler is not None
 
 
 @pytest.mark.parametrize(
@@ -306,6 +300,8 @@ def test_robotiq_model_groups_match_frozen_profiles(model_group: str, legacy_pro
         ["controller=dm_gripper/admittance"],
         ["estimator=none"],
         ["controller.torque_adrc.measurement_filter_cutoff_hz=-1"],
+        ["scheduler=force/adaptive"],
+        ["experiment=dm_gripper/adaptive_dynamic_filling", "scheduler=none"],
     ],
 )
 def test_illegal_component_combinations_fail_before_execution(overrides: list[str]) -> None:

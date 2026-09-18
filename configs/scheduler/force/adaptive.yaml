@@ -1,0 +1,18 @@
+# @package scheduler
+# 只根据触觉承载、摩擦先验和风险观测生成目标力，不读取场景真值。
+family: force
+name: adaptive
+path: configs/scheduler/force/adaptive.yaml
+definition:
+  risk_enabled: false
+  friction_update_enabled: false
+  load:
+    left_friction: 0.6
+    right_friction: 0.6
+    safety_factor: 1.5
+    min_force_n: 0.5
+    max_force_n: 8.0
+    max_force_rate_n_s: 1.0
+    gap_gain_per_s: 8.0
+    load_rate_gain: 1.0
+    filter_tau_s: 0.05

@@ -222,16 +222,20 @@ def run_force_schedule(
     run_prefix: Annotated[str | None, typer.Option("--run-prefix")] = None,
     run_suffix: Annotated[str | None, typer.Option("--run-suffix")] = None,
 ) -> None:
-    """运行基于已知摩擦系数的抓取目标力调度实验。"""
+    """运行独立外载场景与目标力调度器的组合实验。"""
     try:
         resolved = _composed_run(experiment, set_values)
         if not isinstance(resolved.task, ForceSchedulingTask):
             raise ValueError("selected experiment does not define a force-scheduling task")
+        if resolved.scheduler is None:
+            raise ValueError("selected experiment does not define a force scheduler")
         run, result = execute_force_scheduling(
             profile=_profile_snapshot(resolved.profile),
             resolved_profile=resolved.profile,
             task_path=resolved.task_source,
             scheduling_task=resolved.task,
+            scheduler_config=resolved.scheduler,
+            scheduler_source=resolved.scheduler_source,
             output_root=resolved.selection.execution.output_root,
             run_name=run_name,
             run_prefix=run_prefix,

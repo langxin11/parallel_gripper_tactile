@@ -59,6 +59,7 @@ def execute_research_run(
         "estimator": selection.estimator.name,
         "task": resolved.task.name,
         "task_path": str(resolved.task_source),
+        "scheduler": selection.scheduler.name,
         "material": selection.material.name,
         "seed": selection.seed,
     }
@@ -111,7 +112,14 @@ def execute_research_run(
             realtime_factor=selection.execution.realtime_factor,
         )
     elif isinstance(resolved.task, ForceSchedulingTask):
-        run, result = execute_force_scheduling(**common, scheduling_task=resolved.task)
+        if resolved.scheduler is None:
+            raise TypeError("force scheduling requires a resolved scheduler")
+        run, result = execute_force_scheduling(
+            **common,
+            scheduling_task=resolved.task,
+            scheduler_config=resolved.scheduler,
+            scheduler_source=resolved.scheduler_source,
+        )
     elif isinstance(resolved.task, FrictionEstimationTask):
         run, result = execute_friction_estimation(
             **common,

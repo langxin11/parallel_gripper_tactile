@@ -8,10 +8,13 @@ from pathlib import Path
 import sys
 
 import yaml
+from pydantic import TypeAdapter
+from dm_grasp_core.grasp.unified import UnifiedAdaptiveConfig
 
 from ..experiments.force_scheduling import (
     ForceSchedulingResult,
     ForceSchedulingTask,
+    OracleForceSchedulerConfig,
     run_force_scheduling,
 )
 from ..config.profiles import GripperProfile, load_profile, validate_resolved_profile
@@ -24,6 +27,8 @@ def execute_force_scheduling(
     resolved_profile: GripperProfile | None = None,
     task_path: Path,
     scheduling_task: ForceSchedulingTask | None = None,
+    scheduler_config: OracleForceSchedulerConfig | UnifiedAdaptiveConfig,
+    scheduler_source: Path | None = None,
     output_root: Path = Path("outputs"),
     run_name: str | None = None,
     run_prefix: str | None = None,
@@ -53,7 +58,9 @@ def execute_force_scheduling(
             "cube_mass_kg": float(task.cube_mass_kg),
             "object_material": task.object_material,
             "scenario_duration_s": task.downward_load.duration_s,
-            "scheduler": task.scheduler.model_dump(mode="json"),
+            "scheduler": TypeAdapter(type(scheduler_config)).dump_python(
+                scheduler_config, mode="json"
+            ),
             "solver": task.solver.model_dump(mode="json"),
         },
         run_name=run_name,
@@ -69,6 +76,16 @@ def execute_force_scheduling(
             encoding="utf-8",
         )
     run.register_artifact(task_snapshot)
+    scheduler_snapshot = run.artifact_path("scheduler.yaml")
+    scheduler_snapshot.write_text(
+        yaml.safe_dump(
+            TypeAdapter(type(scheduler_config)).dump_python(scheduler_config, mode="json"),
+            allow_unicode=True,
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
+    run.register_artifact(scheduler_snapshot)
     effective_parameters_path = run.artifact_path("effective_parameters.json")
     effective_parameters_path.write_text(
         json.dumps(
@@ -76,6 +93,9 @@ def execute_force_scheduling(
                 "schema_version": 1,
                 "profile": configured.model_dump(mode="json"),
                 "task": task.model_dump(mode="json"),
+                "scheduler": TypeAdapter(type(scheduler_config)).dump_python(
+                    scheduler_config, mode="json"
+                ),
                 "runtime": {
                     "profile_path": (
                         "composed_profile"
@@ -86,11 +106,12 @@ def execute_force_scheduling(
                     ),
                     "task_path": str(task_path.resolve()),
                     "scheduler_kind": (
-                        "unified_adaptive"
-                        if task.unified_adaptive is not None
+                        "adaptive"
+                        if isinstance(scheduler_config, UnifiedAdaptiveConfig)
                         else "oracle"
-                        if task.adaptive_prior is None
-                        else "adaptive_prior"
+                    ),
+                    "scheduler_path": (
+                        None if scheduler_source is None else str(scheduler_source.resolve())
                     ),
                 },
             },
@@ -111,6 +132,7 @@ def execute_force_scheduling(
     result = run_force_scheduling(
         configured,
         task=task,
+        scheduler_config=scheduler_config,
         output_csv=trace_path,
         output_plot=plot_path,
         output_tactile=tactile_path,

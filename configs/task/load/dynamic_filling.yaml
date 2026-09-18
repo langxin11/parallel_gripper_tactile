@@ -1,29 +1,22 @@
 # @package task
-family: force_scheduling
-path: configs/task/force_scheduling/dynamic_filling.yaml
+family: load
+path: configs/task/load/dynamic_filling.yaml
 definition:
   schema_version: 1
   name: dynamic_filling
-  
+
   # 用沿重力方向线性增长的外力模拟容器逐渐注水。
   # 最终 2 N 附加载荷约等价于增加 204 g 水。
   cube_mass_kg: 0.05
   friction_coefficient: 0.8
   object_material: hard
-  
+
   approach:
     duration_s: 1.0
     timeout_s: 3.0
     settle_after_contact_s: 0.3
     feedforward_force_n: 1.0
-  
-  scheduler:
-    safety_factor: 1.5
-    min_force_n: 0.5
-    max_force_n: 8.0
-    max_force_rate_n_s: 1.0
-    friction_floor: 0.05
-  
+
   downward_load:
     interpolation: linear
     waypoints:
@@ -31,13 +24,13 @@ definition:
       - {t_s: 1.0, force_n: 0.0}
       - {t_s: 5.0, force_n: 2.0}
       - {t_s: 7.0, force_n: 2.0}
-  
+
   metrics:
     ignore_initial_s: 0.2
     slip_threshold_m: 0.002
     force_rmse_threshold_n: 0.5
-  
+
   solver:
     noslip_iterations: 5
-  
+
   control_period_s: 0.004

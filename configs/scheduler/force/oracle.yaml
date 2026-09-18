@@ -1,0 +1,11 @@
+# @package scheduler
+# 使用场景真值载荷与摩擦系数生成目标力，仅用作仿真上界基线。
+family: force
+name: oracle
+path: configs/scheduler/force/oracle.yaml
+definition:
+  safety_factor: 1.5
+  min_force_n: 0.5
+  max_force_n: 8.0
+  max_force_rate_n_s: 1.0
+  friction_floor: 0.05

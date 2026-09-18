@@ -1,4 +1,4 @@
-"""Oracle 与固定摩擦先验自适应目标力调度的仿真实验。"""
+"""外载场景与独立目标力调度器组合的仿真实验。"""
 
 from __future__ import annotations
 
@@ -13,7 +13,6 @@ import mujoco
 import numpy as np
 from pydantic import BaseModel, ConfigDict, Field, FiniteFloat, ValidationError, model_validator
 import yaml
-from dm_grasp_core.grasp.adaptive import AdaptiveLoadConfig, AdaptiveLoadScheduler
 from dm_grasp_core.grasp.unified import UnifiedAdaptiveConfig, UnifiedAdaptivePolicy
 from dm_grasp_core.tactile.multirate import (
     LatestTactileBuffer,
@@ -122,8 +121,8 @@ class ForceSchedulingApproach(_TaskModel):
     feedforward_force_n: Annotated[FiniteFloat, Field(ge=0)] = 1.0
 
 
-class OracleSchedulerTaskConfig(_TaskModel):
-    """Oracle 目标力调度器的任务级配置。"""
+class OracleForceSchedulerConfig(_TaskModel):
+    """Oracle 目标力调度器配置。"""
 
     safety_factor: Annotated[FiniteFloat, Field(ge=1)] = 1.5
     min_force_n: Annotated[FiniteFloat, Field(ge=0)] = 0.5
@@ -132,7 +131,7 @@ class OracleSchedulerTaskConfig(_TaskModel):
     friction_floor: Annotated[FiniteFloat, Field(gt=0)] = 0.05
 
     @model_validator(mode="after")
-    def validate_force_limits(self) -> "OracleSchedulerTaskConfig":
+    def validate_force_limits(self) -> "OracleForceSchedulerConfig":
         """要求最大目标力不小于最小目标力。"""
         if self.max_force_n < self.min_force_n:
             raise ValueError("max_force_n must not be smaller than min_force_n")
@@ -149,16 +148,6 @@ class ForceSchedulingMetricsConfig(_TaskModel):
     ignore_initial_s: Annotated[FiniteFloat, Field(ge=0)] = 0.2
     slip_threshold_m: Annotated[FiniteFloat, Field(gt=0)] = 0.002
     force_rmse_threshold_n: Annotated[FiniteFloat, Field(gt=0)] = 0.5
-
-
-class AdaptivePriorTaskConfig(_TaskModel):
-    """独立于场景真值的摩擦先验与连续增力参数。"""
-
-    left_friction: Annotated[FiniteFloat, Field(gt=0)] = 0.6
-    right_friction: Annotated[FiniteFloat, Field(gt=0)] = 0.6
-    gap_gain_per_s: Annotated[FiniteFloat, Field(gt=0)] = 8.0
-    load_rate_gain: Annotated[FiniteFloat, Field(ge=0)] = 1.0
-    filter_tau_s: Annotated[FiniteFloat, Field(gt=0)] = 0.05
 
 
 class ForceSchedulingSolverConfig(_TaskModel):
@@ -179,7 +168,7 @@ class TactileFaultConfig(_TaskModel):
 
 
 class ForceSchedulingTask(_TaskModel):
-    """目标力调度任务；提供 adaptive_prior 时仅由触觉生成承载需求。"""
+    """目标力调度实验的物体、外载、时钟与验收场景。"""
 
     schema_version: Literal[1]
     name: Annotated[str, Field(min_length=1)]
@@ -187,9 +176,6 @@ class ForceSchedulingTask(_TaskModel):
     friction_coefficient: Annotated[FiniteFloat, Field(gt=0)] = 0.8
     object_material: ObjectMaterial = "hard"
     approach: ForceSchedulingApproach = ForceSchedulingApproach()
-    scheduler: OracleSchedulerTaskConfig = OracleSchedulerTaskConfig()
-    adaptive_prior: AdaptivePriorTaskConfig | None = None
-    unified_adaptive: UnifiedAdaptiveConfig | None = None
     tactile_sampling: TactileSamplingConfig | None = None
     tactile_fault: TactileFaultConfig | None = None
     downward_load: DownwardLoadReference
@@ -198,13 +184,9 @@ class ForceSchedulingTask(_TaskModel):
     control_period_s: Annotated[FiniteFloat, Field(gt=0)] = 0.004
 
     @model_validator(mode="after")
-    def validate_adaptive_modes(self) -> "ForceSchedulingTask":
-        """显式策略只能选一种，避免两个状态机同时拥有目标。"""
-        if self.adaptive_prior is not None and self.unified_adaptive is not None:
-            raise ValueError("adaptive_prior 与 unified_adaptive 互斥")
+    def validate_sampling(self) -> "ForceSchedulingTask":
+        """校验任务内的多速率采样与故障注入约束。"""
         if self.tactile_sampling is not None:
-            if self.unified_adaptive is None:
-                raise ValueError("独立触觉采样当前仅接入统一自适应仿真")
             if self.tactile_sampling.period_s > self.control_period_s:
                 raise ValueError("触觉采样周期不得大于控制周期")
         if self.tactile_fault is not None and self.tactile_sampling is None:
@@ -368,11 +350,12 @@ def run_force_scheduling(
     profile_path: Path | GripperProfile = DEFAULT_PROFILE,
     *,
     task: ForceSchedulingTask,
+    scheduler_config: OracleForceSchedulerConfig | UnifiedAdaptiveConfig,
     output_csv: Path | None = None,
     output_plot: Path | None = None,
     output_tactile: Path | None = None,
 ) -> ForceSchedulingResult:
-    """在共用载荷场景中运行 Oracle 或固定先验自适应调度。"""
+    """在独立外载场景中运行指定的目标力调度器。"""
     profile = (
         validate_resolved_profile(profile_path)
         if isinstance(profile_path, GripperProfile)
@@ -404,15 +387,20 @@ def run_force_scheduling(
     sensor_timer = (
         SimulationTimer(sampling.period_s, float(data.time)) if sampling is not None else None
     )
+    adaptive_config = (
+        scheduler_config if isinstance(scheduler_config, UnifiedAdaptiveConfig) else None
+    )
     preprocessor = (
         TactilePreprocessor(
             sampling,
-            load_tau_s=task.unified_adaptive.load.filter_tau_s,
-            observer_config=task.unified_adaptive.observer,
+            load_tau_s=adaptive_config.load.filter_tau_s,
+            observer_config=adaptive_config.observer,
         )
-        if sampling is not None and task.unified_adaptive is not None
+        if sampling is not None and adaptive_config is not None
         else None
     )
+    if sampling is not None and adaptive_config is None:
+        raise ValueError("独立触觉采样仅支持 adaptive 目标力调度器")
     tactile_buffer = LatestTactileBuffer()
     sensor_sequence = 0
     fault_index = 0
@@ -425,7 +413,7 @@ def run_force_scheduling(
         if profile.normal_force.admittance is not None
         else NormalForceController
     )
-    if task.unified_adaptive is not None and controller_type is not DMAdmittanceController:
+    if adaptive_config is not None and controller_type is not DMAdmittanceController:
         force = profile.normal_force
         if (
             force.adrc is not None
@@ -440,27 +428,16 @@ def run_force_scheduling(
         name_prefix=GRIPPER_PREFIX,
         **(
             {"saturation_feedback": True}
-            if task.unified_adaptive is not None and controller_type is DMAdmittanceController
+            if adaptive_config is not None and controller_type is DMAdmittanceController
             else {}
         ),
     )
-    scheduler = OracleTargetForceScheduler(task.scheduler.to_runtime_config())
-    adaptive = (
-        None
-        if task.adaptive_prior is None
-        else AdaptiveLoadScheduler(
-            AdaptiveLoadConfig(
-                **task.adaptive_prior.model_dump(),
-                safety_factor=task.scheduler.safety_factor,
-                min_force_n=task.scheduler.min_force_n,
-                max_force_n=task.scheduler.max_force_n,
-                max_force_rate_n_s=task.scheduler.max_force_rate_n_s,
-            )
-        )
+    scheduler = (
+        OracleTargetForceScheduler(scheduler_config.to_runtime_config())
+        if isinstance(scheduler_config, OracleForceSchedulerConfig)
+        else None
     )
-    unified = (
-        None if task.unified_adaptive is None else UnifiedAdaptivePolicy(task.unified_adaptive)
-    )
+    unified = None if adaptive_config is None else UnifiedAdaptivePolicy(adaptive_config)
     adaptive_diagnostics: dict[str, object] = {}
     noise_rng = np.random.default_rng(int(profile.normal_force.sensor_noise_seed))
     support_id = model.geom(SUPPORT_GEOM_NAME).id
@@ -629,7 +606,7 @@ def run_force_scheduling(
                     )
                 schedule_command = unified_command.load
                 adaptive_diagnostics = {
-                    "scheduler_kind": "unified_adaptive",
+                    "scheduler_kind": "adaptive",
                     "capacity_limited": schedule_command.capacity_limited,
                     **unified_command.trace_fields(),
                 }
@@ -649,26 +626,8 @@ def run_force_scheduling(
                             "filtered_right_tangential_n": state.load.right_n,
                         }
                     )
-            elif adaptive is not None:
-                # 承载仅从触觉测量产生；场景真值继续供物理施加载荷与离线评分。
-                schedule_command = adaptive.update(
-                    left_tangential_n=float(np.linalg.norm(measurement.left_force[:2])),
-                    right_tangential_n=float(np.linalg.norm(measurement.right_force[:2])),
-                    dt=control_dt,
-                )
-                adaptive_diagnostics = {
-                    "scheduler_kind": "adaptive_prior",
-                    "measured_left_tangential_n": float(np.linalg.norm(measurement.left_force[:2])),
-                    "measured_right_tangential_n": float(
-                        np.linalg.norm(measurement.right_force[:2])
-                    ),
-                    "measured_tangential_force_n": schedule_command.measured_tangential_force_n,
-                    "estimated_load_rate_n_s": schedule_command.load_rate_n_s,
-                    "load_target_force_n": schedule_command.load_force_n,
-                    "schedule_gap_n": schedule_command.schedule_gap_n,
-                    "capacity_limited": schedule_command.capacity_limited,
-                }
             else:
+                assert scheduler is not None
                 schedule_command = scheduler.update(
                     tangential_demand_n=tangential_demand_n,
                     friction_coefficient=float(task.friction_coefficient),
@@ -828,7 +787,7 @@ def run_force_scheduling(
         maximum_ratio = math.nan
         rate_ratio = math.nan
 
-    if (adaptive is not None or unified is not None) and scenario_rows:
+    if unified is not None and scenario_rows:
         # 初步自适应验收包含撤支撑后的全部位移，不忽略启动恢复期间的滑移。
         maximum_displacement = max(
             float(row["tangential_displacement_m"])
@@ -887,5 +846,6 @@ __all__ = [
     "ForceSchedulingResult",
     "ForceSchedulingSolverConfig",
     "ForceSchedulingTask",
+    "OracleForceSchedulerConfig",
     "run_force_scheduling",
 ]

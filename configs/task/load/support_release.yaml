@@ -1,24 +1,13 @@
 # @package task
-family: force_scheduling
-path: configs/task/force_scheduling/unified_step_load.yaml
+family: load
+path: configs/task/load/support_release.yaml
 definition:
   schema_version: 1
-  name: unified_step_load
+  name: support_release
   # 质量与惯性一起进入物理模型；在默认 g=9.81 m/s² 下自重为 2.5 N。
   cube_mass_kg: 0.254841997961264
   friction_coefficient: 0.8
   object_material: hard
-  unified_adaptive:
-    risk_enabled: false
-    friction_update_enabled: false
-    load:
-      left_friction: 0.6
-      right_friction: 0.6
-      safety_factor: 1.5
-      min_force_n: 1.0
-      max_force_n: 8.0
-      # 仿真快速响应候选；不作为真机已验证的增力能力。
-      max_force_rate_n_s: 50.0
   downward_load:
     interpolation: hold
     waypoints:

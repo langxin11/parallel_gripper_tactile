@@ -44,7 +44,7 @@ from .force_scheduling import (
     DownwardLoadReference,
     ForceSchedulingApproach,
     ForceSchedulingSolverConfig,
-    OracleSchedulerTaskConfig,
+    OracleForceSchedulerConfig,
 )
 from .grasp import (
     CUBE_BODY_NAME,
@@ -207,7 +207,7 @@ class FrictionEstimationTask(_TaskModel):
     tactile_slip: TactileSlipConfig = TactileSlipConfig()
     taxel_observer: TaxelFrictionTaskConfig = TaxelFrictionTaskConfig()
     taxel_slip_detector: TaxelSlipDetectorTaskConfig = TaxelSlipDetectorTaskConfig()
-    scheduler: OracleSchedulerTaskConfig = OracleSchedulerTaskConfig()
+    scheduler: OracleForceSchedulerConfig = OracleForceSchedulerConfig()
     downward_load: DownwardLoadReference
     metrics: FrictionEstimationMetricsConfig = FrictionEstimationMetricsConfig()
     solver: ForceSchedulingSolverConfig = ForceSchedulingSolverConfig()

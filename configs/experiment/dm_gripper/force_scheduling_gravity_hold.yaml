@@ -4,7 +4,8 @@ defaults:
   - override /model: dm_gripper/height_spheres
   - override /controller: dm_gripper/pid_torque_ff
   - override /estimator: window_linear
-  - override /task: force_scheduling/gravity_hold
+  - override /scheduler: force/oracle
+  - override /task: load/gravity_hold
   - override /material: hard
   - override /execution: run
   - _self_

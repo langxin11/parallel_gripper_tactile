@@ -46,6 +46,13 @@ def test_catalog_hides_internal_controller_fragments() -> None:
     assert all(not part.startswith("_") for name in controllers for part in name.split("/"))
 
 
+def test_catalog_lists_independent_force_schedulers() -> None:
+    """调度器作为独立 Hydra 组对用户可见。"""
+    schedulers = {entry.name for entry in list_configurations("scheduler")}
+
+    assert schedulers == {"force/adaptive", "force/oracle", "none"}
+
+
 def test_catalog_rejects_unknown_group_without_reading_paths() -> None:
     """组名白名单拒绝路径遍历和未支持组。"""
     with pytest.raises(ConfigCatalogError, match="未知配置组"):
