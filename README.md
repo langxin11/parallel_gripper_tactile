@@ -25,9 +25,9 @@ uv run pgt view grasp
 
 ```bash
 uv run pgt run grasp --video
-uv run pgt run force-track --set task=force_tracking/default_waypoints
-uv run pgt run force-schedule --experiment dm_gripper/force_scheduling_gravity_hold
-uv run pgt run friction-estimate --experiment dm_gripper/friction_estimation_nominal
+uv run pgt run force-track --set task=force_tracking/step
+uv run pgt run force-schedule --experiment dm_gripper/force_scheduling_oracle
+uv run pgt run friction-estimate --experiment dm_gripper/friction_estimation
 uv run pgt run discrete-force --experiment robotiq_2f85/discrete_force
 ```
 

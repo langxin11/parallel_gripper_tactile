@@ -23,7 +23,7 @@ uv run python scripts/research/run.py \
 
 # 使用统一导纳组合；该 experiment 会同时选择相容的 controller、estimator 和 task。
 uv run python scripts/research/run.py \
-  experiment=dm_gripper/force_tracking_admittance_unified execution=plan
+  experiment=dm_gripper/force_tracking_admittance execution=plan
 ```
 
 配置组职责如下：
@@ -53,17 +53,17 @@ uv run python scripts/research/run.py \
 其余单次实验也从同一个 `run.yaml` 组合，并共享严格领域解析：
 
 ```bash
-# 已知摩擦力调度与动态注水。
+# 已知摩擦力调度与动态注水；场景由 task=load/* 选择。
 uv run python scripts/research/run.py \
-  experiment=dm_gripper/force_scheduling_gravity_hold execution=plan
+  experiment=dm_gripper/force_scheduling_oracle execution=plan
 uv run python scripts/research/run.py \
-  experiment=dm_gripper/force_scheduling_dynamic_filling execution=plan
+  experiment=dm_gripper/force_scheduling_oracle task=load/dynamic_filling execution=plan
 uv run python scripts/research/run.py \
-  experiment=dm_gripper/adaptive_dynamic_filling execution=plan
+  experiment=dm_gripper/force_scheduling_adaptive execution=plan
 
 # 摩擦估计；可用 task=friction_estimation/high_friction 等替换任务。
 uv run python scripts/research/run.py \
-  experiment=dm_gripper/friction_estimation_nominal execution=plan
+  experiment=dm_gripper/friction_estimation execution=plan
 
 # Robotiq 离散力；只替换 model 即可检查另外两种触觉布局。
 uv run python scripts/research/run.py \
@@ -77,12 +77,12 @@ uv run python scripts/research/run.py \
 
 ```bash
 uv run pgt run force-track \
-  --experiment dm_gripper/force_tracking_default \
+  --experiment dm_gripper/force_tracking \
   --set controller=dm_gripper/pid_torque_ff --set task=force_tracking/step
 uv run pgt run force-schedule \
-  --experiment dm_gripper/force_scheduling_gravity_hold
+  --experiment dm_gripper/force_scheduling_oracle
 uv run pgt run friction-estimate \
-  --experiment dm_gripper/friction_estimation_nominal
+  --experiment dm_gripper/friction_estimation
 uv run pgt run discrete-force \
   --experiment robotiq_2f85/discrete_force
 uv run pgt view taxels \

@@ -27,8 +27,8 @@ DMgripper 使用单电机驱动曲柄滑块机构，左右 Pillar 提供接触�
 
 ```bash
 uv run python scripts/research/run.py \
-  experiment=dm_gripper/force_tracking_admittance_unified execution=plan
-uv run pgt run force-track --experiment dm_gripper/force_tracking_admittance_unified
+  experiment=dm_gripper/force_tracking_admittance execution=plan
+uv run pgt run force-track --experiment dm_gripper/force_tracking_admittance
 ```
 
 第一条命令校验组合并生成计划；第二条执行一次导纳力跟踪。

@@ -155,9 +155,10 @@ Onshape 原始导出中的 position actuator 与 `forcerange=12.5` 可用于保�
 
 ```sh
 # PID／导纳使用共同 task 与平台的对比组合；动画追加 --set execution.viewer=true
-uv run python scripts/research/run.py experiment=dm_gripper/force_tracking_pid_unified
-uv run python scripts/research/run.py experiment=dm_gripper/force_tracking_admittance_unified
-uv run pgt run force-track --experiment dm_gripper/force_tracking_admittance_unified
+uv run python scripts/research/run.py experiment=dm_gripper/force_tracking_admittance
+uv run python scripts/research/run.py \
+  experiment=dm_gripper/force_tracking_admittance controller=dm_gripper/pid_only
+uv run pgt run force-track --experiment dm_gripper/force_tracking_admittance
 ```
 
 参数由当前 controller、platform、task 组合确定，不将某次调优数值写成通用默认值。

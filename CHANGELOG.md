@@ -108,6 +108,17 @@
 
 ### 变更
 
+- experiment 入口按研究线收敛改名：`force_tracking_default`→`force_tracking`、
+  `force_tracking_admittance_unified`→`force_tracking_admittance`、
+  `force_scheduling_gravity_hold` 与 `force_scheduling_dynamic_filling` 合并为
+  `force_scheduling_oracle`（注水场景用 `task=load/dynamic_filling` 选择）、
+  `adaptive_dynamic_filling`→`force_scheduling_adaptive`、
+  `friction_estimation_nominal`→`friction_estimation`。删除
+  `force_tracking_pid_unified`（PID 组合改为 `force_tracking_admittance` 加
+  `controller=dm_gripper/pid_only` 覆盖）及控制器专属任务曲线
+  `dm_unified_ramp`、`default_waypoints`（导纳实验改用标准 ramp，接近段为
+  1 s／3 s／0.2 s，参考力曲线不变）。
+
 - 力调度配置按职责拆分：`task=load/*` 只保存物体、外载、时钟与验收，
   `scheduler=force/{oracle,adaptive}` 独立保存目标抓力算法。撤支撑场景与自适应实验改用
   `support_release` 和 `adaptive_*` 语义名，不再用 `unified` 表示研究演化阶段。

@@ -2,8 +2,8 @@
 
 `force-track` 先建立双侧接触，再跟踪 waypoint 定义的平均单侧法向力。单次运行、viewer 和批量执行见
 [工作流](workflows.md)，对比协议见[控制器对比](control-comparison-ablation.md)。
-默认实验 `dm_gripper/force_tracking_default` 使用 `adrc_torque`、`window_linear`、Ramp 和 `hard` 接触 preset；
-具体组合以 `configs/experiment/dm_gripper/force_tracking_default.yaml` 为准。
+默认实验 `dm_gripper/force_tracking` 使用 `adrc_torque`、`window_linear`、Ramp 和 `hard` 接触 preset；
+具体组合以 `configs/experiment/dm_gripper/force_tracking.yaml` 为准。
 
 ## 接触与目标曲线
 

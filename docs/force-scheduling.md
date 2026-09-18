@@ -6,8 +6,9 @@
 ## 运行方法
 
 ```bash
-uv run pgt run force-schedule --experiment dm_gripper/force_scheduling_gravity_hold
-uv run pgt run force-schedule --experiment dm_gripper/force_scheduling_dynamic_filling
+uv run pgt run force-schedule --experiment dm_gripper/force_scheduling_oracle
+uv run pgt run force-schedule --experiment dm_gripper/force_scheduling_oracle \
+  --set task=load/dynamic_filling
 ```
 
 先建立双侧接触、稳定并撤去支撑，再调度与评价。`gravity_hold` 只抵抗重力；`dynamic_filling`
@@ -82,7 +83,7 @@ trace 记录切向需求、真值摩擦、原始／受限目标、触觉力、�
 真机故障规则和权限保持原样。故障配置用于有限探索，不是正式 study 或完整硬件故障模型。
 
 ```bash
-uv run pgt run force-schedule --experiment dm_gripper/adaptive_dynamic_filling
+uv run pgt run force-schedule --experiment dm_gripper/force_scheduling_adaptive
 # 自重 2.5 N 的撤支撑工况，1 N 初始抓力、50 N/s 限速；当前位移仍未达标
 uv run pgt run force-schedule --experiment dm_gripper/adaptive_support_release
 # 独立 1000 Hz 触觉预处理与 250 Hz 控制，保留高频触觉日志
@@ -178,7 +179,7 @@ uv run pgt run force-schedule --experiment dm_gripper/adaptive_support_release_p
 该组合初始平均单侧抓力 `load.min_force_n=1.0`，目标速率上限 `load.max_force_rate_n_s=50.0`；
 接近前馈 `approach.feedforward_force_n=1.0` 是另一个量，不等同于接触后实测预载。
 滤波、导纳、MIT、8 N 目标上限及 2 mm 位移阈值保持不变。高限速仅是仿真候选，不是实际增力保证，
-目标仍受缺口增益与载荷趋势限制。常规 `adaptive_dynamic_filling` 和真机 YAML 保留各自设置。
+目标仍受缺口增益与载荷趋势限制。常规 `force_scheduling_adaptive` 和真机 YAML 保留各自设置。
 这是半瓶水总重量的刚性方块近似，不包含瓶体变形和液体晃动。
 
 该入口已纠正早期“50 g 方块额外施加 2.5 N”的建模。旧运行快照仍保留原始输入和结果，

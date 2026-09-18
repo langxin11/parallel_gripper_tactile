@@ -21,7 +21,7 @@ uv run pgt compare tactile --left-set model=robotiq_2f85/box_force_sensor --righ
 
 ```bash
 uv run pgt run grasp --video
-uv run pgt run force-track --set task=force_tracking/default_waypoints
+uv run pgt run force-track --set task=force_tracking/step
 ```
 
 其他实验按主题进入：[自适应抓取](adaptive-grasping.md)、[离散力控制](discrete-force-control.md)。
@@ -38,7 +38,7 @@ uv run python scripts/research/run.py \
 ```
 
 去掉 `execution=plan` 即执行；计划会校验领域配置并编译 scene，但不推进仿真。
-共享导纳选择 `experiment=dm_gripper/force_tracking_admittance_unified`。
+共享导纳选择 `experiment=dm_gripper/force_tracking_admittance`。
 探索性组合可使用 `run.py -m material=medium,hard,stiff seed=0,1,2`；
 切向扰动支持单次和 Multirun，尚无正式 study。
 

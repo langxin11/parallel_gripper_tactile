@@ -55,7 +55,7 @@
 
 ```bash
 uv run pgt run friction-estimate \
-  --experiment dm_gripper/friction_estimation_nominal \
+  --experiment dm_gripper/friction_estimation \
   --set task=friction_estimation/hardware_scale_nominal
 ```
 
