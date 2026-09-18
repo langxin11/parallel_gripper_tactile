@@ -21,9 +21,9 @@ uv run python scripts/research/run.py model=dm_gripper/original_mesh execution=p
 uv run python scripts/research/run.py \
   controller=dm_gripper/full estimator=window_quadratic execution=plan
 
-# 使用完整导纳组合；该 experiment 会同时选择相容的 controller、estimator 和 task。
+# 使用统一导纳组合；该 experiment 会同时选择相容的 controller、estimator 和 task。
 uv run python scripts/research/run.py \
-  experiment=dm_gripper/force_tracking_admittance execution=plan
+  experiment=dm_gripper/force_tracking_admittance_unified execution=plan
 ```
 
 配置组职责如下：
@@ -123,7 +123,6 @@ uv run python scripts/research/study.py research=torque_adrc_tuning/study
 uv run python scripts/research/study.py \
   research=torque_adrc_tuning/study study.stage=confirm \
   study.coarse_study_dir=/absolute/path/to/coarse-study
-uv run python scripts/research/study.py research=dm_admittance_tuning/study
 
 # 人工冻结候选配置后再生成最终控制器比较计划。
 uv run python scripts/research/study.py research=force_controller_selection/study

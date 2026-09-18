@@ -38,7 +38,7 @@ uv run python scripts/research/run.py \
 ```
 
 去掉 `execution=plan` 即执行；计划会校验领域配置并编译 scene，但不推进仿真。
-共享导纳选择 `experiment=dm_gripper/force_tracking_admittance`。
+共享导纳选择 `experiment=dm_gripper/force_tracking_admittance_unified`。
 探索性组合可使用 `run.py -m material=medium,hard,stiff seed=0,1,2`；
 切向扰动支持单次和 Multirun，尚无正式 study。
 
@@ -61,13 +61,12 @@ uv run python scripts/research/study.py research=force_controller_selection/stud
 | --- | --- | --- |
 | 1 | `stiffness_ground_truth_validation` | 检查默认估计器的量级、有效性与参考边界。 |
 | 2 | `force_tracking_stiffness_limit_pilot` | 比较无限幅、在线限幅与准静态参考限幅。 |
-| 3 | `force_tracking_stiffness_rate_validation` | 检查控制结构的极限环与外环频率敏感性。 |
+| 3 | `force_tracking_stiffness_rate_validation` | 在统一 250 Hz 外环下检查控制结构的极限环。 |
 | 4 | `force_controller_ablation` | 检查 PID、刚度位置前馈与力矩前馈的贡献。 |
-| 5 | `force_tracking_stiffness_rate_tuning` → `force_tracking_stiffness_rate_refinement` → `force_tracking_stiffness_rate_confirmation` | 初筛、最坏工况再调优、跨频率与材料确认。 |
+| 5 | `force_tracking_stiffness_rate_tuning` → `force_tracking_stiffness_rate_refinement` → `force_tracking_stiffness_rate_confirmation` | 初筛、最坏工况再调优、固定 250 Hz 的跨材料确认。 |
 | 6 | `torque_adrc_tuning` | coarse 筛选，再由 confirm 复验候选。 |
 | 决策门 | 人工审查 | 检查状态、科学失败、执行异常、排名与配对统计；更新并提交配置、测试和文档。 |
 | 7 | `force_controller_selection` | 比较已经冻结的控制器。 |
-| 独立基线 | `dm_admittance_tuning` | 调整导纳接近与接触切换，不进入默认 PID／ADRC 矩阵。 |
 | 独立研究 | `friction_local_slip_validation`、`robotiq_discrete_force_validation` | 分别验证局部起滑与整数命令控制，不阻塞 DM 选型。 |
 
 `stiffness_estimator_validation` 仅比较估计器接入控制后的执行指标，不作为刚度精度或默认方法选型依据。
@@ -89,7 +88,7 @@ uv run python scripts/research/study.py research=torque_adrc_tuning/study \
 状态、失败分类、科学哈希与只读恢复检查见[科研配置规范](research-configuration.md)。
 
 力跟踪 run 保存输入快照、`effective_parameters.json`、`metrics.json` 与 Zstd 压缩的 `trace.parquet`。
-常规轨迹为 100 Hz，直接力矩 ADRC 为 250 Hz；状态变化和 waypoint 前后 0.2 s 保留完整控制频率。
+常规轨迹为 125 Hz，直接力矩 ADRC 为 250 Hz；状态变化和 waypoint 前后 0.2 s 保留完整控制频率。
 指标与运行时图像使用未降采样数据；[出图模式](research-configuration.md#plot-modes)控制图像数量。
 
 从已有目录重绘：

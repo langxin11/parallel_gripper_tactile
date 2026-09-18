@@ -40,7 +40,6 @@ CONFIG_ROOT = REPOSITORY_ROOT / "configs"
 STUDY_GROUPS = {
     "force_tracking_controller_comparison": ("force_controller_selection/study", []),
     "force_tracking_ablation": ("force_controller_ablation/study", []),
-    "force_tracking_diagnosis": ("archive/model_bug_diagnosis/study", []),
     "friction_estimation_local_slip": ("friction_local_slip_validation/study", []),
     "force_tracking_stiffness_estimator_comparison": (
         "stiffness_estimator_validation/study",
@@ -70,7 +69,6 @@ STUDY_GROUPS = {
         "force_tracking_stiffness_rate_confirmation/study",
         [],
     ),
-    "dm_admittance_tuning": ("dm_admittance_tuning/study", []),
     "robotiq_discrete_force": ("robotiq_discrete_force_validation/study", []),
     "force_tracking_torque_adrc_tuning_coarse": ("torque_adrc_tuning/study", []),
     "force_tracking_torque_adrc_tuning_confirm": (
@@ -93,7 +91,6 @@ STUDY_GROUPS = {
         "force_tracking_stiffness_rate_tuning/study",
         "force_tracking_stiffness_rate_refinement/study",
         "force_tracking_stiffness_rate_confirmation/study",
-        "dm_admittance_tuning/study",
         "robotiq_discrete_force_validation/study",
         "torque_adrc_tuning/study",
     ],
@@ -113,19 +110,6 @@ def test_active_research_groups_do_not_repeat_cross_layer_fields(
     assert "output_root" not in definition
     overrides = tuple(study["profile"].get("overrides", ()))
     assert not any(value.startswith(("task=", "seed=", "execution=")) for value in overrides)
-
-
-def test_archived_diagnosis_documents_its_historical_profile_exception() -> None:
-    """归档诊断保留改写历史模型所需的原始 profile 来源。"""
-    register_resolvers()
-    with initialize_config_dir(version_base="1.3", config_dir=str(CONFIG_ROOT)):
-        raw = resolved_mapping(
-            compose(
-                config_name="study",
-                overrides=["research=archive/model_bug_diagnosis/study"],
-            )
-        )
-    assert raw["study"]["definition"]["profile"] == "configs/dm_gripper.yaml"
 
 
 def _resolved(name: str, *, overrides: list[str] | None = None):
@@ -276,8 +260,8 @@ def test_default_formal_selection_excludes_historical_low_performers() -> None:
     assert "archive" not in str(resolved.config_source.relative_to(CONFIG_ROOT))
 
 
-def test_stiffness_rate_validation_preserves_frequency_matrix() -> None:
-    """速率控制验证完整覆盖三控制器、三外环频率和三个配对 seed。"""
+def test_stiffness_rate_validation_preserves_250hz_matrix() -> None:
+    """速率控制验证固定 250 Hz，并覆盖三控制器和三个配对 seed。"""
     resolved = _resolved("force_tracking_stiffness_rate_validation")
     config = resolved.domain_config
 
@@ -287,13 +271,9 @@ def test_stiffness_rate_validation_preserves_frequency_matrix() -> None:
         "pid-stiffness-rate",
     )
     assert config.trace_at_control_rate is True
-    assert tuple(ForceTrackingTask.load(task).control_period_s for task in config.tasks) == (
-        0.002,
-        0.004,
-        0.008,
-    )
-    assert len(resolved.conditions) == 27
-    assert len({row["pair_key"] for row in resolved.conditions}) == 9
+    assert tuple(ForceTrackingTask.load(task).control_period_s for task in config.tasks) == (0.004,)
+    assert len(resolved.conditions) == 9
+    assert len({row["pair_key"] for row in resolved.conditions}) == 3
     assert resolved.profile.control.force.stiffness_rate is not None
     assert resolved.profile.control.force.stiffness_rate.max_force_rate_n_s == pytest.approx(50.0)
 
@@ -313,34 +293,30 @@ def test_stiffness_rate_tuning_preserves_candidate_and_baseline_matrix() -> None
     }
 
 
-def test_stiffness_rate_confirmation_preserves_frequency_material_matrix() -> None:
-    """确认研究固定胜出候选，并完整覆盖频率、材料和配对 seed。"""
+def test_stiffness_rate_confirmation_preserves_250hz_material_matrix() -> None:
+    """确认研究固定 250 Hz 与胜出候选，并完整覆盖材料和配对 seed。"""
     resolved = _resolved("force_tracking_stiffness_rate_confirmation")
     config = resolved.domain_config
 
     assert config.analysis_mode == "confirmation"
-    assert tuple(ForceTrackingTask.load(task).control_period_s for task in config.tasks) == (
-        0.002,
-        0.004,
-        0.008,
-    )
+    assert tuple(ForceTrackingTask.load(task).control_period_s for task in config.tasks) == (0.004,)
     assert config.materials == ("medium", "hard", "stiff")
     assert config.kp_s_inv == (20.0,)
     assert config.max_force_rate_n_s == (50.0,)
     assert resolved.plan.study_kind == "force_tracking_stiffness_rate_confirmation"
-    assert len(resolved.conditions) == 54
-    assert len({row["pair_key"] for row in resolved.conditions}) == 27
-    assert sum(row["baseline_role"] == "performance-baseline" for row in resolved.conditions) == 27
+    assert len(resolved.conditions) == 18
+    assert len({row["pair_key"] for row in resolved.conditions}) == 9
+    assert sum(row["baseline_role"] == "performance-baseline" for row in resolved.conditions) == 9
 
 
 def test_stiffness_rate_refinement_preserves_targeted_matrix() -> None:
-    """二次调优只覆盖 500 Hz medium／hard 和六个候选。"""
+    """二次调优只覆盖 250 Hz medium／hard 和六个候选。"""
     resolved = _resolved("force_tracking_stiffness_rate_refinement")
     config = resolved.domain_config
 
     assert config.analysis_mode == "tuning"
     assert len(config.tasks) == 1
-    assert ForceTrackingTask.load(config.tasks[0]).control_period_s == pytest.approx(0.002)
+    assert ForceTrackingTask.load(config.tasks[0]).control_period_s == pytest.approx(0.004)
     assert config.materials == ("medium", "hard")
     assert config.kp_s_inv == (20.0, 25.0, 30.0)
     assert config.max_force_rate_n_s == (50.0, 70.0)
@@ -360,140 +336,31 @@ def test_formal_ablation_preserves_pairing_and_complete_matrix() -> None:
     assert len({row["pair_key"] for row in resolved.conditions}) == 9
 
 
-def test_formal_diagnosis_preserves_phase_matrices_and_baseline_roles() -> None:
-    """迁移后 10 个 phase 的条件数量、顺序与对照角色与领域定义一致。"""
-    from parallel_gripper_tactile.studies.protocols import (
-        force_tracking_diagnosis as diagnosis_protocol,
-    )
-
-    resolved = _resolved(
-        "force_tracking_diagnosis",
-        overrides=["study.phase=collision-geometry"],
-    )
-    assert [row["condition_id"] for row in resolved.conditions] == [
-        "original-mesh-multiccd",
-        "height-spheres-multiccd",
-        "coplanar-mesh-multiccd",
-        "original-mesh-single-contact",
-        "coplanar-spheres-multiccd",
-    ]
-    assert [row["multiccd_enabled"] for row in resolved.conditions] == [
-        True,
-        True,
-        True,
-        False,
-        True,
-    ]
-    assert {row["pair_key"] for row in resolved.conditions} == {"collision-geometry"}
-    assert {row["baseline_role"] for row in resolved.conditions} == {None}
-
-    expected_counts = {
-        "reproducibility": 2,
-        "controllers": 4,
-        "materials": 3,
-        "force-scale": 5,
-        "contact-model": 2,
-        "collision-geometry": 5,
-        "force-semantics": 4,
-        "position-limit": 5,
-        "integral-gain": 5,
-        "filter-cutoff": 4,
-    }
-    for phase, count in expected_counts.items():
-        phase_rows = _resolved(
-            "force_tracking_diagnosis",
-            overrides=[f"study.phase={phase}"],
-        ).conditions
-        assert len(phase_rows) == count, phase
-        assert all(row["pair_key"] == phase for row in phase_rows), phase
-
-    controllers_rows = _resolved(
-        "force_tracking_diagnosis",
-        overrides=["study.phase=controllers"],
-    ).conditions
-    assert [row["baseline_role"] for row in controllers_rows][-1] == "full"
-    assert diagnosis_protocol._DIAGNOSIS_BASELINE_LABELS["controllers"] == "full"
-
-
-def test_diagnosis_phase_selection_is_validated() -> None:
-    """诊断研究必须显式选择 phase，其他研究禁止 phase 字段。"""
-    raw = {
-        "schema_version": 1,
-        "study": {
-            "kind": "force_tracking_diagnosis",
-            "source": "configs/research/archive/model_bug_diagnosis/study.yaml",
-            "profile": {
-                "experiment": "dm_gripper/force_tracking_default",
-                "overrides": ["execution=plan"],
-            },
-            "rationale": {
-                "question": "测试问题",
-                "decision": "测试决策",
-                "inclusion_criteria": [],
-                "task_rationale": "测试任务理由",
-                "primary_metrics": [],
-                "stop_conditions": [],
-                "exclusions": {},
-            },
-            "definition": {},
-        },
-        "execution": {
-            "mode": "plan",
-            "output_root": "outputs/research/studies",
-            "recovery_source": None,
-        },
-    }
-    with pytest.raises(ResearchStudySetupError, match="requires phase"):
+@pytest.mark.parametrize(
+    "research_group", ["force_controller_ablation/study", "torque_adrc_tuning/study"]
+)
+def test_retired_diagnosis_phase_is_rejected_before_preflight(research_group: str) -> None:
+    """退役的诊断阶段字段不能被活跃研究静默忽略。"""
+    register_resolvers()
+    with initialize_config_dir(version_base="1.3", config_dir=str(CONFIG_ROOT)):
+        raw = resolved_mapping(
+            compose(config_name="study", overrides=[f"research={research_group}"])
+        )
+    raw["study"]["phase"] = "collision-geometry"
+    with pytest.raises(ResearchStudySetupError, match="Extra inputs are not permitted") as caught:
         resolve_research_study(raw)
-    ablation_raw = {
-        **raw,
-        "study": {
-            "kind": "force_tracking_ablation",
-            "source": "configs/research/force_controller_ablation/study.yaml",
-            "profile": raw["study"]["profile"],
-            "rationale": raw["study"]["rationale"],
-            "definition": {},
-            "phase": "controllers",
-        },
-    }
-    with pytest.raises(ResearchStudySetupError, match="phase field is supported only"):
-        resolve_research_study(ablation_raw)
-    torque_raw = {
-        **raw,
-        "study": {
-            "kind": "force_tracking_torque_adrc_tuning",
-            "source": "configs/research/torque_adrc_tuning/study.yaml",
-            "profile": raw["study"]["profile"],
-            "rationale": raw["study"]["rationale"],
-            "definition": {},
-            "stage": "coarse",
-            "phase": "controllers",
-        },
-    }
-    with pytest.raises(ResearchStudySetupError, match="phase field is supported only"):
-        resolve_research_study(torque_raw)
+    assert caught.value.stage == "configuration"
 
 
-def test_diagnosis_plan_registers_phase_and_condition_count(tmp_path: Path) -> None:
-    """诊断 plan 产物登记 phase 与该 phase 的条件数，且不创建任何 run。"""
-    resolved = _resolved(
-        "force_tracking_diagnosis",
-        overrides=["study.phase=force-semantics"],
-    )
-    result = execute_research_study(
-        resolved,
-        hydra_output_directory=tmp_path,
-        provenance={"choices": {}, "overrides": []},
-    )
-
-    plan = json.loads((result / "plan.json").read_text(encoding="utf-8"))
-    assert plan["study"] == "force_tracking_diagnosis"
-    assert plan["stage"] == "force-semantics"
-    assert plan["condition_count"] == 4
-    manifest = json.loads((result / "study_manifest.json").read_text(encoding="utf-8"))
-    assert manifest["state"] == "planned"
-    assert manifest["stage"] == "force-semantics"
-    assert not (result / "runs").exists()
+def test_retired_diagnosis_kind_is_rejected_before_preflight() -> None:
+    """旧诊断配置不能误走其他研究的计划或执行路径。"""
+    register_resolvers()
+    with initialize_config_dir(version_base="1.3", config_dir=str(CONFIG_ROOT)):
+        raw = resolved_mapping(compose(config_name="study"))
+    raw["study"]["kind"] = "force_tracking_diagnosis"
+    with pytest.raises(ResearchStudySetupError, match="Input should be") as caught:
+        resolve_research_study(raw)
+    assert caught.value.stage == "configuration"
 
 
 def test_formal_local_slip_preserves_scenario_and_seed_matrix() -> None:
@@ -528,7 +395,6 @@ def test_formal_local_slip_preserves_scenario_and_seed_matrix() -> None:
     [
         ("friction_estimation_local_slip", 15),
         ("force_tracking_stiffness_estimator_comparison", 81),
-        ("dm_admittance_tuning", 32),
         ("robotiq_discrete_force", 60),
     ],
 )
@@ -583,27 +449,6 @@ def test_formal_stiffness_comparison_preserves_matrix() -> None:
         for row in resolved.conditions
     )
 
-
-def test_formal_dm_admittance_tuning_preserves_matrix() -> None:
-    """迁移后的 32 条导纳调参条件与旧 study 配置逐项一致且无基线角色。"""
-    from parallel_gripper_tactile.studies.dm_admittance_tuning import (
-        load_dm_admittance_tuning_config,
-    )
-
-    resolved = _resolved("dm_admittance_tuning")
-    legacy = load_dm_admittance_tuning_config(
-        REPOSITORY_ROOT / "configs/research/dm_admittance_tuning/study.yaml"
-    )
-
-    actual = tuple(
-        (row["candidate_id"], row["object_material"], row["sensor_noise_seed"])
-        for row in resolved.conditions
-    )
-    expected = tuple(
-        (candidate.identifier, material, seed) for candidate, material, seed in legacy.conditions()
-    )
-    assert actual == expected
-    assert len({row["condition_id"] for row in resolved.conditions}) == 32
     assert all(row["baseline_role"] is None for row in resolved.conditions)
 
 

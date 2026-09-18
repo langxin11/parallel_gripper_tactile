@@ -11,7 +11,7 @@ from typing import Any, Literal, Mapping, get_args
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
 
-from ..config.profiles import GripperProfile, StiffnessRateControl, TorqueAdrcControl, load_profile
+from ..config.profiles import GripperProfile, StiffnessRateControl, TorqueAdrcControl
 from ..experiments.force_tracking import (
     ForceTrackingTask,
     configure_force_controller,
@@ -20,19 +20,12 @@ from ..experiments.force_tracking import (
 from ..experiments.friction_estimation import FrictionEstimationTask
 from ..experiments.robotiq_discrete_force import RobotiqDiscreteForceTask
 from ..scenes.robotiq import RobotiqObjectMaterial
-from ..studies.dm_admittance_tuning import (
-    DMAdmittanceTuningConfig,
-)
 from ..studies.friction_estimation_local_slip import (
     FrictionEstimationLocalSlipStudyConfig,
 )
 from ..studies.force_tracking_ablation import ForceTrackingAblationConfig
 from ..studies.force_tracking_comparison import (
     ForceTrackingComparisonConfig,
-)
-from ..studies.force_tracking_diagnosis import (
-    DiagnosisConfig,
-    Phase as DiagnosisPhase,
 )
 from ..studies.force_tracking_stiffness_estimator_comparison import (
     ForceTrackingStiffnessEstimatorComparisonConfig,
@@ -58,7 +51,6 @@ from ..studies.robotiq_discrete_force import (
     RobotiqDiscreteForceStudyConfig,
 )
 from ..studies.protocols import force_tracking_ablation as ablation_protocol
-from ..studies.protocols import force_tracking_diagnosis as diagnosis_protocol
 from ..studies.protocols import friction_estimation_local_slip as friction_local_slip_protocol
 from ..studies.protocols import (
     force_tracking_controller_comparison as comparison_protocol,
@@ -75,7 +67,6 @@ from ..studies.protocols import (
 from ..studies.protocols import (
     force_tracking_torque_adrc_tuning as torque_tuning_protocol,
 )
-from ..studies.protocols import dm_admittance_tuning as dm_admittance_tuning_protocol
 from ..studies.protocols import (
     robotiq_discrete_force as robotiq_discrete_force_protocol,
 )
@@ -96,9 +87,7 @@ StudyKind = Literal[
     "force_tracking_stiffness_rate_tuning",
     "force_tracking_stiffness_rate_confirmation",
     "stiffness_ground_truth_validation",
-    "dm_admittance_tuning",
     "robotiq_discrete_force",
-    "force_tracking_diagnosis",
 ]
 SetupFailureStage = Literal["configuration", "preflight"]
 
@@ -147,14 +136,11 @@ class StudySelection(_StudyModel):
     definition: dict[str, object]
     stage: TorqueAdrcTuningStageName | None = None
     coarse_study_dir: Path | None = None
-    phase: DiagnosisPhase | None = None
 
     @model_validator(mode="after")
     def validate_stage_fields(self) -> "StudySelection":
-        """只允许 Torque ADRC tuning 使用 coarse/confirm 字段、诊断研究使用 phase 字段。"""
+        """只允许 Torque ADRC tuning 使用 coarse／confirm 谱系字段。"""
         if self.kind == "force_tracking_torque_adrc_tuning":
-            if self.phase is not None:
-                raise ValueError("phase field is supported only by force_tracking_diagnosis")
             if self.stage is None:
                 raise ValueError("torque ADRC tuning requires stage")
             if self.stage == "coarse" and self.coarse_study_dir is not None:
@@ -164,11 +150,6 @@ class StudySelection(_StudyModel):
             return self
         if self.stage is not None or self.coarse_study_dir is not None:
             raise ValueError("stage fields are supported only by torque ADRC tuning")
-        if self.kind == "force_tracking_diagnosis":
-            if self.phase is None:
-                raise ValueError("force_tracking_diagnosis requires phase")
-        elif self.phase is not None:
-            raise ValueError("phase field is supported only by force_tracking_diagnosis")
         return self
 
 
@@ -199,9 +180,7 @@ StudyDomainConfig = (
     | ForceTrackingStiffnessLimitConfig
     | ForceTrackingStiffnessRateTuningConfig
     | StiffnessGroundTruthValidationConfig
-    | DMAdmittanceTuningConfig
     | RobotiqDiscreteForceStudyConfig
-    | DiagnosisConfig
 )
 
 
@@ -252,24 +231,6 @@ class ResolvedResearchStudy:
 def _repository_path(path: Path, *, repository_root: Path) -> Path:
     """以仓库根为唯一基准解析 study 入口路径。"""
     return path.resolve() if path.is_absolute() else (repository_root / path).resolve()
-
-
-def _validate_profile_source_equivalence(
-    profile: GripperProfile,
-    source: Path,
-) -> None:
-    """确保组合对象除力跟踪公共状态机外与保留 profile 来源等价。"""
-    legacy = load_profile(source)
-    composed_values = profile.model_dump(mode="json")
-    legacy_values = legacy.model_dump(mode="json")
-    for values in (composed_values, legacy_values):
-        control = values.get("control")
-        if isinstance(control, dict):
-            force = control.get("force")
-            if isinstance(force, dict):
-                force.pop("supervisor", None)
-    if composed_values != legacy_values:
-        raise ValueError(f"composed study profile differs from its legacy source: {source}")
 
 
 def _validate_comparison(
@@ -402,16 +363,6 @@ def _validate_stiffness_rate_tuning(
                 )
 
 
-def _validate_diagnosis(config: DiagnosisConfig, profile: GripperProfile) -> None:
-    """预检诊断方案的 profile、任务与碰撞几何模型文件。"""
-    if profile.normal_force is None:
-        raise ValueError("力跟踪诊断需要 control.force。")
-    ForceTrackingTask.load(config.task)
-    for condition in config.collision_geometry_models:
-        if not condition.model.is_file():
-            raise ValueError(f"collision geometry model not found: {condition.model}")
-
-
 def _validate_torque_tuning(
     config: ForceTrackingTorqueAdrcTuningConfig,
     plan: StudyPlan,
@@ -452,17 +403,6 @@ def _validate_local_slip(
         raise ValueError("局部起滑研究需要 control.force。")
     for scenario in config.scenarios:
         FrictionEstimationTask.load(scenario.task)
-
-
-def _validate_dm_admittance_tuning(
-    config: DMAdmittanceTuningConfig, profile: GripperProfile
-) -> None:
-    """预检导纳调参 profile 的导纳控制段和 Ramp 任务线性插值。"""
-    if profile.normal_force is None or profile.normal_force.admittance is None:
-        raise ValueError("导纳调参 profile 必须包含 control.force.admittance。")
-    task = ForceTrackingTask.load(config.task)
-    if task.reference.interpolation != "linear":
-        raise ValueError("导纳调参仅接受线性 Ramp 力跟踪任务。")
 
 
 def _validate_robotiq_discrete_force(
@@ -513,11 +453,6 @@ def _resolved_selection(
 def _profile_options(selection: StudySelection, profile: GripperProfile) -> dict[str, object]:
     """标准研究向计划和执行传入同一冻结 profile。"""
     return {"resolved_profile": profile}
-
-
-def _diagnosis_options(selection: StudySelection, profile: GripperProfile) -> dict[str, object]:
-    """历史诊断保留专属 phase 与模型来源语义。"""
-    return {"phase": selection.phase}
 
 
 def _torque_options(selection: StudySelection, profile: GripperProfile) -> dict[str, object]:
@@ -639,28 +574,12 @@ _STUDY_ADAPTERS: dict[StudyKind, _StudyAdapter] = {
         _validate_stiffness_rate_tuning,
         options=_rate_options,
     ),
-    "dm_admittance_tuning": _StudyAdapter(
-        DMAdmittanceTuningConfig,
-        dm_admittance_tuning_protocol,
-        _validate_dm_admittance_tuning,
-        scalar_paths=("task", "output_root"),
-        sequence_paths=(),
-    ),
     "robotiq_discrete_force": _StudyAdapter(
         RobotiqDiscreteForceStudyConfig,
         robotiq_discrete_force_protocol,
         _validate_robotiq_discrete_force,
         scalar_paths=("profile", "task", "output_root"),
         sequence_paths=(),
-    ),
-    "force_tracking_diagnosis": _StudyAdapter(
-        DiagnosisConfig,
-        diagnosis_protocol,
-        _validate_diagnosis,
-        scalar_paths=("profile", "task", "output_root"),
-        sequence_paths=(),
-        nested_paths=(("collision_geometry_models", "model"),),
-        options=_diagnosis_options,
     ),
 }
 
@@ -693,12 +612,6 @@ def resolve_research_study(
             overrides=selection.study.profile.overrides,
         )
         profile = composed.profile
-        # 活跃研究以 experiment 组合结果为唯一 profile；仅归档诊断仍校验历史来源。
-        legacy_profile_source = getattr(domain_config, "profile", None)
-        if selection.study.kind == "force_tracking_diagnosis" and isinstance(
-            legacy_profile_source, Path
-        ):
-            _validate_profile_source_equivalence(profile, legacy_profile_source)
     except (OSError, ValidationError, ValueError) as error:
         raise ResearchStudySetupError(str(error), stage="configuration") from error
 

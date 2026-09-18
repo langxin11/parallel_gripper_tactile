@@ -54,7 +54,6 @@ def test_migration_baseline_static_snapshot_integrity() -> None:
         "force_tracking_torque_adrc_tuning_coarse": 102,
         "friction_estimation_local_slip": 15,
         "force_tracking_stiffness_estimator_comparison": 81,
-        "dm_admittance_tuning": 32,
         "robotiq_discrete_force": 60,
     }
     assert {name: studies[name]["condition_count"] for name in expected} == expected

@@ -302,17 +302,6 @@ def test_empty_rows_return_empty_list_and_key_count_is_validated() -> None:
 # ---------------------------------------------------------------------------
 
 _SAMPLE_ROWS_JSON: dict[str, str] = {
-    "dm_admittance_tuning": (
-        r"""
-        [
-    {"candidate_id": "zz-heavy", "mass_kg": 2.0, "damping_ns_m": 12.0, "stiffness_n_m": 900.0, "filter_cutoff_hz": 8.0, "velocity_limit_rad_s": 0.9, "approach_velocity_rad_s": 0.35, "contact_stable_time_s": 0.12, "contact_transition_time_s": 0.25, "approach_feedforward_force_n": 0.8, "passed": true, "force_tracking_ratio": 0.95, "rmse_n": 0.21, "mae_n": 0.12, "peak_abs_error_n": 0.55, "final_error_n": 0.03, "raw_rmse_n": 0.3, "raw_mae_n": 0.18, "raw_peak_abs_error_n": 0.8},
-    {"candidate_id": "aa-light", "mass_kg": 0.8, "damping_ns_m": 6.5, "stiffness_n_m": 350.0, "filter_cutoff_hz": 12.0, "velocity_limit_rad_s": 1.2, "approach_velocity_rad_s": 0.5, "contact_stable_time_s": 0.08, "contact_transition_time_s": 0.3, "approach_feedforward_force_n": 1.1, "passed": false, "force_tracking_ratio": 1.0, "rmse_n": NaN, "mae_n": NaN, "peak_abs_error_n": null, "final_error_n": Infinity, "raw_rmse_n": null, "raw_mae_n": NaN, "raw_peak_abs_error_n": null},
-    {"candidate_id": "zz-heavy", "mass_kg": 2.0, "damping_ns_m": 12.0, "stiffness_n_m": 900.0, "filter_cutoff_hz": 8.0, "velocity_limit_rad_s": 0.9, "approach_velocity_rad_s": 0.35, "contact_stable_time_s": 0.12, "contact_transition_time_s": 0.25, "approach_feedforward_force_n": 0.8, "passed": false, "force_tracking_ratio": 0.9, "rmse_n": null, "mae_n": NaN, "peak_abs_error_n": Infinity, "final_error_n": 0.07, "raw_rmse_n": NaN, "raw_mae_n": 0.2, "raw_peak_abs_error_n": null},
-    {"candidate_id": "aa-light", "mass_kg": 0.8, "damping_ns_m": 6.5, "stiffness_n_m": 350.0, "filter_cutoff_hz": 12.0, "velocity_limit_rad_s": 1.2, "approach_velocity_rad_s": 0.5, "contact_stable_time_s": 0.08, "contact_transition_time_s": 0.3, "approach_feedforward_force_n": 1.1, "passed": false, "force_tracking_ratio": 0.5, "rmse_n": 0.4, "mae_n": 0.31, "peak_abs_error_n": null, "final_error_n": null, "raw_rmse_n": null, "raw_mae_n": null, "raw_peak_abs_error_n": null},
-    {"candidate_id": "zz-heavy", "mass_kg": 2.0, "damping_ns_m": 12.0, "stiffness_n_m": 900.0, "filter_cutoff_hz": 8.0, "velocity_limit_rad_s": 0.9, "approach_velocity_rad_s": 0.35, "contact_stable_time_s": 0.12, "contact_transition_time_s": 0.25, "approach_feedforward_force_n": 0.8, "passed": true, "force_tracking_ratio": 0.85, "rmse_n": 0.25, "mae_n": 0.14, "peak_abs_error_n": 0.6, "final_error_n": 0.02, "raw_rmse_n": 0.28, "raw_mae_n": 0.22, "raw_peak_abs_error_n": 0.75}
-        ]
-        """
-    ),
     "force_tracking_ablation": (
         r"""
         [
@@ -388,14 +377,6 @@ _SAMPLE_ROWS_JSON: dict[str, str] = {
 _SAMPLE_ROWS = {name: json.loads(text) for name, text in _SAMPLE_ROWS_JSON.items()}
 
 _GOLDEN_JSON: dict[str, str] = {
-    "dm_admittance_tuning": (
-        r"""
-        [
-    {"candidate_id": "zz-heavy", "mass_kg": 2.0, "damping_ns_m": 12.0, "stiffness_n_m": 900.0, "filter_cutoff_hz": 8.0, "velocity_limit_rad_s": 0.9, "approach_velocity_rad_s": 0.35, "contact_stable_time_s": 0.12, "contact_transition_time_s": 0.25, "approach_feedforward_force_n": 0.8, "runs": 3, "stable_runs": 2, "complete_force_tracking_runs": 2, "force_tracking_ratio_mean": 0.9, "force_tracking_ratio_min": 0.85, "rmse_n_mean": 0.22999999999999998, "mae_n_mean": 0.13, "peak_abs_error_n_mean": 0.575, "final_error_n_mean": 0.04, "raw_rmse_n_mean": 0.29000000000000004, "raw_mae_n_mean": 0.19999999999999998, "raw_peak_abs_error_n_mean": 0.775},
-    {"candidate_id": "aa-light", "mass_kg": 0.8, "damping_ns_m": 6.5, "stiffness_n_m": 350.0, "filter_cutoff_hz": 12.0, "velocity_limit_rad_s": 1.2, "approach_velocity_rad_s": 0.5, "contact_stable_time_s": 0.08, "contact_transition_time_s": 0.3, "approach_feedforward_force_n": 1.1, "runs": 2, "stable_runs": 0, "complete_force_tracking_runs": 1, "force_tracking_ratio_mean": 0.75, "force_tracking_ratio_min": 0.5, "rmse_n_mean": 0.4, "mae_n_mean": 0.31, "peak_abs_error_n_mean": null, "final_error_n_mean": null, "raw_rmse_n_mean": null, "raw_mae_n_mean": null, "raw_peak_abs_error_n_mean": null}
-        ]
-        """
-    ),
     "force_tracking_ablation": (
         r"""
         [
@@ -454,7 +435,6 @@ _GOLDEN_JSON: dict[str, str] = {
 _GOLDEN = {name: json.loads(text) for name, text in _GOLDEN_JSON.items()}
 
 _AGGREGATE_FUNCTION = {
-    "dm_admittance_tuning": "aggregate_rows",
     "force_tracking_ablation": "aggregate_rows",
     "force_tracking_controller_comparison": "aggregate_rows",
     "force_tracking_stiffness_estimator_comparison": "aggregate_rows",
@@ -493,8 +473,7 @@ def _assert_matches(actual: object, expected: object) -> None:
 def test_script_aggregation_matches_golden(stem: str) -> None:
     """各研究脚本的声明式聚合输出与手写实现的黄金基线一致。"""
     protocol = _protocol_module(stem)
-    kwargs = {"minimum_ratio": 0.9} if stem == "dm_admittance_tuning" else {}
-    actual = getattr(protocol, _AGGREGATE_FUNCTION[stem])(_SAMPLE_ROWS[stem], **kwargs)
+    actual = getattr(protocol, _AGGREGATE_FUNCTION[stem])(_SAMPLE_ROWS[stem])
     expected = _GOLDEN[stem]
     assert len(actual) == len(expected)
     for index, (got, want) in enumerate(zip(actual, expected, strict=True)):

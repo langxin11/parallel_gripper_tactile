@@ -1,4 +1,4 @@
-"""验证共享 DM 导纳适配、阶段转换和独立仿真入口。"""
+"""验证共享 DM 导纳适配、阶段转换和统一力跟踪入口。"""
 
 import math
 from pathlib import Path
@@ -22,9 +22,9 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def _profile():
-    """通过正式组合入口返回导纳冻结 profile。"""
+    """通过统一导纳实验的组合入口返回导纳冻结 profile。"""
     return compose_research_run(
-        experiment="dm_gripper/force_tracking_admittance",
+        experiment="dm_gripper/force_tracking_admittance_unified",
         overrides=("seed=20260814", "execution=plan"),
     ).profile
 
@@ -48,34 +48,6 @@ def _enter_tracking(controller):
     controller._start_approach(0.0, 0.0)
     controller.state = "force_tracking"
     controller.supervisor.state = "force_tracking"
-
-
-def test_example_uses_low_force_ramp_and_contact_hysteresis():
-    """示例使用低力 Ramp，并让接触进入阈值高于释放阈值。"""
-    profile = _profile()
-    task = ForceTrackingTask.load(ROOT / "configs/task/force_tracking/dm_admittance_ramp.yaml")
-
-    assert profile.normal_force.target_n == 1.0
-    assert profile.normal_force.contact_threshold_n == 0.15
-    assert profile.normal_force.release_threshold_n == 0.05
-    assert profile.normal_force.admittance.mass_kg == 0.2
-    assert profile.normal_force.admittance.damping_ns_m == 15.0
-    assert profile.normal_force.admittance.stiffness_n_m == 1.0
-    assert profile.normal_force.filter_cutoff_hz == 2.0
-    assert profile.normal_force.admittance.approach_velocity_rad_s == 0.05
-    assert profile.normal_force.admittance.velocity_limit_rad_s == 0.05
-    assert profile.normal_force.admittance.contact_stable_time_s == 0.0
-    assert profile.normal_force.admittance.contact_transition_time_s == 0.05
-    assert profile.normal_force.admittance.approach_feedforward_force_n == 0.5
-    assert profile.normal_force.supervisor.contact_transition_time_s == 0.05
-    assert profile.normal_force.supervisor.release_policy == "any_side"
-    assert task.reference.interpolation == "linear"
-    assert tuple(waypoint.force_n for waypoint in task.reference.waypoints) == (
-        1.0,
-        1.2,
-        1.4,
-        1.0,
-    )
 
 
 def test_admittance_rejects_zero_mit_gain_before_first_step():
@@ -126,7 +98,7 @@ def test_tracking_filters_force_impulse_before_admittance_integration():
         observation=_observation(0.0, left=1.0, right=1.0),
         reference=ForceControlReference(target),
     )
-    expected_filtered = 1.0 + (1.0 - math.exp(-2.0 * math.pi * 2.0 * 0.004)) * 8.0
+    expected_filtered = 1.0 + (1.0 - math.exp(-2.0 * math.pi * 20.0 * 0.004)) * 8.0
     expected_admittance = SecondOrderAdmittance(0.2, 15.0, 1.0)
     expected_admittance.step(
         0.0, 0.004, maximum_velocity_m_s=0.05 * controller.kinematics.closure_jacobian(0.0)
@@ -247,7 +219,7 @@ def test_admittance_variant_is_explicit_and_average_side_only():
 
 def test_mujoco_force_tracking_admittance_smoke(tmp_path):
     """4 ms 仿真入口完成接近并输出有限跟踪指标，测试不评价硬件稳定性。"""
-    task = ForceTrackingTask.load(ROOT / "configs/task/force_tracking/dm_admittance_ramp.yaml")
+    task = ForceTrackingTask.load(ROOT / "configs/task/force_tracking/dm_unified_ramp.yaml")
     result = run_force_tracking(
         _profile(), task=task, controller_variant="admittance", output_csv=tmp_path / "trace.csv"
     )

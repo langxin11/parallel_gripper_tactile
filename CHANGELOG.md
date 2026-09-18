@@ -316,6 +316,13 @@
 
 ### 移除
 
+- 退役独立导纳调参研究线：正式执行 `dm_admittance_tuning` 32 条件全部稳定且完整跟踪
+  （force_tracking 占比均为 1.0，满足停止条件），结论为接近速度 0.1 rad/s 组全面优于
+  0.05 组（原始侧力峰值 0.707 对 0.731 N、RMSE 0.043 对 0.139 N），接近／接触切换参数
+  不敏感；产物保留于 `outputs/research/studies/dm_admittance_tuning/`。
+  随之移除 `controller=dm_gripper/admittance`（旧调参入口）、
+  `experiment=dm_gripper/force_tracking_admittance`、`dm_admittance_ramp` 任务、研究协议
+  与专属实现；统一导纳线 `admittance_unified` 不受影响。
 - 移除一阶位置式 ADRC 与直接力矩两个历史复现配置入口
   （`controller=dm_gripper/adrc`、`controller=dm_gripper/direct_torque`）；
   两者不进入默认正式矩阵，变体派生能力仍保留在代码层，历史数据复现以当时的 git 版本为准。

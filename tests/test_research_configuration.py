@@ -115,37 +115,6 @@ def test_default_run_matches_frozen_legacy_domain_parameters() -> None:
     assert resolved.selection.execution.trace_sample_period_s == 0.004
 
 
-def test_admittance_combination_preserves_profile_and_uses_canonical_ramp() -> None:
-    """导纳 profile 保持迁移等价，但任务收敛到唯一低力 Ramp。"""
-    resolved = resolve_research_run(
-        resolved_mapping(
-            _compose(
-                [
-                    "experiment=dm_gripper/force_tracking_admittance",
-                ]
-            )
-        )
-    )
-    expected = _baseline("dm_admittance")
-
-    assert resolved.profile.model_dump(mode="json") == _with_current_dm_supervisor(
-        expected["profile"]
-    )
-    assert resolved.task.name == "dm_admittance_ramp"
-    assert resolved.task.reference.interpolation == "linear"
-    assert tuple(waypoint.force_n for waypoint in resolved.task.reference.waypoints) == (
-        1.0,
-        1.2,
-        1.4,
-        1.0,
-    )
-    assert resolved.profile.normal_force is not None
-    assert resolved.profile.normal_force.admittance is not None
-    assert resolved.profile.normal_force.stiffness is not None
-    assert resolved.profile.normal_force.stiffness.enabled is False
-    assert resolved.selection.execution.trace_sample_period_s == resolved.task.control_period_s
-
-
 @pytest.mark.parametrize(
     "model_name, expected_resource",
     [
@@ -318,7 +287,7 @@ def test_robotiq_model_groups_match_frozen_profiles(model_group: str, legacy_pro
 @pytest.mark.parametrize(
     "overrides",
     [
-        ["controller=dm_gripper/admittance"],
+        ["controller=dm_gripper/admittance_unified"],
         ["estimator=none"],
         ["controller.torque_adrc.measurement_filter_cutoff_hz=-1"],
     ],
@@ -374,11 +343,11 @@ def test_programmatic_composition_reuses_an_active_hydra_context() -> None:
     register_resolvers()
     with initialize_config_dir(version_base="1.3", config_dir=str(CONFIG_ROOT)):
         resolved = compose_research_run(
-            experiment="dm_gripper/force_tracking_admittance",
+            experiment="dm_gripper/force_tracking_admittance_unified",
             overrides=("execution=plan",),
         )
 
-    assert resolved.profile.name == "dm_gripper_admittance"
+    assert resolved.profile.name == "dm_gripper_admittance_unified"
     assert resolved.selection.execution.mode == "plan"
 
 

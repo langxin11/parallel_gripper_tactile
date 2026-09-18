@@ -154,18 +154,14 @@ Onshape 原始导出中的 position actuator 与 `forcerange=12.5` 可用于保�
 ## 仿真入口
 
 ```sh
-uv run pgt run force-track --experiment dm_gripper/force_tracking_admittance
-# 动画追加 --set execution.viewer=true
-
-# PID／导纳使用共同 task 与平台的对比组合
+# PID／导纳使用共同 task 与平台的对比组合；动画追加 --set execution.viewer=true
 uv run python scripts/research/run.py experiment=dm_gripper/force_tracking_pid_unified
 uv run python scripts/research/run.py experiment=dm_gripper/force_tracking_admittance_unified
-
-# 导纳候选研究：默认只计划，执行追加 execution=study_run
-uv run python scripts/research/study.py research=dm_admittance_tuning/study
+uv run pgt run force-track --experiment dm_gripper/force_tracking_admittance_unified
 ```
 
 参数由当前 controller、platform、task 组合确定，不将某次调优数值写成通用默认值。
+PID 统一入口继承导纳统一入口的共同实验设置，再覆盖控制器与实验标识；平台、任务、材料与记录周期只维护一份。
 统一组合隔离控制律差异，不保证两种方法均已调优；饱和或跟踪失败须保留为实验结果。
 正式研究执行约定见[运行流程](workflows.md)。
 
@@ -191,16 +187,6 @@ uv build --package dm-grasp-core --wheel
 其他环境应安装构建产物，记录包版本、源码提交及 wheel 校验值，不跨仓复制算法文件。
 安装路径和部署流程由目标工作区维护，本仓不假定外部 ROS 工作区的目录或依赖锁定状态。
 
-常规门禁见[测试策略](testing.md)。共享核固定回归数据
-`packages/dm_grasp_core/tests/golden_tracking.json` 保存迁移前输出及来源 SHA256；
-生成器须读取保存的原始实现，不能用当前实现刷新期望值。
-
-可选 ROS 对齐检查：
-
-```sh
-PYTEST_DISABLE_PLUGIN_AUTOLOAD=1 uv run pytest tests/test_dm_ros_alignment.py
-```
-
-需先安装 ROS 和消息包，并将目标 `dm_gripper_control` 加入 `PYTHONPATH`；缺少环境时明确跳过。
-测试以实际 `_control_tick` 方法和内存输入／发布器比较跟踪阶段五字段请求及导纳状态，不创建 ROS 节点，
-不验证设备保护。MuJoCo 烟雾也仅证明能进入跟踪并产生有限输出，不构成硬件稳定性或抓取性能结论。
+常规门禁见[测试策略](testing.md)。共享核使用仓库内的独立数学期望验证控制公式、状态更新、
+限幅、复位、正反方向和不规则时间步，不再加载仓库外 ROS 节点或维护迁移期固定轨迹。
+MuJoCo 烟雾仅证明能进入跟踪并产生有限输出，不构成硬件稳定性或抓取性能结论。
