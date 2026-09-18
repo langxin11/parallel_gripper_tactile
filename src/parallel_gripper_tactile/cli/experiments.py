@@ -125,7 +125,7 @@ def run_grasp(
     context: typer.Context,
     experiment: Annotated[
         str, typer.Option("--experiment", help="Named experiment under configs/experiment.")
-    ] = "dm_gripper/force_tracking_default",
+    ] = "dm_gripper/force_tracking",
     set_values: Annotated[
         list[str] | None,
         typer.Option("--set", help="Repeatable Hydra override applied after the experiment."),
@@ -213,7 +213,7 @@ def run_force_schedule(
     context: typer.Context,
     experiment: Annotated[
         str, typer.Option("--experiment", help="Named experiment under configs/experiment.")
-    ] = "dm_gripper/force_scheduling_gravity_hold",
+    ] = "dm_gripper/force_scheduling_oracle",
     set_values: Annotated[
         list[str] | None,
         typer.Option("--set", help="Repeatable Hydra override applied after the experiment."),
@@ -317,7 +317,7 @@ def run_friction_estimate(
     context: typer.Context,
     experiment: Annotated[
         str, typer.Option("--experiment", help="Named experiment under configs/experiment.")
-    ] = "dm_gripper/friction_estimation_nominal",
+    ] = "dm_gripper/friction_estimation",
     set_values: Annotated[
         list[str] | None,
         typer.Option("--set", help="Repeatable Hydra override applied after the experiment."),
@@ -438,7 +438,7 @@ def run_force_track(
     context: typer.Context,
     experiment: Annotated[
         str, typer.Option("--experiment", help="Named experiment under configs/experiment.")
-    ] = "dm_gripper/force_tracking_default",
+    ] = "dm_gripper/force_tracking",
     set_values: Annotated[
         list[str] | None,
         typer.Option("--set", help="Repeatable Hydra override applied after the experiment."),
@@ -561,7 +561,7 @@ def compare_contact(
     context: typer.Context,
     experiment: Annotated[
         str, typer.Option("--experiment", help="Named experiment under configs/experiment.")
-    ] = "dm_gripper/force_tracking_default",
+    ] = "dm_gripper/force_tracking",
     set_values: Annotated[list[str] | None, typer.Option("--set")] = None,
     run_name: Annotated[str | None, typer.Option()] = None,
     taxel: Annotated[str, typer.Option()] = "left:11",
@@ -675,7 +675,7 @@ def view_grasp(
     context: typer.Context,
     experiment: Annotated[
         str, typer.Option("--experiment", help="Named experiment under configs/experiment.")
-    ] = "dm_gripper/force_tracking_default",
+    ] = "dm_gripper/force_tracking",
     set_values: Annotated[list[str] | None, typer.Option("--set")] = None,
 ) -> None:
     """打开一个可交互的 DM_Gripper 抓取场景。"""

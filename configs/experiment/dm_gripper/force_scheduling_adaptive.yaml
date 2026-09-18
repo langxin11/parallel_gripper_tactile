@@ -2,14 +2,14 @@
 defaults:
   - override /platform: dm_gripper/simulation
   - override /model: dm_gripper/height_spheres
-  - override /controller: dm_gripper/pid_torque_ff
-  - override /estimator: window_linear
-  - override /scheduler: force/oracle
+  - override /controller: dm_gripper/admittance
+  - override /estimator: none
+  - override /scheduler: force/adaptive
   - override /task: load/dynamic_filling
   - override /material: hard
   - override /execution: run
   - _self_
 
 experiment:
-  name: dm_force_scheduling_dynamic_filling
+  name: dm_force_scheduling_adaptive
   kind: force_scheduling

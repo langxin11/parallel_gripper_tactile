@@ -3,7 +3,7 @@ study:
   kind: force_tracking_stiffness_limit
   source: configs/research/force_tracking_stiffness_limit_pilot/study.yaml
   profile:
-    experiment: dm_gripper/force_tracking_default
+    experiment: dm_gripper/force_tracking
     overrides: [controller=dm_gripper/pid_torque_ff, estimator=window_linear]
   rationale:
     question: 刚度位置限幅能否降低阶跃跟踪初段的峰值与实际力增长率，同时保持可接受的跟踪误差？

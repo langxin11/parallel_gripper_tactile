@@ -303,7 +303,7 @@ def test_noslip_solver_does_not_hide_insufficient_grip(mode: str) -> None:
     scheduler_config = ORACLE.model_copy(update={"max_force_n": 0.5})
     profile = PROFILE
     if mode == "adaptive":
-        resolved = compose_research_run(experiment="dm_gripper/adaptive_dynamic_filling")
+        resolved = compose_research_run(experiment="dm_gripper/force_scheduling_adaptive")
         profile = resolved.profile
         weak_task = resolved.task
         scheduler_config = replace(
@@ -337,7 +337,7 @@ def test_execute_force_scheduling_writes_reproducible_artifacts(
         experiment = (
             "adaptive_support_release_multirate"
             if mode == "multirate"
-            else "adaptive_dynamic_filling"
+            else "force_scheduling_adaptive"
         )
         resolved = compose_research_run(experiment=f"dm_gripper/{experiment}")
         profile = resolved.profile
@@ -401,7 +401,7 @@ def test_execute_force_scheduling_writes_reproducible_artifacts(
 @pytest.mark.parametrize("scenario", ["steady", "ramp", "step"])
 def test_adaptive_simulation_tracks_measured_load(tmp_path: Path, scenario: str) -> None:
     """比较恒载、缓增与自重 2.5 N 的撤支撑；不以外力代替新增质量。"""
-    resolved = compose_research_run(experiment="dm_gripper/adaptive_dynamic_filling")
+    resolved = compose_research_run(experiment="dm_gripper/force_scheduling_adaptive")
     task = resolved.task
     scheduler_config = resolved.scheduler
     if scenario == "steady":

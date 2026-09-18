@@ -4,12 +4,15 @@ defaults:
   - override /model: dm_gripper/height_spheres
   - override /controller: dm_gripper/admittance
   - override /estimator: none
-  - override /scheduler: force/adaptive
-  - override /task: load/dynamic_filling
+  - override /task: force_tracking/ramp
   - override /material: hard
   - override /execution: run
   - _self_
 
 experiment:
-  name: dm_adaptive_dynamic_filling
-  kind: force_scheduling
+  name: dm_force_tracking_admittance
+  kind: force_tracking
+  profile_name: dm_gripper_admittance
+
+execution:
+  trace_sample_period_s: 0.004

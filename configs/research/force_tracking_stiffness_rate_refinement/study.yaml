@@ -3,7 +3,7 @@ study:
   kind: force_tracking_stiffness_rate_tuning
   source: configs/research/force_tracking_stiffness_rate_refinement/study.yaml
   profile:
-    experiment: dm_gripper/force_tracking_default
+    experiment: dm_gripper/force_tracking
     overrides: [controller=dm_gripper/pid_stiffness_rate, estimator=window_linear]
   rationale:
     question: 哪组速率比例增益与力变化率边界能消除 250 Hz medium／hard 下超过 10% 的超调？

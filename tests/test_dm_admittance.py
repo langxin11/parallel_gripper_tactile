@@ -24,7 +24,7 @@ ROOT = Path(__file__).resolve().parents[1]
 def _profile():
     """通过统一导纳实验的组合入口返回导纳冻结 profile。"""
     return compose_research_run(
-        experiment="dm_gripper/force_tracking_admittance_unified",
+        experiment="dm_gripper/force_tracking_admittance",
         overrides=("seed=20260814", "execution=plan"),
     ).profile
 
@@ -219,7 +219,7 @@ def test_admittance_variant_is_explicit_and_average_side_only():
 
 def test_mujoco_force_tracking_admittance_smoke(tmp_path):
     """4 ms 仿真入口完成接近并输出有限跟踪指标，测试不评价硬件稳定性。"""
-    task = ForceTrackingTask.load(ROOT / "configs/task/force_tracking/dm_unified_ramp.yaml")
+    task = ForceTrackingTask.load(ROOT / "configs/task/force_tracking/ramp.yaml")
     result = run_force_tracking(
         _profile(), task=task, controller_variant="admittance", output_csv=tmp_path / "trace.csv"
     )
@@ -247,7 +247,7 @@ def test_explicit_variant_injects_config_without_old_feedback_or_default_matrix(
     from parallel_gripper_tactile.experiments.force_tracking import CONTROLLER_VARIANTS
 
     baseline = compose_research_run(
-        experiment="dm_gripper/force_tracking_default",
+        experiment="dm_gripper/force_tracking",
         overrides=("controller=dm_gripper/pid_torque_ff", "seed=20260814", "execution=plan"),
     ).profile
     configured = configure_force_controller(baseline, variant="admittance")

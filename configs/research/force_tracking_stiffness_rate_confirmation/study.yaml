@@ -3,7 +3,7 @@ study:
   kind: force_tracking_stiffness_rate_confirmation
   source: configs/research/force_tracking_stiffness_rate_confirmation/study.yaml
   profile:
-    experiment: dm_gripper/force_tracking_default
+    experiment: dm_gripper/force_tracking
     overrides: [controller=dm_gripper/pid_stiffness_rate, estimator=window_linear]
   rationale:
     question: 调优胜出的刚度速率候选能否在固定 250 Hz 外环和不同材料刚度下保持稳定且受控的力增长？

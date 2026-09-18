@@ -8,7 +8,7 @@ defaults:
   - task: force_tracking/ramp
   - material: hard
   - execution: run
-  - experiment: dm_gripper/force_tracking_default
+  - experiment: dm_gripper/force_tracking
   - _self_
 
 schema_version: 1

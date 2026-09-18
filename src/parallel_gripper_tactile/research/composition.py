@@ -20,7 +20,7 @@ def compose_research_run(
 
     Args:
         experiment: ``configs/experiment`` 下的配置组选择，例如
-            ``dm_gripper/force_tracking_default``。
+            ``dm_gripper/force_tracking``。
         overrides: 应用在实验默认值之后的 Hydra 覆盖序列。
 
     Returns:

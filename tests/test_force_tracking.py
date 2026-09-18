@@ -40,14 +40,14 @@ def test_force_reference_waypoints_interpolate_targets() -> None:
     assert ForceReference(interpolation="linear", waypoints=waypoints).target_at(2.0) == 6.0
 
 
-def test_force_tracking_task_loads_default_waypoint_config() -> None:
-    """默认动态力跟踪任务来自 YAML 配置文件。"""
-    task = ForceTrackingTask.load(ROOT / "configs/task/force_tracking/default_waypoints.yaml")
+def test_force_tracking_task_loads_mixed_waypoint_config() -> None:
+    """混合力跟踪任务来自 YAML 配置文件。"""
+    task = ForceTrackingTask.load(ROOT / "configs/task/force_tracking/mixed.yaml")
 
-    assert task.name == "default_waypoint_force_tracking"
+    assert task.name == "mixed_waypoint_force_tracking"
     assert task.approach.feedforward_force_n == pytest.approx(1.0)
-    assert task.reference.duration_s == pytest.approx(4.5)
-    assert task.reference.target_at(3.5) == pytest.approx(10.0)
+    assert task.reference.duration_s == pytest.approx(7.5)
+    assert task.reference.target_at(3.75) == pytest.approx(6.0)
 
 
 def _plot_rows() -> list[dict[str, float | str]]:

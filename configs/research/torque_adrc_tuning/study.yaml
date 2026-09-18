@@ -4,7 +4,7 @@ study:
   kind: force_tracking_torque_adrc_tuning
   source: configs/research/torque_adrc_tuning/study.yaml
   profile:
-    experiment: dm_gripper/force_tracking_default
+    experiment: dm_gripper/force_tracking
     # 这里只固定调参所基于的控制配置；任务和阶段条件由 definition 唯一生成。
     overrides: [controller=dm_gripper/pid_torque_ff, estimator=window_linear]
   stage: coarse

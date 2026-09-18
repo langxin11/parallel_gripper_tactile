@@ -1,9 +1,0 @@
-# @package _global_
-defaults:
-  - /experiment/dm_gripper/force_tracking_admittance_unified
-  - override /controller: dm_gripper/pid_only
-  - _self_
-
-experiment:
-  name: dm_pid_unified
-  profile_name: dm_gripper_pid_unified

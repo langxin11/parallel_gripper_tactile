@@ -85,7 +85,7 @@ def test_execute_force_tracking_writes_complete_run_artifacts(
 
     monkeypatch.setattr(force_tracking, "run_force_tracking", fake_run)
     profile = ROOT / "configs" / "dm_gripper.yaml"
-    task = ROOT / "configs" / "task" / "force_tracking" / "default_waypoints.yaml"
+    task = ROOT / "configs" / "task" / "force_tracking" / "step.yaml"
     run, returned = force_tracking.execute_force_tracking(
         profile=profile,
         task_path=task,
@@ -133,7 +133,7 @@ def test_execute_force_tracking_writes_complete_run_artifacts(
     assert effective["schema_version"] == 1
     assert Path(effective["profile"]["model"]["path"]).is_absolute()
     assert Path(effective["profile"]["model"]["path"]).is_file()
-    assert effective["task"]["name"] == "default_waypoint_force_tracking"
+    assert effective["task"]["name"] == "step_force_tracking"
     assert effective["runtime"]["controller_variant"] == "adrc-torque"
     assert effective["runtime"]["object_material"] == "soft"
     assert effective["runtime"]["sensor_noise_seed"] == 7

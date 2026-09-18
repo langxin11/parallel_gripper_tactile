@@ -188,9 +188,9 @@ def test_runner_snapshots_the_supplied_composed_profile(
 @pytest.mark.parametrize(
     ("experiment", "selected_runner"),
     [
-        ("dm_gripper/force_tracking_default", "execute_force_tracking"),
-        ("dm_gripper/force_scheduling_gravity_hold", "execute_force_scheduling"),
-        ("dm_gripper/friction_estimation_nominal", "execute_friction_estimation"),
+        ("dm_gripper/force_tracking", "execute_force_tracking"),
+        ("dm_gripper/force_scheduling_oracle", "execute_force_scheduling"),
+        ("dm_gripper/friction_estimation", "execute_friction_estimation"),
         ("robotiq_2f85/discrete_force", "execute_robotiq_discrete_force"),
     ],
 )

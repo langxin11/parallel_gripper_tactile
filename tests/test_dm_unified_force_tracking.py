@@ -32,7 +32,7 @@ def test_all_dm_force_controllers_enable_shared_contact_supervisor() -> None:
 
     for controller, estimator in controllers.items():
         resolved = compose_research_run(
-            experiment="dm_gripper/force_tracking_default",
+            experiment="dm_gripper/force_tracking",
             overrides=(
                 f"controller=dm_gripper/{controller}",
                 f"estimator={estimator}",
@@ -49,13 +49,16 @@ def test_all_dm_force_controllers_enable_shared_contact_supervisor() -> None:
 
 def test_unified_pid_and_admittance_share_task_inner_loop_and_supervisor() -> None:
     """两种控制律之外的任务、MIT 内环与接触阶段参数必须逐项一致。"""
-    pid = _resolved("dm_gripper/force_tracking_pid_unified")
-    admittance = _resolved("dm_gripper/force_tracking_admittance_unified")
+    pid = compose_research_run(
+        experiment="dm_gripper/force_tracking_admittance",
+        overrides=("controller=dm_gripper/pid_only", "execution=plan", "seed=0"),
+    )
+    admittance = _resolved("dm_gripper/force_tracking_admittance")
 
     assert pid.task == admittance.task
-    assert pid.task.name == "dm_unified_ramp"
-    assert pid.task.approach.duration_s == 6.0
-    assert pid.task.approach.timeout_s == 8.0
+    assert pid.task.name == "ramp_force_tracking"
+    assert pid.task.approach.duration_s == 1.0
+    assert pid.task.approach.timeout_s == 3.0
     assert [point.force_n for point in pid.task.reference.waypoints] == [1.0, 3.0, 6.0, 1.0, 1.0]
     assert pid.task.control_period_s == 0.004
     assert pid.profile.mit == admittance.profile.mit
@@ -75,8 +78,11 @@ def test_unified_pid_and_admittance_share_task_inner_loop_and_supervisor() -> No
 
 def test_unified_pid_and_admittance_emit_equal_approach_command() -> None:
     """公共接近阶段在相同观测下生成逐字段相同的 MIT 命令。"""
-    pid = _resolved("dm_gripper/force_tracking_pid_unified")
-    admittance = _resolved("dm_gripper/force_tracking_admittance_unified")
+    pid = compose_research_run(
+        experiment="dm_gripper/force_tracking_admittance",
+        overrides=("controller=dm_gripper/pid_only", "execution=plan", "seed=0"),
+    )
+    admittance = _resolved("dm_gripper/force_tracking_admittance")
     pid_model = build_custom_grasp_model(pid.profile)
     admittance_model = build_custom_grasp_model(admittance.profile)
     pid_data = mujoco.MjData(pid_model)

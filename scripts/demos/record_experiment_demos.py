@@ -30,12 +30,12 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument(
         "--ramp-experiment",
-        default="dm_gripper/force_tracking_default",
+        default="dm_gripper/force_tracking",
         help="Ramp 演示使用的命名 experiment。",
     )
     parser.add_argument(
         "--friction-experiment",
-        default="dm_gripper/friction_estimation_nominal",
+        default="dm_gripper/friction_estimation",
         help="摩擦演示使用的命名 experiment。",
     )
     parser.add_argument(

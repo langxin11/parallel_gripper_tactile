@@ -187,32 +187,32 @@ def test_dm_controller_fragments_keep_pid_parameters_in_pid_base() -> None:
     ("experiment", "task_group", "legacy_task"),
     [
         (
-            "dm_gripper/friction_estimation_nominal",
+            "dm_gripper/friction_estimation",
             "friction_estimation/nominal_friction",
             "configs/friction_estimation/nominal_friction.yaml",
         ),
         (
-            "dm_gripper/friction_estimation_nominal",
+            "dm_gripper/friction_estimation",
             "friction_estimation/low_friction",
             "configs/friction_estimation/low_friction.yaml",
         ),
         (
-            "dm_gripper/friction_estimation_nominal",
+            "dm_gripper/friction_estimation",
             "friction_estimation/high_friction",
             "configs/friction_estimation/high_friction.yaml",
         ),
         (
-            "dm_gripper/friction_estimation_nominal",
+            "dm_gripper/friction_estimation",
             "friction_estimation/noisy_friction",
             "configs/friction_estimation/noisy_friction.yaml",
         ),
         (
-            "dm_gripper/friction_estimation_nominal",
+            "dm_gripper/friction_estimation",
             "friction_estimation/no_slip_low_probe",
             "configs/friction_estimation/no_slip_low_probe.yaml",
         ),
         (
-            "dm_gripper/friction_estimation_nominal",
+            "dm_gripper/friction_estimation",
             "friction_estimation/hardware_scale_nominal",
             "configs/friction_estimation/hardware_scale_nominal.yaml",
         ),
@@ -258,7 +258,7 @@ def test_force_scheduling_composes_load_and_scheduler_independently() -> None:
     """载荷场景和目标力调度器分属独立配置组。"""
     resolved = resolve_research_run(
         resolved_mapping(
-            _compose(["experiment=dm_gripper/adaptive_dynamic_filling", "execution=plan"])
+            _compose(["experiment=dm_gripper/force_scheduling_adaptive", "execution=plan"])
         )
     )
 
@@ -301,7 +301,7 @@ def test_robotiq_model_groups_match_frozen_profiles(model_group: str, legacy_pro
         ["estimator=none"],
         ["controller.torque_adrc.measurement_filter_cutoff_hz=-1"],
         ["scheduler=force/adaptive"],
-        ["experiment=dm_gripper/adaptive_dynamic_filling", "scheduler=none"],
+        ["experiment=dm_gripper/force_scheduling_adaptive", "scheduler=none"],
     ],
 )
 def test_illegal_component_combinations_fail_before_execution(overrides: list[str]) -> None:
@@ -355,11 +355,11 @@ def test_programmatic_composition_reuses_an_active_hydra_context() -> None:
     register_resolvers()
     with initialize_config_dir(version_base="1.3", config_dir=str(CONFIG_ROOT)):
         resolved = compose_research_run(
-            experiment="dm_gripper/force_tracking_admittance_unified",
+            experiment="dm_gripper/force_tracking_admittance",
             overrides=("execution=plan",),
         )
 
-    assert resolved.profile.name == "dm_gripper_admittance_unified"
+    assert resolved.profile.name == "dm_gripper_admittance"
     assert resolved.selection.execution.mode == "plan"
 
 

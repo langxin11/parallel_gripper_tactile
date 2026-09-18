@@ -4,12 +4,11 @@ defaults:
   - override /model: dm_gripper/height_spheres
   - override /controller: dm_gripper/pid_torque_ff
   - override /estimator: window_linear
-  - override /scheduler: force/oracle
-  - override /task: load/gravity_hold
+  - override /task: friction_estimation/nominal_friction
   - override /material: hard
   - override /execution: run
   - _self_
 
 experiment:
-  name: dm_force_scheduling_gravity_hold
-  kind: force_scheduling
+  name: dm_friction_estimation
+  kind: friction_estimation

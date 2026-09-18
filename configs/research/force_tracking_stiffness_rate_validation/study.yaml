@@ -3,7 +3,7 @@ study:
   kind: force_tracking_controller_comparison
   source: configs/research/force_tracking_stiffness_rate_validation/study.yaml
   profile:
-    experiment: dm_gripper/force_tracking_default
+    experiment: dm_gripper/force_tracking
     overrides: [controller=dm_gripper/pid_stiffness_rate, estimator=window_linear]
   rationale:
     question: 刚度归一化速率控制能否在 250 Hz 外环下消除 stiff 接触的限幅极限环？

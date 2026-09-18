@@ -3,7 +3,7 @@ study:
   kind: stiffness_ground_truth_validation
   source: configs/research/stiffness_ground_truth_validation/study.yaml
   profile:
-    experiment: dm_gripper/force_tracking_default
+    experiment: dm_gripper/force_tracking
     overrides: [controller=dm_gripper/pid_torque_ff, estimator=window_linear]
   rationale:
     question: 三种在线估计器相对准静态局部切线刚度参考的精度、抖动和低估风险如何？

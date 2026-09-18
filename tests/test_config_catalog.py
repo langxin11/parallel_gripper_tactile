@@ -24,7 +24,7 @@ def test_catalog_discovers_real_nested_research_and_experiment_choices() -> None
         entry for entry in research if entry.name == "force_controller_selection/study"
     )
     assert "哪种仍有竞争力" in selection.purpose
-    assert "dm_gripper/force_tracking_default" in {entry.name for entry in experiments}
+    assert "dm_gripper/force_tracking" in {entry.name for entry in experiments}
 
 
 def test_catalog_search_filters_metadata_and_results_are_stably_ordered() -> None:
