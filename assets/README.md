@@ -27,7 +27,7 @@
 
 > **当前工具边界：**专用工具尚未全部归入资产目录。生成和命名逻辑仍在主包
 > `src/parallel_gripper_tactile/asset_tools.py`，DM 碰撞变体脚本仍在
-> `scripts/prepare_flat_sphere_collision_model.py`。当前 `pgt assets` 仍依赖主项目环境。
+> `scripts/prepare_height_sphere_collision_model.py`。当前 `pgt assets` 仍依赖主项目环境。
 
 ## 维护边界
 

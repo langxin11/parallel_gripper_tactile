@@ -81,7 +81,7 @@ motor、crank 和传动标准件只用于可视化，避免内部传动碰撞。
 输入为输出轴 N·m，限幅为 `±4 N·m`。`prepare-onshape` 不执行这项转换，也不自动恢复主模型的电机参数。
 原始导出或旧版本中的峰值 `forcerange` 不能替代项目持续控制限幅，依据见[电机建模摘要][motor-model]。
 
-## 4．命名触觉碰撞并生成变体
+## 4．命名触觉碰撞并生成默认球体模型
 
 先对原始导出执行后处理：
 
@@ -95,23 +95,17 @@ uv run pgt assets prepare-onshape \
 当 18 个具名 taxel site 齐全时，使用 geom 与 site 位置的最小距离一对一分配；缺失 site 时有位置排序回退，
 但触觉读取器仍需要完整的对应 site，因此回退不等于模型通过了运行时验收。
 
-现有碰撞变体脚本仍位于根目录 `scripts/`。以保留高度差的球体变体为例：
+默认球体模型生成脚本仍位于根目录 `scripts/`：
 
 ```bash
-uv run python scripts/prepare_flat_sphere_collision_model.py \
+uv run python scripts/prepare_height_sphere_collision_model.py \
   --source assets/grippers/dm_gripper/parallel_gripper_prepared.xml \
-  --output assets/grippers/dm_gripper/parallel_gripper_height_sphere_collision.xml \
-  --variant height-sphere
+  --output assets/grippers/dm_gripper/parallel_gripper_height_sphere_collision.xml
 ```
 
-| `--variant` | 对应输出文件 |
-| --- | --- |
-| `height-sphere` | `parallel_gripper_height_sphere_collision.xml`。 |
-| `flat-sphere` | `parallel_gripper_flat_sphere_collision.xml`。 |
-| `coplanar-mesh` | `parallel_gripper_coplanar_mesh_collision.xml`。 |
-
-生成其余变体时同时修改 `--variant` 与 `--output`。脚本不承担 motor 转换或电机参数恢复，
-所有变体均继承输入模型的机构与执行器定义。碰撞选择的实验依据见[模型验证][validation]。
+脚本将 18 个 Pillar 碰撞 geom 替换为半径 `0.0028 m` 的球体，并逐点采用对应 taxel site
+位置，因此保留高度差。脚本不承担 motor 转换或电机参数恢复，输出继承输入模型的机构与
+执行器定义。共面 mesh 与共面球体变体已经退役；历史实验依据见[模型验证][validation]。
 
 ## 5．接入并验收
 

@@ -20,9 +20,7 @@
 | Hydra `model` | MJCF 文件 | 碰撞表示与用途 |
 | --- | --- | --- |
 | `dm_gripper/height_spheres` | `parallel_gripper_height_sphere_collision.xml` | 默认变体，球体代理保留 Pillar 高度差。 |
-| `dm_gripper/original_mesh` | `parallel_gripper_prepared.xml` | 原始非共面 mesh，碰撞诊断对照。 |
-| `dm_gripper/coplanar_mesh` | `parallel_gripper_coplanar_mesh_collision.xml` | 共面 mesh 对照。 |
-| `dm_gripper/flat_spheres` | `parallel_gripper_flat_sphere_collision.xml` | 共面球体对照。 |
+| `dm_gripper/original_mesh` | `parallel_gripper_prepared.xml` | 原始非共面 mesh，仅用于历史行为复现。 |
 
 `parallel_gripper.xml` 是导出模型基线，`scene.xml` 是带地面、灯光与相机的预览场景，
 `assets/` 保存网格与 Part 文件。变体的生成流程从[资产维护入口][onshape]查阅。
@@ -91,7 +89,7 @@ MIT 内环、连续力矩限制和硬件建模假设见[电机建模摘要][moto
 | 中心：`11` | `0.03345 m` | 约 `0.50 mm`。 |
 
 右指尖也保持中心高、四周低的规律。该阵列不能按平面接触解释单元接触顺序。
-共面球体和共面 mesh 是独立对照变体，不能把上表套用到所有变体。
+原始 mesh 保留相同的 site 高度，但 Pillar 碰撞表示不同，不能把球体代理的接触行为套用到原始 mesh。
 
 ### 命名与读取链路
 

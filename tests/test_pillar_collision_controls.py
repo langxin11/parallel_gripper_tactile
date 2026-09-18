@@ -1,4 +1,4 @@
-"""验证 Pillar 碰撞几何的三个因果对照。"""
+"""验证默认 Pillar 球体模型生成与求解器控制。"""
 
 from __future__ import annotations
 
@@ -17,8 +17,8 @@ SOURCE = ROOT / "assets" / "grippers" / "dm_gripper" / "parallel_gripper_prepare
 
 
 def _generator_module():
-    """Load the repository-native model generator for direct unit testing."""
-    path = ROOT / "scripts" / "prepare_flat_sphere_collision_model.py"
+    """加载仓库内的高度球体模型生成器。"""
+    path = ROOT / "scripts" / "prepare_height_sphere_collision_model.py"
     spec = importlib.util.spec_from_file_location("pillar_collision_model_generator", path)
     assert spec and spec.loader
     module = importlib.util.module_from_spec(spec)
@@ -26,15 +26,8 @@ def _generator_module():
     return module
 
 
-def _diagnosis_module():
-    """加载包内的因果诊断 protocol；显式导入子模块，不依赖其他测试的导入副作用。"""
-    from parallel_gripper_tactile.studies.protocols import force_tracking_diagnosis
-
-    return force_tracking_diagnosis
-
-
 def _named_elements(root: ET.Element, expression: str) -> dict[str, ET.Element]:
-    """Index named XML elements selected by ``expression``."""
+    """按名称索引指定 XML 元素。"""
     return {
         name: element
         for element in root.findall(expression)
@@ -42,38 +35,24 @@ def _named_elements(root: ET.Element, expression: str) -> dict[str, ET.Element]:
     }
 
 
-def test_collision_variants_change_one_geometry_factor_at_a_time(tmp_path: Path) -> None:
-    """球体保留原高度，而共面 mesh 仅平移碰撞几何。"""
+def test_height_sphere_generator_preserves_taxel_site_heights(tmp_path: Path) -> None:
+    """默认球体代理逐点保留原始 taxel site 高度。"""
     generator = _generator_module()
     height_spheres = tmp_path / "height-spheres.xml"
-    coplanar_mesh = tmp_path / "coplanar-mesh.xml"
-    generator.make_collision_variant_model(SOURCE, height_spheres, variant="height-sphere")
-    generator.make_collision_variant_model(SOURCE, coplanar_mesh, variant="coplanar-mesh")
+    generator.make_height_sphere_model(SOURCE, height_spheres)
 
     source_root = ET.parse(SOURCE).getroot()
-    source_geoms = _named_elements(source_root, ".//geom[@class='pillar_collision']")
     source_sites = _named_elements(source_root, ".//site")
     sphere_geoms = _named_elements(
         ET.parse(height_spheres).getroot(), ".//geom[@class='pillar_collision']"
     )
-    mesh_geoms = _named_elements(
-        ET.parse(coplanar_mesh).getroot(), ".//geom[@class='pillar_collision']"
-    )
 
-    assert len(sphere_geoms) == len(mesh_geoms) == 18
-    sphere_heights = {float(geom.get("pos", "").split()[2]) for geom in sphere_geoms.values()}
-    assert sphere_heights == {0.03295, 0.03325, 0.03345}
+    assert len(sphere_geoms) == 18
     assert {geom.get("type") for geom in sphere_geoms.values()} == {"sphere"}
-    assert {geom.get("type") for geom in mesh_geoms.values()} == {"mesh"}
-
-    effective_tip_heights = set()
-    for name, geom in mesh_geoms.items():
-        source_geom_z = float(source_geoms[name].get("pos", "").split()[2])
-        shifted_geom_z = float(geom.get("pos", "").split()[2])
+    for name, geom in sphere_geoms.items():
         site_name = name.replace("_geom_", "_", 1)
-        source_tip_z = float(source_sites[site_name].get("pos", "").split()[2])
-        effective_tip_heights.add(round(source_tip_z + shifted_geom_z - source_geom_z, 8))
-    assert effective_tip_heights == {0.03345}
+        assert geom.get("pos") == source_sites[site_name].get("pos")
+        assert geom.get("size") == "0.0028"
 
 
 def test_custom_scene_can_disable_multiccd_without_changing_the_model() -> None:
@@ -87,25 +66,3 @@ def test_custom_scene_can_disable_multiccd_without_changing_the_model() -> None:
 
     assert model.opt.disableflags & flag
     assert model.geom("gripper/left_taxel_geom_11").type == mujoco.mjtGeom.mjGEOM_MESH
-
-
-def test_diagnosis_protocol_contains_baselines_and_three_causal_controls() -> None:
-    """碰撞几何阶段按固定顺序运行两个端点和三个新增对照。"""
-    from parallel_gripper_tactile.studies.force_tracking_diagnosis import (
-        load_diagnosis_config,
-    )
-
-    diagnosis = _diagnosis_module()
-    config = load_diagnosis_config(
-        ROOT / "configs" / "research" / "archive" / "model_bug_diagnosis" / "study.yaml"
-    )
-    conditions = diagnosis._conditions(config, "collision-geometry")
-
-    assert [condition[0] for condition in conditions] == [
-        "original-mesh-multiccd",
-        "height-spheres-multiccd",
-        "coplanar-mesh-multiccd",
-        "original-mesh-single-contact",
-        "coplanar-spheres-multiccd",
-    ]
-    assert [condition[-1] for condition in conditions] == [True, True, True, False, True]
