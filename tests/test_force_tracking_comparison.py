@@ -48,7 +48,9 @@ output_root: results
 
 def test_default_comparison_uses_shifted_contact_presets() -> None:
     """默认正式矩阵排除旧 soft、位置限幅和一阶 ADRC，并锁定默认估计器。"""
-    config = load_comparison_config(ROOT / "configs/research/force_controller_selection/study.yaml")
+    config = load_comparison_config(
+        ROOT / "configs/research/dm_force_controller_selection/study.yaml"
+    )
 
     assert config.materials == ("medium", "hard", "stiff")
     assert config.stiffness_estimator_method == "window_linear"

@@ -61,7 +61,7 @@ RELATED_PREFIXES = {
         "tests/test_study_progress.py",
         "tests/test_research_study.py",
         "tests/test_force_tracking_controller_comparison_script.py",
-        "tests/test_force_tracking_torque_adrc_tuning.py",
+        "tests/test_friction_estimator_validation_study.py",
     ),
     "src/parallel_gripper_tactile/studies/protocols/": (
         "tests/test_study_lifecycle.py",
@@ -69,7 +69,6 @@ RELATED_PREFIXES = {
         "tests/test_research_study.py",
         "tests/test_study_aggregation.py",
         "tests/test_force_tracking_controller_comparison_script.py",
-        "tests/test_force_tracking_torque_adrc_tuning.py",
     ),
     "src/parallel_gripper_tactile/control/": (
         "tests/test_control.py",
@@ -99,7 +98,6 @@ RELATED_PREFIXES = {
         "tests/test_plotstyle.py",
         "tests/test_force_tracking.py",
         "tests/test_force_tracking_controller_comparison_script.py",
-        "tests/test_force_tracking_torque_adrc_tuning.py",
     ),
 }
 

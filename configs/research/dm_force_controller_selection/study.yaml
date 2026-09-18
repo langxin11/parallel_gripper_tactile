@@ -2,7 +2,7 @@
 # 目的导向研究定义；本文件同时拥有研究元数据与唯一条件矩阵。
 study:
   kind: force_tracking_controller_comparison
-  source: configs/research/force_controller_selection/study.yaml
+  source: configs/research/dm_force_controller_selection/study.yaml
   profile:
     experiment: dm_gripper/force_tracking
     # 这里只选择矩阵共享的基础控制配置；任务、seed 和执行方式分别归 definition 与 execution 所有。

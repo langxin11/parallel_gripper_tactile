@@ -314,29 +314,7 @@ _SAMPLE_ROWS_JSON: dict[str, str] = {
         ]
         """
     ),
-    "force_tracking_torque_adrc_tuning": (
-        r"""
-        [
-    {"candidate_id": "zz-wide", "measurement_filter_cutoff_hz": 15.0, "controller_bandwidth_rad_s": 40.0, "observer_bandwidth_ratio": 8.0, "observer_bandwidth_rad_s": 320.0, "task_name": "step_force_tracking", "object_material": "medium", "passed": true, "rmse_n": 0.5, "overshoot_ratio": null, "settling_time_s": NaN, "torque_saturation_ratio": 0.0},
-    {"candidate_id": "aa-base", "measurement_filter_cutoff_hz": 10.0, "controller_bandwidth_rad_s": 24.0, "observer_bandwidth_ratio": 10.0, "observer_bandwidth_rad_s": 240.0, "task_name": "step_force_tracking", "object_material": "medium", "passed": false, "rmse_n": 0.32, "overshoot_ratio": 0.12, "settling_time_s": 0.9, "torque_saturation_ratio": Infinity},
-    {"candidate_id": "zz-wide", "measurement_filter_cutoff_hz": 15.0, "controller_bandwidth_rad_s": 40.0, "observer_bandwidth_ratio": 8.0, "observer_bandwidth_rad_s": 320.0, "task_name": "step_force_tracking", "object_material": "medium", "passed": false, "rmse_n": 0.7, "overshoot_ratio": 0.25, "settling_time_s": 1.1, "torque_saturation_ratio": 0.02},
-    {"candidate_id": "zz-wide", "measurement_filter_cutoff_hz": 15.0, "controller_bandwidth_rad_s": 40.0, "observer_bandwidth_ratio": 8.0, "observer_bandwidth_rad_s": 320.0, "task_name": "ramp_force_tracking", "object_material": "medium", "passed": true, "rmse_n": 0.08, "overshoot_ratio": null, "settling_time_s": null, "torque_saturation_ratio": null},
-    {"candidate_id": "aa-base", "measurement_filter_cutoff_hz": 10.0, "controller_bandwidth_rad_s": 24.0, "observer_bandwidth_ratio": 10.0, "observer_bandwidth_rad_s": 240.0, "task_name": "step_force_tracking", "object_material": "medium", "passed": true, "rmse_n": 0.4, "overshoot_ratio": null, "settling_time_s": 1.2, "torque_saturation_ratio": null}
-        ]
-        """
-    ),
-    "robotiq_discrete_force": (
-        r"""
-        [
-    {"controller_variant": "fixed-step", "passed": true, "safety_violated": false, "safety_violation_duration_s": 0.0, "release_count": 3, "action_count": 42, "average_nonzero_action_step": 0.012, "total_command_movement": 0.55, "reverse_count": 1, "oscillation_count": 2, "settling_time_s": 0.42, "hold_ratio": 0.85, "steady_force_error_n": 0.06, "rmse_n": 0.11, "peak_overshoot_n": 0.32, "prediction_mae_n": 0.21},
-    {"controller_variant": "adaptive-deadband", "passed": false, "safety_violated": true, "safety_violation_duration_s": 1.5, "release_count": 2, "action_count": 37, "average_nonzero_action_step": 0.015, "total_command_movement": 0.61, "reverse_count": 0, "oscillation_count": 3, "settling_time_s": null, "hold_ratio": 0.78, "steady_force_error_n": 0.09, "rmse_n": 0.13, "peak_overshoot_n": 0.41, "prediction_mae_n": null},
-    {"controller_variant": "fixed-step", "passed": false, "safety_violated": true, "safety_violation_duration_s": 0.5, "release_count": 4, "action_count": 51, "average_nonzero_action_step": 0.011, "total_command_movement": 0.7, "reverse_count": 2, "oscillation_count": 1, "settling_time_s": null, "hold_ratio": 0.81, "steady_force_error_n": 0.04, "rmse_n": 0.09, "peak_overshoot_n": 0.28, "prediction_mae_n": null},
-    {"controller_variant": "fixed-step", "passed": true, "safety_violated": false, "safety_violation_duration_s": 0.0, "release_count": 5, "action_count": 48, "average_nonzero_action_step": 0.013, "total_command_movement": 0.58, "reverse_count": 1, "oscillation_count": 2, "settling_time_s": 0.56, "hold_ratio": 0.88, "steady_force_error_n": 0.05, "rmse_n": 0.1, "peak_overshoot_n": 0.3, "prediction_mae_n": null},
-    {"controller_variant": "adaptive-deadband", "passed": true, "safety_violated": false, "safety_violation_duration_s": 0.0, "release_count": 2, "action_count": 40, "average_nonzero_action_step": 0.014, "total_command_movement": 0.66, "reverse_count": 1, "oscillation_count": 4, "settling_time_s": null, "hold_ratio": 0.8, "steady_force_error_n": 0.07, "rmse_n": 0.12, "peak_overshoot_n": 0.38, "prediction_mae_n": null}
-        ]
-        """
-    ),
-    "friction_estimation_local_slip": (
+    "friction_estimator_validation": (
         r"""
         [
     {"scenario": "positive_slip", "expect_local_slip": true, "local_slip_detected": true, "detection_lead_s": 0.12, "local_estimate_ratio": 0.8, "validation_passed": true, "control_candidate_qualified": true},
@@ -362,24 +340,7 @@ _GOLDEN_JSON: dict[str, str] = {
         ]
         """
     ),
-    "force_tracking_torque_adrc_tuning": (
-        r"""
-        [
-    {"candidate_id": "zz-wide", "measurement_filter_cutoff_hz": 15.0, "controller_bandwidth_rad_s": 40.0, "observer_bandwidth_ratio": 8.0, "observer_bandwidth_rad_s": 320.0, "task_name": "step_force_tracking", "object_material": "medium", "runs": 2, "passed_runs": 1, "rmse_n_mean": 0.6, "rmse_n_std": 0.14142135623730948, "overshoot_ratio_mean": 0.25, "overshoot_ratio_std": null, "settling_time_s_mean": 1.1, "settling_time_s_std": null, "torque_saturation_ratio_mean": 0.01, "torque_saturation_ratio_std": 0.01414213562373095},
-    {"candidate_id": "aa-base", "measurement_filter_cutoff_hz": 10.0, "controller_bandwidth_rad_s": 24.0, "observer_bandwidth_ratio": 10.0, "observer_bandwidth_rad_s": 240.0, "task_name": "step_force_tracking", "object_material": "medium", "runs": 2, "passed_runs": 1, "rmse_n_mean": 0.36, "rmse_n_std": 0.05656854249492381, "overshoot_ratio_mean": 0.12, "overshoot_ratio_std": null, "settling_time_s_mean": 1.05, "settling_time_s_std": 0.2121320343559642, "torque_saturation_ratio_mean": null, "torque_saturation_ratio_std": null},
-    {"candidate_id": "zz-wide", "measurement_filter_cutoff_hz": 15.0, "controller_bandwidth_rad_s": 40.0, "observer_bandwidth_ratio": 8.0, "observer_bandwidth_rad_s": 320.0, "task_name": "ramp_force_tracking", "object_material": "medium", "runs": 1, "passed_runs": 1, "rmse_n_mean": 0.08, "rmse_n_std": null, "overshoot_ratio_mean": null, "overshoot_ratio_std": null, "settling_time_s_mean": null, "settling_time_s_std": null, "torque_saturation_ratio_mean": null, "torque_saturation_ratio_std": null}
-        ]
-        """
-    ),
-    "robotiq_discrete_force": (
-        r"""
-        [
-    {"controller_variant": "fixed-step", "runs": 3, "passed_runs": 2, "safety_violations": 1, "safety_violation_duration_s_mean": 0.16666666666666666, "release_count_mean": 4.0, "action_count_mean": 47.0, "average_nonzero_action_step_mean": 0.011999999999999999, "command_movement_mean": 0.61, "reverse_count_mean": 1.3333333333333333, "oscillation_count_mean": 1.6666666666666667, "settling_time_s_mean": 0.49, "hold_ratio_mean": 0.8466666666666667, "steady_force_error_n_mean": 0.049999999999999996, "rmse_n_mean": 0.09999999999999999, "peak_overshoot_n_mean": 0.3, "prediction_mae_n_mean": 0.21},
-    {"controller_variant": "adaptive-deadband", "runs": 2, "passed_runs": 1, "safety_violations": 1, "safety_violation_duration_s_mean": 0.75, "release_count_mean": 2.0, "action_count_mean": 38.5, "average_nonzero_action_step_mean": 0.014499999999999999, "command_movement_mean": 0.635, "reverse_count_mean": 0.5, "oscillation_count_mean": 3.5, "settling_time_s_mean": null, "hold_ratio_mean": 0.79, "steady_force_error_n_mean": 0.08, "rmse_n_mean": 0.125, "peak_overshoot_n_mean": 0.395, "prediction_mae_n_mean": null}
-        ]
-        """
-    ),
-    "friction_estimation_local_slip": (
+    "friction_estimator_validation": (
         r"""
         [
     {"scenario": "positive_slip", "expect_local_slip": true, "runs": 3, "local_detections": 2, "detection_rate": 0.6666666666666666, "false_positive_rate": 0.0, "detection_lead_s_mean": 0.15, "detection_lead_s_std": 0.04242640687119285, "local_estimate_ratio_mean": 0.8500000000000001, "local_estimate_ratio_std": 0.07071067811865474, "passed_runs": 2, "control_qualified_runs": 1},
@@ -394,9 +355,7 @@ _GOLDEN = {name: json.loads(text) for name, text in _GOLDEN_JSON.items()}
 
 _AGGREGATE_FUNCTION = {
     "force_tracking_controller_comparison": "aggregate_rows",
-    "force_tracking_torque_adrc_tuning": "_aggregate",
-    "robotiq_discrete_force": "aggregate_rows",
-    "friction_estimation_local_slip": "aggregate_rows",
+    "friction_estimator_validation": "aggregate_rows",
 }
 
 

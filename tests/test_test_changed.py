@@ -109,14 +109,14 @@ def test_research_entry_and_config_map_to_complete_research_tests() -> None:
 
 
 def test_study_lifecycle_maps_to_all_migrated_protocol_tests() -> None:
-    """公共生命周期改动必须覆盖三类协议及生命周期专属测试。"""
+    """公共生命周期改动必须覆盖活跃协议及生命周期专属测试。"""
     module = _module()
     selected = module.select_tests(["src/parallel_gripper_tactile/studies/lifecycle.py"])
 
     assert selected is not None
     assert "tests/test_study_lifecycle.py" in selected
     assert "tests/test_force_tracking_controller_comparison_script.py" in selected
-    assert "tests/test_force_tracking_torque_adrc_tuning.py" in selected
+    assert "tests/test_friction_estimator_validation_study.py" in selected
 
 
 def test_documentation_only_change_needs_no_pytest() -> None:

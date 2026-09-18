@@ -21,7 +21,7 @@ def test_catalog_discovers_real_nested_research_and_experiment_choices() -> None
     experiments = list_configurations("experiment")
 
     selection = next(
-        entry for entry in research if entry.name == "force_controller_selection/study"
+        entry for entry in research if entry.name == "dm_force_controller_selection/study"
     )
     assert "哪种仍有竞争力" in selection.purpose
     assert "dm_gripper/force_tracking" in {entry.name for entry in experiments}
@@ -31,7 +31,7 @@ def test_catalog_search_filters_metadata_and_results_are_stably_ordered() -> Non
     """检索覆盖用途字段，结果按完整选择名排序。"""
     entries = list_configurations("research", search="哪种仍有竞争力")
 
-    assert [entry.name for entry in entries] == ["force_controller_selection/study"]
+    assert [entry.name for entry in entries] == ["dm_force_controller_selection/study"]
     assert [entry.name for entry in list_configurations("controller")] == sorted(
         entry.name for entry in list_configurations("controller")
     )

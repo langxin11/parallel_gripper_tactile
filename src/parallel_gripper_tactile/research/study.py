@@ -7,35 +7,25 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 from types import ModuleType
-from typing import Any, Literal, Mapping, get_args
+from typing import Any, Literal, Mapping
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from ..config.profiles import GripperProfile, StiffnessRateControl, TorqueAdrcControl
+from ..config.profiles import GripperProfile, StiffnessRateControl
 from ..experiments.force_tracking import (
     ForceTrackingTask,
     configure_force_controller,
     validate_force_tracking_configuration,
 )
 from ..experiments.friction_estimation import FrictionEstimationTask
-from ..experiments.robotiq_discrete_force import RobotiqDiscreteForceTask
-from ..scenes.robotiq import RobotiqObjectMaterial
-from ..studies.friction_estimation_local_slip import (
-    FrictionEstimationLocalSlipStudyConfig,
-)
 from ..studies.force_tracking_comparison import (
     ForceTrackingComparisonConfig,
 )
-from ..studies.force_tracking_stiffness_limit import ForceTrackingStiffnessLimitConfig
 from ..studies.force_tracking_stiffness_rate_tuning import (
     ForceTrackingStiffnessRateTuningConfig,
 )
-from ..studies.force_tracking_torque_adrc_tuning import (
-    ForceTrackingTorqueAdrcTuningConfig,
-    TorqueAdrcTuningStageName,
-)
-from ..studies.stiffness_ground_truth_validation import (
-    StiffnessGroundTruthValidationConfig,
+from ..studies.friction_estimator_validation import (
+    FrictionEstimatorValidationStudyConfig,
 )
 from ..studies.lifecycle import (
     StudyPlan,
@@ -43,27 +33,14 @@ from ..studies.lifecycle import (
     assess_recovery,
     write_planned_study_manifest,
 )
-from ..studies.robotiq_discrete_force import (
-    RobotiqDiscreteForceStudyConfig,
-)
-from ..studies.protocols import friction_estimation_local_slip as friction_local_slip_protocol
 from ..studies.protocols import (
     force_tracking_controller_comparison as comparison_protocol,
-)
-from ..studies.protocols import (
-    force_tracking_stiffness_limit as stiffness_limit_protocol,
 )
 from ..studies.protocols import (
     force_tracking_stiffness_rate_tuning as stiffness_rate_tuning_protocol,
 )
 from ..studies.protocols import (
-    force_tracking_torque_adrc_tuning as torque_tuning_protocol,
-)
-from ..studies.protocols import (
-    robotiq_discrete_force as robotiq_discrete_force_protocol,
-)
-from ..studies.protocols import (
-    stiffness_ground_truth_validation as stiffness_ground_truth_protocol,
+    friction_estimator_validation as friction_estimator_validation_protocol,
 )
 from .configuration import REPOSITORY_ROOT, ResearchConfigurationError
 from .composition import compose_research_run
@@ -71,13 +48,9 @@ from .composition import compose_research_run
 
 StudyKind = Literal[
     "force_tracking_controller_comparison",
-    "force_tracking_torque_adrc_tuning",
-    "friction_estimation_local_slip",
-    "force_tracking_stiffness_limit",
+    "friction_estimator_validation",
     "force_tracking_stiffness_rate_tuning",
     "force_tracking_stiffness_rate_confirmation",
-    "stiffness_ground_truth_validation",
-    "robotiq_discrete_force",
 ]
 SetupFailureStage = Literal["configuration", "preflight"]
 
@@ -117,30 +90,13 @@ class StudyProfileSelection(_StudyModel):
 
 
 class StudySelection(_StudyModel):
-    """正式研究方案及可选阶段谱系。"""
+    """正式研究方案。"""
 
     kind: StudyKind
     source: Path
     profile: StudyProfileSelection
     rationale: StudyRationale
     definition: dict[str, object]
-    stage: TorqueAdrcTuningStageName | None = None
-    coarse_study_dir: Path | None = None
-
-    @model_validator(mode="after")
-    def validate_stage_fields(self) -> "StudySelection":
-        """只允许 Torque ADRC tuning 使用 coarse／confirm 谱系字段。"""
-        if self.kind == "force_tracking_torque_adrc_tuning":
-            if self.stage is None:
-                raise ValueError("torque ADRC tuning requires stage")
-            if self.stage == "coarse" and self.coarse_study_dir is not None:
-                raise ValueError("coarse stage forbids coarse_study_dir")
-            if self.stage == "confirm" and self.coarse_study_dir is None:
-                raise ValueError("confirm stage requires coarse_study_dir")
-            return self
-        if self.stage is not None or self.coarse_study_dir is not None:
-            raise ValueError("stage fields are supported only by torque ADRC tuning")
-        return self
 
 
 class StudyExecution(_StudyModel):
@@ -163,12 +119,8 @@ class ResearchStudyConfig(_StudyModel):
 
 StudyDomainConfig = (
     ForceTrackingComparisonConfig
-    | ForceTrackingTorqueAdrcTuningConfig
-    | FrictionEstimationLocalSlipStudyConfig
-    | ForceTrackingStiffnessLimitConfig
+    | FrictionEstimatorValidationStudyConfig
     | ForceTrackingStiffnessRateTuningConfig
-    | StiffnessGroundTruthValidationConfig
-    | RobotiqDiscreteForceStudyConfig
 )
 
 
@@ -239,46 +191,6 @@ def _validate_comparison(
                 validate_force_tracking_configuration(profile, task=task, object_material=material)
 
 
-def _validate_stiffness_ground_truth(
-    config: StiffnessGroundTruthValidationConfig,
-    profile: GripperProfile,
-) -> None:
-    """预检准静态任务和刚度估计器所需的 profile 组件。"""
-    from ..experiments.stiffness_calibration import StiffnessCalibrationTask
-
-    if profile.normal_force is None or profile.normal_force.stiffness is None:
-        raise ValueError("等效接触刚度真值验证需要 control.force.stiffness。")
-    if profile.normal_force.geometry is None:
-        raise ValueError("等效接触刚度真值验证需要 control.force.geometry。")
-    StiffnessCalibrationTask.load(config.task)
-
-
-def _validate_stiffness_limit(
-    config: ForceTrackingStiffnessLimitConfig,
-    profile: GripperProfile,
-) -> None:
-    """逐三臂、任务和材料预检限幅实验。"""
-    tasks = {path: ForceTrackingTask.load(path) for path in config.tasks}
-    seed = config.seeds.values()[0]
-    for mode in config.modes:
-        for material in config.materials:
-            configured = stiffness_limit_protocol.configured_mode_profile(
-                profile,
-                mode=mode,
-                material=material,
-                seed=seed,
-                oracle_values=config.oracle_stiffness_n_per_m,
-                force_rate_limit_n_s=config.position_limit_force_rate_n_s,
-            )
-            for task in tasks.values():
-                validate_force_tracking_configuration(
-                    configured,
-                    task=task,
-                    object_material=material,
-                    trace_sample_period_s=task.control_period_s,
-                )
-
-
 def _validate_stiffness_rate_tuning(
     config: ForceTrackingStiffnessRateTuningConfig,
     profile: GripperProfile,
@@ -318,59 +230,14 @@ def _validate_stiffness_rate_tuning(
                 )
 
 
-def _validate_torque_tuning(
-    config: ForceTrackingTorqueAdrcTuningConfig,
-    plan: StudyPlan,
-    base_profile: GripperProfile,
+def _validate_friction_estimator_validation(
+    config: FrictionEstimatorValidationStudyConfig, profile: GripperProfile
 ) -> None:
-    """按实际计划中的候选、任务和材料预检 Torque ADRC 场景。"""
-    tasks = {path: ForceTrackingTask.load(path) for path in config.tasks}
-    validated: set[tuple[str, Path, str]] = set()
-    for condition in plan.conditions:
-        parameters = condition.parameters
-        task_path = Path(str(parameters["task_path"]))
-        material = str(parameters["object_material"])
-        key = (str(parameters["candidate_id"]), task_path, material)
-        if key in validated:
-            continue
-        control = TorqueAdrcControl.model_validate(parameters["torque_adrc"])
-        profile = configure_force_controller(
-            base_profile,
-            variant="adrc-torque",
-            stiffness_estimator_method=config.stiffness_estimator_method,
-            sensor_noise_seed=int(parameters["sensor_noise_seed"]),
-            torque_adrc_override=control,
-        )
-        validate_force_tracking_configuration(
-            profile,
-            task=tasks[task_path],
-            object_material=material,
-            trace_sample_period_s=0.004,
-        )
-        validated.add(key)
-
-
-def _validate_local_slip(
-    config: FrictionEstimationLocalSlipStudyConfig, profile: GripperProfile
-) -> None:
-    """逐场景预检局部起滑方案的 profile 与任务文件。"""
+    """逐场景预检摩擦估计方案的 profile 与任务文件。"""
     if profile.normal_force is None:
-        raise ValueError("局部起滑研究需要 control.force。")
+        raise ValueError("摩擦估计研究需要 control.force。")
     for scenario in config.scenarios:
         FrictionEstimationTask.load(scenario.task)
-
-
-def _validate_robotiq_discrete_force(
-    config: RobotiqDiscreteForceStudyConfig, profile: GripperProfile
-) -> None:
-    """预检 Robotiq 离散力方案的 profile、任务文件与材料枚举。"""
-    if profile.control_mode != "position":
-        raise ValueError("Robotiq 离散力研究需要 Robotiq profile。")
-    RobotiqDiscreteForceTask.load(config.task)
-    valid_materials = get_args(RobotiqObjectMaterial)
-    for material in config.materials:
-        if material not in valid_materials:
-            raise ValueError(f"unknown Robotiq object material: {material}")
 
 
 def _resolved_selection(
@@ -381,11 +248,6 @@ def _resolved_selection(
     """把入口、输出和可选恢复路径统一解析为绝对路径。"""
     study = selection.study.model_dump(mode="python")
     study["source"] = _repository_path(selection.study.source, repository_root=repository_root)
-    if selection.study.coarse_study_dir is not None:
-        study["coarse_study_dir"] = _repository_path(
-            selection.study.coarse_study_dir,
-            repository_root=repository_root,
-        )
     execution = selection.execution.model_dump(mode="python")
     execution["output_root"] = _repository_path(
         selection.execution.output_root,
@@ -408,15 +270,6 @@ def _resolved_selection(
 def _profile_options(selection: StudySelection, profile: GripperProfile) -> dict[str, object]:
     """标准研究向计划和执行传入同一冻结 profile。"""
     return {"resolved_profile": profile}
-
-
-def _torque_options(selection: StudySelection, profile: GripperProfile) -> dict[str, object]:
-    """Torque 调参在建计划和执行时都携带完整阶段谱系。"""
-    return {
-        "resolved_profile": profile,
-        "stage": selection.stage,
-        "coarse_study_dir": selection.coarse_study_dir,
-    }
 
 
 def _rate_options(selection: StudySelection, profile: GripperProfile) -> dict[str, object]:
@@ -464,7 +317,7 @@ class _StudyAdapter:
     def build_plan(
         self, config: StudyDomainConfig, selection: StudySelection, profile: GripperProfile
     ) -> StudyPlan:
-        """保留普通研究先预检、Torque 先校验谱系再按候选预检的顺序。"""
+        """先预检再由协议生成唯一计划。"""
         if self.validate is not None:
             self.validate(config, profile)
         plan = self.protocol.build_plan(config, **self.options(selection, profile))
@@ -479,31 +332,12 @@ _STUDY_ADAPTERS: dict[StudyKind, _StudyAdapter] = {
         comparison_protocol,
         _validate_comparison,
     ),
-    "force_tracking_torque_adrc_tuning": _StudyAdapter(
-        ForceTrackingTorqueAdrcTuningConfig,
-        torque_tuning_protocol,
-        None,
-        options=_torque_options,
-        validate_plan=_validate_torque_tuning,
-    ),
-    "friction_estimation_local_slip": _StudyAdapter(
-        FrictionEstimationLocalSlipStudyConfig,
-        friction_local_slip_protocol,
-        _validate_local_slip,
+    "friction_estimator_validation": _StudyAdapter(
+        FrictionEstimatorValidationStudyConfig,
+        friction_estimator_validation_protocol,
+        _validate_friction_estimator_validation,
         sequence_paths=(),
         nested_paths=(("scenarios", "task"),),
-    ),
-    "stiffness_ground_truth_validation": _StudyAdapter(
-        StiffnessGroundTruthValidationConfig,
-        stiffness_ground_truth_protocol,
-        _validate_stiffness_ground_truth,
-        scalar_paths=("profile", "task", "output_root"),
-        sequence_paths=(),
-    ),
-    "force_tracking_stiffness_limit": _StudyAdapter(
-        ForceTrackingStiffnessLimitConfig,
-        stiffness_limit_protocol,
-        _validate_stiffness_limit,
     ),
     "force_tracking_stiffness_rate_tuning": _StudyAdapter(
         ForceTrackingStiffnessRateTuningConfig,
@@ -517,18 +351,11 @@ _STUDY_ADAPTERS: dict[StudyKind, _StudyAdapter] = {
         _validate_stiffness_rate_tuning,
         options=_rate_options,
     ),
-    "robotiq_discrete_force": _StudyAdapter(
-        RobotiqDiscreteForceStudyConfig,
-        robotiq_discrete_force_protocol,
-        _validate_robotiq_discrete_force,
-        scalar_paths=("profile", "task", "output_root"),
-        sequence_paths=(),
-    ),
 }
 
 
 def _study_adapter(kind: StudyKind) -> _StudyAdapter:
-    """拒绝未登记的研究，不把未知类型默认为 Torque 调参。"""
+    """拒绝未登记的研究类型。"""
     try:
         return _STUDY_ADAPTERS[kind]
     except KeyError as error:

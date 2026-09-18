@@ -24,10 +24,10 @@ class LocalSlipScenario(_StudyModel):
     expect_local_slip: bool
 
 
-class FrictionEstimationLocalSlipStudyConfig(_StudyModel):
+class FrictionEstimatorValidationStudyConfig(_StudyModel):
     """任务场景与噪声种子组成的局部起滑验证矩阵。"""
 
-    name: str = Field(default="friction_estimation_local_slip", min_length=1)
+    name: str = Field(default="friction_estimator_validation", min_length=1)
     # 仅供旧的 protocol 直调入口使用；正式 Hydra 研究由 experiment 组合 profile。
     profile: Path = Field(default=Path("configs/dm_gripper.yaml"), exclude=True)
     scenarios: tuple[LocalSlipScenario, ...]
@@ -53,9 +53,9 @@ class FrictionEstimationLocalSlipStudyConfig(_StudyModel):
         return tuple(product(self.scenarios, self.seeds.values()))
 
 
-def load_local_slip_study_config(
+def load_friction_estimator_validation_config(
     path: str | Path,
-) -> FrictionEstimationLocalSlipStudyConfig:
+) -> FrictionEstimatorValidationStudyConfig:
     """加载配置并相对 YAML 所在目录解析路径。"""
     config_path = Path(path).resolve()
     try:
@@ -73,7 +73,7 @@ def load_local_slip_study_config(
         raw = study["definition"]
         base = Path(__file__).resolve().parents[3]
     try:
-        config = FrictionEstimationLocalSlipStudyConfig.model_validate(raw)
+        config = FrictionEstimatorValidationStudyConfig.model_validate(raw)
     except ValidationError as error:
         raise StudyConfigError(str(error)) from error
     scenarios = tuple(
@@ -104,7 +104,7 @@ def load_local_slip_study_config(
 
 
 __all__ = [
-    "FrictionEstimationLocalSlipStudyConfig",
+    "FrictionEstimatorValidationStudyConfig",
     "LocalSlipScenario",
-    "load_local_slip_study_config",
+    "load_friction_estimator_validation_config",
 ]

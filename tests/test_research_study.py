@@ -23,68 +23,22 @@ from parallel_gripper_tactile.research.study import (
     resolve_research_study,
 )
 from parallel_gripper_tactile.studies.force_tracking_comparison import load_comparison_config
-from parallel_gripper_tactile.studies.force_tracking_torque_adrc_tuning import (
-    ForceTrackingTorqueAdrcTuningConfig,
-    TorqueAdrcCandidate,
-    load_torque_adrc_tuning_config,
-)
-from parallel_gripper_tactile.studies.lifecycle import file_sha256
-from parallel_gripper_tactile.studies.protocols import (
-    force_tracking_torque_adrc_tuning as torque_protocol,
-)
-from parallel_gripper_tactile.studies.tabular import write_rows_csv
 
 
 CONFIG_ROOT = REPOSITORY_ROOT / "configs"
 STUDY_GROUPS = {
-    "force_tracking_controller_comparison": ("force_controller_selection/study", []),
-    "friction_estimation_local_slip": ("friction_local_slip_validation/study", []),
-    "stiffness_ground_truth_validation": (
-        "stiffness_ground_truth_validation/study",
-        [],
-    ),
-    "force_tracking_stiffness_limit": (
-        "force_tracking_stiffness_limit_pilot/study",
-        [],
-    ),
-    "force_tracking_stiffness_rate_validation": (
-        "force_tracking_stiffness_rate_validation/study",
-        [],
-    ),
-    "force_tracking_stiffness_rate_tuning": (
-        "force_tracking_stiffness_rate_tuning/study",
-        [],
-    ),
-    "force_tracking_stiffness_rate_refinement": (
-        "force_tracking_stiffness_rate_refinement/study",
-        [],
-    ),
-    "force_tracking_stiffness_rate_confirmation": (
-        "force_tracking_stiffness_rate_confirmation/study",
-        [],
-    ),
-    "robotiq_discrete_force": ("robotiq_discrete_force_validation/study", []),
-    "force_tracking_torque_adrc_tuning_coarse": ("torque_adrc_tuning/study", []),
-    "force_tracking_torque_adrc_tuning_confirm": (
-        "torque_adrc_tuning/study",
-        ["study.stage=confirm"],
-    ),
+    "force_tracking_controller_comparison": ("dm_force_controller_selection/study", []),
+    "friction_estimator_validation": ("friction_estimator_validation/study", []),
+    "force_tracking_stiffness_rate_confirmation": ("dm_stiffness_rate_confirmation/study", []),
 }
 
 
 @pytest.mark.parametrize(
     "research_group",
     [
-        "force_controller_selection/study",
-        "friction_local_slip_validation/study",
-        "stiffness_ground_truth_validation/study",
-        "force_tracking_stiffness_limit_pilot/study",
-        "force_tracking_stiffness_rate_validation/study",
-        "force_tracking_stiffness_rate_tuning/study",
-        "force_tracking_stiffness_rate_refinement/study",
-        "force_tracking_stiffness_rate_confirmation/study",
-        "robotiq_discrete_force_validation/study",
-        "torque_adrc_tuning/study",
+        "dm_force_controller_selection/study",
+        "friction_estimator_validation/study",
+        "dm_stiffness_rate_confirmation/study",
     ],
 )
 def test_active_research_groups_do_not_repeat_cross_layer_fields(
@@ -119,22 +73,22 @@ def _resolved(name: str, *, overrides: list[str] | None = None):
 def test_execution_workers_override_is_validated() -> None:
     """正式研究接受正整数进程数，并拒绝零进程。"""
     resolved = _resolved(
-        "friction_estimation_local_slip",
+        "friction_estimator_validation",
         overrides=["execution.workers=4"],
     )
     assert resolved.selection.execution.workers == 4
     with pytest.raises(ResearchStudySetupError, match="greater than or equal to 1"):
         _resolved(
-            "friction_estimation_local_slip",
+            "friction_estimator_validation",
             overrides=["execution.workers=0"],
         )
 
 
 def test_plot_mode_preserves_scientific_plan_and_rejects_unknown_mode() -> None:
     """出图只影响工件选择，不改变科学哈希或有序实验条件。"""
-    summary = _resolved("friction_estimation_local_slip")
+    summary = _resolved("friction_estimator_validation")
     diagnostic = _resolved(
-        "friction_estimation_local_slip",
+        "friction_estimator_validation",
         overrides=["execution.plot_mode=diagnostic"],
     )
     assert summary.plan == diagnostic.plan
@@ -144,53 +98,9 @@ def test_plot_mode_preserves_scientific_plan_and_rejects_unknown_mode() -> None:
     )
     with pytest.raises(ResearchStudySetupError, match="plot_mode"):
         _resolved(
-            "friction_estimation_local_slip",
+            "friction_estimator_validation",
             overrides=["execution.plot_mode=all"],
         )
-
-
-def _write_coarse_reference(
-    directory: Path,
-    config: ForceTrackingTorqueAdrcTuningConfig,
-) -> tuple[TorqueAdrcCandidate, ...]:
-    """生成 schema、候选全集和摘要均有效的 coarse 谱系 fixture。"""
-    directory.mkdir(parents=True, exist_ok=True)
-    candidates = config.stage_candidates("coarse")
-    rows = [
-        {
-            "rank": rank,
-            "candidate_id": candidate.identifier,
-            "measurement_filter_cutoff_hz": candidate.measurement_filter_cutoff_hz,
-            "controller_bandwidth_rad_s": candidate.controller_bandwidth_rad_s,
-            "observer_bandwidth_ratio": candidate.observer_bandwidth_ratio,
-            "observer_bandwidth_rad_s": candidate.observer_bandwidth_rad_s,
-            "feasible": "true",
-            "step_overshoot_ratio_mean": 0.01 * rank,
-            "step_rmse_n_mean": 0.1 * rank,
-            "ramp_rmse_n_mean": 0.1 * rank,
-            "mixed_rmse_n_mean": 0.1 * rank,
-            "ramp_rmse_ratio_to_baseline": 1.0,
-            "mixed_rmse_ratio_to_baseline": 1.0,
-            "max_torque_saturation_ratio": 0.0,
-        }
-        for rank, candidate in enumerate(candidates, start=1)
-    ]
-    ranking = write_rows_csv(directory / "candidate_ranking.csv", rows)
-    coarse_plan = torque_protocol.build_plan(config, stage="coarse")
-    manifest = {
-        "lifecycle_schema_version": 1,
-        "study_kind": "force_tracking_torque_adrc_tuning",
-        "stage": "coarse",
-        "state": "completed",
-        "study_definition_sha256": coarse_plan.study_definition_sha256,
-        "scientific_configuration_sha256": coarse_plan.scientific_configuration_sha256,
-        "execution_error_count": 0,
-        "lifecycle_failures": [],
-        "artifacts": [ranking.name],
-        "artifact_sha256": {ranking.name: file_sha256(ranking)},
-    }
-    (directory / "study_manifest.json").write_text(json.dumps(manifest), encoding="utf-8")
-    return candidates
 
 
 def _migrated_task(path: Path) -> Path:
@@ -216,7 +126,7 @@ def test_formal_comparison_preserves_the_complete_ordered_matrix() -> None:
     """迁移后的 162 条条件与旧 Pydantic study 的完整 tuple 逐项一致。"""
     resolved = _resolved("force_tracking_controller_comparison")
     legacy = load_comparison_config(
-        REPOSITORY_ROOT / "configs/research/force_controller_selection/study.yaml"
+        REPOSITORY_ROOT / "configs/research/dm_force_controller_selection/study.yaml"
     )
     expected_controllers = (
         "pid-only",
@@ -250,39 +160,6 @@ def test_default_formal_selection_excludes_historical_low_performers() -> None:
     assert "archive" not in str(resolved.config_source.relative_to(CONFIG_ROOT))
 
 
-def test_stiffness_rate_validation_preserves_250hz_matrix() -> None:
-    """速率控制验证固定 250 Hz，并覆盖三控制器和三个配对 seed。"""
-    resolved = _resolved("force_tracking_stiffness_rate_validation")
-    config = resolved.domain_config
-
-    assert config.controllers == (
-        "pid-torque-ff",
-        "pid-stiffness-limit",
-        "pid-stiffness-rate",
-    )
-    assert config.trace_at_control_rate is True
-    assert tuple(ForceTrackingTask.load(task).control_period_s for task in config.tasks) == (0.004,)
-    assert len(resolved.conditions) == 9
-    assert len({row["pair_key"] for row in resolved.conditions}) == 3
-    assert resolved.profile.control.force.stiffness_rate is not None
-    assert resolved.profile.control.force.stiffness_rate.max_force_rate_n_s == pytest.approx(50.0)
-
-
-def test_stiffness_rate_tuning_preserves_candidate_and_baseline_matrix() -> None:
-    """小规模调优包含九个候选及性能基线，并保持三 seed 配对。"""
-    resolved = _resolved("force_tracking_stiffness_rate_tuning")
-    config = resolved.domain_config
-
-    assert len(config.candidates()) == 9
-    assert len(resolved.conditions) == 30
-    assert len({row["pair_key"] for row in resolved.conditions}) == 3
-    assert sum(row["baseline_role"] == "performance-baseline" for row in resolved.conditions) == 3
-    assert {row["controller_variant"] for row in resolved.conditions} == {
-        "pid-torque-ff",
-        "pid-stiffness-rate",
-    }
-
-
 def test_stiffness_rate_confirmation_preserves_250hz_material_matrix() -> None:
     """确认研究固定 250 Hz 与胜出候选，并完整覆盖材料和配对 seed。"""
     resolved = _resolved("force_tracking_stiffness_rate_confirmation")
@@ -299,22 +176,7 @@ def test_stiffness_rate_confirmation_preserves_250hz_material_matrix() -> None:
     assert sum(row["baseline_role"] == "performance-baseline" for row in resolved.conditions) == 9
 
 
-def test_stiffness_rate_refinement_preserves_targeted_matrix() -> None:
-    """二次调优只覆盖 250 Hz medium／hard 和六个候选。"""
-    resolved = _resolved("force_tracking_stiffness_rate_refinement")
-    config = resolved.domain_config
-
-    assert config.analysis_mode == "tuning"
-    assert len(config.tasks) == 1
-    assert ForceTrackingTask.load(config.tasks[0]).control_period_s == pytest.approx(0.004)
-    assert config.materials == ("medium", "hard")
-    assert config.kp_s_inv == (20.0, 25.0, 30.0)
-    assert config.max_force_rate_n_s == (50.0, 70.0)
-    assert len(resolved.conditions) == 42
-    assert len({row["pair_key"] for row in resolved.conditions}) == 6
-
-
-@pytest.mark.parametrize("research_group", ["torque_adrc_tuning/study"])
+@pytest.mark.parametrize("research_group", ["dm_force_controller_selection/study"])
 def test_retired_diagnosis_phase_is_rejected_before_preflight(research_group: str) -> None:
     """退役的诊断阶段字段不能被活跃研究静默忽略。"""
     register_resolvers()
@@ -339,15 +201,15 @@ def test_retired_diagnosis_kind_is_rejected_before_preflight() -> None:
     assert caught.value.stage == "configuration"
 
 
-def test_formal_local_slip_preserves_scenario_and_seed_matrix() -> None:
+def test_formal_friction_estimator_validation_preserves_scenario_and_seed_matrix() -> None:
     """迁移后的 15 条局部起滑条件与旧 study 配置逐项一致。"""
-    from parallel_gripper_tactile.studies.friction_estimation_local_slip import (
-        load_local_slip_study_config,
+    from parallel_gripper_tactile.studies.friction_estimator_validation import (
+        load_friction_estimator_validation_config,
     )
 
-    resolved = _resolved("friction_estimation_local_slip")
-    legacy = load_local_slip_study_config(
-        REPOSITORY_ROOT / "configs/research/friction_local_slip_validation/study.yaml"
+    resolved = _resolved("friction_estimator_validation")
+    legacy = load_friction_estimator_validation_config(
+        REPOSITORY_ROOT / "configs/research/friction_estimator_validation/study.yaml"
     )
 
     actual = tuple(
@@ -369,8 +231,7 @@ def test_formal_local_slip_preserves_scenario_and_seed_matrix() -> None:
 @pytest.mark.parametrize(
     ("study_name", "condition_count"),
     [
-        ("friction_estimation_local_slip", 15),
-        ("robotiq_discrete_force", 60),
+        ("friction_estimator_validation", 15),
     ],
 )
 def test_plan_registers_expected_condition_count(
@@ -392,35 +253,7 @@ def test_plan_registers_expected_condition_count(
     assert not (result / "runs").exists()
 
 
-def test_formal_robotiq_discrete_force_preserves_matrix() -> None:
-    """迁移后的 60 条离散力条件与旧 study 配置逐项一致，仅量化 PI 行有基线角色。"""
-    from parallel_gripper_tactile.studies.robotiq_discrete_force import (
-        load_robotiq_discrete_force_study_config,
-    )
-
-    resolved = _resolved("robotiq_discrete_force")
-    legacy = load_robotiq_discrete_force_study_config(
-        REPOSITORY_ROOT / "configs/research/robotiq_discrete_force_validation/study.yaml"
-    )
-
-    actual = tuple(
-        (
-            row["controller_variant"],
-            row["object_material"],
-            float(row["force_noise_std_n"]),
-            int(row["sensor_noise_seed"]),
-        )
-        for row in resolved.conditions
-    )
-    assert actual == legacy.conditions()
-    assert len({row["condition_id"] for row in resolved.conditions}) == 60
-    assert all(
-        (row["baseline_role"] == "quantized_pi") == (row["controller_variant"] == "quantized-pi")
-        for row in resolved.conditions
-    )
-
-
-def test_local_slip_protocol_preserves_validation_semantics(
+def test_friction_protocol_preserves_validation_semantics(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """局部起滑以 validation_passed 作为科学验收并保留期望汇总字段。"""
@@ -428,15 +261,15 @@ def test_local_slip_protocol_preserves_validation_semantics(
         FrictionEstimationResult,
         FrictionEstimationTask,
     )
-    from parallel_gripper_tactile.studies.friction_estimation_local_slip import (
-        load_local_slip_study_config,
+    from parallel_gripper_tactile.studies.friction_estimator_validation import (
+        load_friction_estimator_validation_config,
     )
     from parallel_gripper_tactile.studies.protocols import (
-        friction_estimation_local_slip as protocol,
+        friction_estimator_validation as protocol,
     )
 
-    source = REPOSITORY_ROOT / "configs/research/friction_local_slip_validation/study.yaml"
-    original = load_local_slip_study_config(source)
+    source = REPOSITORY_ROOT / "configs/research/friction_estimator_validation/study.yaml"
+    original = load_friction_estimator_validation_config(source)
     scenario = next(s for s in original.scenarios if s.expect_local_slip)
     config = original.model_copy(
         update={
@@ -503,22 +336,22 @@ def test_local_slip_protocol_preserves_validation_semantics(
     assert (tmp_path / "local_slip_validation.png").exists()
 
 
-def test_local_slip_protocol_records_condition_exceptions(
+def test_friction_protocol_records_condition_exceptions(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """单条件异常仍生成完整失败账本，不伪装成未执行计划。"""
     from parallel_gripper_tactile.experiments.friction_estimation import (
         FrictionEstimationTask,
     )
-    from parallel_gripper_tactile.studies.friction_estimation_local_slip import (
-        load_local_slip_study_config,
+    from parallel_gripper_tactile.studies.friction_estimator_validation import (
+        load_friction_estimator_validation_config,
     )
     from parallel_gripper_tactile.studies.protocols import (
-        friction_estimation_local_slip as protocol,
+        friction_estimator_validation as protocol,
     )
 
-    source = REPOSITORY_ROOT / "configs/research/friction_local_slip_validation/study.yaml"
-    original = load_local_slip_study_config(source)
+    source = REPOSITORY_ROOT / "configs/research/friction_estimator_validation/study.yaml"
+    original = load_friction_estimator_validation_config(source)
     config = original.model_copy(
         update={
             "scenarios": original.scenarios[:1],
@@ -543,7 +376,7 @@ def test_local_slip_protocol_records_condition_exceptions(
 
 def test_plan_serializes_the_same_validated_condition_collection(tmp_path: Path) -> None:
     """计划产物直接序列化 resolver 交给执行层的同一条件集合。"""
-    resolved = _resolved("friction_estimation_local_slip")
+    resolved = _resolved("friction_estimator_validation")
     result = execute_research_study(
         resolved,
         hydra_output_directory=tmp_path,
@@ -569,138 +402,23 @@ def test_plan_serializes_the_same_validated_condition_collection(tmp_path: Path)
     assert not (result / "runs").exists()
 
 
-def test_formal_torque_coarse_preserves_all_102_ordered_conditions() -> None:
-    """正式 coarse 的 34 候选×3 任务完整顺序与领域模型逐项一致。"""
-    resolved = _resolved("force_tracking_torque_adrc_tuning_coarse")
-    config = resolved.domain_config
-    assert isinstance(config, ForceTrackingTorqueAdrcTuningConfig)
-    actual = tuple(
-        (
-            TorqueAdrcCandidate(
-                float(row["measurement_filter_cutoff_hz"]),
-                float(row["controller_bandwidth_rad_s"]),
-                float(row["observer_bandwidth_ratio"]),
-            ),
-            Path(str(row["task_path"])),
-            row["object_material"],
-            row["sensor_noise_seed"],
-        )
-        for row in resolved.conditions
-    )
-    assert actual == config.conditions("coarse")
-    assert len(config.stage_candidates("coarse")) == 34
-    assert len(actual) == 102
-
-
-def test_torque_confirm_uses_validated_ranking_and_preserves_order(tmp_path: Path) -> None:
-    """confirm 只按 coarse 可行排名选前五，并在缺席时追加基线。"""
-    coarse = _resolved("force_tracking_torque_adrc_tuning_coarse")
-    config = coarse.domain_config
-    assert isinstance(config, ForceTrackingTorqueAdrcTuningConfig)
-    ranked = _write_coarse_reference(tmp_path, config)
-    resolved = _resolved(
-        "force_tracking_torque_adrc_tuning_confirm",
-        overrides=[f"study.coarse_study_dir={tmp_path}"],
-    )
-    selected = tuple(dict.fromkeys((*ranked[: config.confirm_top_candidates], config.baseline)))
-    actual = tuple(
-        (
-            str(row["candidate_id"]),
-            Path(str(row["task_path"])),
-            row["object_material"],
-            row["sensor_noise_seed"],
-        )
-        for row in resolved.conditions
-    )
-    expected = tuple(
-        (candidate.identifier, task, material, seed)
-        for candidate, task, material, seed in config.conditions("confirm", candidates=selected)
-    )
-    assert actual == expected
-    assert len(selected) == 6
-    assert len(actual) == 162
-
-
-@pytest.mark.parametrize(
-    ("field", "value"),
-    [
-        ("stage", "confirm"),
-        ("study_kind", "friction_estimation_local_slip"),
-        ("study_definition_sha256", "0" * 64),
-        ("scientific_configuration_sha256", None),
-    ],
-)
-def test_torque_confirm_rejects_incompatible_coarse_manifest(
-    tmp_path: Path, field: str, value: object
-) -> None:
-    """confirm 在形成任何计划前拒绝错误类型、阶段或配置哈希。"""
-    config = load_torque_adrc_tuning_config(
-        REPOSITORY_ROOT / "configs/research/torque_adrc_tuning/study.yaml"
-    )
-    _write_coarse_reference(tmp_path, config)
-    manifest_path = tmp_path / "study_manifest.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest[field] = value
-    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-    with pytest.raises(ValueError):
-        torque_protocol.build_plan(config, stage="confirm", coarse_study_dir=tmp_path)
-
-
-def test_torque_confirm_rejects_missing_or_modified_ranking(tmp_path: Path) -> None:
-    """confirm 校验排名产物的登记、存在性和内容摘要。"""
-    config = load_torque_adrc_tuning_config(
-        REPOSITORY_ROOT / "configs/research/torque_adrc_tuning/study.yaml"
-    )
-    _write_coarse_reference(tmp_path, config)
-    (tmp_path / "candidate_ranking.csv").write_text("modified\n", encoding="utf-8")
-    with pytest.raises(ValueError, match="digest mismatch"):
-        torque_protocol.build_plan(config, stage="confirm", coarse_study_dir=tmp_path)
-
-
-def test_confirm_reports_configuration_and_preflight_failures_separately(
-    tmp_path: Path,
-) -> None:
-    """缺少 coarse 路径属于配置失败，不兼容 coarse manifest 属于预检失败。"""
-    with pytest.raises(ResearchStudySetupError) as missing:
-        _resolved("force_tracking_torque_adrc_tuning_confirm")
-    assert missing.value.stage == "configuration"
-
-    config = load_torque_adrc_tuning_config(
-        REPOSITORY_ROOT / "configs/research/torque_adrc_tuning/study.yaml"
-    )
-    _write_coarse_reference(tmp_path, config)
-    manifest_path = tmp_path / "study_manifest.json"
-    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest["stage"] = "confirm"
-    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
-    with pytest.raises(ResearchStudySetupError) as incompatible:
-        _resolved(
-            "force_tracking_torque_adrc_tuning_confirm",
-            overrides=[f"study.coarse_study_dir={tmp_path}"],
-        )
-    assert incompatible.value.stage == "preflight"
-
-
 def test_study_hash_ignores_output_root_but_changes_with_science() -> None:
-    """输出位置不进入科学哈希，而验收约束变化必须改变哈希。"""
-    config = load_torque_adrc_tuning_config(
-        REPOSITORY_ROOT / "configs/research/torque_adrc_tuning/study.yaml"
+    """输出位置不进入科学哈希，而条件矩阵变化必须改变哈希。"""
+    from parallel_gripper_tactile.studies.friction_estimator_validation import (
+        load_friction_estimator_validation_config,
     )
-    original = torque_protocol.build_plan(config, stage="coarse")
-    moved = torque_protocol.build_plan(
-        config.model_copy(update={"output_root": Path("/tmp/unrelated-output")}),
-        stage="coarse",
+    from parallel_gripper_tactile.studies.protocols import (
+        friction_estimator_validation as protocol,
     )
-    changed = torque_protocol.build_plan(
-        config.model_copy(
-            update={
-                "constraints": config.constraints.model_copy(
-                    update={"max_torque_saturation_ratio": 0.02}
-                )
-            }
-        ),
-        stage="coarse",
+
+    config = load_friction_estimator_validation_config(
+        REPOSITORY_ROOT / "configs/research/friction_estimator_validation/study.yaml"
     )
+    original = protocol.build_plan(config)
+    moved = protocol.build_plan(
+        config.model_copy(update={"output_root": Path("/tmp/unrelated-output")})
+    )
+    changed = protocol.build_plan(config.model_copy(update={"scenarios": config.scenarios[:1]}))
     assert moved.scientific_configuration_sha256 == original.scientific_configuration_sha256
     assert changed.scientific_configuration_sha256 != original.scientific_configuration_sha256
 
@@ -709,15 +427,15 @@ def test_study_hash_is_independent_of_current_working_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """同一已解析科学配置从不同 cwd 生成相同哈希。"""
-    from parallel_gripper_tactile.studies.friction_estimation_local_slip import (
-        load_local_slip_study_config,
+    from parallel_gripper_tactile.studies.friction_estimator_validation import (
+        load_friction_estimator_validation_config,
     )
     from parallel_gripper_tactile.studies.protocols import (
-        friction_estimation_local_slip as protocol,
+        friction_estimator_validation as protocol,
     )
 
-    config = load_local_slip_study_config(
-        REPOSITORY_ROOT / "configs/research/friction_local_slip_validation/study.yaml"
+    config = load_friction_estimator_validation_config(
+        REPOSITORY_ROOT / "configs/research/friction_estimator_validation/study.yaml"
     )
     expected = protocol.build_plan(config).scientific_configuration_sha256
     monkeypatch.chdir(tmp_path)
@@ -730,10 +448,10 @@ def test_execution_passes_the_exact_resolved_plan_to_protocol(
 ) -> None:
     """执行层不重新展开条件，直接传递解析阶段已校验的计划实例。"""
     from parallel_gripper_tactile.studies.protocols import (
-        friction_estimation_local_slip as protocol,
+        friction_estimator_validation as protocol,
     )
 
-    resolved = _resolved("friction_estimation_local_slip")
+    resolved = _resolved("friction_estimator_validation")
     run_selection = resolved.selection.model_copy(
         update={
             "execution": resolved.selection.execution.model_copy(
@@ -773,15 +491,15 @@ def test_protocol_records_condition_exceptions_and_finishes_manifest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """单条件异常仍生成完整失败账本，不伪装成未执行计划。"""
-    from parallel_gripper_tactile.studies.friction_estimation_local_slip import (
-        load_local_slip_study_config,
+    from parallel_gripper_tactile.studies.friction_estimator_validation import (
+        load_friction_estimator_validation_config,
     )
     from parallel_gripper_tactile.studies.protocols import (
-        friction_estimation_local_slip as protocol,
+        friction_estimator_validation as protocol,
     )
 
-    original = load_local_slip_study_config(
-        REPOSITORY_ROOT / "configs/research/friction_local_slip_validation/study.yaml"
+    original = load_friction_estimator_validation_config(
+        REPOSITORY_ROOT / "configs/research/friction_estimator_validation/study.yaml"
     )
     config = original.model_copy(
         update={
@@ -796,8 +514,7 @@ def test_protocol_records_condition_exceptions_and_finishes_manifest(
     monkeypatch.setattr(protocol, "_execute_condition", fail)
     result = protocol.run_study(
         config,
-        config_source=REPOSITORY_ROOT
-        / "configs/research/friction_local_slip_validation/study.yaml",
+        config_source=REPOSITORY_ROOT / "configs/research/friction_estimator_validation/study.yaml",
         study_directory=tmp_path,
     )
 
@@ -819,7 +536,7 @@ def test_comparison_protocol_continues_after_a_condition_exception(
         force_tracking_controller_comparison as protocol,
     )
 
-    source = REPOSITORY_ROOT / "configs/research/force_controller_selection/study.yaml"
+    source = REPOSITORY_ROOT / "configs/research/dm_force_controller_selection/study.yaml"
     original = load_comparison_config(source)
     config = original.model_copy(
         update={
@@ -877,15 +594,15 @@ def test_study_selects_diagnostic_seed_before_results(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, plot_mode: str
 ) -> None:
     """代表 seed 由计划决定，首条件失败不会把后续 seed 改选为代表。"""
-    from parallel_gripper_tactile.studies.friction_estimation_local_slip import (
-        load_local_slip_study_config,
+    from parallel_gripper_tactile.studies.friction_estimator_validation import (
+        load_friction_estimator_validation_config,
     )
     from parallel_gripper_tactile.studies.protocols import (
-        friction_estimation_local_slip as protocol,
+        friction_estimator_validation as protocol,
     )
 
-    source = REPOSITORY_ROOT / "configs/research/friction_local_slip_validation/study.yaml"
-    original = load_local_slip_study_config(source)
+    source = REPOSITORY_ROOT / "configs/research/friction_estimator_validation/study.yaml"
+    original = load_friction_estimator_validation_config(source)
     config = original.model_copy(
         update={
             "scenarios": original.scenarios[:1],

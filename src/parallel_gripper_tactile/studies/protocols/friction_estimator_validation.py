@@ -31,8 +31,8 @@ from parallel_gripper_tactile.studies.aggregation import (
     optional_mean,
     optional_std,
 )
-from parallel_gripper_tactile.studies.friction_estimation_local_slip import (
-    FrictionEstimationLocalSlipStudyConfig,
+from parallel_gripper_tactile.studies.friction_estimator_validation import (
+    FrictionEstimatorValidationStudyConfig,
 )
 from parallel_gripper_tactile.studies.lifecycle import (
     ConditionExecution,
@@ -176,7 +176,7 @@ def render_study_figures(rows: list[dict[str, object]], study_dir: Path) -> list
     return [figure_path]
 
 
-def _create_study_directory(config: FrictionEstimationLocalSlipStudyConfig) -> Path:
+def _create_study_directory(config: FrictionEstimatorValidationStudyConfig) -> Path:
     """创建一次独占的 study 目录。"""
     identifier = f"{datetime.now(UTC):%Y%m%dT%H%M%SZ}-{uuid4().hex[:8]}"
     directory = config.output_root / config.name / identifier
@@ -185,7 +185,7 @@ def _create_study_directory(config: FrictionEstimationLocalSlipStudyConfig) -> P
 
 
 def build_plan(
-    config: FrictionEstimationLocalSlipStudyConfig,
+    config: FrictionEstimatorValidationStudyConfig,
     *,
     resolved_profile: GripperProfile | None = None,
 ) -> StudyPlan:
@@ -213,7 +213,7 @@ def build_plan(
     )
     definition = {
         "hash_schema_version": 1,
-        "protocol_revision": "friction_estimation_local_slip.v1",
+        "protocol_revision": "friction_estimator_validation.v1",
         "study": config.model_dump(mode="python", exclude={"output_root"}),
         "resources": {
             "profile_sha256": model_configuration_sha256(
@@ -238,7 +238,7 @@ def build_plan(
         repository_root=_REPOSITORY_ROOT,
     )
     return StudyPlan(
-        study_kind="friction_estimation_local_slip",
+        study_kind="friction_estimator_validation",
         study_definition_sha256=definition_hash,
         scientific_configuration_sha256=plan_hash,
         conditions=conditions,
@@ -250,7 +250,7 @@ def build_plan(
 def _execute_condition(
     condition: StudyCondition,
     *,
-    config: FrictionEstimationLocalSlipStudyConfig,
+    config: FrictionEstimatorValidationStudyConfig,
     resolved_profile: GripperProfile | None,
     study_dir: Path,
     plot_mode: Literal["summary", "diagnostic"],
@@ -310,7 +310,7 @@ def _execute_condition(
 
 
 def run_study(
-    config: FrictionEstimationLocalSlipStudyConfig,
+    config: FrictionEstimatorValidationStudyConfig,
     *,
     resolved_profile: GripperProfile | None = None,
     config_source: Path | None = None,

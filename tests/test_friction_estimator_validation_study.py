@@ -4,20 +4,20 @@ from pathlib import Path
 
 import pytest
 
-from parallel_gripper_tactile.studies.friction_estimation_local_slip import (
-    load_local_slip_study_config,
+from parallel_gripper_tactile.studies.friction_estimator_validation import (
+    load_friction_estimator_validation_config,
 )
 from parallel_gripper_tactile.studies.protocols import (
-    friction_estimation_local_slip as protocol,
+    friction_estimator_validation as protocol,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def test_default_local_slip_study_expands_scenarios_and_seeds() -> None:
+def test_default_friction_study_expands_scenarios_and_seeds() -> None:
     """默认 study 同时包含正例、负例和三个噪声种子。"""
-    config = load_local_slip_study_config(
-        ROOT / "configs/research/friction_local_slip_validation/study.yaml"
+    config = load_friction_estimator_validation_config(
+        ROOT / "configs/research/friction_estimator_validation/study.yaml"
     )
 
     assert len(config.conditions()) == 15
