@@ -6,21 +6,18 @@ study:
     experiment: dm_gripper/force_tracking_default
     overrides: [controller=dm_gripper/pid_stiffness_rate, estimator=window_linear]
   rationale:
-    question: 刚度归一化速率控制能否消除 stiff 接触的限幅极限环，并降低对外环频率的敏感性？
+    question: 刚度归一化速率控制能否在 250 Hz 外环下消除 stiff 接触的限幅极限环？
     decision: 判断 pid-stiffness-rate 是否替代动态位置限幅结构进入后续调优。
-    inclusion_criteria: [相同 MIT 参数与机构力矩前馈, 相同 Step 目标, 三种外环频率, 同 seed 配对]
+    inclusion_criteria: [相同 MIT 参数与机构力矩前馈, 固定 250 Hz Step, 同 seed 配对]
     task_rationale: stiff 接触与 6 N 平台是当前极限环最明显的快速反证工况。
     primary_metrics: [RMSE, 超调, 调节时间, 平台力标准差, 主振荡频率]
-    stop_conditions: [完成三控制器乘三频率乘三 seed 共 27 条条件]
+    stop_conditions: [完成三控制器乘三 seed 共 9 条条件]
     exclusions:
       参数最优性: 首轮速率 PID 固定 KI=KD=0，只验证结构，不宣称完成调参。
-      完全频率不变性: 刚度估计窗口仍按样本数定义，残余频率敏感性需单独解释。
+      频率泛化: 现行仿真统一使用 250 Hz 外环，本研究不再比较控制频率。
   definition:
     name: force_tracking_stiffness_rate_validation
-    tasks:
-      - configs/task/force_tracking/step.yaml
-      - configs/task/force_tracking/step_250hz.yaml
-      - configs/task/force_tracking/step_125hz.yaml
+    tasks: [configs/task/force_tracking/step.yaml]
     controllers: [pid-torque-ff, pid-stiffness-limit, pid-stiffness-rate]
     stiffness_estimator_method: window_linear
     materials: [stiff]

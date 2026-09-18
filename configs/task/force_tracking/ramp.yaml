@@ -18,5 +18,5 @@ definition:
       - {t_s: 6.0, force_n: 1.0}
       - {t_s: 8.0, force_n: 1.0}
   metrics: {ignore_initial_s: 0.2}
-  control_period_s: 0.002
+  control_period_s: 0.004
   release_support_on_tracking: false

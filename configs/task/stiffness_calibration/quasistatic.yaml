@@ -1,5 +1,5 @@
 name: quasistatic_stiffness_calibration
-control_period_s: 0.002
+control_period_s: 0.004
 approach_velocity_rad_s: 0.25
 contact_threshold_n: 0.05
 approach_timeout_s: 8.0

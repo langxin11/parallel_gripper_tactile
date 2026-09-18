@@ -422,7 +422,7 @@ def test_force_tracking_run_writes_dynamic_reference_trace(
         output_csv=output_csv,
         output_parquet=output_parquet,
         output_plot=output_plot,
-        trace_sample_period_s=0.01,
+        trace_sample_period_s=0.008,
         trace_event_window_s=0.02,
     )
 
@@ -482,7 +482,7 @@ def test_force_tracking_run_writes_dynamic_reference_trace(
     )
     assert result.rmse_n == pytest.approx(expected_metrics[0])
     assert result.stiffness_position_limit_ratio == 0.0
-    assert schema.metadata[b"pgt.trace.sample_period_s"] == b"0.01"
+    assert schema.metadata[b"pgt.trace.sample_period_s"] == b"0.008"
     assert schema.metadata[b"pgt.trace.event_window_s"] == b"0.02"
 
 

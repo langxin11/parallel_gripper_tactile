@@ -44,6 +44,10 @@ definition:
     arming_slope_threshold_per_s: 0.09
     saturation_slope_threshold_per_s: 0.04
     max_side_ratio_difference: 0.18
+
+  # 250 Hz 外环下用 12 个控制样本覆盖 48 ms，避免噪声场景确认过晚。
+  tactile_slip:
+    trend_window_s: 0.048
   
   taxel_observer:
     contact_enter_force_n: 0.05
@@ -88,4 +92,4 @@ definition:
   solver:
     noslip_iterations: 5
   
-  control_period_s: 0.002
+  control_period_s: 0.004

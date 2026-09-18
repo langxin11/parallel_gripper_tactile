@@ -112,7 +112,7 @@ def record_custom_grasp_video(
     cube_mass: float = DEFAULT_CUBE_MASS,
     object_material: ObjectMaterial = "hard",
     target_force_n: float | None = None,
-    control_period_s: float = 0.002,
+    control_period_s: float = 0.004,
     keep_frames: bool = False,
 ) -> bool:
     """录制水平 DM_Gripper 抓取视频，并返回仿真稳定性。"""

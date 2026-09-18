@@ -387,7 +387,7 @@ def run_acceptance(
     object_material: ObjectMaterial = "hard",
     target_force_n: float | None = None,
     force_rmse_threshold_n: float = 0.5,
-    control_period_s: float = 0.002,
+    control_period_s: float = 0.004,
     output_csv: Path | None = None,
     output_plot: Path | None = None,
 ) -> GraspAcceptance:

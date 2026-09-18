@@ -6,22 +6,19 @@ study:
     experiment: dm_gripper/force_tracking_default
     overrides: [controller=dm_gripper/pid_stiffness_rate, estimator=window_linear]
   rationale:
-    question: 调优胜出的刚度速率候选能否在材料刚度和外环频率变化下保持稳定且受控的力增长？
+    question: 调优胜出的刚度速率候选能否在固定 250 Hz 外环和不同材料刚度下保持稳定且受控的力增长？
     decision: 判断候选参数是否冻结并进入最终控制器比较。
-    inclusion_criteria: [固定 KI=KD=0, 三种外环频率, 三种正式材料, 三 seed 配对, 保留位置式 PID 性能基线]
-    task_rationale: Step 任务以最小矩阵同时暴露瞬态、平台振荡和控制频率敏感性。
+    inclusion_criteria: [固定 KI=KD=0, 固定 250 Hz Step, 三种正式材料, 三 seed 配对, 保留位置式 PID 性能基线]
+    task_rationale: Step 任务以最小矩阵同时暴露瞬态、平台振荡和材料敏感性。
     primary_metrics: [RMSE, 超调, 平台力标准差, 最大正力增长率, 主振荡幅值]
-    stop_conditions: [完成两控制器乘三频率乘三材料乘三 seed 共 54 条条件]
+    stop_conditions: [完成两控制器乘三材料乘三 seed 共 18 条条件]
     exclusions:
       多任务泛化: Ramp 与 Mixed 留给最终控制器比较，本轮只确认参数能否冻结。
       参数再搜索: 本轮只复验调优排名第一的候选，不根据确认结果继续扩张参数网格。
   definition:
     name: force_tracking_stiffness_rate_confirmation
     analysis_mode: confirmation
-    tasks:
-      - configs/task/force_tracking/step.yaml
-      - configs/task/force_tracking/step_250hz.yaml
-      - configs/task/force_tracking/step_125hz.yaml
+    tasks: [configs/task/force_tracking/step.yaml]
     stiffness_estimator_method: window_linear
     materials: [medium, hard, stiff]
     seeds: {start: 0, count: 3}

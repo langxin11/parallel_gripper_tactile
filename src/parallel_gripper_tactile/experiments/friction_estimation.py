@@ -211,7 +211,7 @@ class FrictionEstimationTask(_TaskModel):
     downward_load: DownwardLoadReference
     metrics: FrictionEstimationMetricsConfig = FrictionEstimationMetricsConfig()
     solver: ForceSchedulingSolverConfig = ForceSchedulingSolverConfig()
-    control_period_s: Annotated[FiniteFloat, Field(gt=0)] = 0.002
+    control_period_s: Annotated[FiniteFloat, Field(gt=0)] = 0.004
 
     @model_validator(mode="after")
     def validate_probe_force_limit(self) -> "FrictionEstimationTask":

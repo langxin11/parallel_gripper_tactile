@@ -46,14 +46,14 @@ def test_confirmation_mode_requires_no_second_configuration_type() -> None:
     config = ForceTrackingStiffnessRateTuningConfig(
         name="force_tracking_stiffness_rate_confirmation",
         analysis_mode="confirmation",
-        tasks=(Path("step.yaml"), Path("step_250hz.yaml"), Path("step_125hz.yaml")),
+        tasks=(Path("step.yaml"),),
         materials=("medium", "hard", "stiff"),
         kp_s_inv=(30.0,),
         max_force_rate_n_s=(70.0,),
     )
 
     assert len(config.candidates()) == 1
-    assert len(config.conditions()) == 54
+    assert len(config.conditions()) == 18
 
 
 def test_force_rate_metric_deduplicates_physics_rows_at_each_control_time(
@@ -82,12 +82,9 @@ def test_force_rate_metric_deduplicates_physics_rows_at_each_control_time(
     assert metrics["max_positive_force_rate_n_s"] == pytest.approx(10.0)
 
 
-def test_confirmation_figure_renders_frequency_material_matrix(tmp_path: Path) -> None:
-    """单一确认候选按三种频率和材料生成可读矩阵图。"""
-    task_paths = tuple(
-        REPOSITORY_ROOT / f"configs/task/force_tracking/{name}.yaml"
-        for name in ("step", "step_250hz", "step_125hz")
-    )
+def test_confirmation_figure_renders_250hz_material_matrix(tmp_path: Path) -> None:
+    """单一确认候选按固定 250 Hz 和三种材料生成可读矩阵图。"""
+    task_paths = (REPOSITORY_ROOT / "configs/task/force_tracking/step.yaml",)
     config = ForceTrackingStiffnessRateTuningConfig(
         analysis_mode="confirmation",
         tasks=task_paths,

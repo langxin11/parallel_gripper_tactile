@@ -109,7 +109,7 @@ class TangentialDisturbanceTask(_TaskModel):
     policy: DisturbancePolicyConfig = DisturbancePolicyConfig()
     disturbance: TangentialDisturbanceLoad = TangentialDisturbanceLoad()
     metrics: TangentialDisturbanceMetrics = TangentialDisturbanceMetrics()
-    control_period_s: Annotated[FiniteFloat, Field(gt=0)] = 0.002
+    control_period_s: Annotated[FiniteFloat, Field(gt=0)] = 0.004
 
     @model_validator(mode="after")
     def check_windows(self):

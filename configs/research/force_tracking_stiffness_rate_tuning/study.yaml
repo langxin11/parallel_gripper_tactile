@@ -7,17 +7,17 @@ study:
     overrides: [controller=dm_gripper/pid_stiffness_rate, estimator=window_linear]
   rationale:
     question: 在保持低稳态波动的前提下，哪组速率比例增益与力变化率边界能改善 Step 瞬态？
-    decision: 选择一个候选进入跨频率、跨材料确认，不在本轮直接改写默认参数。
+    decision: 选择一个候选进入跨材料确认，不在本轮直接改写默认参数。
     inclusion_criteria: [固定 KI=KD=0, 固定 250 Hz 外环, stiff 接触, 三 seed 配对, 保留位置式 PID 性能基线]
     task_rationale: 250 Hz stiff Step 同时暴露阶跃响应和已知极限环，是低成本结构调优工况。
     primary_metrics: [RMSE, 超调, 调节时间, 平台力标准差, 主振荡幅值]
     stop_conditions: [完成一条性能基线和九个速率候选的三 seed 配对条件]
     exclusions:
       积分与微分: 首轮固定为零，避免把结构验证与三维增益搜索混合。
-      最终参数声明: 单任务单材料结果只筛选候选，不能直接替代跨任务确认。
+      最终参数声明: 单任务单材料结果只筛选候选，不能直接替代跨材料确认。
   definition:
     name: force_tracking_stiffness_rate_tuning
-    tasks: [configs/task/force_tracking/step_250hz.yaml]
+    tasks: [configs/task/force_tracking/step.yaml]
     stiffness_estimator_method: window_linear
     materials: [stiff]
     seeds: {start: 0, count: 3}

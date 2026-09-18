@@ -31,7 +31,7 @@ class StiffnessCalibrationTask(_CalibrationModel):
     """准静态加载／卸载扫描的时序与闭合偏移。"""
 
     name: str = Field(default="quasistatic_stiffness_calibration", min_length=1)
-    control_period_s: Annotated[float, Field(gt=0)] = 0.002
+    control_period_s: Annotated[float, Field(gt=0)] = 0.004
     approach_velocity_rad_s: Annotated[float, Field(gt=0)] = 0.25
     contact_threshold_n: Annotated[float, Field(gt=0)] = 0.25
     approach_timeout_s: Annotated[float, Field(gt=0)] = 8.0

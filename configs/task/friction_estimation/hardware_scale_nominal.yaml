@@ -50,7 +50,8 @@ definition:
     trend_window_s: 0.06
     arming_increase: 0.03
     arming_slope: 0.08
-    minimum_ratio_coherence: 0.8
+    # 250 Hz 下提高局部／整体一致性要求，拒绝低利用率阶段的接触重分布伪事件。
+    minimum_ratio_coherence: 0.9
     candidate_threshold: 0.55
     confirm_threshold: 0.65
     release_threshold: 0.4
@@ -99,4 +100,4 @@ definition:
   solver:
     noslip_iterations: 5
   
-  control_period_s: 0.002
+  control_period_s: 0.004

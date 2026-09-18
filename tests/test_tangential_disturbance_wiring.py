@@ -57,7 +57,7 @@ def test_composed_disturbance_uses_selected_material_and_supported_controller() 
 @pytest.mark.parametrize(
     ("overrides", "message"),
     [
-        (("controller=dm_gripper/admittance", "estimator=none"), "tangential disturbance"),
+        (("controller=dm_gripper/admittance_unified", "estimator=none"), "tangential disturbance"),
         (("execution.viewer=true",), "does not support viewer"),
         (("execution.multiccd_enabled=false",), "multiccd_enabled=true"),
         (("execution.trace_sample_period_s=0.01",), "every physics step"),

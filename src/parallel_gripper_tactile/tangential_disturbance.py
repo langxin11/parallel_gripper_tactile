@@ -22,7 +22,7 @@ class DisturbancePolicyConfig(BaseModel):
     update_period_s: Annotated[FiniteFloat, Field(gt=0)] = 0.01
     filter_tau_s: Annotated[FiniteFloat, Field(gt=0)] = 0.005
     confirm_time_s: Annotated[FiniteFloat, Field(gt=0)] = 0.006
-    shear_threshold_n: Annotated[FiniteFloat, Field(gt=0)] = 0.06
+    shear_threshold_n: Annotated[FiniteFloat, Field(gt=0)] = 0.08
     shear_gain: Annotated[FiniteFloat, Field(gt=0)] = 1.0
     fixed_step_n: Annotated[FiniteFloat, Field(gt=0)] = 0.15
     min_step_n: Annotated[FiniteFloat, Field(gt=0)] = 0.03

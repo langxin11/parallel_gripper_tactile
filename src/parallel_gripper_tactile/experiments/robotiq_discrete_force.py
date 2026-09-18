@@ -556,7 +556,7 @@ def run_robotiq_discrete_force(
     """运行离散力控制仿真并保存事件增强的独立周期采样轨迹。
 
     RMSE 与平台统计采用均匀控制周期样本，绘图采用持久化 trace；安全、有限性、
-    接触与峰值则在每个物理步在线累计，避免保存完整的 500 Hz 物理轨迹。
+    接触与峰值则在每个物理步在线累计，避免保存完整的 1000 Hz 物理轨迹。
     """
     profile = (
         validate_resolved_profile(profile_path)

@@ -23,7 +23,7 @@ definition:
     update_period_s: 0.01
     filter_tau_s: 0.005
     confirm_time_s: 0.006
-    shear_threshold_n: 0.06
+    shear_threshold_n: 0.08
     shear_gain: 1.0
     fixed_step_n: 0.15
     min_step_n: 0.03
@@ -49,4 +49,4 @@ definition:
     force_tolerance_n: 0.2
     recovery_speed_m_s: 0.001
     recovery_dwell_s: 0.3
-  control_period_s: 0.002
+  control_period_s: 0.004
