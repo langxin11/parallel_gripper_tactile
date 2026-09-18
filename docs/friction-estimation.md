@@ -56,7 +56,7 @@
 ```bash
 uv run pgt run friction-estimate \
   --experiment dm_gripper/friction_estimation \
-  --set task=friction_estimation/hardware_scale_nominal
+  --set task=friction_probe/hardware_scale_nominal
 ```
 
 保留 `trace.csv`、`metrics.json`、输入快照、有效参数、manifest。默认 summary 模式生成主图；

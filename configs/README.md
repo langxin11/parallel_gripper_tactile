@@ -60,7 +60,7 @@ uv run python scripts/research/run.py \
 uv run python scripts/research/run.py \
   experiment=dm_gripper/force_scheduling_adaptive execution=plan
 
-# 摩擦估计；可用 task=friction_estimation/high_friction 等替换任务。
+# 摩擦估计；可用 task=friction_probe/high_friction 等替换任务。
 uv run python scripts/research/run.py \
   experiment=dm_gripper/friction_estimation execution=plan
 

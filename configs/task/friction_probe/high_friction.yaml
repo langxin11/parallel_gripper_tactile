@@ -1,13 +1,13 @@
 # @package task
-family: friction_estimation
-path: configs/task/friction_estimation/no_slip_low_probe.yaml
+family: friction_probe
+path: configs/task/friction_probe/high_friction.yaml
 definition:
-  # 无起滑场景（阴性对照）：用于验证误报率与 false-positive 控制。
   schema_version: 1
-  name: no_slip_low_probe
+  name: high_friction_probe
   
+  # 高摩擦接触需要更长探测斜坡，用于覆盖辨识量程上部。
   cube_mass_kg: 0.05
-  friction_coefficient: 0.8
+  friction_coefficient: 1.2
   object_material: hard
   sensor_noise_scale: 1.0
   
@@ -21,8 +21,8 @@ definition:
     normal_force_n: 1.0
     settle_after_release_s: 0.3
     force_rate_n_s: 0.5
-    max_force_n: 0.2
-    hold_at_max_s: 0.5
+    max_force_n: 3.0
+    hold_at_max_s: 0.2
     recovery_s: 0.5
     recovery_normal_force_n: 2.0
   
@@ -77,9 +77,9 @@ definition:
       - {t_s: 6.0, force_n: 2.0}
   
   metrics:
-    require_detection: false
+    require_detection: true
     conservative_tolerance: 0.02
-    minimum_estimate_ratio: 0.0
+    minimum_estimate_ratio: 0.55
     probe_slip_threshold_m: 0.002
     hold_slip_threshold_m: 0.002
     force_rmse_threshold_n: 0.5

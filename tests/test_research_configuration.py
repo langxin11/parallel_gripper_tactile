@@ -177,32 +177,32 @@ def test_dm_controller_fragments_keep_pid_parameters_in_pid_base() -> None:
     [
         (
             "dm_gripper/friction_estimation",
-            "friction_estimation/nominal_friction",
+            "friction_probe/nominal_friction",
             "configs/friction_estimation/nominal_friction.yaml",
         ),
         (
             "dm_gripper/friction_estimation",
-            "friction_estimation/low_friction",
+            "friction_probe/low_friction",
             "configs/friction_estimation/low_friction.yaml",
         ),
         (
             "dm_gripper/friction_estimation",
-            "friction_estimation/high_friction",
+            "friction_probe/high_friction",
             "configs/friction_estimation/high_friction.yaml",
         ),
         (
             "dm_gripper/friction_estimation",
-            "friction_estimation/noisy_friction",
+            "friction_probe/noisy_friction",
             "configs/friction_estimation/noisy_friction.yaml",
         ),
         (
             "dm_gripper/friction_estimation",
-            "friction_estimation/no_slip_low_probe",
+            "friction_probe/no_slip_low_probe",
             "configs/friction_estimation/no_slip_low_probe.yaml",
         ),
         (
             "dm_gripper/friction_estimation",
-            "friction_estimation/hardware_scale_nominal",
+            "friction_probe/hardware_scale_nominal",
             "configs/friction_estimation/hardware_scale_nominal.yaml",
         ),
         (

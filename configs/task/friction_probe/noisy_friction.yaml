@@ -1,6 +1,6 @@
 # @package task
-family: friction_estimation
-path: configs/task/friction_estimation/noisy_friction.yaml
+family: friction_probe
+path: configs/task/friction_probe/noisy_friction.yaml
 definition:
   schema_version: 1
   name: noisy_friction_probe

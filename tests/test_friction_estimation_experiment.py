@@ -22,7 +22,7 @@ from parallel_gripper_tactile.visualization.friction import _select_taxel_snapsh
 
 ROOT = Path(__file__).resolve().parents[1]
 PROFILE = ROOT / "configs/dm_gripper.yaml"
-TASK_ROOT = ROOT / "configs/task/friction_estimation"
+TASK_ROOT = ROOT / "configs/task/friction_probe"
 STANDARD_TASKS = tuple(
     TASK_ROOT / name
     for name in (

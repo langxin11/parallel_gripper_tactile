@@ -182,7 +182,7 @@ class TaskSelection(_ResearchModel):
     family: Literal[
         "force_tracking",
         "load",
-        "friction_estimation",
+        "friction_probe",
         "discrete_force",
         "tangential_disturbance",
     ]
@@ -247,9 +247,10 @@ class ResearchRunConfig(_ResearchModel):
         expected_family = "robotiq" if self.experiment.kind == "discrete_force" else "dm"
         if self.platform.family != expected_family:
             raise ValueError("experiment kind is incompatible with the selected platform")
-        expected_task_family = (
-            "load" if self.experiment.kind == "force_scheduling" else self.experiment.kind
-        )
+        expected_task_family = {
+            "force_scheduling": "load",
+            "friction_estimation": "friction_probe",
+        }.get(self.experiment.kind, self.experiment.kind)
         if self.task.family != expected_task_family:
             raise ValueError("experiment kind and task family must match")
         if self.experiment.kind == "force_scheduling":
@@ -574,7 +575,7 @@ def resolve_research_run(
         task_model: dict[str, type[BaseModel]] = {
             "force_tracking": ForceTrackingTask,
             "load": ForceSchedulingTask,
-            "friction_estimation": FrictionEstimationTask,
+            "friction_probe": FrictionEstimationTask,
             "discrete_force": RobotiqDiscreteForceTask,
             "tangential_disturbance": TangentialDisturbanceTask,
         }

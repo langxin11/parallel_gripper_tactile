@@ -1,13 +1,13 @@
 # @package task
-family: friction_estimation
-path: configs/task/friction_estimation/low_friction.yaml
+family: friction_probe
+path: configs/task/friction_probe/no_slip_low_probe.yaml
 definition:
+  # 无起滑场景（阴性对照）：用于验证误报率与 false-positive 控制。
   schema_version: 1
-  name: low_friction_probe
+  name: no_slip_low_probe
   
-  # 低摩擦接触用于验证探测器能较早停止，并且估计值不会高于真值。
   cube_mass_kg: 0.05
-  friction_coefficient: 0.35
+  friction_coefficient: 0.8
   object_material: hard
   sensor_noise_scale: 1.0
   
@@ -21,8 +21,8 @@ definition:
     normal_force_n: 1.0
     settle_after_release_s: 0.3
     force_rate_n_s: 0.5
-    max_force_n: 3.0
-    hold_at_max_s: 0.2
+    max_force_n: 0.2
+    hold_at_max_s: 0.5
     recovery_s: 0.5
     recovery_normal_force_n: 2.0
   
@@ -31,10 +31,10 @@ definition:
     min_samples: 20
     estimate_quantile: 0.85
     safety_discount: 0.9
-    fallback_friction_coefficient: 0.15
+    fallback_friction_coefficient: 0.2
     min_friction_coefficient: 0.05
     max_friction_coefficient: 2.0
-    min_probe_load_n: 0.2
+    min_probe_load_n: 0.6
     min_total_normal_force_n: 0.2
     support_residual_threshold_n: 0.04
     support_utilization_threshold: 0.97
@@ -73,19 +73,18 @@ definition:
     waypoints:
       - {t_s: 0.0, force_n: 0.0}
       - {t_s: 1.0, force_n: 0.0}
-      - {t_s: 4.0, force_n: 0.8}
-      - {t_s: 5.0, force_n: 0.8}
+      - {t_s: 5.0, force_n: 2.0}
+      - {t_s: 6.0, force_n: 2.0}
   
   metrics:
-    require_detection: true
+    require_detection: false
     conservative_tolerance: 0.02
-    minimum_estimate_ratio: 0.55
+    minimum_estimate_ratio: 0.0
     probe_slip_threshold_m: 0.002
     hold_slip_threshold_m: 0.002
     force_rmse_threshold_n: 0.5
     ignore_hold_initial_s: 0.2
   
-  # 不启用 noslip 时，软接触的锥内数值爬移会污染 μ 辨识。
   solver:
     noslip_iterations: 5
   

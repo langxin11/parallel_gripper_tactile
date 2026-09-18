@@ -4,7 +4,7 @@ defaults:
   - override /model: dm_gripper/height_spheres
   - override /controller: dm_gripper/pid_torque_ff
   - override /estimator: window_linear
-  - override /task: friction_estimation/nominal_friction
+  - override /task: friction_probe/nominal_friction
   - override /material: hard
   - override /execution: run
   - _self_

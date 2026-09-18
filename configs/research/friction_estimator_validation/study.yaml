@@ -20,19 +20,19 @@ study:
     # 纯局部起滑研究：同一个 profile 下覆盖多组摩擦场景，记录局部候选与全局基线的一致性。
     scenarios:
       # 正常起滑场景：触发局部摩擦先验，验证局部检测是否可提前识别。
-      - task: configs/task/friction_estimation/low_friction.yaml
+      - task: configs/task/friction_probe/low_friction.yaml
         expect_local_slip: true
       # 标称摩擦场景：作为算法中位数基准场景。
-      - task: configs/task/friction_estimation/nominal_friction.yaml
+      - task: configs/task/friction_probe/nominal_friction.yaml
         expect_local_slip: true
       # 高摩擦场景：验证检测不会过度触发。
-      - task: configs/task/friction_estimation/high_friction.yaml
+      - task: configs/task/friction_probe/high_friction.yaml
         expect_local_slip: true
       # 噪声场景：验证局部指标在传感噪声下的稳健性。
-      - task: configs/task/friction_estimation/noisy_friction.yaml
+      - task: configs/task/friction_probe/noisy_friction.yaml
         expect_local_slip: true
       # 无起滑场景：检验误报率，建立阴性对照。
-      - task: configs/task/friction_estimation/no_slip_low_probe.yaml
+      - task: configs/task/friction_probe/no_slip_low_probe.yaml
         expect_local_slip: false
     # 统一复现种子段落，便于统计显著性与误报率估计。
     seeds:

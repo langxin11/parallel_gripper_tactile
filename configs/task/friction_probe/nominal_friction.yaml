@@ -1,13 +1,13 @@
 # @package task
-family: friction_estimation
-path: configs/task/friction_estimation/high_friction.yaml
+family: friction_probe
+path: configs/task/friction_probe/nominal_friction.yaml
 definition:
+  # 标称摩擦场景：用于日常摩擦估计 baseline 与大多数演示命令。
   schema_version: 1
-  name: high_friction_probe
+  name: nominal_friction_probe
   
-  # 高摩擦接触需要更长探测斜坡，用于覆盖辨识量程上部。
   cube_mass_kg: 0.05
-  friction_coefficient: 1.2
+  friction_coefficient: 0.8
   object_material: hard
   sensor_noise_scale: 1.0
   
