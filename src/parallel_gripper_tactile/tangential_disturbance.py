@@ -16,7 +16,7 @@ class DisturbancePolicyConfig(BaseModel):
     model_config = ConfigDict(extra="forbid", frozen=True)
     strategy: Literal["constant", "fixed_step", "dynamic_step"] = "dynamic_step"
     detector: Literal["shear_increase", "force_ratio"] = "shear_increase"
-    initial_force_n: Annotated[FiniteFloat, Field(gt=0)] = 0.8
+    initial_force_n: Annotated[FiniteFloat, Field(gt=0)] = 1.0
     max_force_n: Annotated[FiniteFloat, Field(gt=0)] = 5.0
     max_force_rate_n_s: Annotated[FiniteFloat, Field(gt=0)] = 30.0
     update_period_s: Annotated[FiniteFloat, Field(gt=0)] = 0.01

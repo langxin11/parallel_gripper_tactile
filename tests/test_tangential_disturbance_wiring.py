@@ -96,6 +96,7 @@ def test_runner_snapshots_effective_task_and_registers_existing_artifacts(
         resolved_profile=resolved.profile,
         task_path=resolved.task_source,
         disturbance_task=resolved.task,
+        policy_config=resolved.scheduler,
         output_root=tmp_path,
         run_name="wired",
     )

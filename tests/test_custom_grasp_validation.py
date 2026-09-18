@@ -35,7 +35,14 @@ def test_custom_scene_fixes_reserved_base_and_keeps_free_cube() -> None:
     )
     cube_size = model.geom_size[model.geom("cube/target_cube_geom").id, :3]
     cube_mass = model.body_mass[model.body("cube/target_cube").id]
-    assert np.allclose(cube_size, (0.003, 0.0125, 0.0125))
+    assert np.allclose(
+        cube_size,
+        (
+            scene.DEFAULT_CUBE_HALF_THICKNESS,
+            scene.DEFAULT_CUBE_HALF_CONTACT_SIDE,
+            scene.DEFAULT_CUBE_HALF_CONTACT_SIDE,
+        ),
+    )
     assert np.isclose(cube_mass, 0.050)
     assert 2.0 * cube_size[1] > 0.024
     assert 2.0 * cube_size[2] > 0.024

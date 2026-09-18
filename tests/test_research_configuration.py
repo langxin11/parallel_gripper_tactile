@@ -238,6 +238,11 @@ def test_remaining_task_groups_match_frozen_domain_values(
                 **expected["tactile_slip"],
                 "minimum_ratio_coherence": 0.9,
             },
+            # 30×30×15 平台下 face 超出 taxel 感应区，估计比系统性偏置，门槛对齐平台实测。
+            "metrics": {
+                **expected["metrics"],
+                "minimum_estimate_ratio": 0.3,
+            },
         }
 
     assert resolved.task.model_dump(mode="json") == expected

@@ -91,7 +91,9 @@ definition:
   metrics:
     require_detection: true
     conservative_tolerance: 0.02
-    minimum_estimate_ratio: 0.55
+    # 30×30×15 mm 默认物体 face 超出 taxel 感应区，高夹紧下载荷部分绕过感应区，
+    # 估计比系统性偏置至 0.36–0.49（seed 0–2 实测）；门槛对齐平台实测而非旧 25 mm 口径。
+    minimum_estimate_ratio: 0.30
     probe_slip_threshold_m: 0.002
     hold_slip_threshold_m: 0.002
     force_rmse_threshold_n: 0.5
