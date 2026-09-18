@@ -239,10 +239,10 @@ class ResearchRunConfig(_ResearchModel):
                 self.controller, DMControllerSelection
             ) or self.controller.name not in {
                 "pid-only",
-                "full",
+                "pid-torque-ff",
             }:
                 raise ValueError(
-                    "tangential disturbance supports only pid-only or full controllers"
+                    "tangential disturbance supports only pid-only or pid-torque-ff controllers"
                 )
         if isinstance(self.controller, DMControllerSelection):
             if self.controller.name == "admittance":
@@ -546,7 +546,7 @@ def resolve_research_run(
                 if selection.controller.name == "admittance"
                 else 0.004
                 if selection.controller.name in {"adrc-torque", "adrc-torque-td"}
-                else 0.01
+                else 0.008
             )
         resolved_execution = ExecutionConfig.model_validate(
             {

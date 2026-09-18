@@ -83,9 +83,11 @@ J_f(q)=\frac{\partial f_n}{\partial q}
 
 ### 位置式 PID 与刚度变体 {#pid-stiffness-variants}
 
-`pid-only`、`pid-torque-ff`、`pid-stiffness-ff`、`full` 分别选择 PID、机构力矩前馈与刚度位置修正的组合。
+PID 基线控制器为 `pid-torque-ff`：PID 位置修正加机构力矩前馈，不含刚度位置前馈。
 `pid-stiffness-limit` 关闭刚度加法修正，改用刚度约束位置偏置增量；该变体仅保留专项实验，
 不在默认正式比较矩阵中。`pid-stiffness-rate` 是独立的速率式控制变体。
+`pid-stiffness-ff` 与 `full` 两个含刚度位置修正的历史变体已退役配置入口
+（消融证据显示刚度加法修正的附加收益有限），仅在代码层保留自包含派生供历史研究复现。
 
 令 \(e_f=f_{ref}-f_n\)，逆刚度位置修正与机构力矩前馈分别为：
 

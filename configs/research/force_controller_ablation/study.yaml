@@ -6,7 +6,7 @@ study:
   profile:
     experiment: dm_gripper/force_tracking_default
     # 基础控制配置用于预检；单任务、配对 seed 和输出目录在各自唯一字段中声明。
-    overrides: [controller=dm_gripper/full, estimator=window_linear]
+    overrides: [controller=dm_gripper/pid_torque_ff, estimator=window_linear]
   rationale:
     question: PID、刚度位置前馈与力矩前馈各自贡献多大？
     decision: 确定默认 PID 控制器必须保留的模块。

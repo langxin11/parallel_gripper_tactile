@@ -15,5 +15,4 @@ force:
     max_force_rate_n_s: 50.0
     max_joint_velocity_rad_s: 0.5
 stiffness_control:
-  position_feedforward_gain: 0.0
   position_limit_force_rate_n_s: 50.0

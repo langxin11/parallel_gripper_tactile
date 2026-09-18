@@ -2,7 +2,7 @@
 defaults:
   - override /platform: dm_gripper/simulation
   - override /model: dm_gripper/height_spheres
-  - override /controller: dm_gripper/full
+  - override /controller: dm_gripper/pid_torque_ff
   - override /estimator: window_linear
   - override /task: force_scheduling/dynamic_filling
   - override /material: hard

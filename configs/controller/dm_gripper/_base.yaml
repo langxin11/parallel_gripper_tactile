@@ -1,9 +1,9 @@
 # @package controller
-# DM 力控变体的公共基线：变体文件经组内 defaults 继承本基座，只声明 name 与差异字段。
-# 变体间的模块启停与增益差异由组合层按 controller.name 调用 configure_force_controller
-# 派生（见 src/parallel_gripper_tactile/experiments/force_tracking.py）；
-# 本文件中的 stiffness_control 等基线字段会被该派生按变体覆盖，单独修改
-# 不会改变 PID 消融变体的实际行为。
+# DM 力控变体的公共基线（PID 基线 = pid-torque-ff 语义）：变体文件经组内 defaults
+# 继承本基座，只声明 name 与差异字段。变体间的模块启停与增益差异由组合层按
+# controller.name 调用 configure_force_controller 派生
+# （见 src/parallel_gripper_tactile/experiments/force_tracking.py）；
+# full 与 pid-stiffness-ff 仅作为代码内历史研究变体保留，其增益在派生层自包含。
 family: dm
 # MIT 内环增益：接近阶段位置伺服与跟踪阶段 MIT 力矩命令共用。
 mit_gains: {kp: 20.0, kd: 0.63793536}
@@ -26,9 +26,10 @@ force:
     contact_stable_time_s: 0.0
     contact_transition_time_s: 0.05
     release_policy: any_side
-# 在线刚度估计驱动的前馈与限幅基线；会被变体派生覆盖（见文件头说明）。
+# 在线刚度估计驱动的前馈与限幅基线：PID 基线不含刚度位置前馈（消融证据显示其
+# 附加收益有限），增益基线为 0；历史变体 full／pid-stiffness-ff 在派生层显式恢复。
 stiffness_control:
-  position_feedforward_gain: 0.25
+  position_feedforward_gain: 0.0
   torque_feedforward_gain: 1.0
   position_limit_enabled: false
   position_limit_force_rate_n_s: 10.0

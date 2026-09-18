@@ -248,7 +248,7 @@ def test_explicit_variant_injects_config_without_old_feedback_or_default_matrix(
 
     baseline = compose_research_run(
         experiment="dm_gripper/force_tracking_default",
-        overrides=("controller=dm_gripper/full", "seed=20260814", "execution=plan"),
+        overrides=("controller=dm_gripper/pid_torque_ff", "seed=20260814", "execution=plan"),
     ).profile
     configured = configure_force_controller(baseline, variant="admittance")
     assert configured.normal_force.admittance is not None

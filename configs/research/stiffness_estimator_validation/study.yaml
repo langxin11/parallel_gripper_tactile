@@ -6,7 +6,7 @@ study:
   profile:
     experiment: dm_gripper/force_tracking_default
     # 固定控制器基线；待比较任务、估计器和 seed 只在矩阵中维护。
-    overrides: [controller=dm_gripper/full, estimator=window_linear]
+    overrides: [controller=dm_gripper/pid_torque_ff, estimator=window_linear]
   rationale:
     question: 三种刚度估计器对位置前馈力跟踪的影响是什么？
     decision: 判断估计器差异是否会显著改变下游力跟踪；估计精度由独立真值研究决定。

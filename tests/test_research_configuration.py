@@ -137,7 +137,9 @@ def test_model_group_switches_only_the_selected_collision_resource(
 def test_estimator_group_replaces_its_fragment_and_reaches_final_profile() -> None:
     """估计器切换只改变其方法字段，并进入最终冻结 profile。"""
     resolved = resolve_research_run(
-        resolved_mapping(_compose(["controller=dm_gripper/full", "estimator=window_quadratic"]))
+        resolved_mapping(
+            _compose(["controller=dm_gripper/pid_torque_ff", "estimator=window_quadratic"])
+        )
     )
 
     assert resolved.profile.normal_force is not None
@@ -150,10 +152,8 @@ def test_estimator_group_replaces_its_fragment_and_reaches_final_profile() -> No
     [
         "pid_only",
         "pid_torque_ff",
-        "pid_stiffness_ff",
         "pid_stiffness_limit",
         "pid_stiffness_rate",
-        "full",
         "adrc_torque",
     ],
 )

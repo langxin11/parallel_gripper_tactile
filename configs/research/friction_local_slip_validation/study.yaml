@@ -6,7 +6,7 @@ study:
   profile:
     experiment: dm_gripper/friction_estimation_nominal
     # 场景任务和 seed 属于下方矩阵，这里只固定共享控制配置。
-    overrides: [controller=dm_gripper/full, estimator=window_linear]
+    overrides: [controller=dm_gripper/pid_torque_ff, estimator=window_linear]
   rationale:
     question: 纯触觉局部起滑检测能否区分正例与低探测载荷阴性对照？
     decision: 判断局部候选是否具备接管目标力调度的证据。

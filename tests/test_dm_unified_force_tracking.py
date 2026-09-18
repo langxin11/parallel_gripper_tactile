@@ -24,9 +24,7 @@ def test_all_dm_force_controllers_enable_shared_contact_supervisor() -> None:
     """全部 DMgripper 力控制器必须启用同一组公共接触阶段参数。"""
     controllers = {
         "pid_only": "none",
-        "full": "window_linear",
         "pid_torque_ff": "window_linear",
-        "pid_stiffness_ff": "window_linear",
         "pid_stiffness_limit": "window_linear",
         "adrc_torque": "window_linear",
         "admittance_unified": "none",

@@ -108,6 +108,12 @@
 
 ### 变更
 
+- PID 基线控制器切换为 `pid-torque-ff`（PID 位置修正＋机构力矩前馈），退役刚度位置前馈：
+  消融证据显示刚度加法修正的附加收益接近于零（RMSE 差约 2.5e-05 N）。基线配置
+  `position_feedforward_gain` 置 0，`full` 与 `pid-stiffness-ff` 变体改为代码内自包含派生
+  （行为与历史逐字段一致），引用 `dm_gripper/full` 的切向扰动、摩擦估计、力调度实验与各研究
+  预检基线同步切换；直连 API 默认变体同步改为 `pid-torque-ff`。
+
 - DM controller 配置组统合公共基线：变体文件经组内 defaults 继承 `_base.yaml`，只声明
   `name` 与差异字段，并按变体角色规范注释；组合后的 resolved 配置与重构前逐字段一致，
   行为不变。变体间的模块启停与增益差异仍由 `configure_force_controller` 按 `controller.name`
@@ -316,6 +322,9 @@
 
 ### 移除
 
+- 移除 `controller=dm_gripper/full` 与 `controller=dm_gripper/pid_stiffness_ff` 两个 CLI
+  配置入口（刚度位置前馈退役）；变体派生与行为测试保留在代码层，历史研究复现以当时
+  git 版本或内存派生为准。
 - 移除 `controller=dm_gripper/adrc_torque_td` CLI 配置入口：线性 TD 是带微分状态输出的
   二阶临界阻尼参考低通，解析参考（smoothstep／linear）本身就是零额外相位滞后的替代，
   且该变体从未进入任何正式研究矩阵；变体派生与行为测试仍保留在代码层，

@@ -1,7 +1,0 @@
-# @package controller
-# PID 加刚度位置前馈、关闭机构力矩前馈；隔离刚度位置前馈贡献的消融变体。
-defaults:
-  - /controller/dm_gripper/_base
-  - _self_
-
-name: pid-stiffness-ff

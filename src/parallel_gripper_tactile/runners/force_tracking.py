@@ -46,7 +46,7 @@ def execute_force_tracking(
     object_contact_model: ObjectContactModel = "explicit",
     multiccd_enabled: bool = True,
     force_semantics: ForceSemantics = "average_side",
-    controller_variant: ControllerVariant = "full",
+    controller_variant: ControllerVariant = "pid-torque-ff",
     stiffness_estimator_method: StiffnessEstimatorMethod | None = None,
     sensor_noise_seed: int | None = None,
     torque_adrc_override: TorqueAdrcControl | None = None,

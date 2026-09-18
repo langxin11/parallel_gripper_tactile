@@ -1035,7 +1035,7 @@ def record_force_tracking_ramp_video(
     height: int = DEFAULT_VIDEO_HEIGHT_PX,
     fps: int = 30,
     panel_width: int = PANEL_WIDTH_PX,
-    controller_variant: str = "full",
+    controller_variant: str = "pid-torque-ff",
     object_material: str = "hard",
     sensor_noise_seed: int | None = None,
 ) -> tuple[object, int]:

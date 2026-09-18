@@ -6,7 +6,7 @@ study:
   profile:
     experiment: dm_gripper/force_tracking_default
     # 这里只选择矩阵共享的基础控制配置；任务、seed 和执行方式分别归 definition 与 execution 所有。
-    overrides: [controller=dm_gripper/full, estimator=window_linear]
+    overrides: [controller=dm_gripper/pid_torque_ff, estimator=window_linear]
   rationale:
     question: 哪种仍有竞争力的 DM 力控制器在任务与材料变化下表现最佳？
     decision: 选择后续正式实验的默认控制器。

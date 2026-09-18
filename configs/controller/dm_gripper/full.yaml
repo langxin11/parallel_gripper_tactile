@@ -1,7 +1,0 @@
-# @package controller
-# PID 位置修正、刚度位置前馈与机构力矩前馈的完整组合；消融与控制器比较研究的基准上界。
-defaults:
-  - /controller/dm_gripper/_base
-  - _self_
-
-name: full

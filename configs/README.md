@@ -19,7 +19,7 @@ uv run python scripts/research/run.py model=dm_gripper/original_mesh execution=p
 
 # 换 PID 与估计器。
 uv run python scripts/research/run.py \
-  controller=dm_gripper/full estimator=window_quadratic execution=plan
+  controller=dm_gripper/pid_torque_ff estimator=window_quadratic execution=plan
 
 # 使用统一导纳组合；该 experiment 会同时选择相容的 controller、estimator 和 task。
 uv run python scripts/research/run.py \
@@ -74,7 +74,7 @@ uv run python scripts/research/run.py \
 ```bash
 uv run pgt run force-track \
   --experiment dm_gripper/force_tracking_default \
-  --set controller=dm_gripper/full --set task=force_tracking/step
+  --set controller=dm_gripper/pid_torque_ff --set task=force_tracking/step
 uv run pgt run force-schedule \
   --experiment dm_gripper/force_scheduling_gravity_hold
 uv run pgt run friction-estimate \

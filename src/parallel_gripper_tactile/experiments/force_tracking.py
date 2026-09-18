@@ -90,7 +90,7 @@ FrameCallback = Callable[[dict[str, object], mujoco.MjModel, mujoco.MjData], Non
 def configure_force_controller(
     profile: GripperProfile,
     *,
-    variant: ControllerVariant = "full",
+    variant: ControllerVariant = "pid-torque-ff",
     stiffness_estimator_method: StiffnessEstimatorMethod | None = None,
     sensor_noise_seed: int | None = None,
     torque_adrc_override: TorqueAdrcControl | None = None,
@@ -168,7 +168,23 @@ def configure_force_controller(
     elif variant == "pid-torque-ff" and stiffness is not None:
         stiffness = stiffness.model_copy(update={"enabled": True, "position_feedforward_gain": 0.0})
     elif variant == "pid-stiffness-ff" and stiffness is not None:
-        stiffness = stiffness.model_copy(update={"enabled": True, "torque_feedforward_gain": 0.0})
+        # 历史研究变体：增益自包含，不随基线配置变化（基线已退役刚度位置前馈）。
+        stiffness = stiffness.model_copy(
+            update={
+                "enabled": True,
+                "position_feedforward_gain": 0.25,
+                "torque_feedforward_gain": 0.0,
+            }
+        )
+    elif variant == "full" and stiffness is not None:
+        # 历史研究变体：完整模块组合，增益自包含，不随基线配置变化。
+        stiffness = stiffness.model_copy(
+            update={
+                "enabled": True,
+                "position_feedforward_gain": 0.25,
+                "torque_feedforward_gain": 1.0,
+            }
+        )
     elif variant == "pid-stiffness-limit" and stiffness is not None:
         # 在线刚度只约束 PID 位置目标的周期增量，不再把同一力误差作为
         # 第二条位置修正与 PID 叠加；机构力矩前馈继续保留。
@@ -339,7 +355,7 @@ class ForceTrackingTask(_TaskModel):
     approach: ForceTrackingApproach = ForceTrackingApproach()
     reference: ForceReference
     metrics: ForceTrackingMetricsConfig = ForceTrackingMetricsConfig()
-    control_period_s: Annotated[float, Field(gt=0)] = 0.002
+    control_period_s: Annotated[float, Field(gt=0)] = 0.004
     release_support_on_tracking: bool = False
 
     @classmethod
@@ -712,7 +728,7 @@ def run_force_tracking(
     object_contact_model: ObjectContactModel = "explicit",
     multiccd_enabled: bool = True,
     force_semantics: ForceSemantics = "average_side",
-    controller_variant: ControllerVariant = "full",
+    controller_variant: ControllerVariant = "pid-torque-ff",
     stiffness_estimator_method: StiffnessEstimatorMethod | None = None,
     sensor_noise_seed: int | None = None,
     torque_adrc_override: TorqueAdrcControl | None = None,

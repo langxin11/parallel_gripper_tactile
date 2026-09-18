@@ -4,7 +4,7 @@ study:
   source: configs/research/force_tracking_stiffness_limit_pilot/study.yaml
   profile:
     experiment: dm_gripper/force_tracking_default
-    overrides: [controller=dm_gripper/full, estimator=window_linear]
+    overrides: [controller=dm_gripper/pid_torque_ff, estimator=window_linear]
   rationale:
     question: 刚度位置限幅能否降低阶跃跟踪初段的峰值与实际力增长率，同时保持可接受的跟踪误差？
     decision: 判断 pid-stiffness-limit 是否进入自适应轻柔抓取主线。
@@ -17,7 +17,7 @@ study:
       oracle-k: 仅使用准静态扫描冻结的材料级参考，不代表动态瞬时真值。
   definition:
     name: force_tracking_stiffness_limit_pilot
-    tasks: [configs/task/force_tracking/step_250hz.yaml]
+    tasks: [configs/task/force_tracking/step.yaml]
     modes: [no-limit, window-linear, oracle-k]
     materials: [medium, hard, stiff]
     seeds:
