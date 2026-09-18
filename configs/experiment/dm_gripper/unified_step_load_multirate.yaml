@@ -1,10 +1,15 @@
 # @package _global_
 defaults:
-  - /experiment/dm_gripper/unified_step_load_transient
+  - /experiment/dm_gripper/unified_step_load
   - _self_
 
 experiment:
   name: dm_unified_step_load_multirate
+controller:
+  admittance:
+    # 仿真候选参数，不替换基线或真机参数。
+    velocity_limit_rad_s: 0.20
+    feedforward_ratio: 1.0
 task:
   definition:
     tactile_sampling:
@@ -12,3 +17,7 @@ task:
       median_window: 3
       stale_after_s: 0.01
       record_raw: true
+    unified_adaptive:
+      load:
+        # 缩短承载观测滞后；保留法向力滤波与导纳动力学，只用于仿真验证。
+        filter_tau_s: 0.01

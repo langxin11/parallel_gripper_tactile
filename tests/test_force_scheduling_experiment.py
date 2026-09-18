@@ -72,20 +72,22 @@ def test_multirate_fault_injection_obeys_sampling_and_freeze(tmp_path, fault) ->
             assert increment == pytest.approx(0)
 
 
-@pytest.mark.parametrize("transient", [False, True])
-def test_unified_fast_candidate_only_changes_admittance_limits(tmp_path, transient) -> None:
-    """候选只覆盖指定参数；瞬态回归额外检查未排除初始窗口的位移。"""
+def test_unified_multirate_preserves_transient_admittance_and_filter_overrides(tmp_path) -> None:
+    """多速率组合保留瞬态导纳、前馈和载荷滤波覆盖。"""
     baseline = compose_research_run(experiment="dm_gripper/unified_step_load")
-    suffix = "transient" if transient else "fast"
-    candidate = compose_research_run(experiment=f"dm_gripper/unified_step_load_{suffix}")
-    expected_task = baseline.task
-    if transient:
-        config = expected_task.unified_adaptive
-        expected_task = expected_task.model_copy(
-            update={
-                "unified_adaptive": replace(config, load=replace(config.load, filter_tau_s=0.01))
-            }
-        )
+    candidate = compose_research_run(experiment="dm_gripper/unified_step_load_multirate")
+    config = baseline.task.unified_adaptive
+    expected_task = baseline.task.model_copy(
+        update={
+            "tactile_sampling": TactileSamplingConfig(
+                period_s=0.001,
+                median_window=3,
+                stale_after_s=0.01,
+                record_raw=True,
+            ),
+            "unified_adaptive": replace(config, load=replace(config.load, filter_tau_s=0.01)),
+        }
+    )
     assert candidate.task == expected_task
     expected = baseline.profile.model_dump(mode="json")
     admittance = expected["control"]["force"]["admittance"]
@@ -93,23 +95,21 @@ def test_unified_fast_candidate_only_changes_admittance_limits(tmp_path, transie
     assert admittance["feedforward_ratio"] == 0.2
     admittance.update(velocity_limit_rad_s=0.2, feedforward_ratio=1.0)
     assert candidate.profile.model_dump(mode="json") == expected
+    assert baseline.task.unified_adaptive.load.filter_tau_s == 0.05
+    assert candidate.task.unified_adaptive.load.filter_tau_s == 0.01
     trace = tmp_path / "trace.csv"
     result = run_force_scheduling(candidate.profile, task=candidate.task, output_csv=trace)
     assert result.simulation_stable and result.force_tracking_passed
     assert result.failure_reason is None
-    if transient:
-        assert result.passed
-        with trace.open() as handle:
-            rows = [r for r in csv.DictReader(handle) if r["phase"] == "schedule_load"]
-        assert max(abs(float(r["tangential_displacement_m"])) for r in rows) < 0.002
-        assert any(
-            float(r["scenario_time_s"]) <= 0.1 and float(r["filtered_normal_force_n"]) >= 2.0
-            for r in rows
-        )
-        assert all(r["adaptive_increase_count"] == "0" for r in rows)
-    else:
-        assert 0.003 < result.max_tangential_displacement_m < 0.005
-        assert not result.slip_passed and not result.passed
+    assert result.passed
+    with trace.open() as handle:
+        rows = [r for r in csv.DictReader(handle) if r["phase"] == "schedule_load"]
+    assert max(abs(float(r["tangential_displacement_m"])) for r in rows) < 0.002
+    assert any(
+        float(r["scenario_time_s"]) <= 0.1 and float(r["filtered_normal_force_n"]) >= 2.0
+        for r in rows
+    )
+    assert all(r["adaptive_increase_count"] == "0" for r in rows)
 
 
 @pytest.mark.parametrize("seed", [0, 1, 2])

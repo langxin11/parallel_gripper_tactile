@@ -111,10 +111,6 @@ uv run pgt run force-schedule --experiment dm_gripper/adaptive_prior
 uv run pgt run force-schedule --experiment dm_gripper/unified_adaptive
 # 自重 2.5 N 的撤支撑工况，1 N 初始抓力、50 N/s 限速；当前位移仍未达标
 uv run pgt run force-schedule --experiment dm_gripper/unified_step_load
-# 独立快速导纳候选，用于后续滤波与瞬态响应诊断，不替换原基线
-uv run pgt run force-schedule --experiment dm_gripper/unified_step_load_fast
-# 进一步缩短载荷观测滤波，检查撤支撑后的最初 200 ms
-uv run pgt run force-schedule --experiment dm_gripper/unified_step_load_transient
 # 独立 1000 Hz 触觉预处理与 250 Hz 控制，保留高频触觉日志
 uv run pgt run force-schedule --experiment dm_gripper/unified_step_load_multirate
 # 保留相同上层策略，比较位置式 PID＋机构力矩前馈
@@ -127,20 +123,19 @@ uv run pgt run force-schedule --experiment dm_gripper/unified_step_load_pid
 它只接收双侧各九点三轴力、实测平均单侧力、时间和上一控制周期执行限幅；
 场景摩擦、外加载荷和物体位移不进入策略。导纳开启最终 MIT 请求限幅的状态回投。
 
-`unified_step_load_fast` 继承 `unified_step_load`，只将导纳速度上限改为 0.20 rad/s、
-力矩前馈比例改为 1.0，其余任务与控制参数不变。该组合仅供仿真瞬态诊断，尚未通过
-2 mm 滑移验收，不是全局默认或真机推荐参数。原基线继续保留 0.05 rad/s 与 0.2。
-诊断必须额外检查撤支撑后的前 0.2 s；现有验收 RMSE 默认排除这一窗口，不能单独代表接住能力。
+`unified_step_load_multirate` 直接继承 `unified_step_load`，集中保存当前候选的三项覆盖：
+导纳速度上限为 0.20 rad/s、力矩前馈比例为 1.0、承载调度的 `load.filter_tau_s` 为 0.01 s。
+原基线继续保留 0.05 rad/s、0.2 和 0.05 s。中间的 `fast`、`transient` 入口已移除，
+多速率候选及继承它的 `risk` 候选有效参数保持不变；无需再逐层查找这些覆盖。
 
-`unified_step_load_transient` 继承快速候选，只将承载调度的 `load.filter_tau_s` 从 0.05 s
-改为 0.01 s，减少实测切向载荷进入目标生成的滞后；不是修改法向力的 20 Hz 低通。
 导纳质量、阻尼、刚度、1 N 初始目标、50 N/s 目标速率上限及 2 mm 判据均保持不变，
-局部风险增力和在线摩擦更新仍关闭。回归额外检查从撤支撑开始的完整位移窗口，以及
-滤波平均单侧力首次达到 2 N 的时间；首次过阈值不等于稳定时间。
-该组合用于当前硬物体、自重 2.5 N 的仿真工况，不自动替换原基线、全局默认或真机参数；
-更短滤波对噪声更敏感，跨材料、噪声水平及真机表现仍需独立验证。
+法向力的 20 Hz 低通也不受承载滤波覆盖影响。多速率候选仍默认关闭风险增力与在线摩擦更新。
+回归检查从撤支撑开始的完整位移窗口，以及滤波平均单侧力首次达到 2 N 的时间；
+首次过阈值不等于稳定时间，排除初始 0.2 s 的 RMSE 也不能单独代表接住能力。
+该组合用于硬物体、自重 2.5 N 的仿真工况；更短滤波对噪声更敏感，跨材料、噪声水平及真机表现
+仍需独立验证，不能据此替换真机参数。
 
-`unified_step_load_multirate` 在瞬态候选上显式启用 `task.tactile_sampling`：
+`unified_step_load_multirate` 同时显式启用 `task.tactile_sampling`：
 `period_s=0.001`、`median_window=3`、`stale_after_s=0.01`、`record_raw=true`。
 共享场景默认物理步长为 1 ms，控制周期仍为 4 ms，每个控制周期对应四个触觉采样。
 未配置此字段的组合保持原观测调用路径，也使用新的默认物理步长；历史产物与实验结论不回溯改写。
