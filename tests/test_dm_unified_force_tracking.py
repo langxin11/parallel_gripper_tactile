@@ -29,7 +29,6 @@ def test_all_dm_force_controllers_enable_shared_contact_supervisor() -> None:
         "pid_stiffness_ff": "window_linear",
         "pid_stiffness_limit": "window_linear",
         "adrc_torque": "window_linear",
-        "adrc_torque_td": "window_linear",
         "admittance_unified": "none",
     }
 

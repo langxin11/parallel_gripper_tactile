@@ -155,7 +155,6 @@ def test_estimator_group_replaces_its_fragment_and_reaches_final_profile() -> No
         "pid_stiffness_rate",
         "full",
         "adrc_torque",
-        "adrc_torque_td",
     ],
 )
 def test_all_dm_non_admittance_controller_groups_resolve(controller: str) -> None:

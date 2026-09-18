@@ -35,7 +35,8 @@ MuJoCo scene 编译，不创建 `MjData`、推进时间或访问设备。输出�
 活跃研究以 `study.profile.experiment` 的组合结果为唯一基础 profile；`study.profile.overrides` 仅保存
 矩阵共享且改变基础 profile 的 controller、estimator 或 model 选择。任务与 seed 归
 `study.definition`，研究目录归 `execution.output_root`。解析、预检、执行和快照持有同一冻结对象，
-摘要来自实际组合对象。归档模型诊断因改写历史资源而保留原 profile 路径，并执行等价检查。
+摘要来自实际组合对象。旧模型诊断入口与专属 `study.phase` 字段已移除；
+历史结论与复现版本见[模型验证结论](control-comparison-ablation.md#collision-geometry-conclusions)。
 
 Torque ADRC 的 `coarse → confirm` 强制校验谱系：coarse manifest 的生命周期 schema、研究类型、阶段、
 完成状态、研究定义哈希和无执行异常必须匹配；`candidate_ranking.csv` 必须已登记且摘要、候选全集与
@@ -95,15 +96,16 @@ Torque ADRC 的 `coarse → confirm` 强制校验谱系：coarse manifest 的生
 `adrc`、`torque_adrc`、`admittance` 和直接力矩反馈字段，再校验完整 profile。
 
 导纳必须配 `estimator=none`；非导纳仅 `pid-only` 可显式关闭估计器。Torque ADRC 参数仅可随
-`adrc-torque` 或 `adrc-torque-td` 出现。platform 选择不连接或使能设备，未支持的硬件组合由 schema 拒绝。
+`adrc-torque` 出现。platform 选择不连接或使能设备，未支持的硬件组合由 schema 拒绝。
 
 切向扰动仅支持 DM 的 `full`／`pid-only`，拒绝 viewer、导纳与 ADRC；material 写入任务的
 `object_material`。解析先构造最终 profile，再按实际材料编译 scene，检查 MIT 法向控制及
 `control_period_s` 不小于物理步长。它支持单次与探索性 Multirun，未定义正式 study。
 
-共享仿真场景默认使用 `0.001 s` 物理步长，显式多速率触觉默认同为 `0.001 s`；
-控制周期仍由任务配置独立指定。采样与读取边界见[公共触觉契约](tactile-conventions.md#readers)。
-历史产物保留其原有时序条件，不因默认值调整而重新解释。
+共享仿真场景默认使用 `0.001 s` 物理步长，显式多速率触觉默认同为 `0.001 s`。DM 仿真任务统一使用
+`0.004 s`（250 Hz）控制周期；Robotiq 离散力控制保持独立的 `1/30 s`（30 Hz）决策周期。
+采样与读取边界见[公共触觉契约](tactile-conventions.md#readers)。历史产物保留其原有时序条件，
+不因默认值调整而重新解释。
 
 ## 路径、产物与复现
 
