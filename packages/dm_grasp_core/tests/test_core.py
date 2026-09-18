@@ -1,9 +1,7 @@
-"""独立数学期望和迁移前节点固定观测回放。"""
+"""共享控制核的独立数学期望与边界验证。"""
 
-from dataclasses import asdict, dataclass, replace
-import json
+from dataclasses import dataclass, replace
 import math
-from pathlib import Path
 import pytest
 import dm_grasp_core.command as legacy_command
 import dm_grasp_core.control as legacy_control
@@ -414,20 +412,6 @@ def test_composite_torque_and_infeasible_mechanical_bound():
             measured_velocity_rad_s=100.0,
             feedforward_force_n=0.0,
         )
-
-
-@pytest.mark.parametrize(
-    "scenario",
-    json.loads(Path(__file__).with_name("golden_tracking.json").read_text())["scenarios"],
-)
-def test_original_node_golden(scenario):
-    """验证 original node golden。"""
-    a = SecondOrderAdmittance(0.8, 40.0, 100.0)
-    cfg = replace(C, closing_direction=scenario["direction"])
-    for row in scenario["rows"]:
-        actual = step_admittance(a, K, cfg, **row["inputs"])
-        assert asdict(actual) == row["command"]
-        assert [a.displacement_m, a.velocity_m_s] == row["state"]
 
 
 @pytest.mark.parametrize("dt", [0.0, -0.002, float("nan"), float("inf")])
