@@ -1,11 +1,16 @@
 # @package estimator
+# 最近窗口内做二次局部拟合，取当前闭合位置处斜率为等效接触刚度；可描述曲率，但需要更多有效样本。
 name: window_quadratic
 stiffness:
+  # 单位 N/m：接触重置后的初值，以及局部斜率接受前的物理裁剪范围。
   initial_n_per_m: 3000.0
   min_n_per_m: 250.0
   max_n_per_m: 25000.0
+  # 拟合斜率进入 EWMA 的权重；越大越灵敏，越小越抗噪。
   filter_alpha: 0.15
+  # 整个窗口的闭合行程跨度（m）和法向力跨度（N）均须达到此门限，避免弱激励拟合。
   min_delta_closure_m: 0.00005
   min_delta_force_n: 0.025
+  # 最近样本窗口容量与开始二次拟合所需的最少样本数；最少为 3。
   window_size: 25
   min_samples: 8

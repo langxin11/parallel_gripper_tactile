@@ -1,10 +1,19 @@
 # @package execution
+# 仅解析、校验并打印单次实验的最终配置，不启动 MuJoCo 仿真。
 mode: plan
+# 相对路径锚定仓库根目录；实际 run 的产物写入该目录下的实验子目录。
 output_root: ${pgt_repo:}/outputs/research
+# 是否打开 MuJoCo viewer；计划模式不启动 viewer，但保留字段以使 plan/run 配置同构。
 viewer: false
+# viewer 或帧回调的刷新频率，单位 Hz；仅在启用相应功能时生效。
 render_fps: 30.0
+# viewer 的目标仿真速度与墙钟速度之比；1.0 为实时播放。
 realtime_factor: 1.0
+# 是否启用 MuJoCo multi-contact CCD，减少高速或薄接触的穿透风险。
 multiccd_enabled: true
+# trace 常规采样周期，单位 s；null 交由任务 runner 选择默认记录频率。
 trace_sample_period_s: null
+# 下采样时在接触、状态切换等事件前后额外保留的时间窗口，单位 s。
 trace_event_window_s: 0.2
+# summary 仅输出核心结果图；diagnostic 输出完整诊断图组。
 plot_mode: summary

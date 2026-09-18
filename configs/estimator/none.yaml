@@ -1,11 +1,17 @@
 # @package estimator
+# 关闭在线接触刚度估计；仅允许与 pid-only 或 admittance 组合。
 name: none
 stiffness:
+  # 以下值仍保留以满足统一 profile schema；选择 none 后不会参与估计或控制。
+  # 单位为 N/m，初值用于估计器每次接触重置后的起点，min/max 抑制异常斜率。
   initial_n_per_m: 3000.0
   min_n_per_m: 250.0
   max_n_per_m: 25000.0
+  # EWMA 融合比例；none 模式不使用，保留为切换估计器时的完整参数集。
   filter_alpha: 0.15
+  # 有效激励的最小闭合行程（m）和法向力变化（N）。
   min_delta_closure_m: 0.00005
   min_delta_force_n: 0.025
+  # 窗口容量与最小拟合样本数；none 模式不使用。
   window_size: 25
   min_samples: 8

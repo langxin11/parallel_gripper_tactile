@@ -1,8 +1,11 @@
 # @package execution
 # 只校验并登记正式研究计划，不执行任何条件。
 mode: plan
+# StudyPlan、manifest 和后续聚合产物的根目录；相对路径锚定仓库根目录。
 output_root: ${pgt_repo:}/outputs/research/studies
+# null 表示创建新计划；非 null 时从指定的既有 study 目录恢复未完成条件。
 recovery_source: null
 # 计划模式不创建 worker；保留该字段便于计划与执行配置同构。
 workers: 1
+# summary 生成核心聚合图；diagnostic 生成完整诊断图组。
 plot_mode: summary

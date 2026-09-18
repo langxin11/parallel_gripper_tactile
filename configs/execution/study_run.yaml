@@ -1,7 +1,11 @@
 # @package execution
 # 逐条件执行同一个已校验 StudyPlan；workers > 1 时使用 CPU 多进程。
 mode: run
+# StudyPlan、条件级产物和聚合结果的根目录；相对路径锚定仓库根目录。
 output_root: ${pgt_repo:}/outputs/research/studies
+# null 表示执行新计划；指定既有 study 目录时仅恢复缺失或失败的条件。
 recovery_source: null
+# 并行 worker 数；1 表示串行，增大后以独立进程执行不同条件。
 workers: 1
+# summary 生成核心聚合图；diagnostic 生成完整诊断图组。
 plot_mode: summary
