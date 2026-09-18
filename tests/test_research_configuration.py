@@ -257,6 +257,25 @@ def test_force_scheduling_composes_load_and_scheduler_independently() -> None:
     assert resolved.scheduler is not None
 
 
+@pytest.mark.parametrize("material", ["soft", "medium", "hard", "stiff"])
+def test_material_group_carries_complete_contact_input(material: str) -> None:
+    """四种材料的 YAML 接触参数与场景层领域预设逐值一致并可组合。"""
+    resolved = resolve_research_run(
+        resolved_mapping(_compose([f"material={material}", "execution=plan"]))
+    )
+
+    assert resolved.selection.material.name == material
+    assert resolved.selection.material.contact is not None
+
+
+def test_material_contact_drift_fails_before_execution() -> None:
+    """YAML 接触参数与运行时预设漂移时，组合在校验阶段即失败。"""
+    raw = resolved_mapping(_compose(["execution=plan"]))
+    raw["material"]["contact"]["dm_gripper"]["solref"] = [-1.0, -1.0]
+    with pytest.raises(ResearchConfigurationError, match="不一致"):
+        resolve_research_run(raw)
+
+
 @pytest.mark.parametrize(
     ("model_group", "legacy_profile"),
     [

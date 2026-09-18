@@ -1,2 +1,15 @@
 # @package material
+# 完整实验输入：两个夹爪家族的显式触觉—物体接触参数与场景层领域预设逐值一致，
+# 组合期强制校验，漂移即失败。solref 为 direct-format（timeconst, damping），
+# solimp 五元组与 friction 五元组为 MuJoCo 语义；力单位 N，长度单位 m。
 name: medium
+contact:
+  dm_gripper:
+    solref: [-650.0, -8.0]
+    solimp: [0.75, 0.95, 0.0025, 0.5, 2.0]
+    friction: [0.8, 0.8, 0.02, 0.001, 0.001]
+    condim: 3
+  robotiq_2f85:
+    solref: [-800.0, -9.0]
+    solimp: [0.75, 0.95, 0.0025, 0.5, 2.0]
+    friction: [0.8, 0.8, 0.02, 0.001, 0.001]

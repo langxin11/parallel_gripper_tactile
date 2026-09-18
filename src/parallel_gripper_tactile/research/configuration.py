@@ -191,9 +191,43 @@ class TaskSelection(_ResearchModel):
 
 
 class MaterialSelection(_ResearchModel):
-    """接触材料 preset 选择。"""
+    """接触材料 preset 选择；YAML 携带的接触参数与场景层领域预设强制一致。"""
 
     name: ObjectMaterial
+    # 旧直连入口的映射不带该块；Hydra 组合路径总是提供并校验。
+    contact: dict[str, dict[str, object]] | None = None
+
+    @model_validator(mode="after")
+    def validate_contact_matches_domain_presets(self) -> "MaterialSelection":
+        """拒绝 YAML 接触参数与运行时领域预设漂移，保证配置即完整实验输入。"""
+        if self.contact is None:
+            return self
+        from ..scenes.custom import OBJECT_CONTACT_PRESETS
+        from ..scenes.robotiq import (
+            _ROBOTIQ_CONTACT_FRICTION,
+            _ROBOTIQ_CONTACT_SOLIMP,
+            _ROBOTIQ_CONTACT_SOLREF,
+        )
+
+        preset = OBJECT_CONTACT_PRESETS[self.name]
+        dm = self.contact.get("dm_gripper", {})
+        expected_dm = {
+            "solref": list(preset.solref),
+            "solimp": list(preset.solimp),
+            "friction": list(preset.friction),
+            "condim": preset.condim,
+        }
+        if dm != expected_dm:
+            raise ValueError(f"material {self.name} 的 dm_gripper 接触参数与场景层领域预设不一致")
+        robotiq = self.contact.get("robotiq_2f85", {})
+        expected_robotiq = {
+            "solref": list(_ROBOTIQ_CONTACT_SOLREF[self.name]),
+            "solimp": list(_ROBOTIQ_CONTACT_SOLIMP),
+            "friction": list(_ROBOTIQ_CONTACT_FRICTION),
+        }
+        if robotiq != expected_robotiq:
+            raise ValueError(f"material {self.name} 的 robotiq_2f85 接触参数与场景层领域预设不一致")
+        return self
 
 
 class ExecutionConfig(_ResearchModel):
