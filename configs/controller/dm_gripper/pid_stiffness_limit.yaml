@@ -1,9 +1,0 @@
-# @package controller
-# 刚度感知位置限幅变体：PID 目标增量受预测力变化率约束。
-# selection 研究已因 stiff Step 极限环将其排除，保留 CLI 独立复现入口。
-# configure_force_controller 会启用 position_limit_enabled；限速值继承 _common 的 10 N/s。
-defaults:
-  - /controller/dm_gripper/_pid_base
-  - _self_
-
-name: pid-stiffness-limit

@@ -25,7 +25,6 @@ def test_all_dm_force_controllers_enable_shared_contact_supervisor() -> None:
     controllers = {
         "pid_only": "none",
         "pid_torque_ff": "window_linear",
-        "pid_stiffness_limit": "window_linear",
         "adrc_torque": "window_linear",
         "admittance": "none",
     }

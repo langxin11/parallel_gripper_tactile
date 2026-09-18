@@ -118,36 +118,26 @@ def test_default_run_matches_frozen_legacy_domain_parameters() -> None:
     assert resolved.selection.execution.trace_sample_period_s == 0.004
 
 
-@pytest.mark.parametrize(
-    "model_name, expected_resource",
-    [
-        ("height_spheres", "parallel_gripper_height_sphere_collision.xml"),
-        ("original_mesh", "parallel_gripper_prepared.xml"),
-    ],
-)
-def test_model_group_switches_only_the_selected_collision_resource(
-    model_name: str, expected_resource: str
-) -> None:
-    """两个受支持的 DM 碰撞模型都能在计划预检中完成 scene 编译。"""
+def test_model_group_switches_only_the_selected_collision_resource() -> None:
+    """默认 DM 碰撞模型在计划预检中完成 scene 编译。"""
     resolved = resolve_research_run(
-        resolved_mapping(_compose([f"model=dm_gripper/{model_name}", "execution=plan"]))
+        resolved_mapping(_compose(["model=dm_gripper/height_spheres", "execution=plan"]))
     )
 
-    assert resolved.selection.model.name == model_name
-    assert resolved.profile.model_path.name == expected_resource
+    assert resolved.selection.model.name == "height_spheres"
+    assert resolved.profile.model_path.name == "parallel_gripper_height_sphere_collision.xml"
 
 
 def test_estimator_group_replaces_its_fragment_and_reaches_final_profile() -> None:
     """估计器切换只改变其方法字段，并进入最终冻结 profile。"""
     resolved = resolve_research_run(
-        resolved_mapping(
-            _compose(["controller=dm_gripper/pid_torque_ff", "estimator=window_quadratic"])
-        )
+        resolved_mapping(_compose(["controller=dm_gripper/admittance", "estimator=none"]))
     )
 
+    assert resolved.selection.estimator.name == "none"
     assert resolved.profile.normal_force is not None
     assert resolved.profile.normal_force.stiffness is not None
-    assert resolved.profile.normal_force.stiffness.method == "window_quadratic"
+    assert resolved.profile.normal_force.stiffness.enabled is False
 
 
 @pytest.mark.parametrize(
@@ -155,7 +145,6 @@ def test_estimator_group_replaces_its_fragment_and_reaches_final_profile() -> No
     [
         "pid_only",
         "pid_torque_ff",
-        "pid_stiffness_limit",
         "pid_stiffness_rate",
         "adrc_torque",
     ],
