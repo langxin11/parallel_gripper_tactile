@@ -98,7 +98,7 @@ def execute_force_tracking(
             if controller_variant == "admittance"
             else 0.004
             if controller_variant in {"adrc-torque", "adrc-torque-td"}
-            else 0.01
+            else 0.008
         )
     run = RunDirectory.create(
         output_root,

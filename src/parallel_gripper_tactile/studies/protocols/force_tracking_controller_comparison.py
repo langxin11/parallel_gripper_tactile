@@ -547,7 +547,7 @@ def build_plan(
             "trace_sample_period_s": (
                 {str(task): ForceTrackingTask.load(task).control_period_s for task in config.tasks}
                 if config.trace_at_control_rate
-                else {"default": 0.01, "adrc-torque": 0.004}
+                else {"default": 0.008, "adrc-torque": 0.004}
             ),
             "trace_event_window_s": 0.2,
         },
