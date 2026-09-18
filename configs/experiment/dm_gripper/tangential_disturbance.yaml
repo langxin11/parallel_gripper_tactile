@@ -4,6 +4,7 @@ defaults:
   - override /model: dm_gripper/height_spheres
   - override /controller: dm_gripper/pid_torque_ff
   - override /estimator: window_linear
+  - override /scheduler: disturbance/dynamic_step
   - override /task: tangential_disturbance/ramp
   - override /material: hard
   - override /execution: run

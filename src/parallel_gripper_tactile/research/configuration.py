@@ -29,6 +29,7 @@ from ..experiments.tangential_disturbance import (
     TangentialDisturbanceTask,
     validate_tangential_disturbance_configuration,
 )
+from ..tangential_disturbance import DisturbancePolicyConfig
 from ..experiments.robotiq_discrete_force import (
     ControllerVariant as RobotiqControllerVariant,
     RobotiqDiscreteForceTask,
@@ -158,18 +159,20 @@ class EstimatorSelection(_ResearchModel):
 class SchedulerSelection(_ResearchModel):
     """目标力调度器选择；与外载任务、力跟踪控制器分离。"""
 
-    family: Literal["none", "force"]
-    name: Literal["none", "oracle", "adaptive"]
+    family: Literal["none", "force", "disturbance"]
+    name: Literal["none", "oracle", "adaptive", "dynamic_step"]
     path: Path | None = None
     definition: dict[str, object]
 
     @model_validator(mode="after")
     def validate_family_name(self) -> "SchedulerSelection":
-        """要求空调度器和力调度器的名称与家族一致。"""
+        """要求调度器名称与家族一致，非空调度器必须给出来源路径。"""
         if (self.family == "none") != (self.name == "none"):
             raise ValueError("scheduler family and name are inconsistent")
-        if self.family == "force" and self.path is None:
-            raise ValueError("force scheduler requires a source path")
+        if self.family in {"force", "disturbance"} and self.path is None:
+            raise ValueError("non-empty scheduler requires a source path")
+        if self.family == "disturbance" and self.name != "dynamic_step":
+            raise ValueError("disturbance scheduler must be named dynamic_step")
         return self
 
 
@@ -252,8 +255,11 @@ class ResearchRunConfig(_ResearchModel):
         if self.experiment.kind == "force_scheduling":
             if self.scheduler.family != "force":
                 raise ValueError("force scheduling requires a force scheduler")
+        elif self.experiment.kind == "tangential_disturbance":
+            if self.scheduler.family != "disturbance":
+                raise ValueError("tangential disturbance requires a disturbance scheduler")
         elif self.scheduler.family != "none":
-            raise ValueError("force scheduler is only valid for force-scheduling experiments")
+            raise ValueError("non-empty scheduler is only valid for scheduling experiments")
         if self.experiment.kind == "tangential_disturbance":
             if self.execution.viewer:
                 raise ValueError("tangential disturbance does not support viewer")
@@ -302,7 +308,7 @@ class ResolvedResearchRun:
     scheduler_source: Path | None
     profile: GripperProfile
     task: RunTask
-    scheduler: OracleForceSchedulerConfig | UnifiedAdaptiveConfig | None
+    scheduler: OracleForceSchedulerConfig | UnifiedAdaptiveConfig | DisturbancePolicyConfig | None
 
     def effective_parameters(self) -> dict[str, object]:
         """返回可追溯且可 JSON 序列化的最终有效参数。"""
@@ -578,13 +584,17 @@ def resolve_research_run(
             if selection.scheduler.path is None
             else _repository_path(selection.scheduler.path, repository_root=root)
         )
-        scheduler: OracleForceSchedulerConfig | UnifiedAdaptiveConfig | None
+        scheduler: (
+            OracleForceSchedulerConfig | UnifiedAdaptiveConfig | DisturbancePolicyConfig | None
+        )
         if selection.scheduler.name == "oracle":
             scheduler = OracleForceSchedulerConfig.model_validate(selection.scheduler.definition)
         elif selection.scheduler.name == "adaptive":
             scheduler = TypeAdapter(UnifiedAdaptiveConfig).validate_python(
                 selection.scheduler.definition
             )
+        elif selection.scheduler.name == "dynamic_step":
+            scheduler = DisturbancePolicyConfig.model_validate(selection.scheduler.definition)
         else:
             scheduler = None
         if (
@@ -633,8 +643,10 @@ def resolve_research_run(
                 render_fps=resolved_execution.render_fps,
                 realtime_factor=resolved_execution.realtime_factor,
             )
-        elif isinstance(task, TangentialDisturbanceTask):
-            validate_tangential_disturbance_configuration(profile, task)
+        elif isinstance(task, TangentialDisturbanceTask) and isinstance(
+            scheduler, DisturbancePolicyConfig
+        ):
+            validate_tangential_disturbance_configuration(profile, task, scheduler)
     except (OSError, ValidationError, ValueError) as error:
         raise ResearchConfigurationError(str(error)) from error
     resolved_selection = ResearchRunConfig.model_validate(

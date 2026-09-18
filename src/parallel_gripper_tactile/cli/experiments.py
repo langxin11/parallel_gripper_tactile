@@ -23,6 +23,7 @@ from ..experiments.grasp import run_acceptance
 from ..experiments.grasp_video import record_custom_grasp_video
 from ..experiments.robotiq_discrete_force import RobotiqDiscreteForceTask
 from ..experiments.tangential_disturbance import TangentialDisturbanceTask
+from ..tangential_disturbance import DisturbancePolicyConfig
 from ..config.profiles import GripperProfile, validate_resolved_profile
 from ..protocols import DisturbanceProtocol
 from ..artifacts import RunDirectory
@@ -279,11 +280,15 @@ def run_tangential_disturbance(
         resolved = _composed_run(experiment, set_values)
         if not isinstance(resolved.task, TangentialDisturbanceTask):
             raise ValueError("selected experiment does not define a tangential-disturbance task")
+        if not isinstance(resolved.scheduler, DisturbancePolicyConfig):
+            raise ValueError("selected experiment does not define a disturbance scheduler")
         run, result = execute_tangential_disturbance(
             profile=_profile_snapshot(resolved.profile),
             resolved_profile=resolved.profile,
             task_path=resolved.task_source,
             disturbance_task=resolved.task,
+            policy_config=resolved.scheduler,
+            policy_source=resolved.scheduler_source,
             output_root=resolved.selection.execution.output_root,
             run_name=run_name,
             run_prefix=run_prefix,

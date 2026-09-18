@@ -16,6 +16,7 @@ from ..experiments.tangential_disturbance import (
     TangentialDisturbanceTask,
     run_tangential_disturbance,
 )
+from ..tangential_disturbance import DisturbancePolicyConfig
 
 
 def execute_tangential_disturbance(
@@ -24,6 +25,8 @@ def execute_tangential_disturbance(
     resolved_profile: GripperProfile | None = None,
     task_path: Path,
     disturbance_task: TangentialDisturbanceTask | None = None,
+    policy_config: DisturbancePolicyConfig | None = None,
+    policy_source: Path | None = None,
     output_root: Path = Path("outputs"),
     run_name: str | None = None,
     run_prefix: str | None = None,
@@ -31,6 +34,7 @@ def execute_tangential_disturbance(
 ) -> tuple[RunDirectory, TangentialDisturbanceResult]:
     """运行一次切向扰动实验，并保存可复现输入与实际生成的产物。"""
     task = disturbance_task or TangentialDisturbanceTask.load(task_path)
+    policy = policy_config or DisturbancePolicyConfig()
     configured = (
         validate_resolved_profile(resolved_profile)
         if resolved_profile is not None
@@ -53,6 +57,7 @@ def execute_tangential_disturbance(
             "object_material": task.object_material,
             "cube_mass_kg": float(task.cube_mass_kg),
             "friction_coefficient": float(task.friction_coefficient),
+            "scheduler": "disturbance/dynamic_step",
         },
         run_name=run_name,
         run_prefix=run_prefix,
@@ -68,6 +73,21 @@ def execute_tangential_disturbance(
                 encoding="utf-8",
             )
         run.register_artifact(task_snapshot)
+        policy_snapshot = run.artifact_path("scheduler.yaml")
+        policy_snapshot.write_text(
+            yaml.safe_dump(
+                {
+                    "family": "disturbance",
+                    "name": "dynamic_step",
+                    "path": None if policy_source is None else str(policy_source),
+                    "definition": policy.model_dump(mode="json"),
+                },
+                allow_unicode=True,
+                sort_keys=True,
+            ),
+            encoding="utf-8",
+        )
+        run.register_artifact(policy_snapshot)
         effective_parameters_path = run.artifact_path("effective_parameters.json")
         effective_parameters_path.write_text(
             json.dumps(
@@ -75,6 +95,7 @@ def execute_tangential_disturbance(
                     "schema_version": 1,
                     "profile": configured.model_dump(mode="json"),
                     "task": task.model_dump(mode="json"),
+                    "scheduler": policy.model_dump(mode="json"),
                     "runtime": {
                         "profile_path": (
                             "composed_profile"
@@ -100,6 +121,7 @@ def execute_tangential_disturbance(
         result = run_tangential_disturbance(
             configured,
             task=task,
+            policy_config=policy,
             output_csv=trace_path,
             output_plot=plot_path,
         )

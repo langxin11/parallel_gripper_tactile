@@ -139,6 +139,8 @@ def execute_research_run(
         run, result = execute_tangential_disturbance(
             **common,
             disturbance_task=resolved.task,
+            policy_config=resolved.scheduler,
+            policy_source=resolved.scheduler_source,
         )
     else:
         raise TypeError(f"unsupported run task: {type(resolved.task).__name__}")

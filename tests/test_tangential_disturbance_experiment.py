@@ -23,10 +23,12 @@ def test_dynamic_policy_recovers_from_disturbance(tmp_path: Path, kind: str):
     """相同初始抓力下的三种扰动均需满足滑移上限和最终稳定。"""
     resolved = _resolve(f"task=tangential_disturbance/{kind}", "seed=1")
     trace = tmp_path / "trace.csv"
-    result = run_tangential_disturbance(resolved.profile, task=resolved.task, output_csv=trace)
+    result = run_tangential_disturbance(
+        resolved.profile, task=resolved.task, policy_config=resolved.scheduler, output_csv=trace
+    )
     assert result.passed
     assert result.initial_hold_passed and result.completed
-    assert result.final_target_force_n > resolved.task.policy.initial_force_n + 0.5
+    assert result.final_target_force_n > resolved.scheduler.initial_force_n + 0.5
     assert result.max_tangential_displacement_m < resolved.task.metrics.slip_threshold_m
     rows = list(csv.DictReader(trace.open()))
     for row in rows:
@@ -39,7 +41,7 @@ def test_dynamic_policy_recovers_from_disturbance(tmp_path: Path, kind: str):
     assert np.min(np.diff(targets)) >= -1e-12
     assert (
         max(float(r["target_force_rate_n_s"]) for r in rows)
-        <= resolved.task.policy.max_force_rate_n_s + 1e-9
+        <= resolved.scheduler.max_force_rate_n_s + 1e-9
     )
     assert (
         max(abs(float(r["motor_torque_n_m"])) for r in rows) <= resolved.profile.control.mit.t_max
@@ -57,13 +59,15 @@ def test_dynamic_policy_recovers_from_disturbance(tmp_path: Path, kind: str):
 def test_constant_force_fails_same_step_without_hiding_slip():
     """同样求解器下，固定抓力不足时必须保留科学失败。"""
     resolved = _resolve(
-        "task=tangential_disturbance/step", "task.definition.policy.strategy=constant"
+        "task=tangential_disturbance/step", "scheduler.definition.strategy=constant"
     )
-    result = run_tangential_disturbance(resolved.profile, task=resolved.task)
+    result = run_tangential_disturbance(
+        resolved.profile, task=resolved.task, policy_config=resolved.scheduler
+    )
     assert result.simulation_stable and result.initial_hold_passed and result.completed
     assert not result.passed and not result.slip_passed
     assert result.max_tangential_displacement_m > resolved.task.metrics.slip_threshold_m
-    assert result.final_target_force_n == resolved.task.policy.initial_force_n
+    assert result.final_target_force_n == resolved.scheduler.initial_force_n
     assert result.increase_count == 0
 
 
@@ -75,10 +79,12 @@ def test_zero_disturbance_runner_preserves_artifacts_without_force_ratcheting(tm
         resolved_profile=resolved.profile,
         task_path=resolved.task_source,
         disturbance_task=resolved.task,
+        policy_config=resolved.scheduler,
+        policy_source=resolved.scheduler_source,
         output_root=tmp_path,
     )
     assert result.passed and result.increase_count == 0
-    assert result.final_target_force_n == resolved.task.policy.initial_force_n
+    assert result.final_target_force_n == resolved.scheduler.initial_force_n
     metrics = json.loads((run.path / "metrics.json").read_text())
     assert metrics["passed"] is True
     assert (run.path / "plot.pdf").read_bytes().startswith(b"%PDF")
@@ -90,7 +96,9 @@ def test_zero_disturbance_runner_preserves_artifacts_without_force_ratcheting(tm
 def test_insufficient_initial_grip_cannot_be_scored_as_recovered():
     """初始保持已失败时，不启动扰动，也不伪造恢复时间。"""
     resolved = _resolve("task.definition.cube_mass_kg=1.0")
-    result = run_tangential_disturbance(resolved.profile, task=resolved.task)
+    result = run_tangential_disturbance(
+        resolved.profile, task=resolved.task, policy_config=resolved.scheduler
+    )
     assert not result.passed and not result.initial_hold_passed
     assert result.disturbance_start_time_s is None
     assert result.recovery_time_s is None
@@ -113,7 +121,9 @@ def test_transient_tracking_loss_during_initial_hold_is_not_forgotten(monkeypatc
 
     monkeypatch.setattr(experiment.NormalForceController, "step", transient_state)
     resolved = _resolve()
-    result = run_tangential_disturbance(resolved.profile, task=resolved.task)
+    result = run_tangential_disturbance(
+        resolved.profile, task=resolved.task, policy_config=resolved.scheduler
+    )
     assert injected
     assert result.simulation_stable and not result.initial_hold_passed
     assert result.disturbance_start_time_s is None and not result.passed

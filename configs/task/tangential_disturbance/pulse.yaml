@@ -14,25 +14,6 @@ definition:
     feedforward_force_n: 1.0
   solver:
     noslip_iterations: 5
-  policy:
-    strategy: dynamic_step
-    detector: shear_increase
-    initial_force_n: 0.8
-    max_force_n: 5.0
-    max_force_rate_n_s: 30.0
-    update_period_s: 0.01
-    filter_tau_s: 0.005
-    confirm_time_s: 0.006
-    shear_threshold_n: 0.08
-    shear_gain: 1.0
-    fixed_step_n: 0.15
-    min_step_n: 0.03
-    max_step_n: 0.3
-    ratio_window_s: 0.06
-    normal_delta_floor_n: 0.02
-    ratio_threshold: -0.1
-    closure_scale_m: 0.01
-    contact_floor_n: 0.05
   disturbance:
     kind: pulse
     amplitude_n: 1.5

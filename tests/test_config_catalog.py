@@ -50,7 +50,7 @@ def test_catalog_lists_independent_force_schedulers() -> None:
     """调度器作为独立 Hydra 组对用户可见。"""
     schedulers = {entry.name for entry in list_configurations("scheduler")}
 
-    assert schedulers == {"force/adaptive", "force/oracle", "none"}
+    assert schedulers == {"disturbance/dynamic_step", "force/adaptive", "force/oracle", "none"}
 
 
 def test_catalog_rejects_unknown_group_without_reading_paths() -> None:

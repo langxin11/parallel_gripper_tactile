@@ -291,6 +291,8 @@ def test_robotiq_model_groups_match_frozen_profiles(model_group: str, legacy_pro
         ["controller.torque_adrc.measurement_filter_cutoff_hz=-1"],
         ["scheduler=force/adaptive"],
         ["experiment=dm_gripper/force_scheduling_adaptive", "scheduler=none"],
+        ["experiment=dm_gripper/tangential_disturbance", "scheduler=none"],
+        ["experiment=dm_gripper/tangential_disturbance", "scheduler=force/oracle"],
     ],
 )
 def test_illegal_component_combinations_fail_before_execution(overrides: list[str]) -> None:

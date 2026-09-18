@@ -97,7 +97,7 @@ class TangentialDisturbanceMetrics(_TaskModel):
 
 
 class TangentialDisturbanceTask(_TaskModel):
-    """触觉增力实验配置，真实摩擦仅供场景使用。"""
+    """切向扰动实验的外载场景、时钟与验收配置；目标力策略由 scheduler 拥有。"""
 
     schema_version: Literal[1] = 1
     name: Annotated[str, Field(min_length=1)] = "tangential_disturbance"
@@ -106,7 +106,6 @@ class TangentialDisturbanceTask(_TaskModel):
     object_material: ObjectMaterial = "hard"
     approach: ForceSchedulingApproach = ForceSchedulingApproach(settle_after_contact_s=0.5)
     solver: ForceSchedulingSolverConfig = ForceSchedulingSolverConfig()
-    policy: DisturbancePolicyConfig = DisturbancePolicyConfig()
     disturbance: TangentialDisturbanceLoad = TangentialDisturbanceLoad()
     metrics: TangentialDisturbanceMetrics = TangentialDisturbanceMetrics()
     control_period_s: Annotated[FiniteFloat, Field(gt=0)] = 0.004
@@ -119,8 +118,6 @@ class TangentialDisturbanceTask(_TaskModel):
             < self.metrics.recovery_dwell_s
         ):
             raise ValueError("final hold must cover the recovery dwell")
-        if self.policy.update_period_s < self.control_period_s:
-            raise ValueError("policy update period must not be smaller than control period")
         return self
 
     @classmethod
@@ -162,7 +159,9 @@ class TangentialDisturbanceResult:
 
 
 def validate_tangential_disturbance_configuration(
-    profile: GripperProfile, task: TangentialDisturbanceTask
+    profile: GripperProfile,
+    task: TangentialDisturbanceTask,
+    policy: DisturbancePolicyConfig,
 ) -> None:
     """在执行前验证 MIT 外环、接触阈值和物理周期。"""
     force = profile.normal_force
@@ -170,8 +169,10 @@ def validate_tangential_disturbance_configuration(
         raise ValueError("tangential disturbance requires MIT normal-force control")
     if force.admittance is not None or force.adrc is not None or force.torque_adrc is not None:
         raise ValueError("tangential disturbance currently supports PID-based MIT controllers")
-    if task.policy.initial_force_n < force.contact_threshold_n:
+    if policy.initial_force_n < force.contact_threshold_n:
         raise ValueError("initial force must cover the contact threshold")
+    if policy.update_period_s < task.control_period_s:
+        raise ValueError("policy update period must not be smaller than control period")
     model = build_custom_grasp_model(
         profile,
         cube_mass=task.cube_mass_kg,
@@ -186,6 +187,7 @@ def run_tangential_disturbance(
     profile_path: Path | GripperProfile,
     *,
     task: TangentialDisturbanceTask,
+    policy_config: DisturbancePolicyConfig,
     output_csv: Path | None = None,
     output_plot: Path | None = None,
 ) -> TangentialDisturbanceResult:
@@ -195,7 +197,7 @@ def run_tangential_disturbance(
         if isinstance(profile_path, GripperProfile)
         else load_profile(profile_path)
     )
-    validate_tangential_disturbance_configuration(profile, task)
+    validate_tangential_disturbance_configuration(profile, task, policy_config)
     model = build_custom_grasp_model(
         profile,
         cube_mass=task.cube_mass_kg,
@@ -211,7 +213,7 @@ def run_tangential_disturbance(
     kinematics = CrankSliderKinematics.from_config(force.geometry)
     joint = model.joint(f"{GRIPPER_PREFIX}{profile.actuator}").id
     qadr = model.jnt_qposadr[joint]
-    policy = TactileDisturbancePolicy(task.policy)
+    policy = TactileDisturbancePolicy(policy_config)
     rng = np.random.default_rng(force.sensor_noise_seed)
     timer = SimulationTimer(task.control_period_s)
     support = model.geom(SUPPORT_GEOM_NAME).id
@@ -311,7 +313,7 @@ def run_tangential_disturbance(
                 contact_time = now
             force_ready = (
                 control.state == "force_tracking"
-                and abs(capacity.normal_force_n / 2 - task.policy.initial_force_n)
+                and abs(capacity.normal_force_n / 2 - policy_config.initial_force_n)
                 <= task.metrics.force_tolerance_n
             )
             if release_time is not None and start_time is None:

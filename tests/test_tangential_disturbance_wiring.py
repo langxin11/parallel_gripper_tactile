@@ -79,9 +79,12 @@ def test_runner_snapshots_effective_task_and_registers_existing_artifacts(
     assert isinstance(resolved.task, TangentialDisturbanceTask)
     seen: dict[str, object] = {}
 
-    def fake_run(profile: object, *, task: object, output_csv: Path, output_plot: Path):
+    def fake_run(
+        profile: object, *, task: object, policy_config: object, output_csv: Path, output_plot: Path
+    ):
         seen["profile"] = profile
         seen["task"] = task
+        seen["policy_config"] = policy_config
         output_csv.write_text("time_s\n0.0\n", encoding="utf-8")
         output_plot.write_bytes(b"png")
         output_plot.with_suffix(".pdf").write_bytes(b"pdf")
@@ -98,7 +101,11 @@ def test_runner_snapshots_effective_task_and_registers_existing_artifacts(
     )
 
     assert result.passed
-    assert seen == {"profile": resolved.profile, "task": resolved.task}
+    assert seen == {
+        "profile": resolved.profile,
+        "task": resolved.task,
+        "policy_config": resolved.scheduler,
+    }
     assert json.loads((run.path / "metrics.json").read_text(encoding="utf-8"))["passed"] is True
     effective = json.loads((run.path / "effective_parameters.json").read_text(encoding="utf-8"))
     assert effective["task"] == resolved.task.model_dump(mode="json")

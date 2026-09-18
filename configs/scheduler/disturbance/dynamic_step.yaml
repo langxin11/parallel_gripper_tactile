@@ -1,0 +1,25 @@
+# @package scheduler
+# 切向扰动场景的反应式增力策略；只依赖触觉剪切与比值观测，不读取场景真值。
+# 力与步长单位均为 N，时间单位为 s；update_period_s 不得小于任务控制周期。
+family: disturbance
+name: dynamic_step
+path: configs/scheduler/disturbance/dynamic_step.yaml
+definition:
+  strategy: dynamic_step
+  detector: shear_increase
+  initial_force_n: 0.8
+  max_force_n: 5.0
+  max_force_rate_n_s: 30.0
+  update_period_s: 0.01
+  filter_tau_s: 0.005
+  confirm_time_s: 0.006
+  shear_threshold_n: 0.08
+  shear_gain: 1.0
+  fixed_step_n: 0.15
+  min_step_n: 0.03
+  max_step_n: 0.3
+  ratio_window_s: 0.06
+  normal_delta_floor_n: 0.02
+  ratio_threshold: -0.1
+  closure_scale_m: 0.01
+  contact_floor_n: 0.05
