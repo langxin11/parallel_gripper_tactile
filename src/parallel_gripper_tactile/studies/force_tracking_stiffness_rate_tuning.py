@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from ..config.profiles import StiffnessEstimatorMethod
 from ..scenes.custom import ObjectMaterial
-from .force_tracking_ablation import SeedSweep
+from .common import SeedSweep
 
 
 class _TuningModel(BaseModel):

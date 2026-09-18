@@ -10,7 +10,7 @@ from parallel_gripper_tactile.studies.force_tracking_torque_adrc_tuning import (
     TorqueAdrcCandidate,
     load_torque_adrc_tuning_config,
 )
-from parallel_gripper_tactile.studies.force_tracking_ablation import StudyConfigError
+from parallel_gripper_tactile.studies.common import StudyConfigError
 from parallel_gripper_tactile.studies.protocols import (
     force_tracking_torque_adrc_tuning as package_protocol,
 )

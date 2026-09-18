@@ -13,7 +13,7 @@ import yaml
 
 from ..config.profiles import StiffnessEstimatorMethod
 from ..scenes.custom import ObjectMaterial
-from .force_tracking_ablation import SeedSweep, StudyConfigError
+from .common import SeedSweep, StudyConfigError
 
 
 TorqueAdrcTuningStageName = Literal["coarse", "confirm"]

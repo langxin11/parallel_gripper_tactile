@@ -115,7 +115,6 @@ def test_study_lifecycle_maps_to_all_migrated_protocol_tests() -> None:
 
     assert selected is not None
     assert "tests/test_study_lifecycle.py" in selected
-    assert "tests/test_force_tracking_ablation.py" in selected
     assert "tests/test_force_tracking_controller_comparison_script.py" in selected
     assert "tests/test_force_tracking_torque_adrc_tuning.py" in selected
 

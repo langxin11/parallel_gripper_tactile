@@ -62,14 +62,12 @@ uv run python scripts/research/study.py research=force_controller_selection/stud
 | 1 | `stiffness_ground_truth_validation` | 检查默认估计器的量级、有效性与参考边界。 |
 | 2 | `force_tracking_stiffness_limit_pilot` | 比较无限幅、在线限幅与准静态参考限幅。 |
 | 3 | `force_tracking_stiffness_rate_validation` | 在统一 250 Hz 外环下检查控制结构的极限环。 |
-| 4 | `force_controller_ablation` | 检查 PID、刚度位置前馈与力矩前馈的贡献。 |
 | 5 | `force_tracking_stiffness_rate_tuning` → `force_tracking_stiffness_rate_refinement` → `force_tracking_stiffness_rate_confirmation` | 初筛、最坏工况再调优、固定 250 Hz 的跨材料确认。 |
 | 6 | `torque_adrc_tuning` | coarse 筛选，再由 confirm 复验候选。 |
 | 决策门 | 人工审查 | 检查状态、科学失败、执行异常、排名与配对统计；更新并提交配置、测试和文档。 |
 | 7 | `force_controller_selection` | 比较已经冻结的控制器。 |
 | 独立研究 | `friction_local_slip_validation`、`robotiq_discrete_force_validation` | 分别验证局部起滑与整数命令控制，不阻塞 DM 选型。 |
 
-`stiffness_estimator_validation` 仅比较估计器接入控制后的执行指标，不作为刚度精度或默认方法选型依据。
 Torque ADRC 的 confirm 是入口强制要求上游谱系的阶段，必须指定已完成 coarse 的绝对目录：
 
 ```bash

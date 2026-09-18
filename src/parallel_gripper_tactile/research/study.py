@@ -23,12 +23,8 @@ from ..scenes.robotiq import RobotiqObjectMaterial
 from ..studies.friction_estimation_local_slip import (
     FrictionEstimationLocalSlipStudyConfig,
 )
-from ..studies.force_tracking_ablation import ForceTrackingAblationConfig
 from ..studies.force_tracking_comparison import (
     ForceTrackingComparisonConfig,
-)
-from ..studies.force_tracking_stiffness_estimator_comparison import (
-    ForceTrackingStiffnessEstimatorComparisonConfig,
 )
 from ..studies.force_tracking_stiffness_limit import ForceTrackingStiffnessLimitConfig
 from ..studies.force_tracking_stiffness_rate_tuning import (
@@ -50,13 +46,9 @@ from ..studies.lifecycle import (
 from ..studies.robotiq_discrete_force import (
     RobotiqDiscreteForceStudyConfig,
 )
-from ..studies.protocols import force_tracking_ablation as ablation_protocol
 from ..studies.protocols import friction_estimation_local_slip as friction_local_slip_protocol
 from ..studies.protocols import (
     force_tracking_controller_comparison as comparison_protocol,
-)
-from ..studies.protocols import (
-    force_tracking_stiffness_estimator_comparison as stiffness_comparison_protocol,
 )
 from ..studies.protocols import (
     force_tracking_stiffness_limit as stiffness_limit_protocol,
@@ -79,10 +71,8 @@ from .composition import compose_research_run
 
 StudyKind = Literal[
     "force_tracking_controller_comparison",
-    "force_tracking_ablation",
     "force_tracking_torque_adrc_tuning",
     "friction_estimation_local_slip",
-    "force_tracking_stiffness_estimator_comparison",
     "force_tracking_stiffness_limit",
     "force_tracking_stiffness_rate_tuning",
     "force_tracking_stiffness_rate_confirmation",
@@ -173,10 +163,8 @@ class ResearchStudyConfig(_StudyModel):
 
 StudyDomainConfig = (
     ForceTrackingComparisonConfig
-    | ForceTrackingAblationConfig
     | ForceTrackingTorqueAdrcTuningConfig
     | FrictionEstimationLocalSlipStudyConfig
-    | ForceTrackingStiffnessEstimatorComparisonConfig
     | ForceTrackingStiffnessLimitConfig
     | ForceTrackingStiffnessRateTuningConfig
     | StiffnessGroundTruthValidationConfig
@@ -244,39 +232,6 @@ def _validate_comparison(
             base_profile,
             variant=controller,
             stiffness_estimator_method=config.stiffness_estimator_method,
-            sensor_noise_seed=seed,
-        )
-        for task in tasks.values():
-            for material in config.materials:
-                validate_force_tracking_configuration(profile, task=task, object_material=material)
-
-
-def _validate_ablation(config: ForceTrackingAblationConfig, base_profile: GripperProfile) -> None:
-    """逐组件和科学维度预检 PID 消融方案。"""
-    task = ForceTrackingTask.load(config.task)
-    seed = config.seeds.values()[0]
-    for controller in config.controllers:
-        profile = configure_force_controller(
-            base_profile,
-            variant=controller,
-            sensor_noise_seed=seed,
-        )
-        for material in config.materials:
-            validate_force_tracking_configuration(profile, task=task, object_material=material)
-
-
-def _validate_stiffness_estimator_comparison(
-    config: ForceTrackingStiffnessEstimatorComparisonConfig,
-    base_profile: GripperProfile,
-) -> None:
-    """逐估计器、任务和材料预检刚度估计器对比方案。"""
-    tasks = {path: ForceTrackingTask.load(path) for path in config.tasks}
-    seed = config.seeds.values()[0]
-    for estimator in config.estimators:
-        profile = configure_force_controller(
-            base_profile,
-            variant="pid-stiffness-ff",
-            stiffness_estimator_method=estimator,
             sensor_noise_seed=seed,
         )
         for task in tasks.values():
@@ -524,13 +479,6 @@ _STUDY_ADAPTERS: dict[StudyKind, _StudyAdapter] = {
         comparison_protocol,
         _validate_comparison,
     ),
-    "force_tracking_ablation": _StudyAdapter(
-        ForceTrackingAblationConfig,
-        ablation_protocol,
-        _validate_ablation,
-        scalar_paths=("profile", "task", "output_root"),
-        sequence_paths=(),
-    ),
     "force_tracking_torque_adrc_tuning": _StudyAdapter(
         ForceTrackingTorqueAdrcTuningConfig,
         torque_tuning_protocol,
@@ -544,11 +492,6 @@ _STUDY_ADAPTERS: dict[StudyKind, _StudyAdapter] = {
         _validate_local_slip,
         sequence_paths=(),
         nested_paths=(("scenarios", "task"),),
-    ),
-    "force_tracking_stiffness_estimator_comparison": _StudyAdapter(
-        ForceTrackingStiffnessEstimatorComparisonConfig,
-        stiffness_comparison_protocol,
-        _validate_stiffness_estimator_comparison,
     ),
     "stiffness_ground_truth_validation": _StudyAdapter(
         StiffnessGroundTruthValidationConfig,

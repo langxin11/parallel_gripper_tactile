@@ -103,7 +103,7 @@ uv run pgt compare tactile \
 任务与 seed 由 `study.definition` 的条件矩阵唯一拥有，输出目录由 `execution.output_root` 唯一拥有。
 因此 `study.definition` 不再重复保存完整 profile 路径或 `output_root`。
 
-推荐的科学决策顺序是“默认 `window_linear` 合理性检查、刚度位置限幅三臂验证、刚度速率控制频率验证与 PID 模块消融 → 刚度速率参数调优、Torque ADRC coarse／confirm 和独立导纳调优
+推荐的科学决策顺序是“默认 `window_linear` 合理性检查、刚度位置限幅三臂验证、刚度速率控制频率验证 → 刚度速率参数调优、Torque ADRC coarse／confirm
 → 人工审查并冻结配置 → 最终控制器比较”。局部起滑与 Robotiq 离散力属于独立研究。这个顺序不改变
 配置所有权：各 Study 不会自动回写优胜参数，只有 Torque ADRC 的 `coarse → confirm` 构成程序强制的
 谱系依赖。
@@ -113,7 +113,6 @@ uv run pgt compare tactile \
 uv run python scripts/research/study.py research=stiffness_ground_truth_validation/study
 uv run python scripts/research/study.py research=force_tracking_stiffness_limit_pilot/study
 uv run python scripts/research/study.py research=force_tracking_stiffness_rate_validation/study
-uv run python scripts/research/study.py research=force_controller_ablation/study
 
 # 参数调优；速率调优保留 pid-torque-ff 性能基线，ADRC confirm 必须绑定已完成 coarse 的绝对目录。
 uv run python scripts/research/study.py research=force_tracking_stiffness_rate_tuning/study

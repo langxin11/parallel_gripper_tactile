@@ -56,7 +56,9 @@ def test_default_comparison_uses_shifted_contact_presets() -> None:
     assert "pid-stiffness-limit" not in config.controllers
     assert "pid-stiffness-rate" in config.controllers
     assert "adrc-torque" in config.controllers
-    assert len(config.conditions()) == 162
+    assert "pid-stiffness-ff" not in config.controllers
+    assert "full" not in config.controllers
+    assert len(config.conditions()) == 108
 
 
 @pytest.mark.parametrize(

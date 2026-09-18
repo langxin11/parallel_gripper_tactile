@@ -18,6 +18,9 @@ study:
       direct-torque: 历史 135-run 证据显示跨任务 RMSE 分别恶化约 37.7%、204.5% 与 121%，配置入口已移除。
       adrc: 一阶位置式模型阶次不匹配，配置入口已移除。
       pid-stiffness-limit: 250 Hz stiff Step 出现约 0.326 N 平台标准差和明显极限环，不进入最终比较。
+      full: 消融证据显示刚度位置前馈附加收益接近于零（36 条件 RMSE 差约 2.5e-05 N），
+        刚度位置前馈退役，PID 代表改为 pid-torque-ff。
+      pid-stiffness-ff: 同 full，刚度位置前馈退役，随消融研究一并 concluded 退役。
   definition:
     name: force_tracking_controller_comparison
     tasks:
@@ -26,17 +29,15 @@ study:
       - configs/task/force_tracking/mixed.yaml
     controllers:
       - pid-only
+      # pid-torque-ff 为 PID 基线代表（刚度位置前馈退役后的上界）。
       - pid-torque-ff
-      - pid-stiffness-ff
-      - full
-      # direct-torque 为位置式 MIT 力控的直接力矩式对照；矩阵由 108 扩至 135 条。
-      # 2026-09-01 历史 108-run 基准的复现以当时 manifest 与本文件 git 历史为准。
-      #- direct-torque
       - pid-stiffness-rate
       # 一阶位置式 adrc 因模型阶次不匹配，不再参加默认正式矩阵；CLI 配置入口已移除，
       # 变体派生仍保留在代码层。
-      # adrc-torque 为二阶直接力矩 MB-ADRC；默认矩阵为 162 条。
+      # adrc-torque 为二阶直接力矩 MB-ADRC；默认矩阵为 108 条。
       - adrc-torque
+      # full 与 pid-stiffness-ff 已随刚度位置前馈退役移出矩阵（见 exclusions）；
+      # 历史 162 条矩阵的复现以当时 manifest 与本文件 git 历史为准。
     # 当前控制结构验证与调优统一固定 window_linear；历史基准按其 manifest 解释。
     stiffness_estimator_method: window_linear
     materials:

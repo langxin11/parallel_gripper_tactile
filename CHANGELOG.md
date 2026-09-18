@@ -108,6 +108,9 @@
 
 ### 变更
 
+- 控制器比较研究矩阵重定义：移除随刚度位置前馈退役的 `full` 与 `pid-stiffness-ff`，
+  PID 代表改为基线 `pid-torque-ff`，矩阵为 4 控制器 × 3 任务 × 3 材料 × 3 seed 共 108 条；
+  历史 162 条矩阵的复现以当时 manifest 与配置 git 历史为准。
 - PID 基线控制器切换为 `pid-torque-ff`（PID 位置修正＋机构力矩前馈），退役刚度位置前馈：
   消融证据显示刚度加法修正的附加收益接近于零（RMSE 差约 2.5e-05 N）。基线配置
   `position_feedforward_gain` 置 0，`full` 与 `pid-stiffness-ff` 变体改为代码内自包含派生
@@ -322,6 +325,11 @@
 
 ### 移除
 
+- 退役 `force_controller_ablation`（PID 模块消融）与 `force_tracking_stiffness_estimator_comparison`
+  （固定 `pid-stiffness-ff` 的估计器对比）两条研究线：前者的问题已由历史 36 条件运行回答
+  （力矩前馈贡献约 32%，刚度位置前馈接近于零），后者的存在前提随刚度位置前馈退役消失，
+  结论均已存档于 `docs/control-comparison-ablation.md` 与科研报告；研究配置、协议、专属实现
+  与测试同步移除，共用 `SeedSweep`／`StudyConfigError` 抽至 `studies/common.py`。
 - 移除 `controller=dm_gripper/full` 与 `controller=dm_gripper/pid_stiffness_ff` 两个 CLI
   配置入口（刚度位置前馈退役）；变体派生与行为测试保留在代码层，历史研究复现以当时
   git 版本或内存派生为准。

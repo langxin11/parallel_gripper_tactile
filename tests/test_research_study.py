@@ -22,7 +22,6 @@ from parallel_gripper_tactile.research.study import (
     execute_research_study,
     resolve_research_study,
 )
-from parallel_gripper_tactile.studies.force_tracking_ablation import load_study_config
 from parallel_gripper_tactile.studies.force_tracking_comparison import load_comparison_config
 from parallel_gripper_tactile.studies.force_tracking_torque_adrc_tuning import (
     ForceTrackingTorqueAdrcTuningConfig,
@@ -39,12 +38,7 @@ from parallel_gripper_tactile.studies.tabular import write_rows_csv
 CONFIG_ROOT = REPOSITORY_ROOT / "configs"
 STUDY_GROUPS = {
     "force_tracking_controller_comparison": ("force_controller_selection/study", []),
-    "force_tracking_ablation": ("force_controller_ablation/study", []),
     "friction_estimation_local_slip": ("friction_local_slip_validation/study", []),
-    "force_tracking_stiffness_estimator_comparison": (
-        "stiffness_estimator_validation/study",
-        [],
-    ),
     "stiffness_ground_truth_validation": (
         "stiffness_ground_truth_validation/study",
         [],
@@ -82,9 +76,7 @@ STUDY_GROUPS = {
     "research_group",
     [
         "force_controller_selection/study",
-        "force_controller_ablation/study",
         "friction_local_slip_validation/study",
-        "stiffness_estimator_validation/study",
         "stiffness_ground_truth_validation/study",
         "force_tracking_stiffness_limit_pilot/study",
         "force_tracking_stiffness_rate_validation/study",
@@ -127,22 +119,22 @@ def _resolved(name: str, *, overrides: list[str] | None = None):
 def test_execution_workers_override_is_validated() -> None:
     """正式研究接受正整数进程数，并拒绝零进程。"""
     resolved = _resolved(
-        "force_tracking_stiffness_estimator_comparison",
+        "friction_estimation_local_slip",
         overrides=["execution.workers=4"],
     )
     assert resolved.selection.execution.workers == 4
     with pytest.raises(ResearchStudySetupError, match="greater than or equal to 1"):
         _resolved(
-            "force_tracking_stiffness_estimator_comparison",
+            "friction_estimation_local_slip",
             overrides=["execution.workers=0"],
         )
 
 
 def test_plot_mode_preserves_scientific_plan_and_rejects_unknown_mode() -> None:
     """出图只影响工件选择，不改变科学哈希或有序实验条件。"""
-    summary = _resolved("force_tracking_stiffness_estimator_comparison")
+    summary = _resolved("friction_estimation_local_slip")
     diagnostic = _resolved(
-        "force_tracking_stiffness_estimator_comparison",
+        "friction_estimation_local_slip",
         overrides=["execution.plot_mode=diagnostic"],
     )
     assert summary.plan == diagnostic.plan
@@ -152,7 +144,7 @@ def test_plot_mode_preserves_scientific_plan_and_rejects_unknown_mode() -> None:
     )
     with pytest.raises(ResearchStudySetupError, match="plot_mode"):
         _resolved(
-            "force_tracking_stiffness_estimator_comparison",
+            "friction_estimation_local_slip",
             overrides=["execution.plot_mode=all"],
         )
 
@@ -229,8 +221,6 @@ def test_formal_comparison_preserves_the_complete_ordered_matrix() -> None:
     expected_controllers = (
         "pid-only",
         "pid-torque-ff",
-        "pid-stiffness-ff",
-        "full",
         "pid-stiffness-rate",
         "adrc-torque",
     )
@@ -245,7 +235,7 @@ def test_formal_comparison_preserves_the_complete_ordered_matrix() -> None:
         for controller, task, material, seed in legacy.conditions()
     )
     assert actual == expected
-    assert len(set(str(row["condition_id"]) for row in resolved.conditions)) == 162
+    assert len(set(str(row["condition_id"]) for row in resolved.conditions)) == 108
 
 
 def test_default_formal_selection_excludes_historical_low_performers() -> None:
@@ -324,21 +314,7 @@ def test_stiffness_rate_refinement_preserves_targeted_matrix() -> None:
     assert len({row["pair_key"] for row in resolved.conditions}) == 6
 
 
-def test_formal_ablation_preserves_pairing_and_complete_matrix() -> None:
-    """迁移后的 36 条 PID 2×2 条件保持材料—seed 配对关系。"""
-    resolved = _resolved("force_tracking_ablation")
-    legacy = load_study_config(
-        REPOSITORY_ROOT / "configs/research/force_controller_ablation/study.yaml"
-    )
-
-    actual = tuple((row["controller"], row["material"], row["seed"]) for row in resolved.conditions)
-    assert actual == legacy.conditions()
-    assert len({row["pair_key"] for row in resolved.conditions}) == 9
-
-
-@pytest.mark.parametrize(
-    "research_group", ["force_controller_ablation/study", "torque_adrc_tuning/study"]
-)
+@pytest.mark.parametrize("research_group", ["torque_adrc_tuning/study"])
 def test_retired_diagnosis_phase_is_rejected_before_preflight(research_group: str) -> None:
     """退役的诊断阶段字段不能被活跃研究静默忽略。"""
     register_resolvers()
@@ -394,7 +370,6 @@ def test_formal_local_slip_preserves_scenario_and_seed_matrix() -> None:
     ("study_name", "condition_count"),
     [
         ("friction_estimation_local_slip", 15),
-        ("force_tracking_stiffness_estimator_comparison", 81),
         ("robotiq_discrete_force", 60),
     ],
 )
@@ -415,41 +390,6 @@ def test_plan_registers_expected_condition_count(
     manifest = json.loads((result / "study_manifest.json").read_text(encoding="utf-8"))
     assert manifest["state"] == "planned"
     assert not (result / "runs").exists()
-
-
-def test_formal_stiffness_comparison_preserves_matrix() -> None:
-    """迁移后的 81 条估计器条件与旧 study 配置逐项一致，仅割线基线行有角色。"""
-    from parallel_gripper_tactile.studies.force_tracking_stiffness_estimator_comparison import (
-        load_stiffness_estimator_comparison_config,
-    )
-
-    resolved = _resolved("force_tracking_stiffness_estimator_comparison")
-    legacy = load_stiffness_estimator_comparison_config(
-        REPOSITORY_ROOT / "configs/research/stiffness_estimator_validation/study.yaml"
-    )
-
-    actual = tuple(
-        (
-            row["stiffness_estimator_method"],
-            Path(str(row["task_path"])),
-            row["object_material"],
-            row["sensor_noise_seed"],
-        )
-        for row in resolved.conditions
-    )
-    expected = tuple(
-        (estimator, _migrated_task(task), material, seed)
-        for estimator, task, material, seed in legacy.conditions()
-    )
-    assert actual == expected
-    assert len({row["condition_id"] for row in resolved.conditions}) == 81
-    assert all(
-        (row["baseline_role"] == "secant_ewma")
-        == (row["stiffness_estimator_method"] == "secant_ewma")
-        for row in resolved.conditions
-    )
-
-    assert all(row["baseline_role"] is None for row in resolved.conditions)
 
 
 def test_formal_robotiq_discrete_force_preserves_matrix() -> None:
@@ -586,7 +526,7 @@ def test_local_slip_protocol_records_condition_exceptions(
         }
     )
 
-    def fail(**kwargs: object):
+    def fail(*args: object, **kwargs: object):
         raise RuntimeError("synthetic failure")
 
     monkeypatch.setattr(protocol, "execute_friction_estimation", fail)
@@ -603,7 +543,7 @@ def test_local_slip_protocol_records_condition_exceptions(
 
 def test_plan_serializes_the_same_validated_condition_collection(tmp_path: Path) -> None:
     """计划产物直接序列化 resolver 交给执行层的同一条件集合。"""
-    resolved = _resolved("force_tracking_ablation")
+    resolved = _resolved("friction_estimation_local_slip")
     result = execute_research_study(
         resolved,
         hydra_output_directory=tmp_path,
@@ -685,7 +625,7 @@ def test_torque_confirm_uses_validated_ranking_and_preserves_order(tmp_path: Pat
     ("field", "value"),
     [
         ("stage", "confirm"),
-        ("study_kind", "force_tracking_ablation"),
+        ("study_kind", "friction_estimation_local_slip"),
         ("study_definition_sha256", "0" * 64),
         ("scientific_configuration_sha256", None),
     ],
@@ -769,10 +709,15 @@ def test_study_hash_is_independent_of_current_working_directory(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """同一已解析科学配置从不同 cwd 生成相同哈希。"""
-    from parallel_gripper_tactile.studies.protocols import force_tracking_ablation as protocol
+    from parallel_gripper_tactile.studies.friction_estimation_local_slip import (
+        load_local_slip_study_config,
+    )
+    from parallel_gripper_tactile.studies.protocols import (
+        friction_estimation_local_slip as protocol,
+    )
 
-    config = load_study_config(
-        REPOSITORY_ROOT / "configs/research/force_controller_ablation/study.yaml"
+    config = load_local_slip_study_config(
+        REPOSITORY_ROOT / "configs/research/friction_local_slip_validation/study.yaml"
     )
     expected = protocol.build_plan(config).scientific_configuration_sha256
     monkeypatch.chdir(tmp_path)
@@ -784,9 +729,11 @@ def test_execution_passes_the_exact_resolved_plan_to_protocol(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """执行层不重新展开条件，直接传递解析阶段已校验的计划实例。"""
-    from parallel_gripper_tactile.studies.protocols import force_tracking_ablation as protocol
+    from parallel_gripper_tactile.studies.protocols import (
+        friction_estimation_local_slip as protocol,
+    )
 
-    resolved = _resolved("force_tracking_ablation")
+    resolved = _resolved("friction_estimation_local_slip")
     run_selection = resolved.selection.model_copy(
         update={
             "execution": resolved.selection.execution.model_copy(
@@ -826,19 +773,31 @@ def test_protocol_records_condition_exceptions_and_finishes_manifest(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """单条件异常仍生成完整失败账本，不伪装成未执行计划。"""
-    from parallel_gripper_tactile.studies.protocols import force_tracking_ablation as protocol
-
-    config = load_study_config(
-        REPOSITORY_ROOT / "tests/fixtures/studies/force_tracking_ablation.yaml"
+    from parallel_gripper_tactile.studies.friction_estimation_local_slip import (
+        load_local_slip_study_config,
+    )
+    from parallel_gripper_tactile.studies.protocols import (
+        friction_estimation_local_slip as protocol,
     )
 
-    def fail(**kwargs: object):
+    original = load_local_slip_study_config(
+        REPOSITORY_ROOT / "configs/research/friction_local_slip_validation/study.yaml"
+    )
+    config = original.model_copy(
+        update={
+            "scenarios": original.scenarios[:1],
+            "seeds": original.seeds.model_copy(update={"count": 1}),
+        }
+    )
+
+    def fail(*args: object, **kwargs: object):
         raise RuntimeError("synthetic failure")
 
-    monkeypatch.setattr(protocol, "execute_force_tracking", fail)
+    monkeypatch.setattr(protocol, "_execute_condition", fail)
     result = protocol.run_study(
         config,
-        config_source=REPOSITORY_ROOT / "tests/fixtures/studies/force_tracking_ablation.yaml",
+        config_source=REPOSITORY_ROOT
+        / "configs/research/friction_local_slip_validation/study.yaml",
         study_directory=tmp_path,
     )
 
@@ -848,65 +807,8 @@ def test_protocol_records_condition_exceptions_and_finishes_manifest(
     assert manifest["state"] == "failed"
     assert manifest["completed_condition_count"] == 0
     assert manifest["failed_conditions"] == failures
-    assert failures[0]["condition_id"] == "pid-only-medium-seed000"
+    assert failures[0]["condition_id"].endswith("-seed000")
     assert failures[0]["error_type"] == "RuntimeError"
-
-
-@pytest.mark.parametrize(
-    ("first_raises", "stable", "expected_state", "scientific_failures", "errors"),
-    [
-        (True, True, "partial", 0, 1),
-        (False, False, "completed", 2, 0),
-    ],
-)
-def test_ablation_protocol_preserves_partial_and_scientific_failure_semantics(
-    tmp_path: Path,
-    monkeypatch: pytest.MonkeyPatch,
-    first_raises: bool,
-    stable: bool,
-    expected_state: str,
-    scientific_failures: int,
-    errors: int,
-) -> None:
-    """协议集成层对部分异常和全科学失败保持公共生命周期语义。"""
-    from parallel_gripper_tactile.studies.protocols import force_tracking_ablation as protocol
-
-    source = REPOSITORY_ROOT / "tests/fixtures/studies/force_tracking_ablation.yaml"
-    config = load_study_config(source).model_copy(update={"controllers": ("pid-only", "full")})
-
-    def fake_execute(**kwargs: object):
-        if first_raises and kwargs["controller_variant"] == "pid-only":
-            raise RuntimeError("synthetic partial failure")
-        run_path = Path(str(kwargs["output_root"])) / f"{kwargs['run_prefix']}-synthetic"
-        run_path.mkdir(parents=True)
-        result = ForceTrackingResult(
-            contact_time_s=0.1,
-            tracking_start_time_s=0.2,
-            tracking_duration_s=1.0,
-            rmse_n=0.1,
-            mae_n=0.1,
-            peak_abs_error_n=0.2,
-            mean_error_n=0.0,
-            final_error_n=0.0,
-            torque_saturation_ratio=0.0,
-            position_saturation_ratio=0.0,
-            mean_estimated_stiffness_n_per_m=1000.0,
-            rise_time_s=0.1,
-            overshoot_ratio=0.1,
-            settling_time_s=0.2,
-            simulation_stable=stable,
-        )
-        return SimpleNamespace(path=run_path), result
-
-    monkeypatch.setattr(protocol, "execute_force_tracking", fake_execute)
-    monkeypatch.setattr(protocol, "render_study_figures", lambda *args, **kwargs: [])
-    protocol.run_study(config, config_source=source, study_directory=tmp_path)
-
-    manifest = json.loads((tmp_path / "study_manifest.json").read_text(encoding="utf-8"))
-    assert manifest["state"] == expected_state
-    assert manifest["scientific_failure_count"] == scientific_failures
-    assert manifest["execution_error_count"] == errors
-    assert manifest["failed_condition_count"] == scientific_failures + errors
 
 
 def test_comparison_protocol_continues_after_a_condition_exception(
@@ -975,19 +877,28 @@ def test_study_selects_diagnostic_seed_before_results(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, plot_mode: str
 ) -> None:
     """代表 seed 由计划决定，首条件失败不会把后续 seed 改选为代表。"""
-    from parallel_gripper_tactile.studies.protocols import force_tracking_ablation as protocol
+    from parallel_gripper_tactile.studies.friction_estimation_local_slip import (
+        load_local_slip_study_config,
+    )
+    from parallel_gripper_tactile.studies.protocols import (
+        friction_estimation_local_slip as protocol,
+    )
 
-    source = REPOSITORY_ROOT / "tests/fixtures/studies/force_tracking_ablation.yaml"
-    original = load_study_config(source)
+    source = REPOSITORY_ROOT / "configs/research/friction_local_slip_validation/study.yaml"
+    original = load_local_slip_study_config(source)
     config = original.model_copy(
-        update={"seeds": original.seeds.model_copy(update={"start": 7, "count": 2})}
+        update={
+            "scenarios": original.scenarios[:1],
+            "seeds": original.seeds.model_copy(update={"start": 7, "count": 2}),
+        }
     )
     seen = {}
 
-    def capture(**kwargs: object):
-        seen[kwargs["sensor_noise_seed"]] = kwargs["plot_mode"]
+    def fail(condition, *args: object, **kwargs: object):
+        seen[condition.parameters["sensor_noise_seed"]] = kwargs["diagnostic_seed"]
         raise RuntimeError("仅核对计划派发，不启动仿真。")
 
-    monkeypatch.setattr(protocol, "execute_force_tracking", capture)
+    monkeypatch.setattr(protocol, "_execute_condition", fail)
     protocol.run_study(config, config_source=source, study_directory=tmp_path, plot_mode=plot_mode)
-    assert seen == {7: "diagnostic", 8: "diagnostic" if plot_mode == "diagnostic" else "none"}
+    # 代表 seed 在计划中固定，条件失败不会改选后续 seed 的诊断目标。
+    assert seen == {7: 7, 8: 7}
