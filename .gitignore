@@ -8,6 +8,8 @@ dist/
 .vscode/
 
 outputs/
+# 本地图表导出目录（单数，区别于研究产物 outputs/）
+output/
 MUJOCO_LOG.TXT
 site/
 # Typst 报告编译产物（源文件 reports/*.typ 入库，PDF 可随时重编译）
