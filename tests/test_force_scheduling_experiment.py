@@ -113,9 +113,8 @@ def test_adaptive_multirate_preserves_transient_admittance_and_filter_overrides(
     assert candidate.scheduler == replace(config, load=replace(config.load, filter_tau_s=0.01))
     expected = baseline.profile.model_dump(mode="json")
     admittance = expected["control"]["force"]["admittance"]
-    assert admittance["velocity_limit_rad_s"] == 0.05
-    assert admittance["feedforward_ratio"] == 0.2
-    admittance.update(velocity_limit_rad_s=0.2, feedforward_ratio=1.0)
+    assert admittance["velocity_limit_rad_s"] == 0.3
+    assert admittance["feedforward_ratio"] == 1.0
     assert candidate.profile.model_dump(mode="json") == expected
     assert baseline.scheduler.load.filter_tau_s == 0.05
     assert candidate.scheduler.load.filter_tau_s == 0.01

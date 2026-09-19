@@ -26,6 +26,10 @@ from parallel_gripper_tactile.visualization import (
     science_pyplot,
 )
 from parallel_gripper_tactile.config.profiles import GripperProfile, load_profile
+from parallel_gripper_tactile.config.profiles import (
+    StiffnessEstimatorMethod,
+    validate_resolved_profile,
+)
 from parallel_gripper_tactile.runners import execute_force_tracking
 from parallel_gripper_tactile.studies.aggregation import (
     aggregate_records,
@@ -85,6 +89,48 @@ PLOTTED_METRICS = (
 )
 SUMMARY_PLOTTED_METRICS = tuple(metric for metric in PLOTTED_METRICS if metric[0] != "mae_n")
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
+
+
+def _condition_estimator(
+    config: ForceTrackingComparisonConfig, controller: str
+) -> StiffnessEstimatorMethod | None:
+    """返回控制器实际使用的刚度估计器；导纳显式关闭估计。"""
+    return None if controller == "admittance" else config.stiffness_estimator_method
+
+
+def _controller_base_profile(
+    config: ForceTrackingComparisonConfig,
+    base_profile: GripperProfile,
+    controller: str,
+) -> GripperProfile:
+    """向导纳条件注入研究冻结参数，其余控制器保持公共基座不变。"""
+    if controller != "admittance":
+        return base_profile
+    if config.admittance is None or base_profile.normal_force is None:
+        raise ValueError("admittance comparison requires explicit parameters and normal force")
+    configured_force = base_profile.normal_force.model_copy(
+        update={"admittance": config.admittance}
+    )
+    configured_control = base_profile.control.model_copy(update={"force": configured_force})
+    return validate_resolved_profile(
+        base_profile.model_copy(update={"control": configured_control})
+    )
+
+
+def configure_comparison_controller(
+    config: ForceTrackingComparisonConfig,
+    base_profile: GripperProfile,
+    *,
+    controller: str,
+    sensor_noise_seed: int,
+) -> GripperProfile:
+    """按研究定义配置一个控制器，保留导纳专用参数与 estimator 例外。"""
+    return configure_force_controller(
+        _controller_base_profile(config, base_profile, controller),
+        variant=controller,
+        stiffness_estimator_method=_condition_estimator(config, controller),
+        sensor_noise_seed=sensor_noise_seed,
+    )
 
 
 def _json_compatible(value: object) -> object:
@@ -486,7 +532,7 @@ def describe_conditions(config: ForceTrackingComparisonConfig) -> str:
     lines = [
         f"Study: {config.name}",
         f"Profile: {config.profile}",
-        f"Stiffness estimator: {config.stiffness_estimator_method}",
+        f"Stiffness estimator: {config.stiffness_estimator_method} (admittance: none)",
         f"Conditions: {len(config.conditions())}",
     ]
     for index, (controller, task_path, material, seed) in enumerate(config.conditions(), start=1):
@@ -506,10 +552,10 @@ def build_plan(
     base_profile = resolved_profile or load_profile(config.profile)
     representative_seed = config.seeds.values()[0]
     controller_profiles = {
-        controller: configure_force_controller(
+        controller: configure_comparison_controller(
+            config,
             base_profile,
-            variant=controller,
-            stiffness_estimator_method=config.stiffness_estimator_method,
+            controller=controller,
             sensor_noise_seed=representative_seed,
         ).model_dump(mode="python")
         for controller in config.controllers
@@ -519,7 +565,7 @@ def build_plan(
             condition_id=f"{controller}-{task.stem}-{material}-seed{seed:03d}",
             parameters={
                 "controller_variant": controller,
-                "stiffness_estimator_method": config.stiffness_estimator_method,
+                "stiffness_estimator_method": (_condition_estimator(config, controller) or "none"),
                 "task_path": str(task),
                 "object_material": material,
                 "sensor_noise_seed": seed,
@@ -531,7 +577,7 @@ def build_plan(
     )
     definition = {
         "hash_schema_version": 1,
-        "protocol_revision": "force_tracking_controller_comparison.v1",
+        "protocol_revision": "force_tracking_controller_comparison.v2",
         "study": config.model_dump(mode="python", exclude={"output_root"}),
         "resources": {
             "profile_sha256": model_configuration_sha256(
@@ -547,7 +593,7 @@ def build_plan(
             "trace_sample_period_s": (
                 {str(task): ForceTrackingTask.load(task).control_period_s for task in config.tasks}
                 if config.trace_at_control_rate
-                else {"default": 0.008, "adrc-torque": 0.004}
+                else {"default": 0.008, "adrc-torque": 0.004, "admittance": 0.004}
             ),
             "trace_event_window_s": 0.2,
         },
@@ -588,17 +634,23 @@ def _execute_condition(
     controller = str(parameters["controller_variant"])
     material = str(parameters["object_material"])
     seed = int(parameters["sensor_noise_seed"])
+    estimator_name = str(parameters["stiffness_estimator_method"])
+    estimator = None if estimator_name == "none" else estimator_name
     task = tasks[task_path]
     run, result = execute_force_tracking(
         profile=config.profile,
-        resolved_profile=resolved_profile,
+        resolved_profile=_controller_base_profile(
+            config,
+            resolved_profile or load_profile(config.profile),
+            controller,
+        ),
         task_path=task_path,
         tracking_task=task,
         output_root=study_dir / "runs",
         run_prefix=condition.condition_id,
         object_material=material,
         controller_variant=controller,
-        stiffness_estimator_method=config.stiffness_estimator_method,
+        stiffness_estimator_method=estimator,
         sensor_noise_seed=seed,
         trace_sample_period_s=task.control_period_s if config.trace_at_control_rate else None,
         plot_mode=(
@@ -607,7 +659,7 @@ def _execute_condition(
     )
     row = {
         "controller_variant": controller,
-        "stiffness_estimator_method": config.stiffness_estimator_method,
+        "stiffness_estimator_method": estimator_name,
         "task_name": task.name,
         "task_path": str(task_path),
         "object_material": material,

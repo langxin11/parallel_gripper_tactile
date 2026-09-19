@@ -135,6 +135,7 @@ def test_formal_comparison_preserves_the_complete_ordered_matrix() -> None:
         "pid-torque-ff",
         "pid-stiffness-rate",
         "adrc-torque",
+        "admittance",
     )
 
     actual = tuple(
@@ -147,7 +148,12 @@ def test_formal_comparison_preserves_the_complete_ordered_matrix() -> None:
         for controller, task, material, seed in legacy.conditions()
     )
     assert actual == expected
-    assert len(set(str(row["condition_id"]) for row in resolved.conditions)) == 108
+    assert len(set(str(row["condition_id"]) for row in resolved.conditions)) == 135
+    assert {
+        row["stiffness_estimator_method"]
+        for row in resolved.conditions
+        if row["controller"] == "admittance"
+    } == {"none"}
 
 
 def test_default_formal_selection_excludes_historical_low_performers() -> None:

@@ -11,7 +11,7 @@
 
 | 研究名 | 比较对象与控制变量 |
 | --- | --- |
-| `dm_force_controller_selection` | PID 基线 `pid-torque-ff`、`pid-only`、`pid-stiffness-rate` 与 `adrc-torque`；固定 Step／Ramp／Mixed，配对材料与 seed。 |
+| `dm_force_controller_selection` | PID 基线 `pid-torque-ff`、`pid-only`、`pid-stiffness-rate`、`adrc-torque` 与二阶导纳 `admittance`；固定 Step／Ramp／Mixed，配对材料与 seed。 |
 | `dm_stiffness_rate_confirmation` | 在固定 250 Hz 外环和三种材料下确认刚度速率候选参数。 |
 
 历史研究 `torque_adrc_tuning`（未找到优于基线的候选）、刚度位置限幅与速率调优系列已完成并退役，
@@ -24,6 +24,8 @@
 正式接触 preset 为 `medium`、`hard`、`stiff`，它们描述显式 contact pair 的求解器参数，
 不是材料弹性模量，也不是系统实测等效刚度。所有比较保持目标、接触参数、控制周期、噪声 seed 和评价时间窗一致，
 只改变研究指定因素。执行异常、科学失败和有效结果分别登记，不能通过丢弃失败运行改善排名。
+非导纳控制器统一使用 `window_linear`；导纳不消费在线刚度估计，条件快照显式记录
+`stiffness_estimator_method=none`，其虚拟质量、阻尼、刚度和执行约束由研究定义冻结。
 
 ## 指标与解释
 

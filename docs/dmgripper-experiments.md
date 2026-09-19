@@ -34,7 +34,7 @@ uv run --package dmgripper-experiments dmgripper-run \
 `configs/hardware/dmgripper/unified_adaptive_fast.yaml` 是独立候选，不替换旧配置。
 初始平均单侧目标为 1 N，上限为 30 N／侧，增力上限 50 N/s；导纳速度上限 0.20 rad/s，
 质量 0.2 kg、阻尼 15 N·s/m、刚度 1 N/m、力矩前馈比例 1.0，MIT 力矩上限仍为 4 N·m。
-`controller.admittance.feedforward_ratio` 默认 0 保持旧行为，新候选显式设为 1；
+`controller.admittance.feedforward_ratio` 默认统一为 1.0；
 死区设为 0，`prevent_unloading=true` 按真机实验要求阻止导纳减小闭合量；显式释放仍走独立流程。
 此项与允许反向纠偏的仿真候选不同，不保证实际抓力单调，也不能主动卸去过冲；原始过力保护保留。
 法向低通显式设为 20 Hz，切向链为逐 taxel 中值3＋10 ms 低通。

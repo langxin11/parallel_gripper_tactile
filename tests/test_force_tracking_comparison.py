@@ -58,9 +58,15 @@ def test_default_comparison_uses_shifted_contact_presets() -> None:
     assert "pid-stiffness-limit" not in config.controllers
     assert "pid-stiffness-rate" in config.controllers
     assert "adrc-torque" in config.controllers
+    assert "admittance" in config.controllers
+    assert config.admittance is not None
+    assert config.admittance.mass_kg == 0.2
+    assert config.admittance.damping_ns_m == 15.0
+    assert config.admittance.feedforward_ratio == 1.0
+    assert config.admittance.velocity_limit_rad_s == 0.3
     assert "pid-stiffness-ff" not in config.controllers
     assert "full" not in config.controllers
-    assert len(config.conditions()) == 108
+    assert len(config.conditions()) == 135
 
 
 @pytest.mark.parametrize(
@@ -100,6 +106,7 @@ materials: [hard]
         "seeds: {start: -1, count: 1}",
         "seeds: {start: 0, count: 0}",
         "unexpected: true",
+        "controllers: [admittance]",
     ],
 )
 def test_comparison_config_rejects_invalid_values_and_unknown_fields(

@@ -31,10 +31,31 @@ study:
       - pid-stiffness-rate
       # 一阶位置式 adrc 因模型阶次不匹配，不再参加默认正式矩阵；CLI 配置入口已移除，
       # 变体派生仍保留在代码层。
-      # adrc-torque 为二阶直接力矩 MB-ADRC；默认矩阵为 108 条。
+      # adrc-torque 为二阶直接力矩 MB-ADRC。
       - adrc-torque
-    # 当前控制结构验证与调优统一固定 window_linear；历史基准按其 manifest 解释。
+      # 二阶导纳不消费刚度估计；protocol 为该条件显式记录 estimator=none。
+      - admittance
+    # 非导纳控制结构统一固定 window_linear；历史基准按其 manifest 解释。
     stiffness_estimator_method: window_linear
+    # 参数与 controller=dm_gripper/admittance 及仿真平台机械边界保持一致，并随 StudyPlan 冻结。
+    admittance:
+      mass_kg: 0.2
+      damping_ns_m: 15.0
+      stiffness_n_m: 1.0
+      feedforward_ratio: 1.0
+      contact_stable_time_s: 0.0
+      contact_transition_time_s: 0.05
+      approach_velocity_rad_s: 0.05
+      approach_acceleration_rad_s2: 0.5
+      approach_jerk_rad_s3: 2.0
+      approach_feedforward_force_n: 0.5
+      approach_feedforward_ratio: 1.0
+      position_min_rad: 0.0
+      position_max_rad: 1.5707963267948966
+      velocity_limit_rad_s: 0.3
+      closing_direction: 1
+      feedforward_torque_limit_nm: 4.0
+      mit_torque_limit_nm: 4.0
     materials:
       - medium
       - hard

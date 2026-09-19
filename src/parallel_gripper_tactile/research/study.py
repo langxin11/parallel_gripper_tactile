@@ -189,10 +189,10 @@ def _validate_comparison(
     tasks = {path: ForceTrackingTask.load(path) for path in config.tasks}
     seed = config.seeds.values()[0]
     for controller in config.controllers:
-        profile = configure_force_controller(
+        profile = comparison_protocol.configure_comparison_controller(
+            config,
             base_profile,
-            variant=controller,
-            stiffness_estimator_method=config.stiffness_estimator_method,
+            controller=controller,
             sensor_noise_seed=seed,
         )
         for task in tasks.values():

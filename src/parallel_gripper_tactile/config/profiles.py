@@ -192,7 +192,7 @@ class DMAdmittanceControl(_FrozenModel):
     mass_kg: Annotated[FiniteFloat, Field(gt=0)] = 0.02
     damping_ns_m: Annotated[FiniteFloat, Field(ge=0)] = 0.20
     stiffness_n_m: Annotated[FiniteFloat, Field(ge=0)] = 1.0
-    feedforward_ratio: Annotated[FiniteFloat, Field(ge=0, le=1)] = 0.2
+    feedforward_ratio: Annotated[FiniteFloat, Field(ge=0, le=1)] = 1.0
     contact_stable_time_s: Annotated[FiniteFloat, Field(ge=0)] = 0.10
     contact_transition_time_s: Annotated[FiniteFloat, Field(gt=0)] = 0.15
     approach_velocity_rad_s: Annotated[FiniteFloat, Field(gt=0)] = 0.20

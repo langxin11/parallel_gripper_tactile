@@ -485,7 +485,7 @@ class AdmittanceConfig:
     stiffness_n_m: float = 1.0
     force_deadband_n: float = 0.1
     prevent_unloading: bool = True
-    feedforward_ratio: float = 0.0
+    feedforward_ratio: float = 1.0
 
     def __post_init__(self) -> None:
         """验证导纳参数。"""

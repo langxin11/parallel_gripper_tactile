@@ -5,11 +5,18 @@ from __future__ import annotations
 from itertools import product
 from pathlib import Path
 
-from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 import yaml
 
 from ..experiments.force_tracking import ControllerVariant
-from ..config.profiles import StiffnessEstimatorMethod
+from ..config.profiles import DMAdmittanceControl, StiffnessEstimatorMethod
 from ..scenes.custom import ObjectMaterial
 from .force_tracking_ablation import SeedSweep, StudyConfigError
 
@@ -29,6 +36,7 @@ class ForceTrackingComparisonConfig(_ComparisonStudyModel):
     tasks: tuple[Path, ...]
     controllers: tuple[ControllerVariant, ...]
     stiffness_estimator_method: StiffnessEstimatorMethod = "window_linear"
+    admittance: DMAdmittanceControl | None = None
     materials: tuple[ObjectMaterial, ...]
     seeds: SeedSweep = SeedSweep()
     trace_at_control_rate: bool = False
@@ -46,6 +54,15 @@ class ForceTrackingComparisonConfig(_ComparisonStudyModel):
         if len(set(value)) != len(value):
             raise ValueError("must not contain duplicate values")
         return value
+
+    @model_validator(mode="after")
+    def require_admittance_parameters(self) -> "ForceTrackingComparisonConfig":
+        """导纳进入矩阵时必须冻结专用参数，避免回退到通用数据模型默认值。"""
+        if "admittance" in self.controllers and self.admittance is None:
+            raise ValueError("admittance controller requires explicit admittance parameters")
+        if "admittance" not in self.controllers and self.admittance is not None:
+            raise ValueError("admittance parameters require the admittance controller")
+        return self
 
     def conditions(self) -> tuple[tuple[ControllerVariant, Path, ObjectMaterial, int], ...]:
         """按 controller × task × material × seed 的配置顺序展开条件矩阵。"""

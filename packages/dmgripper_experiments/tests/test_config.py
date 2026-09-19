@@ -38,6 +38,8 @@ def test_default_config_constructs_and_selects_curve():
     assert config.hardware.feedback_position_margin_rad == pytest.approx(0.05)
     assert config.controller.pid.torque_feedforward_gain is None
     assert config.controller.pid.max_position_adjustment_rad == pytest.approx(0.15)
+    assert config.controller.admittance.feedforward_ratio == pytest.approx(1.0)
+    assert config.controller.velocity_limit_rad_s == pytest.approx(0.3)
 
 
 @pytest.mark.parametrize("limit", [None, 0.15, 0.5])

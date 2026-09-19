@@ -54,8 +54,6 @@ study:
         experiment: dm_gripper/force_scheduling_adaptive
         overrides:
           - task=load/support_release
-          - controller.admittance.velocity_limit_rad_s=0.2
-          - controller.admittance.feedforward_ratio=1.0
         task_patch:
           tactile_sampling:
             period_s: 0.001

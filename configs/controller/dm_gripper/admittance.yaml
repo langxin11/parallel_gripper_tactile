@@ -12,7 +12,7 @@ admittance:
   damping_ns_m: 15.0
   stiffness_n_m: 1.0
   # 目标力经机构雅可比换算为前馈力矩的比例；0 关闭，1 表示完整名义补偿。
-  feedforward_ratio: 0.2
+  feedforward_ratio: 1.0
   # 接触后稳定等待与控制律平滑接管时间，单位为 s。
   contact_stable_time_s: 0.0
   contact_transition_time_s: 0.05
@@ -23,5 +23,5 @@ admittance:
   # 接近阶段使用 0.5 N 名义力的完整力矩前馈，减小首次接触前的位置误差积累。
   approach_feedforward_force_n: 0.5
   approach_feedforward_ratio: 1.0
-  # 导纳跟踪阶段的关节速度绝对上限，单位为 rad/s。
-  velocity_limit_rad_s: 0.05
+  # 导纳跟踪阶段的关节速度绝对上限，单位为 rad/s；保留有限边界以约束回差重新啮合。
+  velocity_limit_rad_s: 0.3

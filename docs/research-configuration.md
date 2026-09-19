@@ -96,7 +96,8 @@ Torque ADRC 的 `coarse → confirm` 强制校验谱系：coarse manifest 的生
 配置使用 `extra="forbid"`，未知字段与缺失值在仿真前失败。控制器组整体替换，解析器清除其他算法的
 `adrc`、`torque_adrc`、`admittance` 和直接力矩反馈字段，再校验完整 profile。
 
-导纳必须配 `estimator=none`；非导纳仅 `pid-only` 可显式关闭估计器。Torque ADRC 参数仅可随
+导纳必须配 `estimator=none`；控制器正式对比 protocol 也按条件把导纳记录为 `none`，其余控制器使用
+研究定义的公共估计方法。非导纳仅 `pid-only` 可显式关闭估计器。Torque ADRC 参数仅可随
 `adrc-torque` 出现。platform 选择不连接或使能设备，未支持的硬件组合由 schema 拒绝。
 目标力调度实验必须组合 `task=load/*` 与 `scheduler=force/*`；其他实验禁止携带力调度器。
 
