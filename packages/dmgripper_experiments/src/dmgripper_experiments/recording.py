@@ -89,10 +89,15 @@ TRACE_FIELDS = (
     "sensor_stale",
     "sensor_dropped_samples",
     "sensor_observed_events",
+    "native_session_id",
+    "native_session_phase",
+    "native_session_reason",
+    "native_left_estimate_count",
+    "native_right_estimate_count",
 )
 
 SCHEMA_NAME = "dmgripper-experiment/v1"
-RECORDER_VERSION = "1.4.0"
+RECORDER_VERSION = "1.5.0"
 
 
 def create_run_directory(root: Path | str, config: ExperimentConfig) -> Path:

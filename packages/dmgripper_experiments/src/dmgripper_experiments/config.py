@@ -21,6 +21,7 @@ from papillarray_hardware import DEFAULT_PAPILLARRAY_PORT
 from dm_grasp_core import ForceInterpolation
 from dm_grasp_core.grasp.unified import UnifiedAdaptiveConfig
 from dm_grasp_core.tactile.multirate import TactileSamplingConfig
+from .native_slip import NativeSlipConfig
 
 ControllerKind = Literal["admittance", "pid", "adrc"]
 LostContactScope = Literal["any_side", "both_sides"]
@@ -209,6 +210,7 @@ class LifecycleConfig:
         return_timeout_s: 回位总超时。
         return_settle_timeout_s: 回位轨迹结束后等待位置达标的余量。
         return_position_tolerance_rad: 回位达标的位置误差容限。
+        native_slip: 可选原厂短时辨识会话；省略时不发送滑移启停命令。
     """
 
     verify_zero_force: bool = True
@@ -239,11 +241,16 @@ class LifecycleConfig:
     return_timeout_s: float = 5.0
     return_settle_timeout_s: float = 2.0
     return_position_tolerance_rad: float = 0.02
+    native_slip: NativeSlipConfig | None = None
 
     def __post_init__(self) -> None:
         """验证生命周期参数与跨字段关系。"""
         for item in fields(self):
             value = getattr(self, item.name)
+            if item.name == "native_slip":
+                if value is not None and not isinstance(value, NativeSlipConfig):
+                    raise ValueError("lifecycle.native_slip 必须为 NativeSlipConfig 或 null")
+                continue
             if item.name in {"verify_zero_force", "auto_start"}:
                 if not isinstance(value, bool):
                     raise ValueError(f"lifecycle.{item.name} 必须是布尔值")

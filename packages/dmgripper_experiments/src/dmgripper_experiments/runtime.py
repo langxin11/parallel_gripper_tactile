@@ -32,6 +32,7 @@ from dm_grasp_core import (
 from .config import ExperimentConfig
 from .control import GripController
 from .lifecycle import Lifecycle, LifecyclePhase
+from .native_slip import NativeSlipSession
 from .observation import (
     PairedObservation,
     StiffnessDiagnostics,
@@ -653,7 +654,7 @@ def _run_control_loop(
                 "home_tolerance_rad": config.hardware.home_tolerance_rad,
             }
         )
-        return _run_control_loop_inner(
+        outcome = _run_control_loop_inner(
             config,
             dm,
             tactile,
@@ -668,13 +669,22 @@ def _run_control_loop(
             feedback,
             feedback_state,
         )
+        if config.lifecycle.native_slip is not None:
+            tactile.stop_native_slip("control_exit")
+        return outcome
     except FatalHardwareFault as error:
+        if config.lifecycle.native_slip is not None:
+            tactile.stop_native_slip("control_fault")
         if error.phase is None:
             error.phase = lifecycle.phase.value
         raise
     except KeyboardInterrupt:
+        if config.lifecycle.native_slip is not None:
+            tactile.stop_native_slip("interrupted")
         raise
     except Exception as error:
+        if config.lifecycle.native_slip is not None:
+            tactile.stop_native_slip("control_fault")
         return _run_fault_holding(
             config,
             dm,
@@ -724,6 +734,11 @@ def _run_control_loop_inner(
         contact_floor_n=lifecycle_config.contact_off_n,
     )
     stiffness = StiffnessDiagnostics(config.estimation, kinematics)
+    native_slip = (
+        NativeSlipSession(lifecycle_config.native_slip)
+        if lifecycle_config.native_slip is not None
+        else None
+    )
 
     period = 1.0 / timing.control_rate_hz
     phase_started = last_control = clock()
@@ -1179,6 +1194,18 @@ def _run_control_loop_inner(
             command = controller_step.command
             target_source.set_execution_limited(controller.admittance.execution_limited)
 
+        if native_slip is not None:
+            for event in native_slip.update(
+                sample,
+                target_force_n=current_target.force_n
+                if current_target is not None
+                else config.reference.initial_force_n,
+                permitted=lifecycle.phase in {LifecyclePhase.PRELOAD, LifecyclePhase.ACTIVE},
+                now_s=clock(),
+                worker=tactile,
+            ):
+                emit(event)
+
         # 交互输出／存储也可能延迟；发送前再次检查时限和输入新鲜度。
         if clock() - last_control > timing.max_control_gap_s:
             fail("发送前控制计算或事件记录超时")
@@ -1212,6 +1239,8 @@ def _run_control_loop_inner(
             latency=latency,
         )
         row.update(target_source.trace_fields())
+        if native_slip is not None:
+            row.update(native_slip.trace_fields(tactile))
         recorder.write(row)
         if clock() - last_control > timing.max_control_gap_s:
             fail("命令反馈或控制记录超时")
