@@ -90,6 +90,21 @@ PLOTTED_METRICS = (
 SUMMARY_PLOTTED_METRICS = tuple(metric for metric in PLOTTED_METRICS if metric[0] != "mae_n")
 _REPOSITORY_ROOT = Path(__file__).resolve().parents[4]
 
+# 控制器轨迹同时使用颜色与线型编码，避免色觉障碍和灰度打印时发生歧义。
+_CONTROLLER_LINE_STYLES: dict[str, dict[str, object]] = {
+    "pid-only": {"color": "#000000", "linestyle": "-"},
+    "pid-torque-ff": {"color": "#D55E00", "linestyle": "--"},
+    "pid-stiffness-rate": {"color": "#0072B2", "linestyle": ":"},
+    "adrc-torque": {"color": "#009E73", "linestyle": "-."},
+    # 紫红色与长划—点—点节奏使导纳在彩色和灰度输出中都能与 PID-only 区分。
+    "admittance": {"color": "#CC79A7", "linestyle": (0, (7, 2, 1.5, 2, 1.5, 2))},
+}
+
+
+def _controller_line_style(controller: str) -> dict[str, object]:
+    """返回稳定的控制器轨迹样式，未知扩展保持 Matplotlib 默认循环。"""
+    return dict(_CONTROLLER_LINE_STYLES.get(controller, {}))
+
 
 def _condition_estimator(
     config: ForceTrackingComparisonConfig, controller: str
@@ -451,6 +466,7 @@ def plot_tracking_overlays(
                 [float(item["filtered_normal_force_n"]) for item in trace],
                 linewidth=1.0,
                 label=controller,
+                **_controller_line_style(controller),
             )
         axis.set_xlabel("Tracking time (s)")
         axis.set_ylabel("Mean side normal force (N)")

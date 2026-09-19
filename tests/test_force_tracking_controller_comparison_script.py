@@ -222,6 +222,18 @@ def test_tracking_overlay_uses_common_seed(tmp_path: Path, fast_plot_render: Non
     assert all(path.is_file() and path.stat().st_size > 0 for path in outputs)
 
 
+def test_admittance_and_pid_only_have_distinct_publication_styles() -> None:
+    """导纳与 PID-only 在颜色和线型两个通道上均可区分。"""
+    pid_style = protocol._controller_line_style("pid-only")  # type: ignore[attr-defined]
+    admittance_style = protocol._controller_line_style(  # type: ignore[attr-defined]
+        "admittance"
+    )
+
+    assert pid_style["color"] != admittance_style["color"]
+    assert pid_style["linestyle"] != admittance_style["linestyle"]
+    assert protocol._controller_line_style("future-controller") == {}  # type: ignore[attr-defined]
+
+
 def test_tracking_rows_prefer_parquet_over_legacy_csv(tmp_path: Path) -> None:
     """轨迹读取在新旧文件同时存在时优先使用 Parquet。"""
     run_directory = tmp_path / "runs" / "example"
