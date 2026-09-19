@@ -6,6 +6,11 @@ model:
   # 但以每 taxel 一个球体避免非共面 mesh 在 multiccd 下切换接触流形。
   # 原 mesh + execution.multiccd_enabled=false 作为保留候选，用于后续实物标定对照。
   path: ../../../assets/grippers/dm_gripper/parallel_gripper_height_sphere_collision.xml
+  mechanics:
+    # 每侧滑台的小幅库仑摩擦；打印件销轴间隙集中折算为驱动侧总换向空程。
+    slide_frictionloss_n: 0.1
+    backlash_enabled: true
+    backlash_rad: 0.005
 
 control:
   # 达妙 MIT 风格控制：外部给位置/速度/力矩目标，仿真内显式计算输出轴力矩。

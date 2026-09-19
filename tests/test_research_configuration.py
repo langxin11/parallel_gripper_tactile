@@ -82,6 +82,16 @@ def _with_current_dm_supervisor(value: object) -> object:
     """为冻结旧快照补入当前 DMgripper 公共接触状态机配置。"""
     restored = _with_repository_root(value)
     if isinstance(restored, dict):
+        model = restored.get("model")
+        if isinstance(model, dict):
+            model.setdefault(
+                "mechanics",
+                {
+                    "slide_frictionloss_n": 0.1,
+                    "backlash_enabled": True,
+                    "backlash_rad": 0.005,
+                },
+            )
         control = restored.get("control")
         if isinstance(control, dict):
             force = control.get("force")

@@ -3,6 +3,12 @@ family: dm
 name: height_spheres
 profile_name: dm_gripper
 path: assets/grippers/dm_gripper/parallel_gripper_height_sphere_collision.xml
+mechanics:
+  # 每侧被动滑台的小幅库仑摩擦，单位 N；默认开启并允许实验覆盖。
+  slide_frictionloss_n: 0.1
+  # 集中等效销轴配合间隙：总换向空程 0.005 rad（约 0.29°）。
+  backlash_enabled: true
+  backlash_rad: 0.005
 tactile:
   mode: contact_geom
   rows: 3

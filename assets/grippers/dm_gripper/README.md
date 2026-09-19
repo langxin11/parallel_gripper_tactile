@@ -46,12 +46,20 @@ uv run -m mujoco.viewer --mjcf assets/grippers/dm_gripper/scene.xml
 | MuJoCo 关节 | 类型 | 作用 |
 | --- | --- | --- |
 | `gripper_drive` | hinge | 唯一主动关节，电机输出轴。 |
+| `gripper_backlash` | hinge | 电机输入轴与曲柄之间的集中等效换向回差。 |
 | `left_link_crank_pin`、`right_link_crank_pin` | hinge | 左右被动曲柄销轴。 |
 | `left_finger_slide`、`right_finger_slide` | slide | 左右被动滑台。 |
 
 当前 prepared 模型及碰撞变体使用名为 `gripper_drive` 的 `<motor>`；输入是输出轴力矩，单位为 N·m，
 MJCF 限幅为 `±4 N·m`，主动关节范围为 `[0, 1.7] rad`。曲柄半径为 30 mm，连杆两销轴中心距为 40 mm。
 MIT 内环、连续力矩限制和硬件建模假设见[电机建模摘要][motor-model]；控制流程见[DMgripper 使用入口][dm-guide]。
+
+默认机构非理想参数由 `model.mechanics` 显式保存：左右滑台各使用
+`frictionloss=0.1 N`，`gripper_backlash` 的总角空程为 `0.005 rad`（范围
+`[-0.0025, 0.0025] rad`）。回差关节位于电机输入轴与曲柄之间，换向时输入轴先跨过空程，
+再通过关节限位重新向曲柄传力；这是打印件多个销轴配合间隙的集中等效模型，不等同于逐个销—孔接触。
+诊断时可用 `backlash_enabled=false` 移除该自由度，或分别覆盖 `backlash_rad` 与
+`slide_frictionloss_n`。当前数值是小幅工程初值，尚未经过实机往返数据辨识。
 
 > `config.json` 的导出基线配置为 position actuator。`prepare-onshape` 只命名触觉碰撞几何，
 > 不会自动转换执行器。重新导出后必须核对主项目所需的 motor 类型、单位和限幅。

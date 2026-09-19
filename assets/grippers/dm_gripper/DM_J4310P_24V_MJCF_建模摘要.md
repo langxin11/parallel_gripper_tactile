@@ -173,6 +173,8 @@ frictionloss = 0.04 N·m
 
 仓库中的 `parallel_gripper.xml` 与 `parallel_gripper_prepared.xml` 已采用这一结构。
 `ctrlrange` 与 `forcerange` 均对齐当前实机 MIT 的 `TMAX=4 N·m`，厂家 12.5 N·m 峰值仅作为电机能力参考。
+当前资产在 `gripper_drive` 输入轴与曲柄本体之间另设被动 `gripper_backlash` 关节，
+以默认 `0.005 rad` 总角空程集中等效打印件销轴配合间隙；该关节不改变 MIT 力矩单位或限幅。
 
 ### 参数含义
 
@@ -196,6 +198,8 @@ frictionloss = 0.04 N·m
 | armature | 0.002074755 kg·m² |
 | damping | 0.02532329 N·m·s/rad |
 | frictionloss | 0.04 N·m（经验值） |
+| 滑台 frictionloss | 0.1 N／侧（经验值） |
+| 等效 backlash | 0.005 rad 总角空程（默认开启） |
 | 最大输出转速参考 | 20.944 rad/s |
 | 连续输出转矩参考 | 3.5 N·m |
 

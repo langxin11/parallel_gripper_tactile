@@ -120,7 +120,7 @@ uv run pgt view grasp --set model=dm_gripper/height_spheres
 
 | 检查范围 | 通过条件 |
 | --- | --- |
-| 关节与执行器 | 五个预期关节存在，仅 `gripper_drive` 有执行器，类型、输入单位与限幅符合当前控制器。 |
+| 关节与执行器 | 五个原机构关节及一个 `gripper_backlash` 等效回差关节存在，仅 `gripper_drive` 有执行器，类型、输入单位与限幅符合当前控制器。 |
 | 闭环 | 左右各有中心与 `_z` 的 connect 对，共四条。 |
 | 碰撞 | 原 mesh 基线有 18 个 Pillar 和四个外壳碰撞 mesh；变体按声明替换 Pillar 碰撞几何。 |
 | 触觉 | 18 个稳定 geom 名与对应 site 齐全，且没有意外的 `frame_freejoint`。 |

@@ -134,6 +134,11 @@ Pillars 使用等效接触参数 `solref="-1200 -10"` 与
 法向力 `f_n=(F_L+F_R)/2`，在线 `k_pair` 是 Pillar—物体—机构／接触链路的组合等效刚度，
 只用于前馈、增益调度和实验比较。
 
+默认 DMgripper 模型同时启用每侧 `0.1 N` 的滑台干摩擦，以及总角空程 `0.005 rad` 的
+集中等效回差。两者属于 `model.mechanics`，进入 MuJoCo 被动动力学；回差用于近似打印件销轴
+配合间隙，不代表已完成逐销孔标定。模型来源、关闭方式与适用边界见
+[DMgripper 模型资产](grippers/dmgripper/index.md#model-selection)。
+
 ### 电机与执行器一致性
 
 项目 MIT 映射固定为 PMAX=`1.7 rad`、VMAX=`8 rad/s`、TMAX=`4.0 N·m`。修改这些范围时，

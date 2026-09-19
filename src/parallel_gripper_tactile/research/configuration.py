@@ -10,6 +10,7 @@ from pydantic import BaseModel, ConfigDict, Field, TypeAdapter, ValidationError,
 from dm_grasp_core.grasp.unified import UnifiedAdaptiveConfig
 
 from ..config.profiles import (
+    DMMechanicalNonideality,
     GripperProfile,
     MITTorqueControl,
     StiffnessEstimatorMethod,
@@ -90,6 +91,7 @@ class DMModelSelection(_ResearchModel):
     name: str = Field(min_length=1)
     profile_name: str | None = Field(default=None, min_length=1)
     path: Path
+    mechanics: DMMechanicalNonideality
     tactile: dict[str, object]
     sensor_taxel_normal_noise_std_n: tuple[float, float]
     sensor_taxel_shear_noise_std_n: tuple[float, float]
@@ -455,7 +457,10 @@ def _profile_from_fragments(
             "name": (
                 selection.experiment.profile_name or model.profile_name or platform.profile_name
             ),
-            "model": {"path": _repository_path(model.path, repository_root=repository_root)},
+            "model": {
+                "path": _repository_path(model.path, repository_root=repository_root),
+                "mechanics": model.mechanics,
+            },
             "control": {
                 "mode": "mit_torque",
                 "actuator": platform.actuator,

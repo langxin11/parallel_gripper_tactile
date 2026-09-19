@@ -334,10 +334,21 @@ ControlLayout: TypeAlias = Annotated[
 ]
 
 
+class DMMechanicalNonideality(_FrozenModel):
+    """DMgripper 仿真的机构摩擦与集中等效回差。"""
+
+    slide_frictionloss_n: Annotated[FiniteFloat, Field(ge=0)] = 0.1
+    backlash_enabled: bool = True
+    backlash_rad: Annotated[FiniteFloat, Field(ge=0, le=0.05)] = 0.005
+
+
 class ModelSpec(_FrozenModel):
-    """profile 所使用的 MJCF 源。"""
+    """profile 所使用的 MJCF 源及可选机构非理想参数。"""
 
     path: Path
+    mechanics: DMMechanicalNonideality | None = Field(
+        default=None, exclude_if=lambda value: value is None
+    )
 
 
 class Mount(_FrozenModel):
@@ -498,7 +509,10 @@ def validate_resolved_profile(profile: GripperProfile) -> GripperProfile:
         validated = GripperProfile.model_validate(
             {
                 **validated.model_dump(mode="python"),
-                "model": {"path": model_path},
+                "model": {
+                    **validated.model.model_dump(mode="python"),
+                    "path": model_path,
+                },
             }
         )
     return _resolve_touch_grid_shape(validated)
@@ -527,7 +541,10 @@ def load_profile(path: str | Path, *, repository_root: str | Path | None = None)
     resolved_profile = GripperProfile.model_validate(
         {
             **profile.model_dump(mode="python"),
-            "model": {"path": resolved_model_path},
+            "model": {
+                **profile.model.model_dump(mode="python"),
+                "path": resolved_model_path,
+            },
         }
     )
     return validate_resolved_profile(resolved_profile)
@@ -537,6 +554,7 @@ __all__ = [
     "AdrcControl",
     "ControlLayout",
     "DMAdmittanceControl",
+    "DMMechanicalNonideality",
     "DMForceSupervisorControl",
     "GripperProfile",
     "ContactStiffnessControl",

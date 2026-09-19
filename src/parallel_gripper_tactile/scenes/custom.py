@@ -122,6 +122,24 @@ def _load_fixed_gripper_spec(mujoco, profile: GripperProfile):
         raise ValueError("custom gripper model is missing the reserved base body")
     for freejoint in base.findall("freejoint"):
         base.remove(freejoint)
+    mechanics = profile.model.mechanics
+    if mechanics is not None:
+        for name in ("left_finger_slide", "right_finger_slide"):
+            joint = root.find(f".//joint[@name='{name}']")
+            if joint is None:
+                raise ValueError(f"custom gripper model is missing {name!r}")
+            joint.set("frictionloss", f"{float(mechanics.slide_frictionloss_n):.9g}")
+        backlash = root.find(".//joint[@name='gripper_backlash']")
+        if backlash is None:
+            raise ValueError("custom gripper model is missing 'gripper_backlash'")
+        if mechanics.backlash_enabled and mechanics.backlash_rad > 0:
+            half_width = 0.5 * float(mechanics.backlash_rad)
+            backlash.set("range", f"{-half_width:.9g} {half_width:.9g}")
+        else:
+            for parent in root.iter():
+                if backlash in list(parent):
+                    parent.remove(backlash)
+                    break
     return mujoco.MjSpec.from_string(ET.tostring(root, encoding="unicode"))
 
 

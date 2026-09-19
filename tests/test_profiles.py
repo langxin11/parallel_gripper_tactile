@@ -75,6 +75,10 @@ def test_custom_profile_defines_bounded_mit_torque_control() -> None:
     profile = load_profile(ROOT / "tests/fixtures/profiles/dm_gripper.yaml")
 
     assert profile.model_path.name == "parallel_gripper_height_sphere_collision.xml"
+    assert profile.model.mechanics is not None
+    assert profile.model.mechanics.slide_frictionloss_n == pytest.approx(0.1)
+    assert profile.model.mechanics.backlash_enabled
+    assert profile.model.mechanics.backlash_rad == pytest.approx(0.005)
     assert profile.control_mode == "mit_torque"
     assert profile.mit is not None
     assert profile.mit.p_min <= profile.open_control < profile.closed_control <= profile.mit.p_max

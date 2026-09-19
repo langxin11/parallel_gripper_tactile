@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from parallel_gripper_tactile import load_profile
+from parallel_gripper_tactile.config.profiles import DMMechanicalNonideality
 from parallel_gripper_tactile.experiments import grasp as validation
 from parallel_gripper_tactile.scenes import custom as scene
 
@@ -49,6 +50,56 @@ def test_custom_scene_fixes_reserved_base_and_keeps_free_cube() -> None:
     pillar_id = model.geom("gripper/left_taxel_geom_11").id
     assert np.allclose(model.geom_solref[pillar_id], (-1200.0, -10.0))
     assert np.allclose(model.geom_solimp[pillar_id], (0.75, 0.95, 0.0025, 0.5, 2.0))
+
+    backlash_id = model.joint("gripper/gripper_backlash").id
+    assert np.allclose(model.jnt_range[backlash_id], (-0.0025, 0.0025))
+    for name in ("left_finger_slide", "right_finger_slide"):
+        joint_id = model.joint(f"gripper/{name}").id
+        dof_id = model.jnt_dofadr[joint_id]
+        assert model.dof_frictionloss[dof_id] == pytest.approx(0.1)
+
+
+def test_custom_scene_can_disable_mechanical_nonidealities() -> None:
+    """诊断配置可关闭回差并清零滑台干摩擦。"""
+    profile = load_profile(ROOT / "tests/fixtures/profiles/dm_gripper.yaml")
+    mechanics = DMMechanicalNonideality(
+        slide_frictionloss_n=0.0,
+        backlash_enabled=False,
+        backlash_rad=0.005,
+    )
+    profile = profile.model_copy(
+        update={"model": profile.model.model_copy(update={"mechanics": mechanics})}
+    )
+
+    model = scene.build_custom_grasp_model(profile)
+
+    assert mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_JOINT, "gripper/gripper_backlash") == -1
+    for name in ("left_finger_slide", "right_finger_slide"):
+        joint_id = model.joint(f"gripper/{name}").id
+        dof_id = model.jnt_dofadr[joint_id]
+        assert model.dof_frictionloss[dof_id] == pytest.approx(0.0)
+
+
+def test_backlash_allows_input_reversal_without_output_motion() -> None:
+    """输入轴跨过总回差宽度时，曲柄输出位姿保持不变。"""
+    profile = load_profile(ROOT / "tests/fixtures/profiles/dm_gripper.yaml")
+    model = scene.build_custom_grasp_model(profile)
+    data = mujoco.MjData(model)
+    drive_qadr = model.jnt_qposadr[model.joint("gripper/gripper_drive").id]
+    backlash_qadr = model.jnt_qposadr[model.joint("gripper/gripper_backlash").id]
+    output_body = model.body("gripper/motor").id
+
+    data.qpos[drive_qadr] = 0.5
+    data.qpos[backlash_qadr] = -0.0025
+    mujoco.mj_forward(model, data)
+    output_before = data.xmat[output_body].copy()
+
+    data.qpos[drive_qadr] -= 0.005
+    data.qpos[backlash_qadr] = 0.0025
+    mujoco.mj_forward(model, data)
+
+    assert data.qpos[drive_qadr] == pytest.approx(0.495)
+    assert np.allclose(data.xmat[output_body], output_before, atol=1e-12)
 
 
 @pytest.mark.parametrize(

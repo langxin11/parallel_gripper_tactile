@@ -26,7 +26,7 @@ uv run python scripts/research/run.py \
 配置组职责如下：
 
 - `platform/`：设备家族、后端、机构、安装和硬边界；
-- `model/`：MJCF、碰撞近似、触觉布局和传感器噪声标定；
+- `model/`：MJCF、碰撞近似、机构摩擦／回差、触觉布局和传感器噪声标定；
 - `controller/`：完整控制律、MIT 可调增益、滤波及接触状态参数；DM 控制器共享
   `dm_gripper/_common.yaml` 的算法无关参数，PID 系列再继承 `_pid_base.yaml`；变体文件只声明
   `name` 与差异字段，模块启停差异由 `configure_force_controller` 在组合后按
