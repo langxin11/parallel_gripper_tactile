@@ -186,13 +186,37 @@ class PapillArraySerialClient:
         """请求设备停止滑动检测。"""
         self._write_command(_STOP_SLIP_COMMAND)
 
-    def read_packet(self) -> PtsPacket:
+    def read_packet(self, packet_timeout_s: float | None = None) -> PtsPacket:
         """读取下一个校验通过且数量符合部署配置的触觉观测包。
+
+        Args:
+            packet_timeout_s: 可选缩短本次总等待及底层串口读取时限，单位 s。
 
         Raises:
             RuntimeError: 设备报告的传感器数与部署配置不一致。
         """
-        packet = self._require_reader().read_packet()
+        reader = self._require_reader()
+        if packet_timeout_s is None:
+            packet = reader.read_packet()
+        else:
+            if (
+                isinstance(packet_timeout_s, bool)
+                or not math.isfinite(packet_timeout_s)
+                or packet_timeout_s <= 0
+            ):
+                raise ValueError("单包等待覆盖必须是正有限数")
+            budget = min(packet_timeout_s, self._config.packet_timeout_s)
+            port = self._require_open()
+            # 原厂服务截止临近时，底层单次 read 也不得继续沿用长超时。
+            has_timeout = hasattr(port, "timeout")
+            old_timeout = getattr(port, "timeout", None)
+            if has_timeout:
+                port.timeout = min(self._config.timeout_s, budget)
+            try:
+                packet = reader.read_packet(packet_timeout_s=budget)
+            finally:
+                if has_timeout:
+                    port.timeout = old_timeout
         if packet.n_sensors != self._config.expected_sensors:
             raise RuntimeError(
                 "PapillArray 传感器数与部署配置不一致："

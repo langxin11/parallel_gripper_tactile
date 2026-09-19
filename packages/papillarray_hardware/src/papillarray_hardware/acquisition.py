@@ -6,13 +6,14 @@ import math
 import threading
 import time
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import Literal
 
 import numpy as np
 
 from .client import PapillArraySerialClient, PapillArraySerialConfig
 from .protocol import PtsPacket, PtsReadTimeout
+from .native_slip import NativeSlipLease, NativeSlipPhase, NativeSlipStatus
 
 CounterEvent = Literal["first", "consecutive", "gap", "wrap"]
 TaxelForces = tuple[tuple[float, float, float], ...]
@@ -227,6 +228,17 @@ class TactileSnapshot:
     counter_gap: int | None = None
     raw_timestamp_us: int | None = None
     timestamp_wrap_count: int = 0
+    native_session_id: int = 0
+    native_session_phase: NativeSlipPhase = "idle"
+    native_session_reason: str = "not_requested"
+    native_slip_active: tuple[bool, ...] = ()
+    native_reference_loaded: tuple[bool, ...] = ()
+    native_pillar_states: tuple[tuple[int, ...], ...] = ()
+    native_pillar_friction: tuple[tuple[float | None, ...], ...] = ()
+    native_sensor_friction: tuple[float | None, ...] = ()
+    native_target_grip_force_n: tuple[float | None, ...] = ()
+    left_taxel_displacements_mm: TaxelForces = ()
+    right_taxel_displacements_mm: TaxelForces = ()
 
 
 class FirstOrderLowPassFilter:
@@ -298,6 +310,29 @@ class TactileWorker:
         self._snapshot: TactileSnapshot | None = None
         self._error: BaseException | None = None
         self._last_timeout: PtsReadTimeout | None = None
+        self._native_slip = NativeSlipLease()
+        self._cleanup_error: BaseException | None = None
+
+    @property
+    def native_slip_status(self) -> NativeSlipStatus:
+        """返回原厂服务的发送及确认状态。"""
+        return self._native_slip.status
+
+    def request_native_slip(
+        self, session_id: int, *, max_duration_s: float, confirmation_timeout_s: float
+    ) -> None:
+        """提交有界会话；所有串口命令仍由采集线程发送。"""
+        if self._stop.is_set() or self._error is not None:
+            raise RuntimeError("采集已经退出或失败，不能启动滑移检测")
+        self._native_slip.request_start(
+            session_id,
+            max_duration_s=max_duration_s,
+            confirmation_timeout_s=confirmation_timeout_s,
+        )
+
+    def stop_native_slip(self, reason: str = "cancelled") -> None:
+        """请求原厂停止，调用方通过状态区分请求与确认。"""
+        self._native_slip.request_stop(reason)
 
     def start(self) -> None:
         """启动唯一的触觉串口所有者线程。"""
@@ -308,12 +343,24 @@ class TactileWorker:
 
     def stop(self) -> None:
         """请求采集结束并等待串口关闭。"""
+        self.stop_native_slip("acquisition_exit")
         self._stop.set()
         thread = self._thread
         if thread is not None:
-            thread.join(timeout=self._config.packet_timeout_s + self._config.timeout_s + 1.0)
+            thread.join(
+                timeout=self._config.packet_timeout_s
+                + self._config.timeout_s
+                + self._native_slip.shutdown_timeout_s
+                + 1.0
+            )
             if thread.is_alive():
                 raise RuntimeError("触觉采集线程未能在时限内退出")
+        if self._cleanup_error is not None:
+            raise RuntimeError(
+                f"原厂滑移检测退出失败：{self._cleanup_error}"
+            ) from self._cleanup_error
+        if self.native_slip_status.phase == "failed":
+            raise RuntimeError(f"原厂滑移检测停止未确认：{self.native_slip_status.reason}")
 
     def wait_for_update(
         self, previous_received_at_s: float | None, timeout_s: float
@@ -349,37 +396,72 @@ class TactileWorker:
         try:
             with self._client_factory(self._config) as client:
                 client.configure_stream()
-                bias_pending = self._clear_bias
-                while not self._stop.is_set():
+                try:
+                    self._read_stream(client)
+                finally:
                     try:
-                        packet = client.read_packet()
-                    except PtsReadTimeout as error:
-                        with self._condition:
-                            self._last_timeout = error
-                            self._condition.notify_all()
-                        continue
-                    diagnostics = self._integrity.inspect(packet)
-                    if bias_pending:
-                        client.clear_bias()
-                        self._left_filter.reset()
-                        self._right_filter.reset()
-                        self._integrity.reset_stream_sequence()
-                        bias_pending = False
-                        continue
-                    snapshot = self._snapshot_from_packet(packet, diagnostics)
-                    if self._snapshot_transform is not None:
-                        snapshot = self._snapshot_transform(snapshot)
-                    if self._sample_sink is not None:
-                        self._sample_sink(asdict(snapshot))
-                    with self._condition:
-                        self._snapshot = snapshot
-                        self._last_timeout = None
-                        self._condition.notify_all()
+                        self._native_slip.close(client)
+                    except BaseException as error:  # noqa: BLE001
+                        self._cleanup_error = error
+                        raise
         except BaseException as error:  # noqa: BLE001
             if not self._stop.is_set():
                 with self._condition:
                     self._error = error
                     self._condition.notify_all()
+
+    def _read_stream(self, client: PapillArraySerialClient) -> None:
+        """逐包检查租期；控制线程暂停时仍会执行停止及确认。"""
+        bias_pending = self._clear_bias
+        while True:
+            if self._stop.is_set():
+                self.stop_native_slip("acquisition_exit")
+            self._native_slip.tick(client, self._clock())
+            if self._stop.is_set() and self.native_slip_status.phase in {
+                "idle",
+                "stopped",
+                "failed",
+            }:
+                break
+            try:
+                budget = self._native_slip.read_timeout_s(
+                    self._clock(), self._config.packet_timeout_s
+                )
+                packet = (
+                    client.read_packet()
+                    if budget is None
+                    else client.read_packet(packet_timeout_s=budget)
+                )
+            except PtsReadTimeout as error:
+                with self._condition:
+                    self._last_timeout = error
+                    self._condition.notify_all()
+                continue
+            diagnostics = self._integrity.inspect(packet)
+            if bias_pending:
+                client.clear_bias()
+                self._left_filter.reset()
+                self._right_filter.reset()
+                self._integrity.reset_stream_sequence()
+                bias_pending = False
+                continue
+            active = tuple(getattr(packet, "slip_detection_active", ()))
+            self._native_slip.tick(client, self._clock(), active if len(active) == 2 else None)
+            status = self.native_slip_status
+            snapshot = replace(
+                self._snapshot_from_packet(packet, diagnostics),
+                native_session_id=status.session_id,
+                native_session_phase=status.phase,
+                native_session_reason=status.reason,
+            )
+            if self._snapshot_transform is not None:
+                snapshot = self._snapshot_transform(snapshot)
+            if self._sample_sink is not None:
+                self._sample_sink(asdict(snapshot))
+            with self._condition:
+                self._snapshot = snapshot
+                self._last_timeout = None
+                self._condition.notify_all()
 
     def _snapshot_from_packet(
         self, packet: PtsPacket, diagnostics: PacketIntegrityDiagnostics
@@ -388,6 +470,7 @@ class TactileWorker:
         sample_time_s = diagnostics.unwrapped_timestamp_us * 1e-6
         raw_left_fz_n = float(packet.global_forces[0][2])
         raw_right_fz_n = float(packet.global_forces[1][2])
+        displacements = getattr(packet, "pillar_displacements", ())
         return TactileSnapshot(
             received_at_s=self._clock(),
             packet_counter=int(packet.packet_counter),
@@ -406,12 +489,45 @@ class TactileWorker:
             counter_gap=diagnostics.counter_gap,
             raw_timestamp_us=int(packet.timestamp_us),
             timestamp_wrap_count=diagnostics.timestamp_wrap_count,
+            native_slip_active=tuple(
+                bool(value) for value in getattr(packet, "slip_detection_active", ())
+            ),
+            native_reference_loaded=tuple(
+                bool(value) for value in getattr(packet, "reference_pillar_loaded", ())
+            ),
+            native_pillar_states=tuple(
+                tuple(int(value) for value in sensor)
+                for sensor in getattr(packet, "pillar_slip_states", ())
+            ),
+            native_pillar_friction=tuple(
+                tuple(_finite_estimate(value) for value in sensor)
+                for sensor in getattr(packet, "pillar_friction_estimates", ())
+            ),
+            native_sensor_friction=tuple(
+                _finite_estimate(value)
+                for value in getattr(packet, "sensor_friction_estimates", ())
+            ),
+            native_target_grip_force_n=tuple(
+                _finite_estimate(value) for value in getattr(packet, "target_grip_forces", ())
+            ),
+            left_taxel_displacements_mm=(
+                _taxel_forces(displacements[0]) if len(displacements) == 2 else ()
+            ),
+            right_taxel_displacements_mm=(
+                _taxel_forces(displacements[1]) if len(displacements) == 2 else ()
+            ),
         )
 
 
 def _taxel_forces(values: np.ndarray) -> TaxelForces:
     """将已验证的 NumPy taxel 数组转成 JSON 兼容的不可变普通浮点数。"""
     return tuple(tuple(float(component) for component in row) for row in values)
+
+
+def _finite_estimate(value: float) -> float | None:
+    """将原厂非有限估计记为缺失，避免日志生成非标准 JSON 数字。"""
+    number = float(value)
+    return number if math.isfinite(number) else None
 
 
 def _timeout_detail(error: PtsReadTimeout | None) -> str:
