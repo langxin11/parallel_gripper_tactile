@@ -194,6 +194,11 @@ uv run --package dmgripper-experiments dmgripper-run \
 
 正常阶段为 `preparing` → `ready` → 必要时 `homing` → `approach` →
 `contact_transition` → `preload` → `active` → `holding` → 显式释放后的 `returning` → `completed`。
+终端将这些内部阶段归并为预检、等待启动、建立抓力、正式运行、故障保持和释放结束；
+`events.jsonl` 与 trace 仍保留原始阶段名供诊断。使能后的 `homing`、`approach`、
+`contact_transition`、`preload`、`active` 和 `holding` 均接受 `release`，统一转入受限回位。
+统一自适应配置的 `duration_s: null` 使 `holding` 在正常路径不可达，且动态目标不允许
+`reapproach`；两者只保留给其他公共实验模式。
 
 - `preparing` 先做电机预检：打开 DM 串口、校验反馈与 MIT 模式、确认失能态（上次异常退出残留的
   使能态先显式失能一次再确认）；位置不在 home 容差内时按受限回位参数自动回零，完成后回到失能态。

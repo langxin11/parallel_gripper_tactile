@@ -477,6 +477,40 @@ def test_auto_start_and_return_complete_without_interactive_actions(tmp_path: Pa
     )
 
 
+@pytest.mark.parametrize("release_phase", ["approach", "contact_transition", "preload"])
+def test_release_before_active_uses_limited_return(tmp_path: Path, release_phase: str) -> None:
+    """建立抓力的各子阶段都能直接请求受限回位。"""
+
+    class EarlyReleaseActions(PhaseActions):
+        def __init__(self) -> None:
+            super().__init__()
+            self.released = False
+
+        def __call__(self) -> str | None:
+            if self.phase == release_phase and not self.released:
+                self.released = True
+                return "release"
+            return super().__call__()
+
+    result, session, actions, directory = run_fake_experiment(
+        tmp_path,
+        curve_config(),
+        actions_type=EarlyReleaseActions,
+    )
+    assert result["status"] == "completed"
+    assert session.disable_calls == 1
+    assert actions.released is True
+    assert actions.states[-2:] == ["returning", "completed"]
+    assert "active" not in actions.states
+    events = _read_events(directory)
+    assert any(
+        event.get("event") == "command_received"
+        and event.get("phase") == release_phase
+        and event.get("action") == "release"
+        for event in events
+    )
+
+
 def test_own_friction_session_runs_inside_automatic_motor_lifecycle(tmp_path: Path) -> None:
     """完整运行器在闭环夹持期间启动自主估计，且不提交原厂启停请求。"""
     from dataclasses import replace

@@ -14,7 +14,7 @@ import threading
 import time
 from dataclasses import dataclass, fields
 
-from .lifecycle import LifecyclePhase
+from .lifecycle import RELEASE_PHASES, LifecyclePhase
 
 _MESSAGES = {
     LifecyclePhase.PREPARING: "正在预检：检查电机反馈并按需回零，随后验证空载零力。",
@@ -30,6 +30,22 @@ _MESSAGES = {
     LifecyclePhase.COMPLETED: "回位完成，实验结束。",
     LifecyclePhase.CANCELLED: "使能前取消，未发送运动命令。",
     LifecyclePhase.FAULT: "发生故障，已执行退出清理。",
+}
+
+_OPERATOR_PHASES = {
+    LifecyclePhase.PREPARING: "预检",
+    LifecyclePhase.READY: "等待启动",
+    LifecyclePhase.HOMING: "建立抓力",
+    LifecyclePhase.APPROACH: "建立抓力",
+    LifecyclePhase.CONTACT_TRANSITION: "建立抓力",
+    LifecyclePhase.PRELOAD: "建立抓力",
+    LifecyclePhase.ACTIVE: "正式运行",
+    LifecyclePhase.HOLDING: "正式运行",
+    LifecyclePhase.FAULT_HOLDING: "故障保持",
+    LifecyclePhase.RETURNING: "释放结束",
+    LifecyclePhase.COMPLETED: "释放结束",
+    LifecyclePhase.CANCELLED: "已取消",
+    LifecyclePhase.FAULT: "故障退出",
 }
 
 
@@ -346,7 +362,7 @@ class TerminalDisplay:
             subtitle = "退出清理已尝试完成"
         elif phase == LifecyclePhase.HOMING.value:
             title = "DMgripper 自动回零"
-            subtitle = "仅接受 status；紧急停止请按 Ctrl+C"
+            subtitle = "可输入 status 或 release；紧急停止请按 Ctrl+C"
         elif phase == LifecyclePhase.FAULT_HOLDING.value:
             title = "DMgripper 故障保持"
             subtitle = "请承接物体后输入 release；紧急停止请按 Ctrl+C"
@@ -424,7 +440,7 @@ class TerminalDisplay:
         )
         task_time = "n/a" if snapshot.task_time_s is None else f"{snapshot.task_time_s:.1f}s"
         return (
-            f"[{snapshot.phase.value}] t_task={task_time} "
+            f"[{_OPERATOR_PHASES[snapshot.phase]}/{snapshot.phase.value}] t_task={task_time} "
             f"F_L={snapshot.left_normal_n:.3f}N F_R={snapshot.right_normal_n:.3f}N "
             f"F_target={snapshot.target_force_n:.3f}N "
             f"K={stiffness}{valid} dt={snapshot.control_dt_s * 1000:.1f}ms "
@@ -441,7 +457,10 @@ class TerminalDisplay:
         table.add_column(justify="right", style="cyan", no_wrap=True)
         table.add_column(no_wrap=True)
         title = Text(f"{snapshot.task_name} / {snapshot.object_name}", style="bold")
-        phase_text = Text(snapshot.phase.value, style="bold magenta")
+        phase_text = Text(
+            f"{_OPERATOR_PHASES[snapshot.phase]}（{snapshot.phase.value}）",
+            style="bold magenta",
+        )
         message = _MESSAGES.get(snapshot.phase, "")
         table.add_row("阶段", f"{phase_text} +{snapshot.phase_elapsed_s:.1f}s  {message}")
         task_time = "n/a" if snapshot.task_time_s is None else f"{snapshot.task_time_s:.2f} s"
@@ -487,19 +506,8 @@ class TerminalDisplay:
 
 def _command_hint(phase: LifecyclePhase) -> str:
     """返回与当前生命周期实际允许动作一致的命令提示。"""
-    if phase in {
-        LifecyclePhase.ACTIVE,
-        LifecyclePhase.HOLDING,
-        LifecyclePhase.FAULT_HOLDING,
-    }:
+    if phase in RELEASE_PHASES:
         return "status 查看状态 · r/release 回位（按 Enter）"
-    if phase in {
-        LifecyclePhase.HOMING,
-        LifecyclePhase.APPROACH,
-        LifecyclePhase.CONTACT_TRANSITION,
-        LifecyclePhase.PRELOAD,
-    }:
-        return "status 查看状态 · r/release 暂不可用 · 紧急停止 Ctrl+C"
     if phase is LifecyclePhase.RETURNING:
         return "正在回位 · status 查看状态 · 紧急停止 Ctrl+C"
     return "实验已结束"

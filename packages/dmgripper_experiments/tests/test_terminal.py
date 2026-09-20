@@ -128,7 +128,7 @@ def test_plain_mode_formats_phase_and_forces():
     display.publish(_snapshot())
     display.stop()
     text = stream.getvalue()
-    assert "[active]" in text
+    assert "[正式运行/active]" in text
     assert "F_target=0.500N" in text
 
 
@@ -168,7 +168,7 @@ def test_rich_preflight_panel_keeps_recent_warning_without_snapshot():
 
 
 def test_rich_command_hint_matches_phase_permissions() -> None:
-    """Rich 控制面板不得在不支持的阶段邀请用户输入 release。"""
+    """Rich 控制面板在使能后各阶段统一提供 release。"""
     import io
 
     from rich.console import Console
@@ -179,7 +179,8 @@ def test_rich_command_hint_matches_phase_permissions() -> None:
         display._render_rich(_snapshot(phase=LifecyclePhase.APPROACH))  # noqa: SLF001
     )
     rendered = stream.getvalue()
-    assert "release 暂不可用" in rendered
+    assert "release 回位" in rendered
+    assert "建立抓力（approach）" in rendered
 
     stream.seek(0)
     stream.truncate(0)

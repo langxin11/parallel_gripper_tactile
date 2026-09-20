@@ -31,7 +31,7 @@ from dm_grasp_core import (
 
 from .config import ExperimentConfig, LifecycleConfig
 from .control import GripController
-from .lifecycle import Lifecycle, LifecyclePhase
+from .lifecycle import RELEASE_PHASES, Lifecycle, LifecyclePhase
 from .native_slip import NativeSlipSession
 from .observation import (
     PairedObservation,
@@ -796,6 +796,20 @@ def _run_control_loop_inner(
                 raise
             except Exception:
                 raise
+            if action == "release":
+                emit(
+                    {
+                        "event": "command_received",
+                        "phase": lifecycle.phase.value,
+                        "action": "release",
+                        "message": "已收到 release，正在受限张开回位。",
+                    }
+                )
+                lifecycle.begin_return(now, "用户在自动回零阶段请求释放")
+                trajectory = _home_trajectory(config, kinematics, feedback.position_rad)
+                phase_started = now
+                enter_phase(LifecyclePhase.RETURNING, _PHASE_MESSAGES[LifecyclePhase.RETURNING])
+                continue
             if action == "status":
                 emit(
                     {
@@ -812,7 +826,7 @@ def _run_control_loop_inner(
                         "code": "command_not_available",
                         "phase": lifecycle.phase.value,
                         "action": action,
-                        "message": "自动回零阶段只接受 status；紧急停止请按 Ctrl+C。",
+                        "message": "自动回零阶段只接受 status 或 release；紧急停止请按 Ctrl+C。",
                     }
                 )
             closure, velocity, _ = trajectory.sample(now - phase_started)
@@ -889,10 +903,7 @@ def _run_control_loop_inner(
                 raise RuntimeError(f"统一策略触觉配对失败：{error}") from error
             raise
         action = action_source()
-        if action == "release" and lifecycle.phase in {
-            LifecyclePhase.ACTIVE,
-            LifecyclePhase.HOLDING,
-        }:
+        if action == "release" and lifecycle.phase in RELEASE_PHASES:
             emit(
                 {
                     "event": "command_received",

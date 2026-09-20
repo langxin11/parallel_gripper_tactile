@@ -38,6 +38,18 @@ TERMINAL_PHASES = frozenset(
     }
 )
 
+RELEASE_PHASES = frozenset(
+    {
+        LifecyclePhase.HOMING,
+        LifecyclePhase.APPROACH,
+        LifecyclePhase.CONTACT_TRANSITION,
+        LifecyclePhase.PRELOAD,
+        LifecyclePhase.ACTIVE,
+        LifecyclePhase.HOLDING,
+        LifecyclePhase.FAULT_HOLDING,
+    }
+)
+
 _TRACKING_PHASES = frozenset(
     {
         LifecyclePhase.PRELOAD,
@@ -56,7 +68,8 @@ class Lifecycle:
     preparing → ready → homing（必要时）→ approach → contact_transition
                        └────────────────→ approach
     contact_transition → preload → active → holding
-    active／holding → returning → completed
+    homing／approach／contact_transition／preload／active／holding
+      → returning → completed
     任一使能后可保持阶段 → fault_holding → returning → completed
     ready → cancelled
     approach → contact_transition → preload
@@ -138,12 +151,8 @@ class Lifecycle:
         self._enter(LifecyclePhase.HOLDING, now_s, "任务计时完成，保持抓握")
 
     def begin_return(self, now_s: float, reason: str) -> None:
-        """响应用户 release，进入受限张开回位。"""
-        if self.phase not in {
-            LifecyclePhase.ACTIVE,
-            LifecyclePhase.HOLDING,
-            LifecyclePhase.FAULT_HOLDING,
-        }:
+        """响应使能后的 release，进入受限张开回位。"""
+        if self.phase not in RELEASE_PHASES:
             raise RuntimeError(f"阶段 {self.phase.value} 不允许开始回位")
         self._enter(LifecyclePhase.RETURNING, now_s, reason)
 

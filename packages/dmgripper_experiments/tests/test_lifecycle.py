@@ -4,7 +4,12 @@ from __future__ import annotations
 
 import pytest
 
-from dmgripper_experiments.lifecycle import TERMINAL_PHASES, Lifecycle, LifecyclePhase
+from dmgripper_experiments.lifecycle import (
+    RELEASE_PHASES,
+    TERMINAL_PHASES,
+    Lifecycle,
+    LifecyclePhase,
+)
 
 
 def test_full_transition_table_happy_path():
@@ -103,11 +108,23 @@ def test_transitions_require_their_unique_source_phase(call: str, kwargs: dict):
         getattr(lifecycle, call)(0.0, **kwargs)
 
 
-def test_begin_return_accepts_active_and_holding_only():
-    """release 只在 active／holding 有效。"""
+@pytest.mark.parametrize("source", sorted(RELEASE_PHASES, key=lambda phase: phase.value))
+def test_begin_return_accepts_every_enabled_release_phase(source: LifecyclePhase):
+    """使能后的正常阶段与故障保持都允许安全回位。"""
     lifecycle = Lifecycle()
-    lifecycle.mark_ready(0.0)
-    lifecycle.start(0.1)
+    lifecycle.phase = source
+    lifecycle.begin_return(0.2, "release")
+    assert lifecycle.phase is LifecyclePhase.RETURNING
+
+
+@pytest.mark.parametrize(
+    "source",
+    [LifecyclePhase.PREPARING, LifecyclePhase.READY, LifecyclePhase.RETURNING],
+)
+def test_begin_return_rejects_nonrelease_phase(source: LifecyclePhase):
+    """未使能、等待启动或已在回位时不重复开始回位。"""
+    lifecycle = Lifecycle()
+    lifecycle.phase = source
     with pytest.raises(RuntimeError, match="回位"):
         lifecycle.begin_return(0.2, "release")
 
