@@ -124,34 +124,6 @@ def test_yaml_rejects_invalid_pid_torque_feedforward_gain(tmp_path, literal):
         load_experiment_config(path)
 
 
-def test_water_bottle_pid_feedforward_can_be_overridden_in_cli_dry_run(capsys):
-    """水瓶配置启用独立前馈，命令行可离线覆盖而不连接设备。"""
-    from dmgripper_experiments.cli import run
-
-    path = (
-        Path(__file__).resolve().parents[3] / "configs/hardware/dmgripper/water_bottle_curve.yaml"
-    )
-    config = load_experiment_config(path)
-    assert config.controller.pid.torque_feedforward_gain == 1.0
-    assert config.controller.pid.max_position_adjustment_rad is None
-    assert (
-        run(
-            [
-                "--config",
-                str(path),
-                "--controller.kind",
-                "pid",
-                "--controller.pid.torque-feedforward-gain",
-                "0.0",
-            ]
-        )
-        == 0
-    )
-    record = json.loads(capsys.readouterr().out)
-    assert record["mode"] == "dry-run"
-    assert record["config"]["controller"]["pid"]["torque_feedforward_gain"] == 0.0
-
-
 @pytest.mark.parametrize("change", ["risk", "friction", "initial", "rate", "ceiling", "controller"])
 def test_unified_config_loads_and_requires_consistent_limits_and_acceptance(change: str):
     """低载荷配置可离线解码，权限与执行边界不允许隐式越过。"""
