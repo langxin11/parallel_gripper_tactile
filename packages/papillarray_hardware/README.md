@@ -81,6 +81,45 @@ PapillArray 探针超时：等待有效 PTS 包超过总时限。协议诊断：
 
 这类诊断只读取设备输出，探针仍只发送 `f<rate>\n`，不会执行清零或滑动检测命令。
 
+## 独立记录与手柄实验
+
+`papillarray-record` 不依赖夹爪控制进程，可与 `dmgripper-teleop` 分别运行在两个终端。
+记录器以独占目录保存 `tactile.jsonl`、`events.jsonl`、`config.json` 和 `manifest.json`。
+显式传入 `--bias` 时，采集线程在首个完整包后发送一次清零命令；启动时传感器必须完全无负载。
+
+显式传入 `--estimate-friction` 后，记录器根据双侧逐触点接触集合和全局法向力变化率判断稳定接触，
+连续满足 `--stable-duration` 后启动一次自主估计。启动时冻结参考接触集合；活动期允许扰动引起的
+边缘触点变化；整侧失去有效接触持续 `30 ms`、失鲜、缺包或退出时停止。该模式不调用原厂滑移服务，
+不会发送 `S\n`／`s\n`。按单 pillar `Fz` 测量误差尺度 `0.05 N`，默认逐触点接触进入／退出门槛
+设为 `0.15/0.10 N`；较小信号仍完整记录，但不进入参考接触集合。
+
+自主估计器不读取原厂状态或原厂摩擦值：对每个参考
+pillar 计算 `rho=hypot(Fx,Fy)/Fz`，只在比值先上升、随后饱和或发生剪切重分配并持续确认时，
+冻结候选开始前 `0.2 s` 窗口的 80% 分位数。`raw_mu` 保留未经安全折减的实验估计，
+`conservative_mu=clip(0.8*raw_mu,0.05,2.0)` 预留控制裕量。普通粘着阶段的 `rho` 只表示已用
+摩擦比例，不产生估计。`events.jsonl` 保存 `own_friction_state` 和 `own_friction_estimate`；
+当前命令只记录候选，不向夹爪发送目标力。
+
+```sh
+# 终端 A：空载启动；收到 bias 后首个有效包再用手柄闭合接触
+uv run --package papillarray-hardware papillarray-record \
+  --port /dev/papillarray --bias \
+  --estimate-friction \
+  --contact-on 0.15 --contact-off 0.10 \
+  --output outputs/real/papillarray/manual-friction-01
+
+# 终端 B：独立控制夹爪，不访问触觉串口
+uv run --package dmgripper-hardware dmgripper-teleop \
+  --port /dev/dmj4310_can --execute
+```
+
+终端 A 显示“自主逐 pillar 摩擦估计已启动”后，再沿触觉面缓慢施加切向扰动。整个实验结束时
+先用手柄张开并失能，再在终端 A 按 `Ctrl-C`；无需按 Enter。`Ctrl-C` 只结束自主估计与记录，
+不能替代夹爪端的失能操作。
+
+`--native-slip` 与 `--native-slip-duration` 仅保留给需要复现实验或做原厂对照的场景；日常自主估计
+不要传入这两个参数。
+
 ## 示例脚本
 
 探针 CLI 用于快速验证设备是否存活；`examples/` 下的脚本用于演示上层应如何正确使用这一采集边界

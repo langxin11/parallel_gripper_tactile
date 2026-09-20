@@ -10,6 +10,12 @@ from .acquisition import (
 )
 
 from .client import DEFAULT_PAPILLARRAY_PORT, PapillArraySerialClient, PapillArraySerialConfig
+from .pillar_friction import (
+    PillarFrictionConfig,
+    PillarFrictionEstimate,
+    PillarFrictionEstimator,
+)
+from .standalone import StandaloneSlipConfig, StandaloneSlipSession
 from .protocol import (
     PacketChecksumError,
     ProtocolError,
@@ -26,6 +32,9 @@ __all__ = [
     "DEFAULT_PAPILLARRAY_PORT",
     "PapillArraySerialClient",
     "PapillArraySerialConfig",
+    "PillarFrictionConfig",
+    "PillarFrictionEstimate",
+    "PillarFrictionEstimator",
     "PacketIntegrityDiagnostics",
     "PacketIntegrityError",
     "PacketIntegrityTracker",
@@ -36,5 +45,7 @@ __all__ = [
     "PtsStreamReader",
     "TactileSnapshot",
     "TactileWorker",
+    "StandaloneSlipConfig",
+    "StandaloneSlipSession",
     "parse_packet",
 ]

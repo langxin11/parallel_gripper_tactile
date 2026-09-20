@@ -1,4 +1,4 @@
-"""由采集线程执行的有限滑移检测租期与设备确认。"""
+"""由采集线程执行的滑移检测会话与设备确认。"""
 
 from __future__ import annotations
 
@@ -38,9 +38,9 @@ class NativeSlipLease:
         """初始化未启动会话与互斥锁。"""
         self._lock = threading.Lock()
         self._status = NativeSlipStatus()
-        self._start: tuple[int, float, float] | None = None
+        self._start: tuple[int, float | None, float] | None = None
         self._stop: str | None = None
-        self._duration = 0.0
+        self._duration: float | None = None
         self._confirmation = 0.0
         self._may_be_active = False
 
@@ -51,15 +51,28 @@ class NativeSlipLease:
             return self._status
 
     def request_start(
-        self, session_id: int, *, max_duration_s: float, confirmation_timeout_s: float
+        self,
+        session_id: int,
+        *,
+        max_duration_s: float | None,
+        confirmation_timeout_s: float,
     ) -> None:
-        """排队一个不可续期的检测会话；拒绝覆盖尚未确认停止的会话。"""
+        """排队一个检测会话；None 表示仅接受显式停止。"""
         if isinstance(session_id, bool) or not isinstance(session_id, int) or session_id <= 0:
             raise ValueError("会话编号必须为正整数")
-        for value in (max_duration_s, confirmation_timeout_s):
-            if isinstance(value, bool) or not math.isfinite(value) or value <= 0:
-                raise ValueError("检测租期与确认时限必须为正有限数")
-        if confirmation_timeout_s >= max_duration_s:
+        if (
+            isinstance(confirmation_timeout_s, bool)
+            or not math.isfinite(confirmation_timeout_s)
+            or confirmation_timeout_s <= 0
+        ):
+            raise ValueError("确认时限必须为正有限数")
+        if max_duration_s is not None and (
+            isinstance(max_duration_s, bool)
+            or not math.isfinite(max_duration_s)
+            or max_duration_s <= 0
+        ):
+            raise ValueError("检测租期必须为正有限数或 None")
+        if max_duration_s is not None and confirmation_timeout_s >= max_duration_s:
             raise ValueError("确认时限必须小于检测租期")
         with self._lock:
             if self._status.phase not in {"idle", "stopped"}:
@@ -77,14 +90,17 @@ class NativeSlipLease:
                 self._stop = reason
 
     def read_timeout_s(self, now_s: float, default_s: float) -> float | None:
-        """活动会话把单包等待预算缩短至下一个租期或确认期限。"""
+        """把单包等待预算缩短至下一个租期或确认期限。"""
         with self._lock:
             status = self._status
-            if status.phase in {"starting", "active"}:
+            if status.phase == "starting":
                 assert status.started_s is not None
+                deadline = status.started_s + self._confirmation
+            elif status.phase == "active":
+                assert status.started_s is not None
+                if self._duration is None:
+                    return None
                 deadline = status.started_s + self._duration
-                if status.phase == "starting":
-                    deadline = min(deadline, status.started_s + self._confirmation)
             elif status.phase == "stopping":
                 assert status.stop_sent_s is not None
                 deadline = status.stop_sent_s + self._confirmation
@@ -132,7 +148,7 @@ class NativeSlipLease:
                 assert status.started_s is not None
                 elapsed = now_s - status.started_s
                 reason = self._stop
-                if elapsed >= self._duration:
+                if self._duration is not None and elapsed >= self._duration:
                     reason = "duration_limit"
                 elif status.phase == "starting" and elapsed >= self._confirmation:
                     reason = "start_unconfirmed"

@@ -87,6 +87,22 @@ def test_total_duration_includes_starting_and_expires_without_feedback() -> None
     assert lease.status.stop_sent_s == 15.0
 
 
+def test_manual_session_has_no_duration_limit_and_stops_on_request() -> None:
+    """无租期会话保持活动，直到操作者显式请求停止。"""
+    lease, client = NativeSlipLease(), _Client()
+    lease.request_start(1, max_duration_s=None, confirmation_timeout_s=1.0)
+    lease.tick(client, 10.0)
+    lease.tick(client, 10.5, (True, True))
+    lease.tick(client, 10_000.0, (True, True))
+    assert lease.status.phase == "active"
+    assert lease.read_timeout_s(10_000.0, 0.2) is None
+    lease.request_stop("operator_requested")
+    lease.tick(client, 10_000.1, (True, True))
+    assert lease.status.phase == "stopping"
+    assert lease.status.reason == "operator_requested"
+    assert client.commands == ["start", "stop"]
+
+
 def test_start_confirmation_timeout_stops_even_without_feedback() -> None:
     """设备未确认启动时也必须停止可能已开启的服务。"""
     lease, client = NativeSlipLease(), _Client()

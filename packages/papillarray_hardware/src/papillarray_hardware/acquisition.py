@@ -319,9 +319,13 @@ class TactileWorker:
         return self._native_slip.status
 
     def request_native_slip(
-        self, session_id: int, *, max_duration_s: float, confirmation_timeout_s: float
+        self,
+        session_id: int,
+        *,
+        max_duration_s: float | None,
+        confirmation_timeout_s: float,
     ) -> None:
-        """提交有界会话；所有串口命令仍由采集线程发送。"""
+        """提交滑移会话；所有串口命令仍由采集线程发送。"""
         if self._stop.is_set() or self._error is not None:
             raise RuntimeError("采集已经退出或失败，不能启动滑移检测")
         self._native_slip.request_start(
