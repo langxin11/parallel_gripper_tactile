@@ -521,3 +521,99 @@ def test_step_stops_at_mechanical_bound():
     )
     assert a.displacement_m == K.closure(0.9) - K.closure(0.3)
     assert a.velocity_m_s == 0.0
+
+
+@pytest.mark.parametrize("direction", [-1, 1])
+@pytest.mark.parametrize("force", [0.1, 2.0])
+def test_closing_torque_only_clamps_composite_not_just_feedforward(direction, force):
+    """两种安装方向均阻止反馈项产生张开力矩，保留正向前馈。"""
+    cfg = replace(C, closing_direction=direction, closing_torque_only=True)
+    kwargs = dict(
+        reference_position_rad=0.4,
+        displacement_m=-0.002,
+        velocity_m_s=-0.002,
+        measured_position_rad=0.4,
+        measured_velocity_rad_s=0.1 * direction,
+        feedforward_force_n=force,
+    )
+    raw = build_mit_command(K, replace(cfg, closing_torque_only=False), **kwargs)
+    constrained = build_mit_command(K, cfg, **kwargs)
+
+    def torque(command):
+        return direction * (
+            command.kp * (command.position_rad - 0.4)
+            + command.kd * (command.velocity_rad_s - 0.1 * direction)
+            + command.feedforward_torque_nm
+        )
+
+    assert torque(raw) < 0
+    assert torque(constrained) == pytest.approx(0, abs=1e-12)
+    assert direction * constrained.feedforward_torque_nm > 0
+    assert constrained.kp == cfg.kp and constrained.kd == cfg.kd
+
+
+def test_closing_torque_only_preserves_positive_torque_modulation():
+    """单向约束不把正向力矩固定为常量，减小目标仍能减小支撑。"""
+    values = []
+    for force in (1.0, 3.0):
+        command = build_mit_command(
+            K,
+            replace(C, closing_torque_only=True),
+            reference_position_rad=0.4,
+            displacement_m=0.0,
+            velocity_m_s=0.0,
+            measured_position_rad=0.4,
+            measured_velocity_rad_s=0.0,
+            feedforward_force_n=force,
+        )
+        values.append(command.feedforward_torque_nm)
+    assert 0 < values[0] < values[1]
+
+
+def test_zero_velocity_target_keeps_position_and_feedforward_mapping():
+    """零目标速度仅移除 MIT 速度前馈，不改变导纳位移或力前馈。"""
+    kwargs = dict(
+        reference_position_rad=0.2,
+        displacement_m=K.closure(0.5) - K.closure(0.2),
+        velocity_m_s=0.005,
+        measured_position_rad=0.3,
+        measured_velocity_rad_s=0.1,
+        feedforward_force_n=3.0,
+    )
+    unconstrained = replace(C, torque_limit_nm=100.0, feedforward_torque_limit_nm=100.0)
+    moving = build_mit_command(K, unconstrained, **kwargs)
+    still = build_mit_command(K, replace(unconstrained, zero_velocity_target=True), **kwargs)
+
+    assert moving.velocity_rad_s != 0.0
+    assert still.velocity_rad_s == 0.0
+    assert still.position_rad == pytest.approx(moving.position_rad)
+    assert still.feedforward_torque_nm == pytest.approx(moving.feedforward_torque_nm)
+
+
+def test_closing_torque_limit_backprojects_admittance_without_explicit_feedback():
+    """持续卸力饱和时自动回投导纳，避免不可执行负力矩积累。"""
+    admittance = SecondOrderAdmittance(1.0, 0.0, 0.0)
+    cfg = replace(C, closing_torque_only=True)
+    for _ in range(100):
+        command = step_admittance(
+            admittance,
+            K,
+            cfg,
+            reference_position_rad=0.4,
+            measured_position_rad=0.4,
+            measured_velocity_rad_s=0.0,
+            left_force_n=10.0,
+            right_force_n=10.0,
+            target_force_n=1.0,
+            dt_s=0.01,
+        )
+        torque = (
+            command.kp * (command.position_rad - 0.4)
+            + command.kd * command.velocity_rad_s
+            + command.feedforward_torque_nm
+        )
+        assert torque >= -1e-9
+    assert admittance.execution_limited
+    assert admittance.displacement_m == pytest.approx(
+        K.closure(command.position_rad) - K.closure(0.4)
+    )

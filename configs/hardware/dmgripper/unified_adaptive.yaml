@@ -1,44 +1,82 @@
-# 统一自适应低载荷试运行配置；尚未完成真实设备验收。
-# 每侧恰好九点，直接使用采集层的局部 Fx、Fy、正压缩 Fz。
-# 实际左右编号、法向符号、九点行列顺序和装配坐标仍需标定；
-# 风险与摩擦只做旁路诊断，完成独立验收后才可同时开放权限和验收门禁。
+# 通用自适应抓取入口：水瓶、舵机、耳机仓、海绵和长方体共用控制与估计流程。
+# 物体名称只用于记录；力限须按物体耐受调整，当前数值不是跨物体验收结论。
 metadata:
   task_name: unified-adaptive
-  object_name: low-load-object
+  object_name: object
+  description: 持续在线摩擦与接触刚度估计，人工释放结束抓取
+  tags: [real, adaptive, friction, online]
 hardware:
   dm_port: /dev/dmj4310_can
   tactile_port: /dev/papillarray
 timing:
-  control_rate_hz: 250
+  control_rate_hz: 250.0
   max_control_gap_s: 0.1
-  tactile_timeout_s: 0.1
+  tactile_timeout_s: 0.2
+  tactile_cutoff_hz: 20.0
 lifecycle:
   verify_zero_force: true
   contact_on_n: 0.2
   contact_off_n: 0.1
+  contact_off_stable_s: 0.15
+  contact_transition_s: 0.15
+  lost_contact_scope: any_side
   lost_contact_action: fault
-  preload_stable_time_s: 2.0
+  # 预载只确认可靠建立抓力，不要求精确稳态；最终目标的 75% 持续 0.5 s 即进入 active。
+  preload_min_force_ratio: 0.75
+  preload_stable_time_s: 0.5
   preload_timeout_s: 30.0
+  # 独立于 active 增力速率，五次曲线首尾平滑、峰值不超过 1 N/s。
+  preload_force_rate_n_s: 1.0
+  auto_start: false
   on_finished: hold
+  own_friction: null
+  native_slip: null
 reference:
   adaptive:
-    initial_force_n: 0.5
-    duration_s: 20.0
-    max_force_rate_n_s: 0.5
-    risk_validation_passed: false
-    friction_validation_passed: false
+    initial_force_n: 1.0
+    # 不设任务截止时间；输入 release 后受限回位，再失能退出。
+    duration_s: null
+    # 切向承载增大时快速补足法向目标；仍受目标与原始过力上限约束。
+    max_force_rate_n_s: 10.0
+    # 本配置仅授权当前未验收的受控闭环试验，不冒充风险或摩擦真机验收。
+    experimental_closed_loop: true
     unified:
-      risk_enabled: false
-      friction_update_enabled: false
+      risk_enabled: true
+      # 风险事件只更新摩擦；目标完全由切向承载与在线摩擦之比产生。
+      risk_step_enabled: false
+      friction_update_enabled: true
+      # 允许至少三个共同有效触点形成候选；这是覆盖率门槛，不是统计置信度。
+      friction_quality_min: 0.3
+      friction_discount: 0.8
+      friction_min: 0.05
+      friction_max: 2.0
+      # 同一连续接触段内保留估计；无新事件不等于摩擦回到先验。
+      friction_expiry_s: null
+      friction_raise_events: 3
+      friction_consistency: 0.15
       load:
-        left_friction: 0.6
-        right_friction: 0.6
+        # 启动先验仅在尚无可信事件时使用，不表示被抓物摩擦已知。
+        left_friction: 0.3
+        right_friction: 0.3
         safety_factor: 1.5
-        min_force_n: 0.5
-        max_force_n: 1.5
-        max_force_rate_n_s: 0.5
+        min_force_n: 1.0
+        max_force_n: 30.0
+        max_force_rate_n_s: 10.0
+        # 短暂卸载或液体晃动时缓慢退力，避免快速跟随切向波动而松夹。
+        max_force_decrease_rate_n_s: 1.0
+        gap_gain_per_s: 8.0
+        load_rate_gain: 1.0
+        filter_tau_s: 0.05
+        allow_target_decrease: true
       observer:
-        # 量程为初始配置，必须按实际传感器验证。
+        window_s: 0.2
+        confirmation_s: 0.04
+        cooldown_s: 0.3
+        max_gap_s: 0.1
+        min_normal_n: 0.15
+        contact_release_ratio: 0.6666666666666666
+        allow_steady_load_risk: true
+        stable_contact_subset: true
         tangential_range_n: 4.0
         normal_range_n: 15.0
       tracking_error_n: 0.3
@@ -46,14 +84,31 @@ reference:
       max_sample_gap_s: 0.1
 controller:
   kind: admittance
+  # 通过正向合成力矩增减来卸力，允许接触弹性反力推动被动退让。
+  closing_torque_only: true
+  # 跟踪只更新位置参考；MIT 速度项只阻尼实测速度，不追随导纳速度。
+  zero_tracking_velocity: true
+  # 跟踪增益较默认 2.0／0.5 小幅提高；回位增益保持独立。
+  mit_kp: 4.0
+  mit_kd: 1.0
   admittance:
+    mass_kg: 0.2
+    damping_ns_m: 15.0
+    stiffness_n_m: 1.0
     force_deadband_n: 0.1
-    prevent_unloading: true
+    prevent_unloading: false
+    feedforward_ratio: 1.0
+estimation:
+  # 在线估计等效接触刚度；无足够位移激励时如实记录无效。
+  enabled: true
+  method: window_linear
 safety:
-  max_target_force_n: 1.5
-  force_ceiling_n: 2.0
+  max_target_force_n: 30.0
+  force_ceiling_n: 40.0
+  approach_feedforward_force_n: 1.0
 output:
   root: outputs/real
   plots: true
 terminal:
   mode: auto
+  refresh_hz: 5.0

@@ -324,3 +324,18 @@ def test_legacy_entry_points_reject_with_migration_hint(capsys: pytest.CaptureFi
         legacy.force_demo_main()
     assert demo_exit.value.code == 2
     assert "dmgripper-run" in capsys.readouterr().err
+
+
+def test_unlimited_execute_requires_terminal(tmp_path: Path, capsys, monkeypatch):
+    """不限时模式即便配置自动回位，也不能启动无人值守运行。"""
+    from dmgripper_experiments import cli
+
+    monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
+    path = tmp_path / "unlimited.yaml"
+    path.write_text(
+        "reference:\n  adaptive:\n    duration_s: null\nlifecycle:\n"
+        "  auto_start: true\n  on_finished: return\n",
+        encoding="utf-8",
+    )
+    assert cli.run(["--config", str(path), "--execute"]) == 1
+    assert "不限时实验必须在交互终端运行" in capsys.readouterr().err

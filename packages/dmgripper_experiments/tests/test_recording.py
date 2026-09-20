@@ -135,5 +135,9 @@ def test_trace_fields_cover_target_stiffness_and_timing_diagnostics():
         "control_dt_s",
         "tactile_age_s",
         "command_latency_s",
+        "adaptive_left_mu_lower_bound",
+        "adaptive_right_mu_lower_bound",
+        "adaptive_left_taxel_mu_lower_bound",
+        "adaptive_right_taxel_mu_lower_bound",
     }
     assert required <= set(TRACE_FIELDS)

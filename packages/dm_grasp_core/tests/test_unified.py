@@ -5,6 +5,7 @@ from dataclasses import replace
 import numpy as np
 import pytest
 
+from dm_grasp_core.grasp.adaptive import AdaptiveLoadConfig
 from dm_grasp_core.grasp.unified import UnifiedAdaptiveConfig, UnifiedAdaptivePolicy
 from dm_grasp_core.tactile.risk import TaxelRiskObservation
 
@@ -49,6 +50,55 @@ def test_event_budget_deduplication_and_monotonic_target() -> None:
     assert final.risk_budget_exhausted and final.failure_reason == "risk_budget_exhausted"
 
 
+def test_friction_only_mode_tracks_ratio_without_consuming_risk_budget() -> None:
+    """摩擦专用风险事件更新系数，目标可随承载比值下降且不消费固定增力预算。"""
+    load = AdaptiveLoadConfig(
+        left_friction=0.5,
+        right_friction=0.5,
+        min_force_n=0.5,
+        max_force_rate_n_s=10.0,
+        filter_tau_s=0.01,
+        allow_target_decrease=True,
+    )
+    config = UnifiedAdaptiveConfig(
+        load=load,
+        risk_enabled=True,
+        risk_step_enabled=False,
+        friction_update_enabled=True,
+    )
+    policy = UnifiedAdaptivePolicy(config)
+    loaded = np.tile([0.1, 0, 0.2], (9, 1))
+    event = TaxelRiskObservation(
+        valid=True,
+        risk=1,
+        event_id=1,
+        left_candidate=0.25,
+        right_candidate=0.25,
+        left_quality=1,
+        right_quality=1,
+    )
+    policy.update(loaded, loaded, time_s=0, measured_force_n=0.5)
+    raised = policy.update(
+        loaded,
+        loaded,
+        time_s=0.1,
+        measured_force_n=0.5,
+        observation=event,
+    )
+    assert raised.left_friction == pytest.approx(0.2)
+    assert raised.increase_count == 0
+    assert not raised.risk_budget_exhausted
+    unloaded = np.tile([0, 0, 0.2], (9, 1))
+    lowered = policy.update(
+        unloaded,
+        unloaded,
+        time_s=0.2,
+        measured_force_n=raised.load.target_force_n,
+        observation=TaxelRiskObservation(valid=True),
+    )
+    assert lowered.load.target_force_n < raised.load.target_force_n
+
+
 def test_asymmetric_friction_quality_and_expiry() -> None:
     """低质量不覆盖已接受低值；提高需独立证据，过期与拓扑变化回退。"""
     policy = UnifiedAdaptivePolicy(
@@ -81,6 +131,85 @@ def test_asymmetric_friction_quality_and_expiry() -> None:
     evidence.observation = TaxelRiskObservation(valid=True, contact_changed=True)
     result = policy.update(frame, frame, time_s=5.1, measured_force_n=0.9)
     assert result.right_update_reason == "contact_reset"
+
+
+def test_accepted_friction_can_persist_until_contact_changes() -> None:
+    """关闭时间过期后，已接受低值保持到接触拓扑明确改变。"""
+    config = UnifiedAdaptiveConfig(
+        risk_enabled=True,
+        friction_update_enabled=True,
+        friction_expiry_s=None,
+    )
+    policy = UnifiedAdaptivePolicy(config)
+    frame = np.tile([0, 0, 0.1], (9, 1))
+    policy.update(frame, frame, time_s=0, measured_force_n=0.5)
+    accepted = policy.update(
+        frame,
+        frame,
+        time_s=0.01,
+        measured_force_n=0.5,
+        observation=TaxelRiskObservation(
+            valid=True,
+            event_id=1,
+            left_candidate=0.25,
+            left_quality=1,
+        ),
+    )
+    assert accepted.left_friction == pytest.approx(0.2)
+    for index in range(1, 122):
+        persistent = policy.update(
+            frame,
+            frame,
+            time_s=0.01 + 0.05 * index,
+            measured_force_n=0.5,
+            observation=TaxelRiskObservation(valid=True),
+        )
+    assert persistent.left_friction == pytest.approx(0.2)
+    reset = policy.update(
+        frame,
+        frame,
+        time_s=6.07,
+        measured_force_n=0.5,
+        observation=TaxelRiskObservation(valid=True, contact_changed=True),
+    )
+    assert reset.left_friction == config.load.left_friction
+    assert reset.left_update_reason == "contact_reset"
+
+
+def test_candidate_below_observed_no_slip_lower_bound_is_rejected() -> None:
+    """稳定无风险利用率形成下界，后续更低的整侧候选不得接管控制。"""
+    config = UnifiedAdaptiveConfig(
+        risk_enabled=True,
+        friction_update_enabled=True,
+        friction_discount=1.0,
+        friction_quality_min=0.4,
+    )
+    policy = UnifiedAdaptivePolicy(config)
+    frame = np.tile([0, 0, 0.1], (9, 1))
+    stable = TaxelRiskObservation(
+        valid=True,
+        reason="observing",
+        left_utilization=0.29,
+        right_utilization=0.28,
+    )
+    policy.update(frame, frame, time_s=0, measured_force_n=0.5, observation=stable)
+    baseline = policy.update(frame, frame, time_s=0.01, measured_force_n=0.5, observation=stable)
+    assert baseline.left_lower_bound == pytest.approx(0.29)
+    assert baseline.right_lower_bound == pytest.approx(0.28)
+    event = replace(
+        stable,
+        risk=1,
+        event_id=1,
+        left_candidate=0.064,
+        right_candidate=0.127,
+        left_quality=4 / 9,
+        right_quality=4 / 9,
+    )
+    rejected = policy.update(frame, frame, time_s=0.02, measured_force_n=0.5, observation=event)
+    assert rejected.left_friction == config.load.left_friction
+    assert rejected.right_friction == config.load.right_friction
+    assert rejected.left_update_reason == "below_observed_lower_bound"
+    assert rejected.right_update_reason == "below_observed_lower_bound"
 
 
 @pytest.mark.parametrize("failure", ["tracking_limited", "capacity_limited", "sample_gap"])
@@ -169,3 +298,49 @@ def test_fast_persistent_risk_steps_and_freeze(confirmed: bool) -> None:
     for value in (0, -1, True, float("nan")):
         with pytest.raises(ValueError):
             replace(config, risk_repeat_interval_s=value)
+
+
+def test_local_lower_bounds_are_diagnostic_and_reset_each_lost_contact() -> None:
+    """局部与整侧比值共享事件，异质触点的高局部下界不否决整侧候选。"""
+    policy = UnifiedAdaptivePolicy(
+        UnifiedAdaptiveConfig(risk_enabled=True, friction_update_enabled=True)
+    )
+    frame = np.tile([0, 0, 0.1], (9, 1))
+    stable = TaxelRiskObservation(
+        valid=True,
+        reason="observing",
+        left_utilization=0.1,
+        right_utilization=0.2,
+        left_taxel_utilization=(0.9, 0.4) + (0.0,) * 7,
+        right_taxel_utilization=(0.6, 0.3) + (0.0,) * 7,
+        left_valid_mask=(True, True) + (False,) * 7,
+        right_valid_mask=(True, True) + (False,) * 7,
+    )
+    result = policy.update(frame, frame, time_s=0, measured_force_n=0.5, observation=stable)
+    assert result.left_taxel_lower_bound == pytest.approx(0.9)
+    assert result.right_taxel_lower_bound == pytest.approx(0.6)
+    assert result.left_friction == policy.config.load.left_friction
+    assert result.event_id == 0 and result.increase_count == 0
+    assert result.trace_fields()["adaptive_left_taxel_mu_lower_bound"] == pytest.approx(0.9)
+    event = replace(
+        stable,
+        risk=1,
+        event_id=1,
+        left_candidate=0.4,
+        left_quality=1,
+        left_taxel_utilization=(1.5, 0.4) + (0.0,) * 7,
+    )
+    result = policy.update(frame, frame, time_s=0.01, measured_force_n=0.5, observation=event)
+    assert result.left_friction == pytest.approx(0.32)
+    assert result.left_taxel_lower_bound == pytest.approx(0.9)
+    assert result.left_update_reason == "lower_accepted"
+    lost = replace(stable, left_valid_mask=(False, True) + (False,) * 7)
+    result = policy.update(frame, frame, time_s=0.02, measured_force_n=0.5, observation=lost)
+    assert result.left_taxel_lower_bound == pytest.approx(0.4)
+    reentered = replace(stable, left_taxel_utilization=(0.2, 0.3) + (0.0,) * 7)
+    result = policy.update(frame, frame, time_s=0.03, measured_force_n=0.5, observation=reentered)
+    assert result.left_taxel_lower_bound == pytest.approx(0.4)
+    invalid = replace(stable, valid=False)
+    result = policy.update(frame, frame, time_s=0.04, measured_force_n=0.5, observation=invalid)
+    assert result.left_taxel_lower_bound == 0
+    assert result.right_taxel_lower_bound == 0

@@ -151,7 +151,7 @@ def test_adaptive_target_increases_under_tangential_load(tmp_path: Path) -> None
 def test_unified_nine_taxel_lifecycle_and_fault_health_gate(
     tmp_path: Path, mode: str, multirate: bool
 ) -> None:
-    """九点链路按设备时间增力，容量失败可保持，触觉失效必须失能。"""
+    """九点链路按设备时间增力，任务与触觉故障均持位等待人工释放。"""
     from dataclasses import replace
 
     from dm_grasp_core.grasp.adaptive import AdaptiveLoadConfig
@@ -265,13 +265,10 @@ def test_unified_nine_taxel_lifecycle_and_fault_health_gate(
     else:
         assert manifest["status"] == "failed"
         assert manifest["disable_confirmed"] is True
-        assert manifest["fault_holding_entered"] == (mode in {"capacity", "hold_communication"})
+        assert manifest["fault_holding_entered"] is True
         if mode in {"capacity", "hold_communication"}:
             assert "capacity_limited" in manifest["primary_error"]["message"]
-        if mode == "capacity":
-            assert manifest["fault_resolution"] == "released"
-        else:
-            assert manifest["fault_resolution"] == "forced_disable"
+        assert manifest["fault_resolution"] == "released"
 
 
 def test_preload_accepts_force_above_floor_without_imbalance_fault(tmp_path: Path) -> None:
@@ -478,6 +475,58 @@ def test_auto_start_and_return_complete_without_interactive_actions(tmp_path: Pa
         event.get("event") == "command_received" and event.get("action") == "auto_start"
         for event in events
     )
+
+
+def test_own_friction_session_runs_inside_automatic_motor_lifecycle(tmp_path: Path) -> None:
+    """完整运行器在闭环夹持期间启动自主估计，且不提交原厂启停请求。"""
+    from dataclasses import replace
+
+    from papillarray_hardware.native_slip import NativeSlipStatus
+
+    from dmgripper_experiments.config import OwnFrictionConfig
+
+    from .fakes import FakeTactile
+
+    class OwnFrictionTactile(FakeTactile):
+        def __init__(self, *args, **kwargs) -> None:
+            super().__init__(*args, **kwargs)
+            self.native_slip_status = NativeSlipStatus()
+            self.native_starts = 0
+            self.native_stops = 0
+
+        def request_native_slip(self, *_args, **_kwargs) -> None:
+            self.native_starts += 1
+
+        def stop_native_slip(self, *_args, **_kwargs) -> None:
+            self.native_stops += 1
+
+    config = curve_config(on_finished="return")
+    config = replace(
+        config,
+        lifecycle=replace(
+            config.lifecycle,
+            own_friction=OwnFrictionConfig(
+                stable_duration_s=0.01,
+                max_force_rate_n_s=1.0,
+                contact_on_n=0.1,
+                contact_off_n=0.05,
+                contact_loss_confirm_s=0.02,
+                sample_timeout_s=0.1,
+            ),
+        ),
+    )
+    result, _session, _actions, directory = run_fake_experiment(
+        tmp_path,
+        config,
+        tactile_type=OwnFrictionTactile,
+    )
+    assert result["status"] == "completed"
+    events = _read_events(directory)
+    assert any(
+        event.get("event") == "own_friction_state" and event.get("phase") == "active"
+        for event in events
+    )
+    assert not any(event.get("event") == "native_slip_state" for event in events)
 
 
 def test_zero_force_peak_warning_is_recorded_without_blocking_start(tmp_path: Path) -> None:
@@ -777,7 +826,7 @@ def test_fault_holding_command_failure_preserves_primary_and_marks_hold_lost(
 def test_fault_release_planning_failure_preserves_primary_and_holding_metadata(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """建立保持后的任意二次规划异常都由整体兜底保留首故障。"""
+    """释放规划异常保留首故障与位置保持，下一次 release 可重试。"""
     from .fakes import BadTactile
     from dmgripper_experiments import runtime
 
@@ -787,8 +836,14 @@ def test_fault_release_planning_failure_preserves_primary_and_holding_metadata(
         {"mode": "stale", "target_phase": "approach"},
     )
 
-    def fail_home_trajectory(*_args, **_kwargs):
-        raise ValueError("模拟故障释放规划失败")
+    original = runtime._home_trajectory
+    failures = []
+
+    def fail_home_trajectory(*args, **kwargs):
+        if not failures:
+            failures.append(True)
+            raise ValueError("模拟故障释放规划失败")
+        return original(*args, **kwargs)
 
     monkeypatch.setattr(runtime, "_home_trajectory", fail_home_trajectory)
     with pytest.raises(RuntimeError, match="触觉快照过期"):
@@ -796,7 +851,7 @@ def test_fault_release_planning_failure_preserves_primary_and_holding_metadata(
     manifest = json.loads(next(tmp_path.rglob("manifest.json")).read_text(encoding="utf-8"))
     assert "触觉快照过期" in manifest["primary_error"]["message"]
     assert manifest["fault_holding_entered"] is True
-    assert manifest["fault_resolution"] == "hold_lost"
+    assert manifest["fault_resolution"] == "released"
     assert any("模拟故障释放规划失败" in error for error in manifest["cleanup_errors"])
 
 
@@ -1158,3 +1213,153 @@ def test_holding_phase_keeps_responding_for_adaptive(tmp_path: Path) -> None:
     # FakeTactile 在 holding 仍施加切向 0（active 才有）；目标保持不超过上限。
     assert all(0.0 <= float(row["target_force_n"]) <= 1.5 + 1e-9 for row in holding)
     assert all(row["measured_tangential_force_n"] for row in holding)
+
+
+def test_unlimited_adaptive_runs_until_explicit_release(tmp_path: Path) -> None:
+    """不限时目标超过原任务时长仍停留 active，仅人工释放结束。"""
+    from dataclasses import replace
+
+    class DelayedReleaseActions(PhaseActions):
+        def __init__(self):
+            super().__init__()
+            self.active_cycles = 0
+
+        def __call__(self):
+            if self.phase == "active":
+                self.active_cycles += 1
+                if self.active_cycles >= 100:
+                    return "release"
+            return super().__call__()
+
+    config = adaptive_config()
+    config = replace(
+        config,
+        reference=replace(
+            config.reference, adaptive=replace(config.reference.adaptive, duration_s=None)
+        ),
+    )
+    result, session, actions, directory = run_fake_experiment(
+        tmp_path, config, actions_type=DelayedReleaseActions
+    )
+    assert result["status"] == "completed"
+    assert actions.active_cycles == 100
+    assert "holding" not in actions.states
+    assert session.disable_calls == 1
+    assert not any(event["event"] == "task_finished" for event in _read_events(directory))
+
+
+def test_input_errors_during_fault_keep_motor_held_until_recovered_release(tmp_path: Path):
+    """输入通道暂时丢失不失能退出，恢复后的 release 仍可完成回位。"""
+
+    class RecoveringInput(ClosedInputActions):
+        def __init__(self):
+            super().__init__()
+            self.failures = 0
+
+        def __call__(self):
+            if self.phase == "fault_holding" and self.failures < 3:
+                self.failures += 1
+                raise OSError("模拟输入读取异常")
+            return super().__call__()
+
+    def observe(event, session):
+        if event.get("code") == "fault_holding_input_lost":
+            assert session.disable_calls == 0
+            assert session.hold_calls >= 1
+
+    with pytest.raises(RuntimeError, match="交互输入已关闭"):
+        run_fake_experiment(
+            tmp_path, curve_config(), actions_type=RecoveringInput, event_observer=observe
+        )
+    manifest_path = next(tmp_path.rglob("manifest.json"))
+    manifest = json.loads(manifest_path.read_text())
+    assert manifest["fault_holding_entered"] is True
+    assert manifest["fault_resolution"] == "released"
+    warnings = [
+        event
+        for event in _read_events(manifest_path.parent)
+        if event.get("code") == "fault_holding_input_lost"
+    ]
+    assert len(warnings) == 1
+
+
+def test_closing_torque_mode_keeps_transition_feedforward_and_release(tmp_path):
+    """接触过渡保留前馈，单向跟踪不影响人工释放回位。"""
+    from dataclasses import replace
+
+    config = adaptive_config()
+    config = replace(config, controller=replace(config.controller, closing_torque_only=True))
+    result, session, _, directory = run_fake_experiment(tmp_path, config)
+    rows = _read_rows(directory)
+    transition = [row for row in rows if row["phase"] == "contact_transition"]
+    returning = [row for row in rows if row["phase"] == "returning"]
+    assert transition and returning
+    assert all(float(row["tau_ff_nm"]) > 0 for row in transition)
+    assert result["status"] == "completed"
+    assert session.disable_calls == 1
+
+
+def test_zero_tracking_velocity_applies_after_contact_only(tmp_path):
+    """接近轨迹保留速度，预载与 active 的 MIT 目标速度固定为零。"""
+    from dataclasses import replace
+
+    config = adaptive_config()
+    config = replace(config, controller=replace(config.controller, zero_tracking_velocity=True))
+    result, _, _, directory = run_fake_experiment(tmp_path, config)
+    rows = _read_rows(directory)
+    approach = [row for row in rows if row["phase"] == "approach"]
+    tracking = [row for row in rows if row["phase"] in {"preload", "active"}]
+
+    assert any(abs(float(row["dq_des_rad_s"])) > 0.0 for row in approach)
+    assert all(float(row["dq_des_rad_s"]) == 0.0 for row in tracking)
+    assert result["status"] == "completed"
+
+
+def test_preload_ramp_waits_until_final_target_before_activation(tmp_path):
+    """即使实测力提前达标，也必须等升力完成后重新累计稳定时间。"""
+
+    class GentleContact(FakeTactile):
+        def latest(self):
+            if self.phase.phase == "contact_transition":
+                return self._snapshot(force_n=0.3)
+            return super().latest()
+
+    config = adaptive_config(preload_force_rate_n_s=1.0)
+    result, _, _, directory = run_fake_experiment(tmp_path, config, tactile_type=GentleContact)
+    rows = _read_rows(directory)
+    preload = [r for r in rows if r["phase"] == "preload"]
+    targets = [float(r["target_force_n"]) for r in preload]
+    assert targets[0] == pytest.approx(0.3)
+    assert targets[-1] == pytest.approx(0.5)
+    assert targets == sorted(targets)
+    assert max(float(r["target_force_rate_n_s"]) for r in preload) <= 1.0 + 1e-9
+    active = next(r for r in rows if r["phase"] == "active")
+    assert float(active["time_s"]) - float(preload[0]["time_s"]) >= 1.875 * 0.2 + 0.02
+    assert result["status"] == "completed"
+
+
+def test_preload_min_force_ratio_allows_coarse_preload_completion(tmp_path):
+    """按比例的预载门槛允许达到最低抓力后尽早进入 active。"""
+
+    class CoarsePreload(FakeTactile):
+        def latest(self):
+            from dataclasses import replace
+
+            snapshot = super().latest()
+            if self.phase.phase == "preload":
+                return replace(
+                    snapshot,
+                    left_force_n=0.3,
+                    right_force_n=0.3,
+                    raw_left_fz_n=0.3,
+                    raw_right_fz_n=0.3,
+                )
+            return snapshot
+
+    config = adaptive_config(preload_min_force_ratio=0.6)
+    result, _, _, directory = run_fake_experiment(tmp_path, config, tactile_type=CoarsePreload)
+    rows = _read_rows(directory)
+
+    assert any(row["phase"] == "preload" for row in rows)
+    assert any(row["phase"] == "active" for row in rows)
+    assert result["status"] == "completed"

@@ -71,6 +71,10 @@ TRACE_FIELDS = (
     "adaptive_right_candidate",
     "adaptive_left_quality",
     "adaptive_right_quality",
+    "adaptive_left_mu_lower_bound",
+    "adaptive_right_mu_lower_bound",
+    "adaptive_left_taxel_mu_lower_bound",
+    "adaptive_right_taxel_mu_lower_bound",
     "adaptive_left_update_reason",
     "adaptive_right_update_reason",
     "adaptive_observation_reason",
@@ -97,7 +101,7 @@ TRACE_FIELDS = (
 )
 
 SCHEMA_NAME = "dmgripper-experiment/v1"
-RECORDER_VERSION = "1.5.0"
+RECORDER_VERSION = "1.7.0"
 
 
 def create_run_directory(root: Path | str, config: ExperimentConfig) -> Path:

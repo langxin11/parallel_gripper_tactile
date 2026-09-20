@@ -157,8 +157,19 @@ def test_unified_config_loads_and_requires_consistent_limits_and_acceptance(chan
     """低载荷配置可离线解码，权限与执行边界不允许隐式越过。"""
     from dataclasses import replace
 
-    config = load_experiment_config(
-        Path(__file__).resolve().parents[3] / "configs/hardware/dmgripper/unified_adaptive.yaml"
+    from dm_grasp_core.grasp.adaptive import AdaptiveLoadConfig
+    from dm_grasp_core.grasp.unified import UnifiedAdaptiveConfig
+    from dmgripper_experiments.config import SafetyConfig
+
+    config = ExperimentConfig(
+        reference=ReferenceConfig(
+            adaptive=AdaptiveReferenceConfig(
+                unified=UnifiedAdaptiveConfig(
+                    load=AdaptiveLoadConfig(max_force_n=1.5, max_force_rate_n_s=0.5)
+                )
+            )
+        ),
+        safety=SafetyConfig(max_target_force_n=1.5, force_ceiling_n=2.0),
     )
     assert config.unified_adaptive_enabled
     adaptive = config.reference.adaptive
@@ -184,6 +195,37 @@ def test_unified_config_loads_and_requires_consistent_limits_and_acceptance(chan
             replace(config, safety=replace(config.safety, max_target_force_n=1.6))
         else:
             replace(config, controller=replace(config.controller, kind="pid"))
+
+
+def test_unified_config_keeps_both_estimators_running_until_release():
+    """跨物体统一入口同时估计摩擦与刚度，任务不自动到期。"""
+    config = load_experiment_config(
+        Path(__file__).resolve().parents[3] / "configs/hardware/dmgripper/unified_adaptive.yaml"
+    )
+    adaptive = config.reference.adaptive
+
+    assert adaptive is not None and adaptive.unified is not None
+    assert adaptive.duration_s is None
+    assert config.reference.duration_s is None
+    assert config.lifecycle.on_finished == "hold"
+    assert not config.lifecycle.auto_start
+    assert config.estimation.enabled and config.estimation.method == "window_linear"
+    assert adaptive.experimental_closed_loop
+    assert not adaptive.risk_validation_passed and not adaptive.friction_validation_passed
+    assert adaptive.unified.risk_enabled and adaptive.unified.friction_update_enabled
+    assert not adaptive.unified.risk_step_enabled
+    assert adaptive.unified.friction_expiry_s is None
+    assert adaptive.max_force_rate_n_s == adaptive.unified.load.max_force_rate_n_s == 10.0
+    assert adaptive.unified.load.max_force_decrease_rate_n_s == 1.0
+    assert config.controller.mit_kp == 4.0
+    assert config.controller.mit_kd == 1.0
+    assert config.controller.zero_tracking_velocity
+    assert config.lifecycle.preload_min_force_ratio == 0.75
+    assert config.lifecycle.preload_stable_time_s == 0.5
+    assert config.controller.torque_limit_nm > 0.0
+    assert config.controller.velocity_limit_rad_s > 0.0
+    assert adaptive.unified.load.max_force_n == config.safety.max_target_force_n
+    assert config.safety.max_target_force_n < config.safety.force_ceiling_n
 
 
 def test_hardware_home_and_feedback_margin_are_strictly_validated():
@@ -380,3 +422,31 @@ def test_sanitize_directory_component_blocks_traversal():
         sanitize_directory_component("  ")
     with pytest.raises(ValueError):
         sanitize_directory_component("a\\b")
+
+
+def test_unlimited_adaptive_yaml_loads_and_rejects_invalid_durations(tmp_path: Path):
+    """显式 null 表示无限时，非空时长仍要求有限正数。"""
+    path = tmp_path / "unlimited.yaml"
+    path.write_text("reference:\n  adaptive:\n    duration_s: null\n", encoding="utf-8")
+    assert load_experiment_config(path).reference.duration_s is None
+    for duration in (0.0, -1.0, float("inf"), True):
+        with pytest.raises(ValueError):
+            AdaptiveReferenceConfig(duration_s=duration)
+
+
+@pytest.mark.parametrize("rate", [0.0, -1.0, float("nan"), float("inf"), True])
+def test_preload_ramp_rejects_invalid_rate(rate):
+    """预载升力速率必须是正有限数值。"""
+    from dmgripper_experiments.config import LifecycleConfig
+
+    with pytest.raises(ValueError):
+        LifecycleConfig(preload_force_rate_n_s=rate)
+
+
+@pytest.mark.parametrize("ratio", [0.0, -1.0, 1.01, float("nan"), float("inf"), True])
+def test_preload_min_force_ratio_rejects_invalid_values(ratio):
+    """预载最低比例必须位于零与一之间。"""
+    from dmgripper_experiments.config import LifecycleConfig
+
+    with pytest.raises(ValueError):
+        LifecycleConfig(preload_min_force_ratio=ratio)

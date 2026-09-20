@@ -2,6 +2,7 @@
 
 from .config import (
     ExperimentConfig,
+    OwnFrictionConfig,
     experiment_config_record,
     load_experiment_config,
     sanitize_directory_component,
@@ -12,6 +13,7 @@ from .recording import create_run_directory
 __version__ = "0.2.0"
 __all__ = [
     "ExperimentConfig",
+    "OwnFrictionConfig",
     "Lifecycle",
     "LifecyclePhase",
     "create_run_directory",

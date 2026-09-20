@@ -67,8 +67,8 @@ class TargetSource:
         return None
 
     @property
-    def duration_s(self) -> float:
-        """返回任务时长。"""
+    def duration_s(self) -> float | None:
+        """返回任务时长；None 表示等待人工释放。"""
         raise NotImplementedError
 
     def preload_target(self, task_time_s: float) -> float:
@@ -170,7 +170,7 @@ class AdaptiveTargetSource(TargetSource):
         self._command: DisturbanceCommand | None = None
 
     @property
-    def duration_s(self) -> float:
+    def duration_s(self) -> float | None:
         """返回显式任务时长。"""
         return self._config.duration_s
 
@@ -237,7 +237,7 @@ class UnifiedAdaptiveTargetSource(TargetSource):
         self._command: UnifiedAdaptiveCommand | None = None
 
     @property
-    def duration_s(self) -> float:
+    def duration_s(self) -> float | None:
         """返回显式任务时长。"""
         return self._config.duration_s
 

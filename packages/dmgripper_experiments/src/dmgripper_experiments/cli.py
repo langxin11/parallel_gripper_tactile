@@ -221,6 +221,8 @@ def run(argv: Sequence[str] | None = None) -> int:
 
         interactive = sys.stdin.isatty()
         if not interactive:
+            if config.reference.duration_s is None:
+                raise ValueError("不限时实验必须在交互终端运行，以便人工输入 release")
             if not config.lifecycle.auto_start or config.lifecycle.on_finished != "return":
                 raise ValueError(
                     "非交互 --execute 要求 lifecycle.auto_start=true 且 on_finished=return；"

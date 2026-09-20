@@ -120,6 +120,43 @@ def test_tangential_trigger_is_background_and_axes_use_math_symbols():
     plt.close(figure)
 
 
+def test_friction_panel_distinguishes_state_and_candidate_outcome() -> None:
+    """摩擦面板显示采用值，并以不同标记区分接受与拒绝候选。"""
+    import matplotlib.pyplot as plt
+
+    from dmgripper_experiments.plotting import _plot_friction_estimate
+
+    rows = [
+        {
+            "adaptive_left_mu": "0.3",
+            "adaptive_right_mu": "0.3",
+            "adaptive_left_candidate": "",
+            "adaptive_right_candidate": "",
+            "adaptive_left_update_reason": "unchanged",
+            "adaptive_right_update_reason": "unchanged",
+        },
+        {
+            "adaptive_left_mu": "0.1",
+            "adaptive_right_mu": "0.3",
+            "adaptive_left_candidate": "0.125",
+            "adaptive_right_candidate": "0.2",
+            "adaptive_left_update_reason": "lower_accepted",
+            "adaptive_right_update_reason": "insufficient_quality",
+        },
+    ]
+    figure, axis = plt.subplots()
+    _plot_friction_estimate(axis, [0.0, 1.0], rows)
+
+    assert [line.get_label() for line in axis.lines] == [
+        r"Left $\hat{\mu}$",
+        r"Right $\hat{\mu}$",
+    ]
+    labels = [collection.get_label() for collection in axis.collections]
+    assert labels == ["Left candidate accepted", "Right candidate rejected"]
+    assert axis.get_ylabel() == r"$\mu$"
+    plt.close(figure)
+
+
 def test_math_text_uses_stix_without_fonttools_timestamp_noise(tmp_path: Path):
     """数学字体固定为 STIX：嵌入 PDF 不触发 fontTools 旧时间戳告警。"""
     import logging

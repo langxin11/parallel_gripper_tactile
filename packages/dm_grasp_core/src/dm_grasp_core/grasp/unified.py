@@ -18,6 +18,7 @@ class UnifiedAdaptiveConfig:
     load: AdaptiveLoadConfig = field(default_factory=AdaptiveLoadConfig)
     observer: TaxelRiskConfig = field(default_factory=TaxelRiskConfig)
     risk_enabled: bool = False
+    risk_step_enabled: bool = True
     friction_update_enabled: bool = False
     risk_step_n: float = 0.15
     risk_rate_n_s: float = 1.0
@@ -29,9 +30,10 @@ class UnifiedAdaptiveConfig:
     friction_discount: float = 0.8
     friction_min: float = 0.05
     friction_max: float = 2.0
-    friction_expiry_s: float = 5.0
+    friction_expiry_s: float | None = 5.0
     friction_raise_events: int = 3
     friction_consistency: float = 0.15
+    friction_lower_bound_tolerance: float = 0.02
     tracking_error_n: float = 0.5
     failure_timeout_s: float = 0.5
     max_sample_gap_s: float = 0.1
@@ -46,9 +48,9 @@ class UnifiedAdaptiveConfig:
             value = getattr(self, item.name)
             if item.name in {"load", "observer"}:
                 continue
-            if item.name == "risk_repeat_interval_s" and value is None:
+            if item.name in {"risk_repeat_interval_s", "friction_expiry_s"} and value is None:
                 continue
-            if item.name in {"risk_enabled", "friction_update_enabled"}:
+            if item.name in {"risk_enabled", "risk_step_enabled", "friction_update_enabled"}:
                 if not isinstance(value, bool):
                     raise ValueError("策略权限必须为布尔值")
             elif (
@@ -83,11 +85,18 @@ class _FrictionState:
     pending: float | None = None
     pending_s: float | None = None
     count: int = 0
+    lower_bound: float = 0.0
+    taxel_lower_bounds: tuple[float, ...] = (0.0,) * 9
 
 
 @dataclass(frozen=True, slots=True)
 class UnifiedAdaptiveCommand:
-    """本次调度及可解释诊断，不包含硬件动作。"""
+    """本次调度及可解释诊断，不包含硬件动作。
+
+    整侧下界来自切向合力与法向合力比；局部下界是连续有效触点的
+    历史力比最大值。仅在共同摩擦系数及非滑移假设下，局部最大值
+    才能约束同一个系数；异质接触时保留为诊断，不否决整侧候选。
+    """
 
     load: AdaptiveLoadCommand
     risk: float
@@ -100,6 +109,8 @@ class UnifiedAdaptiveCommand:
     right_candidate: float | None
     left_quality: float
     right_quality: float
+    left_lower_bound: float
+    right_lower_bound: float
     left_update_reason: str
     right_update_reason: str
     observation_reason: str
@@ -108,6 +119,8 @@ class UnifiedAdaptiveCommand:
     tracking_error_n: float
     execution_limited: bool
     failure_reason: str | None
+    left_taxel_lower_bound: float = 0.0
+    right_taxel_lower_bound: float = 0.0
 
     def trace_fields(self) -> dict[str, object]:
         """生成仿真、真机和离线回放共享的平面诊断字段。"""
@@ -122,6 +135,10 @@ class UnifiedAdaptiveCommand:
             "adaptive_right_candidate": self.right_candidate,
             "adaptive_left_quality": self.left_quality,
             "adaptive_right_quality": self.right_quality,
+            "adaptive_left_mu_lower_bound": self.left_lower_bound,
+            "adaptive_right_mu_lower_bound": self.right_lower_bound,
+            "adaptive_left_taxel_mu_lower_bound": self.left_taxel_lower_bound,
+            "adaptive_right_taxel_mu_lower_bound": self.right_taxel_lower_bound,
             "adaptive_left_update_reason": self.left_update_reason,
             "adaptive_right_update_reason": self.right_update_reason,
             "adaptive_observation_reason": self.observation_reason,
@@ -169,16 +186,45 @@ class UnifiedAdaptivePolicy:
         quality: float,
         event: bool,
         changed: bool,
+        utilization: float,
+        taxel_utilization: tuple[float, ...],
+        valid_mask: tuple[bool, ...],
+        lower_bound_eligible: bool,
         now: float,
     ) -> str:
         """接触变化或过期回退，可信低值即时使用，高值需重复证据。"""
         c, state = self.config, self._friction[side]
         prior = (c.load.left_friction, c.load.right_friction)[side]
-        if state.pending_s is not None and now - state.pending_s > c.friction_expiry_s:
+        if (
+            c.friction_expiry_s is not None
+            and state.pending_s is not None
+            and now - state.pending_s > c.friction_expiry_s
+        ):
             state.pending, state.pending_s, state.count = None, None, 0
-        if changed or (state.updated_s is not None and now - state.updated_s > c.friction_expiry_s):
+        expired = (
+            c.friction_expiry_s is not None
+            and state.updated_s is not None
+            and now - state.updated_s > c.friction_expiry_s
+        )
+        if changed or expired:
             state.value, state.updated_s, state.pending, state.count = prior, None, None, 0
+            state.lower_bound = 0.0
+            state.taxel_lower_bounds = (0.0,) * 9
             return "contact_reset" if changed else "expired_prior"
+        # 非滑移是下界解释的前提；低风险仅为工程筛选，不能证明静摩擦。
+        # 逐触点历史在触点失效时清空，稳定子集模式下也不得跨触点重入复用。
+        state.taxel_lower_bounds = tuple(
+            max(previous, ratio)
+            if lower_bound_eligible and math.isfinite(ratio) and valid
+            else previous
+            if valid
+            else 0.0
+            for previous, ratio, valid in zip(
+                state.taxel_lower_bounds, taxel_utilization, valid_mask, strict=True
+            )
+        )
+        if lower_bound_eligible and math.isfinite(utilization):
+            state.lower_bound = max(state.lower_bound, utilization)
         if not c.friction_update_enabled:
             return "diagnostic_only"
         if not event:
@@ -190,6 +236,9 @@ class UnifiedAdaptivePolicy:
         if not c.friction_min <= value <= c.friction_max:
             state.pending, state.count = None, 0
             return "out_of_range"
+        if candidate + c.friction_lower_bound_tolerance < state.lower_bound:
+            state.pending, state.count = None, 0
+            return "below_observed_lower_bound"
         if value <= state.value:
             state.value, state.updated_s, state.pending, state.count = value, now, None, 0
             return "lower_accepted"
@@ -264,6 +313,12 @@ class UnifiedAdaptivePolicy:
         event = observation.event_id > self._last_event
         if event:
             self._last_event = observation.event_id
+        lower_bound_eligible = (
+            observation.valid
+            and observation.reason == "observing"
+            and observation.risk < c.observer.release_ratio
+            and not gap
+        )
         reasons = [
             self._update_friction(
                 side,
@@ -271,11 +326,29 @@ class UnifiedAdaptivePolicy:
                 quality,
                 event and actionable,
                 observation.contact_changed or gap or not observation.valid,
+                utilization,
+                taxel_utilization,
+                valid_mask,
+                lower_bound_eligible,
                 time_s,
             )
-            for side, candidate, quality in (
-                (0, observation.left_candidate, observation.left_quality),
-                (1, observation.right_candidate, observation.right_quality),
+            for side, candidate, quality, utilization, taxel_utilization, valid_mask in (
+                (
+                    0,
+                    observation.left_candidate,
+                    observation.left_quality,
+                    observation.left_utilization,
+                    observation.left_taxel_utilization,
+                    observation.left_valid_mask,
+                ),
+                (
+                    1,
+                    observation.right_candidate,
+                    observation.right_quality,
+                    observation.right_utilization,
+                    observation.right_taxel_utilization,
+                    observation.right_valid_mask,
+                ),
             )
         ]
         if not enabled or not observation.valid or blocked or gap or observation.risk < 1:
@@ -289,7 +362,7 @@ class UnifiedAdaptivePolicy:
             and time_s - self._risk_confirmed_since >= c.observer.confirmation_s
             and time_s - self._last_risk_step_s >= c.risk_repeat_interval_s
         )
-        if (event or repeat) and actionable and c.risk_enabled:
+        if (event or repeat) and actionable and c.risk_enabled and c.risk_step_enabled:
             if self._risk_started is None:
                 self._risk_started = time_s
             if (
@@ -332,7 +405,7 @@ class UnifiedAdaptivePolicy:
             or dt == 0
             or self._failure is not None,
         )
-        exhausted = (
+        exhausted = c.risk_step_enabled and (
             self._events >= c.risk_max_events
             or self._risk_budget >= c.risk_budget_n
             or (c.risk_enabled and self._risk_goal >= c.load.max_force_n)
@@ -365,6 +438,8 @@ class UnifiedAdaptivePolicy:
             observation.right_candidate,
             observation.left_quality,
             observation.right_quality,
+            self._friction[0].lower_bound,
+            self._friction[1].lower_bound,
             *reasons,
             observation.reason,
             observation.left_valid_mask,
@@ -372,6 +447,8 @@ class UnifiedAdaptivePolicy:
             track_error,
             execution_limited,
             self._failure,
+            max(self._friction[0].taxel_lower_bounds),
+            max(self._friction[1].taxel_lower_bounds),
         )
         return self.latest
 

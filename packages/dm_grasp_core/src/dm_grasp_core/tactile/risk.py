@@ -62,12 +62,16 @@ class TaxelRiskObservation:
     right_candidate: float | None = None
     left_quality: float = 0.0
     right_quality: float = 0.0
+    left_utilization: float = 0.0
+    right_utilization: float = 0.0
     contact_changed: bool = False
     valid: bool = False
     reason: str = "warming_up"
     left_valid_mask: tuple[bool, ...] = (False,) * 9
     right_valid_mask: tuple[bool, ...] = (False,) * 9
     confirmed_risk: bool = False
+    left_taxel_utilization: tuple[float, ...] = (0.0,) * 9
+    right_taxel_utilization: tuple[float, ...] = (0.0,) * 9
 
 
 class TaxelRiskObserver:
@@ -147,11 +151,24 @@ class TaxelRiskObserver:
         valid = bool(within.all() and active.any(axis=1).all())
         self._last_time = time_s
         self._masks = masks
+        normal = np.where(active, values[:, :, 2], 0).sum(axis=1)
+        shear_vectors = np.where(active[:, :, None], values[:, :, :2], 0)
+        load = np.linalg.norm(shear_vectors.sum(axis=1), axis=1)
+        utilization = load / np.maximum(normal, 1e-12)
+        # 局部比值保留切向相互抵消的信息；它与整侧合力比共享同一帧，
+        # 不能视为独立事件，也不能在异质接触下代替整侧有效摩擦系数。
+        taxel_utilization = np.linalg.norm(shear_vectors, axis=2) / np.where(
+            active, values[:, :, 2], 1.0
+        )
         result = TaxelRiskObservation(
             valid=valid,
             contact_changed=changed,
             left_valid_mask=masks[0],
             right_valid_mask=masks[1],
+            left_utilization=float(utilization[0]),
+            right_utilization=float(utilization[1]),
+            left_taxel_utilization=tuple(float(value) for value in taxel_utilization[0]),
+            right_taxel_utilization=tuple(float(value) for value in taxel_utilization[1]),
         )
         if changed or gap or not valid:
             self._history.clear()
@@ -160,9 +177,7 @@ class TaxelRiskObserver:
         if not valid:
             self._last = replace(result, reason="invalid_taxels")
             return self._last
-        normal = np.where(active, values[:, :, 2], 0).sum(axis=1)
         shear = np.where(active, np.linalg.norm(values[:, :, :2], axis=2), 0)
-        load = np.linalg.norm(np.where(active[:, :, None], values[:, :, :2], 0).sum(axis=1), axis=1)
         share = shear / np.maximum(shear.sum(axis=1, keepdims=True), 1e-12)
         ratios = shear / np.maximum(values[:, :, 2], c.min_normal_n * c.contact_release_ratio)
         self._history.append(
@@ -268,12 +283,25 @@ class TaxelRiskObserver:
                 self._armed = False
                 # 仅在剪切份额下降且局部力比不再增长的触点上形成摩擦候选。
                 # 风险仍可更敏感；没有这条额外证据时只发风险，不更新摩擦。
-                baseline = np.median(np.stack([frame[3] for frame in self._history][:-1]), axis=0)
                 affected = candidate_mask & (share < baseline_share) & (ratios <= first[3])
                 for side in range(2):
                     if scores[side] >= 1 and affected[side].any():
-                        candidates[side] = float(np.median(baseline[side][affected[side]]))
-                        quality[side] = candidate_mask[side].sum() / 9
+                        # 局部比值只负责定位发生重分配的触点；整侧控制系数必须由
+                        # 同一稳定接触子集的合力比生成，避免单个低比值触点代表整侧摩擦。
+                        side_utilization = []
+                        for frame in list(self._history)[:-1]:
+                            vectors = np.where(
+                                candidate_mask[side, :, None], frame[5][side, :, :2], 0
+                            )
+                            side_load = np.linalg.norm(vectors.sum(axis=0))
+                            side_normal = np.where(
+                                candidate_mask[side], frame[5][side, :, 2], 0
+                            ).sum()
+                            side_utilization.append(side_load / max(side_normal, 1e-12))
+                        candidates[side] = float(np.quantile(side_utilization, 0.9))
+                        # 质量只统计真正支持候选的受影响触点，稳定但无事件证据的
+                        # 邻近触点不得抬高候选质量。
+                        quality[side] = affected[side].sum() / 9
         elif score < 1:
             self._pending_s = None
         self._last = replace(

@@ -28,6 +28,8 @@ class MITCommandConfig:
         feedforward_ratio: 力前馈比例，无量纲。
         feedforward_torque_limit_nm: 前馈力矩绝对值上限 (N·m)。
         torque_limit_nm: 合成力矩绝对值上限 (N·m)。
+        closing_torque_only: 是否禁止预测合成力矩指向张开方向。
+        zero_velocity_target: 是否固定 MIT 目标速度为零。
     """
 
     position_min_rad: float
@@ -39,6 +41,8 @@ class MITCommandConfig:
     feedforward_ratio: float
     feedforward_torque_limit_nm: float
     torque_limit_nm: float
+    closing_torque_only: bool = False
+    zero_velocity_target: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,6 +115,8 @@ def build_mit_command(
     position_rad = min(max(position_rad, position_min_rad), position_max_rad)
     velocity_limit_rad_s = config.velocity_limit_rad_s
     velocity_rad_s = min(max(velocity_rad_s, -velocity_limit_rad_s), velocity_limit_rad_s)
+    if config.zero_velocity_target:
+        velocity_rad_s = 0.0
     if feedforward_ratio is None:
         feedforward_ratio = config.feedforward_ratio
     measured_jacobian_m_per_rad = kinematics.closure_jacobian(measured_position_rad)
@@ -133,6 +139,12 @@ def build_mit_command(
         feedforward_torque_nm=feedforward_torque_nm,
         torque_limit_nm=torque_limit_nm,
     )
+    if config.closing_torque_only:
+        # 允许减小正力矩和被动退让，不冻结导纳的卸力位移。
+        non_position = kd * (velocity_rad_s - measured_velocity_rad_s) + feedforward_torque_nm
+        predicted = kp * (position_rad - measured_position_rad) + non_position
+        if closing_direction * predicted < 0.0:
+            position_rad = measured_position_rad - non_position / kp
     position_rad = min(max(position_rad, position_min_rad), position_max_rad)
     predicted_torque_nm = (
         kp * (position_rad - measured_position_rad)
@@ -141,6 +153,8 @@ def build_mit_command(
     )
     if abs(predicted_torque_nm) > torque_limit_nm + 1e-9:
         raise ValueError("机械角限位内无法满足 MIT 合成力矩上限")
+    if config.closing_torque_only and closing_direction * predicted_torque_nm < -1e-9:
+        raise ValueError("机械角限位内无法满足 MIT 单向合成力矩约束")
     return MITCommand(position_rad, velocity_rad_s, kp, kd, feedforward_torque_nm)
 
 
@@ -258,7 +272,7 @@ def step_admittance(
         measured_velocity_rad_s=measured_velocity_rad_s,
         feedforward_force_n=target_force_n,
     )
-    if saturation_feedback:
+    if saturation_feedback or config.closing_torque_only:
         requested_position_rad = kinematics.position_for_closure(
             reference_closure_m + closing_direction * displacement_m,
             config.position_min_rad,

@@ -54,22 +54,25 @@ def plot_experiment_run(
     if not any(math.isfinite(value) for value in time_s):
         return ()
     has_stiffness = any(math.isfinite(value) for value in _values(rows, "stiffness_n_per_m"))
-    panels = 4 if has_stiffness else 3
+    has_friction = _has_friction_estimation(directory, rows)
+    panels = 3 + int(has_friction) + int(has_stiffness)
     plt, style_context = _plotting_api()
     with style_context():
         figure, axes = plt.subplots(
             panels, 1, sharex=True, figsize=(7.16, 2.2 * panels), layout="constrained"
         )
-        if panels == 3:
-            axes = [axes[0], axes[1], axes[2]]
+        axes = list(axes)
         _plot_normal_force(axes[0], time_s, rows)
         _plot_tangential_force(axes[1], time_s, rows)
-        _plot_joint_command(axes[2], time_s, rows)
+        panel = 2
+        if has_friction:
+            _plot_friction_estimate(axes[panel], time_s, rows)
+            panel += 1
+        _plot_joint_command(axes[panel], time_s, rows)
+        panel += 1
         if has_stiffness:
-            _plot_stiffness(axes[3], time_s, rows)
-            axes[3].set_xlabel(_x_label(x_field))
-        else:
-            axes[2].set_xlabel(_x_label(x_field))
+            _plot_stiffness(axes[panel], time_s, rows)
+        axes[-1].set_xlabel(_x_label(x_field))
         for axis in axes:
             axis.grid(True, alpha=0.25)
         target = Path(output_directory) if output_directory is not None else directory
@@ -240,6 +243,94 @@ def _plot_joint_command(axis: Any, time_s: list[float], rows: list[dict[str, str
     _legend(axis, torque_axis)
 
 
+def _plot_friction_estimate(axis: Any, time_s: list[float], rows: list[dict[str, str]]) -> None:
+    """绘制控制采用值、无滑移观测下界及原始候选接受结果。"""
+    _line_if_data(
+        axis,
+        time_s,
+        _values(rows, "adaptive_left_mu"),
+        r"Left $\hat{\mu}$",
+        "C0",
+        drawstyle="steps-post",
+    )
+    _line_if_data(
+        axis,
+        time_s,
+        _values(rows, "adaptive_left_mu_lower_bound"),
+        r"Left observed lower bound",
+        "C0",
+        linestyle=":",
+        drawstyle="steps-post",
+    )
+    _line_if_data(
+        axis,
+        time_s,
+        _values(rows, "adaptive_right_mu_lower_bound"),
+        r"Right observed lower bound",
+        "C1",
+        linestyle=":",
+        drawstyle="steps-post",
+    )
+    _line_if_data(
+        axis,
+        time_s,
+        _values(rows, "adaptive_right_mu"),
+        r"Right $\hat{\mu}$",
+        "C1",
+        linestyle="--",
+        drawstyle="steps-post",
+    )
+    for side, color in (("left", "C0"), ("right", "C1")):
+        candidates = _values(rows, f"adaptive_{side}_candidate")
+        reasons = [row.get(f"adaptive_{side}_update_reason", "") for row in rows]
+        accepted_x = [
+            x
+            for x, value, reason in zip(time_s, candidates, reasons, strict=True)
+            if math.isfinite(value) and reason.endswith("_accepted")
+        ]
+        accepted_y = [
+            value
+            for value, reason in zip(candidates, reasons, strict=True)
+            if math.isfinite(value) and reason.endswith("_accepted")
+        ]
+        rejected_x = [
+            x
+            for x, value, reason in zip(time_s, candidates, reasons, strict=True)
+            if math.isfinite(value) and not reason.endswith("_accepted")
+        ]
+        rejected_y = [
+            value
+            for value, reason in zip(candidates, reasons, strict=True)
+            if math.isfinite(value) and not reason.endswith("_accepted")
+        ]
+        side_label = "Left" if side == "left" else "Right"
+        if accepted_x:
+            axis.scatter(
+                accepted_x,
+                accepted_y,
+                s=22,
+                facecolors="white",
+                edgecolors=color,
+                linewidths=1.0,
+                zorder=3,
+                label=f"{side_label} candidate accepted",
+            )
+        if rejected_x:
+            axis.scatter(
+                rejected_x,
+                rejected_y,
+                s=18,
+                marker="x",
+                color=color,
+                linewidths=0.9,
+                zorder=3,
+                label=f"{side_label} candidate rejected",
+            )
+    axis.set_ylabel(r"$\mu$")
+    axis.set_ylim(bottom=0.0)
+    _legend(axis)
+
+
 def _plot_stiffness(axis: Any, time_s: list[float], rows: list[dict[str, str]]) -> None:
     """绘制等效接触刚度估计；未有效确认的区间留空。"""
     values = _values(rows, "stiffness_n_per_m")
@@ -258,6 +349,24 @@ def _values(rows: list[dict[str, str]], field: str, *, boolean: bool = False) ->
     if boolean:
         return [_parse_boolean(row.get(field, "")) for row in rows]
     return [_parse_number(row.get(field, "")) for row in rows]
+
+
+def _has_friction_estimation(directory: Path, rows: list[dict[str, str]]) -> bool:
+    """优先按运行配置识别在线摩擦场景，并兼容只有 trace 的记录。"""
+    config_path = directory / "config.json"
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        adaptive = config.get("reference", {}).get("adaptive") or {}
+        unified = adaptive.get("unified") or {}
+        if unified.get("friction_update_enabled") is True:
+            return True
+    except (AttributeError, OSError, json.JSONDecodeError):
+        pass
+    return any(
+        math.isfinite(value)
+        for field in ("adaptive_left_candidate", "adaptive_right_candidate")
+        for value in _values(rows, field)
+    )
 
 
 def _parse_number(value: str) -> float:

@@ -507,6 +507,16 @@ def _command_hint(phase: LifecyclePhase) -> str:
 
 def format_event_line(event: dict[str, object]) -> str:
     """把结构化事件格式化为单行文本，供终端与日志复用。"""
+    if event.get("event") == "own_friction_estimate":
+        return (
+            f"自主摩擦估计 | {event.get('side')} pillar={event.get('pillar_id')} | "
+            f"mu_raw={float(event['raw_mu']):.4f} | "
+            f"mu_control={float(event['conservative_mu']):.4f}"
+        )
+    if event.get("event") == "own_friction_state":
+        phase = event.get("phase")
+        label = "已启动" if phase == "active" else "已停止"
+        return f"自主逐 pillar 摩擦估计{label} | {event.get('reason')}"
     parts = []
     for key in ("event", "state", "phase", "action"):
         if key in event and event[key] is not None:

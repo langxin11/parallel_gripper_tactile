@@ -1,4 +1,4 @@
-"""固定分侧摩擦先验下的绝对承载需求与单调目标调度。"""
+"""分侧摩擦约束下的绝对承载需求与受限目标调度。"""
 
 from dataclasses import dataclass, fields
 import math
@@ -16,14 +16,22 @@ class AdaptiveLoadConfig:
     min_force_n: float = 0.5
     max_force_n: float = 8.0
     max_force_rate_n_s: float = 1.0
+    max_force_decrease_rate_n_s: float | None = None
     gap_gain_per_s: float = 8.0
     load_rate_gain: float = 1.0
     filter_tau_s: float = 0.05
+    allow_target_decrease: bool = False
 
     def __post_init__(self) -> None:
         """拒绝无效先验和不满足范围约束的参数。"""
         for item in fields(self):
             value = getattr(self, item.name)
+            if item.name == "allow_target_decrease":
+                if not isinstance(value, bool):
+                    raise ValueError("allow_target_decrease 必须为布尔值")
+                continue
+            if item.name == "max_force_decrease_rate_n_s" and value is None:
+                continue
             if isinstance(value, bool) or not math.isfinite(value) or value < 0:
                 raise ValueError(f"{item.name} 必须为非负有限数值")
         if (
@@ -39,6 +47,15 @@ class AdaptiveLoadConfig:
             raise ValueError("摩擦先验、速率上限、缺口增益和滤波时间常数必须为正")
         if self.safety_factor < 1 or self.max_force_n < self.min_force_n:
             raise ValueError("安全系数至少为 1，目标力上下限必须有序")
+
+    @property
+    def effective_decrease_rate_n_s(self) -> float:
+        """返回减力限幅；省略时保持历史的双向对称速率语义。"""
+        return (
+            self.max_force_rate_n_s
+            if self.max_force_decrease_rate_n_s is None
+            else self.max_force_decrease_rate_n_s
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,7 +113,7 @@ class AdaptiveLoadScheduler:
             filtered_load: 采样侧已滤波承载；提供时不重复低通，使用采样侧变化率。
 
         Returns:
-            只增不减、满足幅值和速率限制的平均单侧目标与诊断。
+            满足幅值和速率限制的平均单侧目标与诊断。
         """
         if not all(
             not isinstance(v, bool) and math.isfinite(v)
@@ -131,13 +148,21 @@ class AdaptiveLoadScheduler:
         if not all(math.isfinite(v) for v in (total, load_rate, raw)):
             raise ValueError("承载需求或载荷趋势计算溢出")
         load = min(c.max_force_n, max(c.min_force_n, raw))
-        goal = max(self.target_force_n, load, min(c.max_force_n, goal_floor_n))
+        requested = max(load, min(c.max_force_n, goal_floor_n))
+        goal = requested if c.allow_target_decrease else max(self.target_force_n, requested)
         gap = goal - self.target_force_n
-        rate = min(
-            c.max_force_rate_n_s,
-            c.gap_gain_per_s * gap + c.load_rate_gain * max(0, load_rate) + risk_rate_n_s,
-        )
-        increment = 0.0 if pause_increase else min(gap, rate * dt)
+        if gap >= 0:
+            rate = min(
+                c.max_force_rate_n_s,
+                c.gap_gain_per_s * gap + c.load_rate_gain * max(0, load_rate) + risk_rate_n_s,
+            )
+            increment = 0.0 if pause_increase else min(gap, rate * dt)
+        else:
+            rate = max(
+                -c.effective_decrease_rate_n_s,
+                c.gap_gain_per_s * gap + c.load_rate_gain * min(0, load_rate),
+            )
+            increment = max(gap, rate * dt)
         self._filtered = filtered
         self.target_force_n += increment
         limited = []
@@ -145,9 +170,9 @@ class AdaptiveLoadScheduler:
             limited.append("minimum")
         if raw > c.max_force_n:
             limited.append("maximum")
-        if increment < gap:
+        if abs(increment) < abs(gap):
             limited.append("rate")
-        if pause_increase:
+        if pause_increase and gap > 0:
             limited.append("execution")
         return AdaptiveLoadCommand(
             self.target_force_n,

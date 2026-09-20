@@ -416,3 +416,17 @@ def test_format_event_line_combines_fields():
     """事件行格式化合并事件与消息字段。"""
     line = format_event_line({"event": "state", "phase": "active", "message": "运行中"})
     assert "state" in line and "active" in line and "运行中" in line
+
+
+def test_format_event_line_shows_own_friction_estimate() -> None:
+    """自主摩擦事件在动态面板中保留触点与两个系数。"""
+    line = format_event_line(
+        {
+            "event": "own_friction_estimate",
+            "side": "left",
+            "pillar_id": 3,
+            "raw_mu": 0.4,
+            "conservative_mu": 0.32,
+        }
+    )
+    assert line == "自主摩擦估计 | left pillar=3 | mu_raw=0.4000 | mu_control=0.3200"

@@ -42,8 +42,9 @@ def test_evidence_requires_loading_and_redistribution(mode: str, expected: bool)
     if expected:
         assert len(events) == 1
         if mode == "local_release":
-            assert 1 < events[0].left_candidate < 3
-            assert events[0].left_quality == 1
+            # 候选是整侧合力比，质量只计算真正发生重分配的触点。
+            assert 0.5 < events[0].left_candidate < 0.8
+            assert events[0].left_quality == pytest.approx(1 / 9)
         else:
             # 剪切重分配已满足风险门槛，但局部力比仍增长，不授予摩擦候选。
             assert events[0].left_candidate is None
@@ -145,7 +146,7 @@ def test_stable_subset_ignores_edge_contact_chatter(redistribute: bool) -> None:
             events.append(result)
     assert bool(events) is redistribute
     if redistribute:
-        assert events[0].left_quality == pytest.approx(8 / 9)
+        assert events[0].left_quality == pytest.approx(1 / 9)
     replacement = np.zeros((9, 3))
     replacement[8, 2] = 0.2
     result = observer.update(replacement, replacement, time_s=0.6)
@@ -160,3 +161,36 @@ def test_large_device_time_does_not_reenter_warmup():
         observation = observer.update(frame, frame, time_s=1202.503 + index * 0.002)
         if index >= 21:
             assert observation.reason == "observing"
+
+
+def test_candidate_uses_whole_side_force_ratio_instead_of_local_low_ratio() -> None:
+    """局部低比值只定位受影响触点，候选仍等于整侧稳定子集的合力利用率。"""
+    observer = TaxelRiskObserver()
+    events = []
+    for time in np.arange(0, 0.65, 0.01):
+        frame = _frame(time, "local_release")
+        result = observer.update(frame, frame, time_s=float(time))
+        if result.event_id:
+            events.append(result)
+    assert len(events) == 1
+    event = events[0]
+    assert event.left_candidate == pytest.approx(event.right_candidate)
+    assert event.left_candidate > 5 * event.left_quality
+
+
+def test_local_utilization_retains_canceling_shear_and_ignores_inactive_taxels() -> None:
+    """相反切向力可在整侧抵消，局部下界仍保留；低法向触点不得放大比值。"""
+    frame = np.zeros((9, 3))
+    frame[0] = [0.3, 0.4, 1]
+    frame[1] = [-0.3, -0.4, 1]
+    frame[2] = [1, 0, 0.001]
+    observer = TaxelRiskObserver()
+    observation = observer.update(frame, frame, time_s=0)
+    assert observation.valid
+    assert observation.left_utilization == pytest.approx(0)
+    assert observation.left_taxel_utilization == pytest.approx((0.5, 0.5, 0, 0, 0, 0, 0, 0, 0))
+    assert observation.right_taxel_utilization == observation.left_taxel_utilization
+    assert not observation.left_valid_mask[2]
+    frame[1] = [0.3, 0.4, 1]
+    observation = observer.update(frame, frame, time_s=0.01)
+    assert observation.left_utilization == pytest.approx(0.5)

@@ -16,7 +16,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import NoReturn
 
-from papillarray_hardware import PapillArraySerialConfig
+from papillarray_hardware import PapillArraySerialConfig, StandaloneSlipSession
 
 from dm_grasp_core import (
     ContactTransition,
@@ -29,7 +29,7 @@ from dm_grasp_core import (
     build_mit_command,
 )
 
-from .config import ExperimentConfig
+from .config import ExperimentConfig, LifecycleConfig
 from .control import GripController
 from .lifecycle import Lifecycle, LifecyclePhase
 from .native_slip import NativeSlipSession
@@ -172,6 +172,8 @@ def run_experiment(
         if terminal is not None and stamped.get("event") in {
             "command_received",
             "disabled",
+            "own_friction_estimate",
+            "own_friction_state",
             "state",
             "status",
             "warning",
@@ -399,9 +401,11 @@ def _motor_command_configs(
         feedforward_ratio=controller.admittance.feedforward_ratio,
         feedforward_torque_limit_nm=controller.torque_limit_nm,
         torque_limit_nm=controller.torque_limit_nm,
+        closing_torque_only=controller.closing_torque_only,
     )
     return_config = replace(
         command_config,
+        closing_torque_only=False,
         kp=controller.return_mit_kp,
         kd=controller.return_mit_kd,
         feedforward_torque_limit_nm=controller.return_torque_limit_nm,
@@ -641,7 +645,7 @@ def _run_control_loop(
     lifecycle: Lifecycle,
     feedback,
 ) -> dict[str, object]:
-    """运行使能后状态机；统一模式的故障保持额外要求触觉健康。"""
+    """运行使能后状态机；触觉及计算故障由健康电机持位等待人工释放。"""
     feedback_state = [feedback]
     try:
         emit(
@@ -684,7 +688,10 @@ def _run_control_loop(
         raise
     except Exception as error:
         if config.lifecycle.native_slip is not None:
-            tactile.stop_native_slip("control_fault")
+            try:
+                tactile.stop_native_slip("control_fault")
+            except Exception as stop_error:
+                error.add_note(f"停止原生滑动检测失败，继续电机持位：{stop_error}")
         return _run_fault_holding(
             config,
             dm,
@@ -697,11 +704,6 @@ def _run_control_loop(
             lifecycle,
             feedback_state[0],
             error,
-            tactile_health_check=(
-                lambda: _validate_snapshot(_latest_snapshot(tactile, config), clock(), config)
-            )
-            if config.unified_adaptive_enabled
-            else None,
         )
 
 
@@ -725,7 +727,11 @@ def _run_control_loop_inner(
     lifecycle_config = config.lifecycle
     kinematics = _KINEMATICS
     command_config, return_config = _motor_command_configs(config, dm)
-    controller = GripController(config, kinematics=kinematics, command_config=command_config)
+    tracking_config = replace(
+        command_config,
+        zero_velocity_target=config.controller.zero_tracking_velocity,
+    )
+    controller = GripController(config, kinematics=kinematics, command_config=tracking_config)
     target_source = build_target_source(
         curve=_curve_from_config(config),
         adaptive=config.reference.adaptive,
@@ -737,6 +743,11 @@ def _run_control_loop_inner(
     native_slip = (
         NativeSlipSession(lifecycle_config.native_slip)
         if lifecycle_config.native_slip is not None
+        else None
+    )
+    own_friction = (
+        StandaloneSlipSession(lifecycle_config.own_friction.to_session_config())
+        if lifecycle_config.own_friction is not None
         else None
     )
 
@@ -755,6 +766,8 @@ def _run_control_loop_inner(
     lost_since: float | None = None
     preload_stable_since: float | None = None
     preload_started = 0.0
+    preload_start_force_n = 0.0
+    preload_ramp_duration_s = 0.0
     task_time_s = 0.0
     tracking_begun = False
     reapproach_attempts = 0
@@ -781,11 +794,8 @@ def _run_control_loop_inner(
                 action = action_source()
             except KeyboardInterrupt:
                 raise
-            except BaseException as error:  # noqa: BLE001
-                raise FatalHardwareFault(
-                    str(error),
-                    phase=lifecycle.phase.value,
-                ) from error
+            except Exception:
+                raise
             if action == "status":
                 emit(
                     {
@@ -876,19 +886,9 @@ def _run_control_loop_inner(
             )
         except Exception as error:
             if config.unified_adaptive_enabled:
-                raise FatalHardwareFault(
-                    f"统一策略触觉配对失败：{error}", phase=lifecycle.phase.value
-                ) from error
+                raise RuntimeError(f"统一策略触觉配对失败：{error}") from error
             raise
-        try:
-            action = action_source()
-        except KeyboardInterrupt:
-            raise
-        except BaseException as error:  # noqa: BLE001
-            raise FatalHardwareFault(
-                str(error),
-                phase=lifecycle.phase.value,
-            ) from error
+        action = action_source()
         if action == "release" and lifecycle.phase in {
             LifecyclePhase.ACTIVE,
             LifecyclePhase.HOLDING,
@@ -947,9 +947,7 @@ def _run_control_loop_inner(
             try:
                 target_source.observe(paired, dt)
             except (ValueError, RuntimeError) as error:
-                raise FatalHardwareFault(
-                    f"多速率观测失败：{error}", phase=lifecycle.phase.value
-                ) from error
+                raise RuntimeError(f"多速率观测失败：{error}") from error
             if target_source.failure_reason is not None:
                 fail(f"统一自适应策略失败：{target_source.failure_reason}")
         if paired.is_new_tactile:
@@ -1026,9 +1024,7 @@ def _run_control_loop_inner(
                         target_source.observe(paired, policy_dt)
                 except ValueError as error:
                     if config.unified_adaptive_enabled:
-                        raise FatalHardwareFault(
-                            f"统一策略观测计算失败：{error}", phase=lifecycle.phase.value
-                        ) from error
+                        raise RuntimeError(f"统一策略观测计算失败：{error}") from error
                     raise
                 diagnostics = target_source.trace_fields()
                 signature = tuple(
@@ -1062,9 +1058,10 @@ def _run_control_loop_inner(
                 )
                 if lifecycle.phase is LifecyclePhase.PRELOAD:
                     target_value = target_source.preload_target(task_time_s)
-                    minimum_stable_force_n = target_value - lifecycle_config.preload_tolerance_n
+                    minimum_stable_force_n = _minimum_preload_force(target_value, lifecycle_config)
                     stable = (
-                        min(left_n, right_n) >= lifecycle_config.contact_on_n
+                        now - preload_started >= preload_ramp_duration_s
+                        and min(left_n, right_n) >= lifecycle_config.contact_on_n
                         and paired.measured_force_n >= minimum_stable_force_n
                     )
                     preload_stable_since = (
@@ -1092,6 +1089,19 @@ def _run_control_loop_inner(
             if now - phase_started >= lifecycle_config.contact_transition_s:
                 lifecycle.finish_contact_transition(now)
                 phase_started = preload_started = now
+                preload_goal = target_source.preload_target(task_time_s)
+                preload_start_force_n = min(
+                    preload_goal, max(lifecycle_config.contact_on_n, paired.measured_force_n)
+                )
+                rate = lifecycle_config.preload_force_rate_n_s
+                preload_ramp_duration_s = (
+                    0.0 if rate is None else 1.875 * (preload_goal - preload_start_force_n) / rate
+                )
+                if (
+                    preload_ramp_duration_s + lifecycle_config.preload_stable_time_s
+                    >= lifecycle_config.preload_timeout_s
+                ):
+                    fail("预载升力时长与稳定等待超过 preload_timeout_s，请提高速率或延长预载超时")
                 controller.reset(feedback.position_rad)
                 stiffness.reset_contact(
                     position_rad=feedback.position_rad,
@@ -1105,7 +1115,7 @@ def _run_control_loop_inner(
             lifecycle_config.preload_timeout_s
         ):
             target_value = target_source.preload_target(task_time_s)
-            minimum_stable_force_n = target_value - lifecycle_config.preload_tolerance_n
+            minimum_stable_force_n = _minimum_preload_force(target_value, lifecycle_config)
             detail = (
                 "初始抓力在等待上限内未达到稳定："
                 f"目标={target_value:.3f}N，当前均值={paired.measured_force_n:.3f}N"
@@ -1119,7 +1129,11 @@ def _run_control_loop_inner(
             ):
                 detail += "；导纳 prevent_unloading=true，力偏高时不会反向纠偏"
             fail(detail)
-        if lifecycle.phase is LifecyclePhase.ACTIVE and task_time_s >= target_source.duration_s:
+        if (
+            lifecycle.phase is LifecyclePhase.ACTIVE
+            and target_source.duration_s is not None
+            and task_time_s >= target_source.duration_s
+        ):
             lifecycle.finish_task(now)
             phase_started = now
             emit(
@@ -1162,12 +1176,22 @@ def _run_control_loop_inner(
                 feedback,
                 reference_position,
                 transition.velocity_at(now - phase_started),
-                0.0,
-                0.0,
+                config.safety.approach_feedforward_force_n
+                if config.controller.closing_torque_only
+                else 0.0,
+                config.safety.approach_feedforward_ratio
+                if config.controller.closing_torque_only
+                else 0.0,
             )
         else:
             if lifecycle.phase is LifecyclePhase.PRELOAD:
-                current_target = _preload_force_target(target_source, task_time_s)
+                current_target = _preload_force_target(
+                    target_source,
+                    task_time_s,
+                    start_force_n=preload_start_force_n,
+                    elapsed_s=now - preload_started,
+                    duration_s=preload_ramp_duration_s,
+                )
             else:
                 current_target = target_source.active_reference(task_time_s)
             if not tracking_begun:
@@ -1204,6 +1228,9 @@ def _run_control_loop_inner(
                 now_s=clock(),
                 worker=tactile,
             ):
+                emit(event)
+        if own_friction is not None:
+            for event in own_friction.update(sample, now_s=clock(), worker=tactile):
                 emit(event)
 
         # 交互输出／存储也可能延迟；发送前再次检查时限和输入新鲜度。
@@ -1308,7 +1335,6 @@ def _run_fault_holding(
     lifecycle: Lifecycle,
     feedback,
     primary_error: BaseException,
-    tactile_health_check: Callable[[], object] | None = None,
 ) -> dict[str, object]:
     """建立并守护故障保持，确保后续异常不能覆盖首个实验故障。"""
     try:
@@ -1324,7 +1350,6 @@ def _run_fault_holding(
             lifecycle,
             feedback,
             primary_error,
-            tactile_health_check,
         )
     except FatalHardwareFault:
         raise
@@ -1377,9 +1402,8 @@ def _run_fault_holding_impl(
     lifecycle: Lifecycle,
     feedback,
     primary_error: BaseException,
-    tactile_health_check: Callable[[], object] | None = None,
 ) -> dict[str, object]:
-    """保持首个故障位置，统一模式持续校验触觉，直到人工释放。"""
+    """保持首个故障位置，仅依赖健康电机反馈，直到人工释放。"""
     source_phase = lifecycle.phase.value
     kinematics = _KINEMATICS
     base_config = MITCommandConfig(
@@ -1395,21 +1419,6 @@ def _run_fault_holding_impl(
     )
     period = 1.0 / config.timing.control_rate_hz
     secondary_errors: list[str] = []
-
-    def check_tactile_health() -> None:
-        """统一模式仅在触觉反馈健康时允许位置保持。"""
-        if tactile_health_check is None:
-            return
-        try:
-            tactile_health_check()
-        except Exception as error:
-            raise FatalHardwareFault(
-                f"统一策略故障保持期间触觉保护失败：{error}",
-                phase=source_phase,
-                holding_entered=lifecycle.fault_holding_started_s is not None,
-                holding_duration_s=_fault_holding_duration(lifecycle, clock()),
-                primary_error=primary_error,
-            ) from error
 
     def safe_emit(event: dict[str, object]) -> None:
         """记录故障阶段事件；记录通道失败不得夺走电机控制权。"""
@@ -1428,7 +1437,6 @@ def _run_fault_holding_impl(
             secondary_errors.append(f"故障保持事件记录失败：{error}")
 
     try:
-        check_tactile_health()
         hold_command = _hold_command(kinematics, base_config, feedback)
         feedback = dm.hold(hold_command)
     except KeyboardInterrupt as error:
@@ -1470,7 +1478,6 @@ def _run_fault_holding_impl(
     last_control_s = entered_s
     while True:
         now = clock()
-        check_tactile_health()
         if now - last_control_s > config.timing.max_control_gap_s:
             safe_emit(
                 {
@@ -1491,15 +1498,14 @@ def _run_fault_holding_impl(
                 holding_duration_s=clock() - entered_s,
                 primary_error=primary_error,
             ) from error
-        except BaseException as error:  # noqa: BLE001
-            raise FatalHardwareFault(
-                f"故障保持期间无法继续接收人工 release：{error}",
-                phase=source_phase,
-                resolution="hold_lost",
-                holding_entered=True,
-                holding_duration_s=clock() - entered_s,
-                primary_error=primary_error,
-            ) from error
+        except Exception as error:
+            message = f"故障保持期间无法接收 release：{error}；电机继续持位，Ctrl+C 可紧急退出。"
+            if message not in secondary_errors:
+                secondary_errors.append(message)
+                safe_emit(
+                    {"event": "warning", "code": "fault_holding_input_lost", "message": message}
+                )
+            action = None
         if lifecycle.phase is LifecyclePhase.FAULT_HOLDING:
             if action == "release":
                 safe_emit(
@@ -1510,17 +1516,30 @@ def _run_fault_holding_impl(
                         "message": "已收到 release，正在执行不依赖触觉的受限回位。",
                     }
                 )
-                lifecycle.begin_return(now, "故障保持后人工 release")
-                return_trajectory = _home_trajectory(config, kinematics, feedback.position_rad)
-                return_started_s = now
-                safe_emit(
-                    {
-                        "event": "state",
-                        "phase": LifecyclePhase.RETURNING.value,
-                        "message": _PHASE_MESSAGES[LifecyclePhase.RETURNING],
-                        "fault_release": True,
-                    }
-                )
+                try:
+                    return_trajectory = _home_trajectory(config, kinematics, feedback.position_rad)
+                except Exception as error:
+                    message = f"故障释放规划失败，继续持位；请检查后重新输入 release：{error}"
+                    if message not in secondary_errors:
+                        secondary_errors.append(message)
+                        safe_emit(
+                            {
+                                "event": "warning",
+                                "code": "fault_release_planning_failed",
+                                "message": message,
+                            }
+                        )
+                else:
+                    lifecycle.begin_return(now, "故障保持后人工 release")
+                    return_started_s = now
+                    safe_emit(
+                        {
+                            "event": "state",
+                            "phase": LifecyclePhase.RETURNING.value,
+                            "message": _PHASE_MESSAGES[LifecyclePhase.RETURNING],
+                            "fault_release": True,
+                        }
+                    )
             elif action == "status":
                 safe_emit(
                     {
@@ -1681,15 +1700,36 @@ def _run_fault_holding_impl(
             ) from error
 
 
-def _preload_force_target(target_source: TargetSource, task_time_s: float) -> ForceTarget:
-    """构造 preload 阶段的常值目标。"""
-    value = target_source.preload_target(task_time_s)
+def _preload_force_target(
+    target_source: TargetSource,
+    task_time_s: float,
+    *,
+    start_force_n: float = 0.0,
+    elapsed_s: float = 0.0,
+    duration_s: float = 0.0,
+) -> ForceTarget:
+    """以首尾速度及加速度均为零的五次曲线建立预载，零时长兼容常值目标。"""
+    goal = target_source.preload_target(task_time_s)
+    if duration_s <= 0.0:
+        return ForceTarget(
+            force_n=goal, rate_n_s=None, acceleration_n_s2=None, source=target_source.kind
+        )
+    u = min(1.0, max(0.0, elapsed_s / duration_s))
+    delta = goal - start_force_n
     return ForceTarget(
-        force_n=value,
-        rate_n_s=None,
-        acceleration_n_s2=None,
+        force_n=start_force_n + delta * (10 * u**3 - 15 * u**4 + 6 * u**5),
+        rate_n_s=delta * 30 * u**2 * (1 - u) ** 2 / duration_s,
+        acceleration_n_s2=delta * (60 * u - 180 * u**2 + 120 * u**3) / duration_s**2,
         source=target_source.kind,
     )
+
+
+def _minimum_preload_force(target_force_n: float, lifecycle: LifecycleConfig) -> float:
+    """返回最终预载目标在切换 active 前允许的低侧下界。"""
+    ratio = lifecycle.preload_min_force_ratio
+    if ratio is not None:
+        return target_force_n * ratio
+    return target_force_n - lifecycle.preload_tolerance_n
 
 
 def _curve_from_config(config: ExperimentConfig) -> ForceReferenceCurve | None:
@@ -1824,22 +1864,22 @@ def _trace_row(
 def _validate_snapshot(
     snapshot: TactileSnapshot, now_s: float, config: ExperimentConfig
 ) -> tuple[float, ...]:
-    """统一模式把触觉保护失败直接交给失能清理。"""
+    """触觉保护失败停止闭环，由运行时进入电机位置保持。"""
     try:
         return _validate_snapshot_values(snapshot, now_s, config)
     except Exception as error:
         if config.unified_adaptive_enabled:
-            raise FatalHardwareFault(f"统一策略触觉保护失败：{error}") from error
+            raise RuntimeError(f"统一策略触觉保护失败：{error}") from error
         raise
 
 
 def _latest_snapshot(tactile: TactileWorker, config: ExperimentConfig) -> TactileSnapshot:
-    """统一模式的采集异常不能转入仅依赖电机的故障保持。"""
+    """触觉采集异常停止闭环，由运行时进入电机位置保持。"""
     try:
         return tactile.latest()
     except Exception as error:
         if config.unified_adaptive_enabled:
-            raise FatalHardwareFault(f"统一策略触觉采集失败：{error}") from error
+            raise RuntimeError(f"统一策略触觉采集失败：{error}") from error
         raise
 
 

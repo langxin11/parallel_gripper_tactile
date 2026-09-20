@@ -16,7 +16,11 @@ from typing import Any, Literal, get_args, get_origin, get_type_hints
 
 import yaml
 from dmgripper_hardware import DEFAULT_USB2CAN_PORT, make_dm4310p_gripper_config
-from papillarray_hardware import DEFAULT_PAPILLARRAY_PORT
+from papillarray_hardware import (
+    DEFAULT_PAPILLARRAY_PORT,
+    PillarFrictionConfig,
+    StandaloneSlipConfig,
+)
 
 from dm_grasp_core import ForceInterpolation
 from dm_grasp_core.grasp.unified import UnifiedAdaptiveConfig
@@ -67,6 +71,39 @@ def sanitize_directory_component(name: str) -> str:
     if not cleaned.strip("._"):
         raise ValueError(f"目录组件名称清理后为空：{name!r}")
     return cleaned
+
+
+@dataclass(frozen=True, slots=True)
+class OwnFrictionConfig:
+    """自主逐 pillar 摩擦估计的稳定接触门禁与算法参数。"""
+
+    stable_duration_s: float = 0.5
+    max_force_rate_n_s: float = 0.5
+    contact_on_n: float = 0.15
+    contact_off_n: float = 0.1
+    contact_loss_confirm_s: float = 0.03
+    sample_timeout_s: float = 0.05
+    min_estimates_per_side: int = 1
+    estimator: PillarFrictionConfig = field(default_factory=PillarFrictionConfig)
+
+    def __post_init__(self) -> None:
+        """复用硬件包约束，确保该路径永远不启用原厂服务。"""
+        self.to_session_config()
+
+    def to_session_config(self) -> StandaloneSlipConfig:
+        """转换为自主估计会话配置。"""
+        return StandaloneSlipConfig(
+            native_slip_enabled=False,
+            own_friction_enabled=True,
+            stable_duration_s=self.stable_duration_s,
+            max_force_rate_n_s=self.max_force_rate_n_s,
+            contact_on_n=self.contact_on_n,
+            contact_off_n=self.contact_off_n,
+            contact_loss_confirm_s=self.contact_loss_confirm_s,
+            sample_timeout_s=self.sample_timeout_s,
+            min_estimates_per_side=self.min_estimates_per_side,
+            own_friction=self.estimator,
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -196,6 +233,7 @@ class LifecycleConfig:
         reapproach_max_attempts: 单次运行允许的重新接近次数上限。
         reapproach_timeout_s: 重接近路径的累计时间上限。
         preload_tolerance_n: 初始抓力稳定判定的低侧力误差容限。
+        preload_min_force_ratio: 可选的最终预载目标最低比例；设定后覆盖绝对容限。
         preload_stable_time_s: 初始抓力稳定需要持续的时长。
         preload_timeout_s: preload 等待上限。
         auto_start: ready 阶段是否跳过交互等待直接启动。
@@ -210,6 +248,8 @@ class LifecycleConfig:
         return_timeout_s: 回位总超时。
         return_settle_timeout_s: 回位轨迹结束后等待位置达标的余量。
         return_position_tolerance_rad: 回位达标的位置误差容限。
+        preload_force_rate_n_s: 预载平滑升力峰值速率；None 保留常值目标。
+        own_friction: 可选自主逐 pillar 摩擦估计；不发送原厂滑移命令。
         native_slip: 可选原厂短时辨识会话；省略时不发送滑移启停命令。
     """
 
@@ -227,8 +267,10 @@ class LifecycleConfig:
     reapproach_max_attempts: int = 2
     reapproach_timeout_s: float = 20.0
     preload_tolerance_n: float = 0.15
+    preload_min_force_ratio: float | None = None
     preload_stable_time_s: float = 2.0
     preload_timeout_s: float = 30.0
+    preload_force_rate_n_s: float | None = None
     auto_start: bool = False
     on_finished: FinishBehavior = "hold"
     approach_closure_velocity_m_s: float = 0.01
@@ -241,12 +283,21 @@ class LifecycleConfig:
     return_timeout_s: float = 5.0
     return_settle_timeout_s: float = 2.0
     return_position_tolerance_rad: float = 0.02
+    own_friction: OwnFrictionConfig | None = None
     native_slip: NativeSlipConfig | None = None
 
     def __post_init__(self) -> None:
         """验证生命周期参数与跨字段关系。"""
         for item in fields(self):
             value = getattr(self, item.name)
+            if item.name in {"preload_force_rate_n_s", "preload_min_force_ratio"}:
+                if value is not None:
+                    _finite_number(value, f"lifecycle.{item.name}", positive=True)
+                continue
+            if item.name == "own_friction":
+                if value is not None and not isinstance(value, OwnFrictionConfig):
+                    raise ValueError("lifecycle.own_friction 必须为 OwnFrictionConfig 或 null")
+                continue
             if item.name == "native_slip":
                 if value is not None and not isinstance(value, NativeSlipConfig):
                     raise ValueError("lifecycle.native_slip 必须为 NativeSlipConfig 或 null")
@@ -288,6 +339,8 @@ class LifecycleConfig:
         ):
             if getattr(self, name) < 0.0:
                 raise ValueError(f"lifecycle.{name} 不得为负")
+        if self.preload_min_force_ratio is not None and self.preload_min_force_ratio > 1.0:
+            raise ValueError("lifecycle.preload_min_force_ratio 不得大于 1")
         if not 0.0 <= self.contact_off_n < self.contact_on_n:
             raise ValueError("lifecycle.contact_off_n 必须非负且小于 contact_on_n")
         if not 0.0 < self.zero_force_threshold_n < self.contact_on_n:
@@ -378,7 +431,7 @@ class AdaptiveReferenceConfig:
 
     Attributes:
         initial_force_n: 初始抓力（preload 目标与策略基线初值）。
-        duration_s: 任务计时长度。
+        duration_s: 任务计时长度；None 表示持续运行直到人工 release。
         max_force_rate_n_s: 目标力变化率上限。
         filter_tau_s: 切向力滤波时间常数。
         shear_threshold_n: 触发阈值。
@@ -390,7 +443,7 @@ class AdaptiveReferenceConfig:
     """
 
     initial_force_n: float = 0.5
-    duration_s: float = 10.0
+    duration_s: float | None = 10.0
     max_force_rate_n_s: float = 0.5
     filter_tau_s: float = 0.05
     shear_threshold_n: float = 0.06
@@ -411,6 +464,8 @@ class AdaptiveReferenceConfig:
                 "friction_validation_passed",
                 "experimental_closed_loop",
             }:
+                continue
+            if item.name == "duration_s" and self.duration_s is None:
                 continue
             _finite_number(
                 getattr(self, item.name), f"reference.adaptive.{item.name}", positive=True
@@ -433,7 +488,7 @@ class AdaptiveReferenceConfig:
             if self.unified.load.min_force_n != self.initial_force_n:
                 raise ValueError("unified 最低力必须等于 initial_force_n")
             if self.unified.load.max_force_rate_n_s != self.max_force_rate_n_s:
-                raise ValueError("unified 与 adaptive 的最大增力速率必须一致")
+                raise ValueError("unified 与 adaptive 的最大目标变化率必须一致")
             if self.unified.risk_enabled and not (
                 self.risk_validation_passed or self.experimental_closed_loop
             ):
@@ -467,7 +522,7 @@ class ReferenceConfig:
         return "curve" if self.curve is not None else "adaptive"
 
     @property
-    def duration_s(self) -> float:
+    def duration_s(self) -> float | None:
         """返回任务时长（曲线取末节点，动态取显式 duration_s）。"""
         if self.curve is not None:
             return self.curve.duration_s
@@ -573,6 +628,8 @@ class ControllerConfig:
         admittance: 导纳参数。
         pid: PID 参数。
         adrc: 一阶 LADRC 参数。
+        closing_torque_only: 接近至正常保持期间禁止预测张开力矩。
+        zero_tracking_velocity: 预载、跟踪与保持阶段的 MIT 目标速度是否固定为零。
         mit_kp: 跟踪段 MIT 位置增益。
         mit_kd: 跟踪段 MIT 阻尼增益。
         velocity_limit_rad_s: 关节速度限幅。
@@ -586,6 +643,8 @@ class ControllerConfig:
     admittance: AdmittanceConfig = field(default_factory=AdmittanceConfig)
     pid: PIDConfig = field(default_factory=PIDConfig)
     adrc: AdrcConfig = field(default_factory=AdrcConfig)
+    closing_torque_only: bool = False
+    zero_tracking_velocity: bool = False
     mit_kp: float = 2.0
     mit_kd: float = 0.5
     velocity_limit_rad_s: float = 0.3
@@ -596,6 +655,10 @@ class ControllerConfig:
 
     def __post_init__(self) -> None:
         """验证控制器选择与 MIT 参数范围。"""
+        if not isinstance(self.closing_torque_only, bool) or not isinstance(
+            self.zero_tracking_velocity, bool
+        ):
+            raise ValueError("controller 的单向力矩与零目标速度开关必须是布尔值")
         if self.kind not in get_args(ControllerKind):
             raise ValueError("controller.kind 必须是 admittance、pid 或 adrc")
         for name in (
