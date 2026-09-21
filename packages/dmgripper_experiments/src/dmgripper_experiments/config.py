@@ -26,6 +26,10 @@ from dm_grasp_core import ForceInterpolation
 from dm_grasp_core.grasp.unified import UnifiedAdaptiveConfig
 from dm_grasp_core.tactile.multirate import TactileSamplingConfig
 from .native_slip import NativeSlipConfig
+from dm_grasp_core.grasp.stiffness_adaptation import (
+    StiffnessAdmittanceConfig,
+    StiffnessPreloadConfig,
+)
 
 ControllerKind = Literal["admittance", "pid", "adrc"]
 LostContactScope = Literal["any_side", "both_sides"]
@@ -251,6 +255,7 @@ class LifecycleConfig:
         preload_force_rate_n_s: 预载平滑升力峰值速率；None 保留常值目标。
         own_friction: 可选自主逐 pillar 摩擦估计；不发送原厂滑移命令。
         native_slip: 可选原厂短时辨识会话；省略时不发送滑移启停命令。
+        stiffness_preload: 可选刚度预载；省略时保持固定初始目标。
     """
 
     verify_zero_force: bool = True
@@ -285,11 +290,16 @@ class LifecycleConfig:
     return_position_tolerance_rad: float = 0.02
     own_friction: OwnFrictionConfig | None = None
     native_slip: NativeSlipConfig | None = None
+    stiffness_preload: StiffnessPreloadConfig | None = None
 
     def __post_init__(self) -> None:
         """验证生命周期参数与跨字段关系。"""
         for item in fields(self):
             value = getattr(self, item.name)
+            if item.name == "stiffness_preload":
+                if value is not None and not isinstance(value, StiffnessPreloadConfig):
+                    raise ValueError("stiffness_preload 必须为刚度预载配置或 null")
+                continue
             if item.name in {"preload_force_rate_n_s", "preload_min_force_ratio"}:
                 if value is not None:
                     _finite_number(value, f"lifecycle.{item.name}", positive=True)
@@ -540,7 +550,12 @@ class ReferenceConfig:
 
 @dataclass(frozen=True, slots=True)
 class AdmittanceConfig:
-    """二阶导纳外环参数；死区与单向闭合是导纳专属行为。"""
+    """二阶导纳外环参数；运动边界独立于 MIT 关节限幅。
+
+    ``max_closing_velocity_m_s``、``max_opening_velocity_m_s`` 与
+    ``max_acceleration_m_s2`` 为可选外环状态边界；省略时保持旧行为，只受
+    MIT 关节速度、机械角和合成力矩约束。
+    """
 
     mass_kg: float = 0.02
     damping_ns_m: float = 0.2
@@ -548,6 +563,10 @@ class AdmittanceConfig:
     force_deadband_n: float = 0.1
     prevent_unloading: bool = True
     feedforward_ratio: float = 1.0
+    max_closing_velocity_m_s: float | None = None
+    max_opening_velocity_m_s: float | None = None
+    max_acceleration_m_s2: float | None = None
+    stiffness_adaptation: StiffnessAdmittanceConfig | None = None
 
     def __post_init__(self) -> None:
         """验证导纳参数。"""
@@ -564,6 +583,23 @@ class AdmittanceConfig:
         _finite_number(self.feedforward_ratio, "controller.admittance.feedforward_ratio")
         if not 0 <= self.feedforward_ratio <= 1:
             raise ValueError("导纳力矩前馈比例必须位于 0 与 1 之间")
+        for name in (
+            "max_closing_velocity_m_s",
+            "max_opening_velocity_m_s",
+            "max_acceleration_m_s2",
+        ):
+            value = getattr(self, name)
+            if value is not None:
+                _finite_number(value, f"controller.admittance.{name}", positive=True)
+        adaptive = self.stiffness_adaptation
+        if adaptive is not None:
+            if not isinstance(adaptive, StiffnessAdmittanceConfig):
+                raise ValueError("stiffness_adaptation 必须为刚度导纳配置或 null")
+            if (
+                not adaptive.min_mass_kg <= self.mass_kg <= adaptive.max_mass_kg
+                or self.damping_ns_m <= 0
+            ):
+                raise ValueError("初始导纳质量必须位于调度范围且阻尼必须为正")
 
 
 @dataclass(frozen=True, slots=True)
@@ -704,8 +740,8 @@ class EstimationConfig:
     """等效接触刚度估计配置。
 
     估计量为平均单侧法向力相对于总闭合行程的局部等效刚度（N/m）。
-    默认值沿用仿真验证过的起点，不是真机辨识值。默认只诊断，
-    不因启用估计而改变控制律。
+    默认值沿用仿真验证过的起点，不是真机辨识值。默认只诊断；
+    显式开启刚度预载或导纳参数调度时，才消费有效估计。
 
     Attributes:
         enabled: 是否更新刚度估计并记录诊断。
@@ -897,6 +933,32 @@ class ExperimentConfig:
     def _validate_controller_compatibility(self) -> None:
         """校验控制器、目标来源与失接触处理的组合约束。"""
         adaptive = self.reference.adaptive is not None
+        preload = self.lifecycle.stiffness_preload
+        adaptation = self.controller.admittance.stiffness_adaptation
+        if preload is not None or adaptation is not None:
+            if not self.estimation.enabled or not self.unified_adaptive_enabled:
+                raise ValueError("刚度闭环要求开启估计并使用统一自适应模式")
+            if not self.reference.adaptive.experimental_closed_loop:
+                raise ValueError("刚度闭环需要显式 experimental_closed_loop 实验授权")
+        if preload is not None:
+            if preload.force_ceiling_n > self.safety.force_ceiling_n:
+                raise ValueError("预载过力上限不得超过全程原始过力上限")
+            if self.lifecycle.preload_force_rate_n_s is None:
+                raise ValueError("刚度预载需要有限的 preload_force_rate_n_s")
+            if (
+                not self.reference.adaptive.unified.load.min_force_n
+                <= preload.min_force_n
+                <= preload.max_force_n
+                <= self.safety.max_target_force_n
+            ):
+                raise ValueError("刚度预载目标必须位于统一调度力范围内")
+            required_s = (
+                preload.timeout_s
+                + 1.875 * preload.max_force_n / self.lifecycle.preload_force_rate_n_s
+                + self.lifecycle.preload_stable_time_s
+            )
+            if required_s >= self.lifecycle.preload_timeout_s:
+                raise ValueError("刚度辨识及升力确认预算超过预载超时")
         if self.unified_adaptive_enabled and self.controller.kind != "admittance":
             raise ValueError("统一自适应模式只支持导纳控制器")
         if adaptive and self.lifecycle.lost_contact_action == "reapproach":

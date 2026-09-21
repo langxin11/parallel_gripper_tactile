@@ -173,6 +173,9 @@ def step_admittance(
     force_deadband_n: float = 0.0,
     prevent_unloading: bool = False,
     saturation_feedback: bool = False,
+    maximum_closing_velocity_m_s: float | None = None,
+    maximum_opening_velocity_m_s: float | None = None,
+    maximum_acceleration_m_s2: float | None = None,
 ) -> MITCommand:
     """按平均单侧力误差积分、限制导纳状态并构建 MIT 命令。
 
@@ -196,6 +199,9 @@ def step_admittance(
         force_deadband_n: 误差绝对值不超过该值时冻结导纳位置和速度 (N)。
         prevent_unloading: 是否禁止虚拟闭合量在抓握期间减小。
         saturation_feedback: 是否将最终 MIT 限幅回投至导纳状态，防止虚拟位移积累。
+        maximum_closing_velocity_m_s: 独立于电机关节上限的外环闭合速度上限。
+        maximum_opening_velocity_m_s: 独立于电机关节上限的外环张开速度绝对值上限。
+        maximum_acceleration_m_s2: 外环虚拟加速度绝对值上限。
 
     Returns:
         MITCommand: 此步生成的未量化命令。
@@ -222,13 +228,27 @@ def step_admittance(
     admittance.deadband_active = False
     admittance.unloading_blocked = False
     if force_deadband_n > 0.0 and abs(force_error_n) <= force_deadband_n:
-        admittance.step(0.0, dt_s, maximum_velocity_m_s=maximum_velocity_m_s)
+        admittance.step(
+            0.0,
+            dt_s,
+            maximum_velocity_m_s=maximum_velocity_m_s,
+            maximum_closing_velocity_m_s=maximum_closing_velocity_m_s,
+            maximum_opening_velocity_m_s=maximum_opening_velocity_m_s,
+            maximum_acceleration_m_s2=maximum_acceleration_m_s2,
+        )
         admittance.displacement_m = previous_displacement_m
         admittance.velocity_m_s = 0.0
         admittance.deadband_active = True
         displacement_m, velocity_m_s = admittance.displacement_m, 0.0
     elif prevent_unloading and force_error_n < -force_deadband_n:
-        admittance.step(0.0, dt_s, maximum_velocity_m_s=maximum_velocity_m_s)
+        admittance.step(
+            0.0,
+            dt_s,
+            maximum_velocity_m_s=maximum_velocity_m_s,
+            maximum_closing_velocity_m_s=maximum_closing_velocity_m_s,
+            maximum_opening_velocity_m_s=maximum_opening_velocity_m_s,
+            maximum_acceleration_m_s2=maximum_acceleration_m_s2,
+        )
         admittance.displacement_m = previous_displacement_m
         admittance.velocity_m_s = 0.0
         admittance.unloading_blocked = True
@@ -241,6 +261,9 @@ def step_admittance(
             effective_error_n,
             dt_s,
             maximum_velocity_m_s=maximum_velocity_m_s,
+            maximum_closing_velocity_m_s=maximum_closing_velocity_m_s,
+            maximum_opening_velocity_m_s=maximum_opening_velocity_m_s,
+            maximum_acceleration_m_s2=maximum_acceleration_m_s2,
         )
         if prevent_unloading and displacement_m < previous_displacement_m:
             admittance.displacement_m = previous_displacement_m
@@ -286,7 +309,12 @@ def step_admittance(
             or velocity_m_s != requested_velocity_m_s
             or abs(requested_velocity_m_s) >= maximum_velocity_m_s
             or not math.isclose(command.position_rad, requested_position_rad, abs_tol=1e-12)
-            or not math.isclose(command.velocity_rad_s, requested_velocity_rad_s, abs_tol=1e-12)
+            or (
+                not config.zero_velocity_target
+                and not math.isclose(
+                    command.velocity_rad_s, requested_velocity_rad_s, abs_tol=1e-12
+                )
+            )
         )
         if admittance.execution_limited:
             # 限幅回投可以撤销不可执行的闭合请求，不属于主动反向卸载。

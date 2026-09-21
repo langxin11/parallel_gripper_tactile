@@ -30,6 +30,7 @@ from dm_grasp_core import (
 from .config import ExperimentConfig
 from .observation import PairedObservation
 from .targets import ForceTarget
+from dm_grasp_core.grasp.stiffness_adaptation import StiffnessAdmittance
 
 
 @dataclass(frozen=True, slots=True)
@@ -227,13 +228,49 @@ class GripController:
             max_control_gap_s=config.timing.max_control_gap_s,
         )
         self._contact_reference_rad: float | None = None
+        self.stiffness_adaptation = (
+            StiffnessAdmittance(controller.admittance.stiffness_adaptation)
+            if controller.admittance.stiffness_adaptation is not None
+            else None
+        )
 
     def reset(self, position_rad: float) -> None:
         """接触边沿重置导纳状态、核心跟踪状态与速度限幅参考。"""
         self.admittance.reset()
+        if self.stiffness_adaptation is not None:
+            self.stiffness_adaptation = StiffnessAdmittance(self.stiffness_adaptation.config)
+            self.admittance.mass_kg = self._admittance_params.mass_kg
+            self.admittance.damping_ns_m = self._admittance_params.damping_ns_m
         self.normal.reset()
         self._inner.reset(position_rad)
         self._contact_reference_rad = position_rad
+
+    def adapt_stiffness(self, snapshot, *, time_s: float, dt: float) -> None:
+        """以同一估计快照调度外环，不改变 MIT 参数及运动状态。"""
+        if self.stiffness_adaptation is not None:
+            self.stiffness_adaptation.update(self.admittance, snapshot, now_s=time_s, dt_s=dt)
+
+    def seed_admittance_from_stiffness(self, stiffness_n_per_m: float, *, dt: float) -> None:
+        """在 active 边界以预载锁定刚度初始化外环参数。"""
+        if self.stiffness_adaptation is not None:
+            self.stiffness_adaptation.seed(
+                self.admittance,
+                stiffness_n_per_m=stiffness_n_per_m,
+                dt_s=dt,
+            )
+
+    def adaptation_trace_fields(self) -> dict[str, object]:
+        """提供导纳运动状态，并在启用时追加刚度调度诊断。"""
+        fields: dict[str, object] = {
+            "admittance_displacement_m": self.admittance.displacement_m,
+            "admittance_velocity_m_s": self.admittance.velocity_m_s,
+            "admittance_acceleration_m_s2": self.admittance.acceleration_m_s2,
+            "admittance_velocity_limited": self.admittance.velocity_limited,
+            "admittance_acceleration_limited": self.admittance.acceleration_limited,
+        }
+        if self.stiffness_adaptation is not None:
+            fields.update(self.stiffness_adaptation.trace_fields(self.admittance))
+        return fields
 
     def begin_contact_tracking(
         self,
@@ -323,6 +360,9 @@ class GripController:
             force_deadband_n=grip.force_deadband_n,
             prevent_unloading=grip.prevent_unloading,
             saturation_feedback=self._config.unified_adaptive_enabled,
+            maximum_closing_velocity_m_s=grip.max_closing_velocity_m_s,
+            maximum_opening_velocity_m_s=grip.max_opening_velocity_m_s,
+            maximum_acceleration_m_s2=grip.max_acceleration_m_s2,
         )
         self._inner.previous_target = command.position_rad
         return TrackingStep(

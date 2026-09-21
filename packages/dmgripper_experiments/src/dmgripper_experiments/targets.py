@@ -11,6 +11,8 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Literal
 
+import numpy as np
+
 from dm_grasp_core import (
     DisturbancePolicyParameters,
     ForceReferenceCurve,
@@ -235,6 +237,18 @@ class UnifiedAdaptiveTargetSource(TargetSource):
         self._activated = False
         self._execution_limited = False
         self._command: UnifiedAdaptiveCommand | None = None
+        self._preload_force_n = config.initial_force_n
+        self._contact_floor_set = False
+
+    def set_contact_floor(self, force_n: float) -> None:
+        """预载目标只锁定一次，激活时再衔接调度器参考。"""
+        if self._activated or self._contact_floor_set:
+            raise RuntimeError("接触底力只能在预载中锁定一次")
+        limits = self._config.unified.load
+        if not limits.min_force_n <= force_n <= limits.max_force_n:
+            raise ValueError("接触底力超出目标范围")
+        self._preload_force_n = force_n
+        self._contact_floor_set = True
 
     @property
     def duration_s(self) -> float | None:
@@ -242,8 +256,8 @@ class UnifiedAdaptiveTargetSource(TargetSource):
         return self._config.duration_s
 
     def preload_target(self, task_time_s: float) -> float:
-        """预载目标保持初始力。"""
-        return self._config.initial_force_n
+        """返回初始力或已锁定的刚度接触底力。"""
+        return self._preload_force_n
 
     def stabilize_preload(self) -> None:
         """预载期间仅观测，不允许调度增力。"""
@@ -255,6 +269,17 @@ class UnifiedAdaptiveTargetSource(TargetSource):
 
     def observe(self, paired: PairedObservation, policy_dt_s: float) -> None:
         """设备时间戳决定窗口与积分；接收时间仅供运行时检查新鲜度。"""
+        depth_inputs = (
+            {
+                f"{side}_displacements_m": np.asarray(
+                    getattr(paired.snapshot, f"{side}_taxel_displacements_mm"), dtype=float
+                )
+                * 0.001
+                for side in ("left", "right")
+            }
+            if self._config.unified.depth_friction_prior is not None
+            else {}
+        )
         if self._config.tactile_sampling is not None:
             snapshot = paired.snapshot
             if not isinstance(snapshot, MultirateSnapshot) or snapshot.processed is None:
@@ -277,6 +302,7 @@ class UnifiedAdaptiveTargetSource(TargetSource):
                 measured_force_n=paired.measured_force_n,
                 execution_limited=self._execution_limited,
                 enabled=self._activated,
+                **depth_inputs,
             )
             self._sampling_diagnostics = {
                 "sensor_sequence_id": state.sequence_id,
@@ -295,12 +321,16 @@ class UnifiedAdaptiveTargetSource(TargetSource):
             measured_force_n=paired.measured_force_n,
             execution_limited=self._execution_limited,
             enabled=self._activated,
+            **depth_inputs,
         )
 
     def activate(self) -> None:
         """完成预载后允许目标增长。"""
         if self._command is None:
             raise RuntimeError("统一策略在激活前缺少逐触点观测")
+        if self._contact_floor_set:
+            self.policy.establish_contact_floor(self._preload_force_n)
+            self._command = self.policy.latest
         self._activated = True
 
     @property

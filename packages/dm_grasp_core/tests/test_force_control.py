@@ -236,6 +236,30 @@ def test_stiffness_validity_requires_an_accepted_fit(method: str) -> None:
     assert not estimator.is_valid
 
 
+@pytest.mark.parametrize("method", ["window_linear", "window_quadratic"])
+def test_window_stiffness_first_fit_does_not_blend_placeholder(method: str) -> None:
+    """首次可靠窗口直接初始化，避免较高占位初值形成虚假启动瞬态。"""
+    estimator = ContactStiffnessEstimator(
+        dataclasses.replace(
+            STIFFNESS_CONFIG,
+            method=method,
+            initial_n_per_m=3000.0,
+            filter_alpha=0.01,
+            min_samples=3,
+        ),
+        GEOMETRY,
+    )
+    positions = (0.4, 0.42, 0.44)
+    closure_0 = GEOMETRY.closure(positions[0])
+    estimator.reset(position_rad=positions[0], normal_force_n=0.2)
+    for position in positions[1:]:
+        force = 0.2 + 250.0 * (GEOMETRY.closure(position) - closure_0)
+        estimator.update(position_rad=position, normal_force_n=force)
+
+    assert estimator.is_valid
+    assert estimator.estimate_n_per_m == pytest.approx(250.0)
+
+
 def test_normal_force_controller_switches_to_tracking_after_bilateral_contact() -> None:
     """双侧力连续超阈值后进入力跟踪，并从接触位置开始位置修正。"""
     config = NormalForceConfig(

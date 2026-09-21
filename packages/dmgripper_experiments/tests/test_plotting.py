@@ -157,6 +157,33 @@ def test_friction_panel_distinguishes_state_and_candidate_outcome() -> None:
     plt.close(figure)
 
 
+def test_friction_detection_reads_effective_config_without_candidates(tmp_path: Path) -> None:
+    """有效配置包裹在 effective 下且尚无起滑候选时仍保留摩擦面板。"""
+    from dmgripper_experiments.plotting import _has_friction_estimation
+
+    (tmp_path / "config.json").write_text(
+        json.dumps(
+            {
+                "effective": {
+                    "reference": {"adaptive": {"unified": {"friction_update_enabled": True}}}
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    rows = [{"adaptive_left_mu": "0.3", "adaptive_right_mu": "0.3"}]
+
+    assert _has_friction_estimation(tmp_path, rows)
+
+
+def test_friction_detection_falls_back_to_state_and_lower_bound_columns(tmp_path: Path) -> None:
+    """缺少配置时，采用值或无滑移下界也足以证明摩擦诊断存在。"""
+    from dmgripper_experiments.plotting import _has_friction_estimation
+
+    assert _has_friction_estimation(tmp_path, [{"adaptive_left_mu": "0.3"}])
+    assert _has_friction_estimation(tmp_path, [{"adaptive_right_mu_lower_bound": "0.32"}])
+
+
 def test_math_text_uses_stix_without_fonttools_timestamp_noise(tmp_path: Path):
     """数学字体固定为 STIX：嵌入 PDF 不触发 fontTools 旧时间戳告警。"""
     import logging

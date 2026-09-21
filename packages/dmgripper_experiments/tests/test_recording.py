@@ -139,5 +139,16 @@ def test_trace_fields_cover_target_stiffness_and_timing_diagnostics():
         "adaptive_right_mu_lower_bound",
         "adaptive_left_taxel_mu_lower_bound",
         "adaptive_right_taxel_mu_lower_bound",
+        "adaptive_left_particle_mu_control",
+        "adaptive_left_particle_mu_ess",
+        "adaptive_left_particle_mu_reason",
+        "adaptive_right_particle_mu_control",
+        "adaptive_right_particle_mu_ess",
+        "adaptive_right_particle_mu_reason",
+        "admittance_displacement_m",
+        "admittance_velocity_m_s",
+        "admittance_acceleration_m_s2",
+        "admittance_velocity_limited",
+        "admittance_acceleration_limited",
     }
     assert required <= set(TRACE_FIELDS)

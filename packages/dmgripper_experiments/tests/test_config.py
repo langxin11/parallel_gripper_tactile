@@ -296,6 +296,22 @@ def test_descending_curve_conflicts_with_admittance_prevent_unloading():
     )
 
 
+@pytest.mark.parametrize(
+    "name,value",
+    [
+        ("max_closing_velocity_m_s", 0.0),
+        ("max_opening_velocity_m_s", -0.1),
+        ("max_acceleration_m_s2", float("inf")),
+    ],
+)
+def test_admittance_motion_limits_must_be_positive_finite(name: str, value: float) -> None:
+    """独立外环运动边界不能以零、负值或非有限数绕过。"""
+    from dmgripper_experiments.config import AdmittanceConfig
+
+    with pytest.raises(ValueError):
+        AdmittanceConfig(**{name: value})
+
+
 def test_adaptive_rejects_reapproach_lost_contact_action():
     """动态模式只接受失接触 fault。"""
     base = ExperimentConfig(reference=ReferenceConfig(adaptive=AdaptiveReferenceConfig()))

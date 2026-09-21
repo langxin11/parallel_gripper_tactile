@@ -48,4 +48,9 @@ class HardwareTactilePreprocessor:
         )
 
 
-__all__ = ["TactileSnapshot", "TactileWorker"]
+__all__ = [
+    "HardwareTactilePreprocessor",
+    "MultirateSnapshot",
+    "TactileSnapshot",
+    "TactileWorker",
+]

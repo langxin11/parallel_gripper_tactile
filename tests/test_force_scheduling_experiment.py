@@ -12,6 +12,7 @@ import pytest
 from pydantic import ValidationError
 
 from dm_grasp_core.tactile.multirate import TactileSamplingConfig
+from dm_grasp_core.grasp.friction_particle import ParticleFrictionConfig
 from parallel_gripper_tactile.experiments.force_scheduling import (
     DownwardLoadReference,
     DownwardLoadWaypoint,
@@ -307,6 +308,70 @@ def test_dynamic_filling_increases_target_and_remains_stable(tmp_path: Path) -> 
     assert rows
     assert float(rows[-1]["additional_downward_force_n"]) == pytest.approx(2.0)
     assert float(rows[-1]["scheduled_target_force_n"]) > float(rows[0]["scheduled_target_force_n"])
+
+
+def test_particle_friction_candidate_recovers_gradual_low_friction_load(tmp_path: Path) -> None:
+    """充分预载下，临界事件后验可救回固定乐观先验失稳的缓增载荷。"""
+    resolved = compose_research_run(experiment="dm_gripper/force_scheduling_adaptive")
+    task = resolved.task.model_copy(update={"friction_coefficient": 0.3})
+    observer = replace(
+        resolved.scheduler.observer,
+        window_s=0.04,
+        confirmation_s=0.012,
+        cooldown_s=0.1,
+        allow_steady_load_risk=True,
+        stable_contact_subset=True,
+    )
+    common = replace(
+        resolved.scheduler,
+        load=replace(
+            resolved.scheduler.load,
+            min_force_n=4.0,
+            max_force_rate_n_s=10.0,
+        ),
+        observer=observer,
+        risk_step_enabled=False,
+        friction_expiry_s=None,
+    )
+    baseline = run_force_scheduling(
+        resolved.profile,
+        task=task,
+        scheduler_config=replace(
+            common,
+            risk_enabled=False,
+            friction_update_enabled=False,
+        ),
+    )
+    trace = tmp_path / "particle.csv"
+    candidate = run_force_scheduling(
+        resolved.profile,
+        task=task,
+        scheduler_config=replace(
+            common,
+            risk_enabled=True,
+            friction_update_enabled=True,
+            particle_friction=ParticleFrictionConfig(
+                seed=23,
+                minimum_event_quality=0.3,
+            ),
+        ),
+        output_csv=trace,
+    )
+
+    assert not baseline.passed
+    assert candidate.passed
+    assert candidate.max_tangential_displacement_m < task.metrics.slip_threshold_m
+    with trace.open(newline="", encoding="utf-8") as stream:
+        rows = list(csv.DictReader(stream))
+    assert any(
+        row["adaptive_left_update_reason"].startswith("particle_event_update")
+        or row["adaptive_right_update_reason"].startswith("particle_event_update")
+        for row in rows
+    )
+    assert (
+        min(min(float(row["adaptive_left_mu"]), float(row["adaptive_right_mu"])) for row in rows)
+        < 0.3
+    )
 
 
 @pytest.mark.parametrize("mode", ["oracle", "adaptive"])

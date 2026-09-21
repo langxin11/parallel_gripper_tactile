@@ -356,6 +356,7 @@ def _has_friction_estimation(directory: Path, rows: list[dict[str, str]]) -> boo
     config_path = directory / "config.json"
     try:
         config = json.loads(config_path.read_text(encoding="utf-8"))
+        config = config.get("effective", config)
         adaptive = config.get("reference", {}).get("adaptive") or {}
         unified = adaptive.get("unified") or {}
         if unified.get("friction_update_enabled") is True:
@@ -364,7 +365,14 @@ def _has_friction_estimation(directory: Path, rows: list[dict[str, str]]) -> boo
         pass
     return any(
         math.isfinite(value)
-        for field in ("adaptive_left_candidate", "adaptive_right_candidate")
+        for field in (
+            "adaptive_left_mu",
+            "adaptive_right_mu",
+            "adaptive_left_candidate",
+            "adaptive_right_candidate",
+            "adaptive_left_mu_lower_bound",
+            "adaptive_right_mu_lower_bound",
+        )
         for value in _values(rows, field)
     )
 

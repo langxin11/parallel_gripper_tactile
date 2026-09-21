@@ -296,6 +296,10 @@ class ContactStiffnessEstimator:
             return self._estimate_n_per_m
 
         sample = float(np.clip(slope, self._config.min_n_per_m, self._config.max_n_per_m))
-        alpha = float(self._config.filter_alpha)
-        self._accept(self._estimate_n_per_m + alpha * (sample - self._estimate_n_per_m))
+        if not self._is_valid:
+            # initial_n_per_m 只是无有效观测时的占位值，不能污染本接触段的首次可靠拟合。
+            self._accept(sample)
+        else:
+            alpha = float(self._config.filter_alpha)
+            self._accept(self._estimate_n_per_m + alpha * (sample - self._estimate_n_per_m))
         return self._estimate_n_per_m

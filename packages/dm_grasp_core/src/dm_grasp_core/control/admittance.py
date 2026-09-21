@@ -16,9 +16,12 @@ class SecondOrderAdmittance:
         stiffness_n_m: 虚拟刚度 (N/m)，不得为负数。
         displacement_m: 当前虚拟闭合位移 (m)。
         velocity_m_s: 当前虚拟闭合速度 (m/s)。
+        acceleration_m_s2: 最近一次虚拟动力学积分实际采用的加速度 (m/s²)。
         deadband_active: 最近一步是否因力误差位于死区而冻结。
         unloading_blocked: 最近一步是否阻止了反向卸载。
         execution_limited: 最近一步启用执行反馈时是否受到命令限幅。
+        velocity_limited: 最近一次动力学积分是否触及速度边界。
+        acceleration_limited: 最近一次动力学积分是否触及加速度边界。
     """
 
     mass_kg: float
@@ -26,23 +29,32 @@ class SecondOrderAdmittance:
     stiffness_n_m: float
     displacement_m: float = 0.0
     velocity_m_s: float = 0.0
+    acceleration_m_s2: float = 0.0
     deadband_active: bool = field(default=False, init=False)
     unloading_blocked: bool = field(default=False, init=False)
     execution_limited: bool = field(default=False, init=False)
+    velocity_limited: bool = field(default=False, init=False)
+    acceleration_limited: bool = field(default=False, init=False)
 
     def reset(self) -> None:
         """清零虚拟位移和速度，以当前电机位置作为新的参考点。"""
         self.displacement_m = 0.0
         self.velocity_m_s = 0.0
+        self.acceleration_m_s2 = 0.0
         self.deadband_active = False
         self.unloading_blocked = False
         self.execution_limited = False
+        self.velocity_limited = False
+        self.acceleration_limited = False
 
     def step(
         self,
         force_error_n: float,
         dt_s: float,
         maximum_velocity_m_s: float | None = None,
+        maximum_closing_velocity_m_s: float | None = None,
+        maximum_opening_velocity_m_s: float | None = None,
+        maximum_acceleration_m_s2: float | None = None,
     ) -> tuple[float, float]:
         """以半隐式欧拉法更新二阶导纳状态。
 
@@ -52,6 +64,11 @@ class SecondOrderAdmittance:
             maximum_velocity_m_s: 可选的虚拟闭合速度绝对值上限 (m/s)。给定时在
                 位移积分前裁剪更新后的速度，确保本步虚拟位移增量不超过
                 ``maximum_velocity_m_s * dt_s``；省略时保持既有积分语义。
+            maximum_closing_velocity_m_s: 可选的正向闭合速度上限 (m/s)，与通用速度
+                上限同时给定时取更严格者。
+            maximum_opening_velocity_m_s: 可选的反向张开速度绝对值上限 (m/s)，与通用
+                速度上限同时给定时取更严格者。
+            maximum_acceleration_m_s2: 可选的虚拟加速度绝对值上限 (m/s²)。
 
         Returns:
             tuple[float, float]: 更新后的虚拟位移 (m) 与速度 (m/s)。
@@ -62,6 +79,8 @@ class SecondOrderAdmittance:
         self.deadband_active = False
         self.unloading_blocked = False
         self.execution_limited = False
+        self.velocity_limited = False
+        self.acceleration_limited = False
         values = (
             self.mass_kg,
             self.damping_ns_m,
@@ -77,23 +96,56 @@ class SecondOrderAdmittance:
             or dt_s <= 0.0
         ):
             raise ValueError("二阶导纳参数或积分输入无效")
-        if maximum_velocity_m_s is not None and (
-            not math.isfinite(maximum_velocity_m_s) or maximum_velocity_m_s <= 0.0
+        limits = (
+            maximum_velocity_m_s,
+            maximum_closing_velocity_m_s,
+            maximum_opening_velocity_m_s,
+            maximum_acceleration_m_s2,
+        )
+        if any(
+            limit is not None and (not math.isfinite(limit) or limit <= 0.0) for limit in limits
         ):
-            raise ValueError("二阶导纳虚拟速度上限无效")
-        acceleration_m_s2 = (
+            raise ValueError("二阶导纳运动上限无效")
+        raw_acceleration_m_s2 = (
             force_error_n
             - self.damping_ns_m * self.velocity_m_s
             - self.stiffness_n_m * self.displacement_m
         ) / self.mass_kg
-        self.velocity_m_s += acceleration_m_s2 * dt_s
-        if maximum_velocity_m_s is not None:
-            self.velocity_m_s = min(
-                max(self.velocity_m_s, -maximum_velocity_m_s),
-                maximum_velocity_m_s,
+        acceleration_m_s2 = raw_acceleration_m_s2
+        if maximum_acceleration_m_s2 is not None:
+            acceleration_m_s2 = min(
+                max(acceleration_m_s2, -maximum_acceleration_m_s2),
+                maximum_acceleration_m_s2,
             )
+            self.acceleration_limited = acceleration_m_s2 != raw_acceleration_m_s2
+        previous_velocity_m_s = self.velocity_m_s
+        requested_velocity_m_s = previous_velocity_m_s + acceleration_m_s2 * dt_s
+        closing_limit = maximum_closing_velocity_m_s
+        opening_limit = maximum_opening_velocity_m_s
+        if maximum_velocity_m_s is not None:
+            closing_limit = (
+                maximum_velocity_m_s
+                if closing_limit is None
+                else min(closing_limit, maximum_velocity_m_s)
+            )
+            opening_limit = (
+                maximum_velocity_m_s
+                if opening_limit is None
+                else min(opening_limit, maximum_velocity_m_s)
+            )
+        velocity_m_s = requested_velocity_m_s
+        if closing_limit is not None:
+            velocity_m_s = min(velocity_m_s, closing_limit)
+        if opening_limit is not None:
+            velocity_m_s = max(velocity_m_s, -opening_limit)
+        self.velocity_limited = velocity_m_s != requested_velocity_m_s
+        self.velocity_m_s = velocity_m_s
+        self.acceleration_m_s2 = (velocity_m_s - previous_velocity_m_s) / dt_s
         self.displacement_m += self.velocity_m_s * dt_s
-        if not all(math.isfinite(value) for value in (self.displacement_m, self.velocity_m_s)):
+        if not all(
+            math.isfinite(value)
+            for value in (self.displacement_m, self.velocity_m_s, self.acceleration_m_s2)
+        ):
             raise ValueError("二阶导纳积分结果非有限")
         return self.displacement_m, self.velocity_m_s
 
@@ -131,6 +183,7 @@ class SecondOrderAdmittance:
             max(self.displacement_m, minimum_displacement_m),
             maximum_displacement_m,
         )
+        requested_velocity_m_s = self.velocity_m_s
         self.velocity_m_s = min(
             max(self.velocity_m_s, -maximum_velocity_m_s),
             maximum_velocity_m_s,
@@ -139,6 +192,7 @@ class SecondOrderAdmittance:
             self.displacement_m >= maximum_displacement_m and self.velocity_m_s > 0.0
         ):
             self.velocity_m_s = 0.0
+        self.velocity_limited = self.velocity_limited or self.velocity_m_s != requested_velocity_m_s
         return self.displacement_m, self.velocity_m_s
 
 

@@ -13,6 +13,12 @@ from .disturbance import (
     DisturbancePolicyParameters,
     TactileDisturbancePolicy,
 )
+from .friction_depth import DepthFrictionPriorConfig
+from .friction_particle import (
+    ParticleFrictionConfig,
+    ParticleFrictionEstimator,
+    ParticleFrictionSnapshot,
+)
 from .motion import ContactTransition, MinimumJerkTrajectory, quintic_blend
 from .reference import (
     ForceInterpolation,
@@ -28,6 +34,7 @@ __all__ = [
     "ContactTransition",
     "ContactState",
     "ContactStateUpdate",
+    "DepthFrictionPriorConfig",
     "DisturbanceCommand",
     "DisturbancePolicyParameters",
     "ForceInterpolation",
@@ -36,6 +43,9 @@ __all__ = [
     "MITCommand",
     "MITCommandConfig",
     "MinimumJerkTrajectory",
+    "ParticleFrictionConfig",
+    "ParticleFrictionEstimator",
+    "ParticleFrictionSnapshot",
     "ReleasePolicy",
     "TactileDisturbancePolicy",
     "build_mit_command",

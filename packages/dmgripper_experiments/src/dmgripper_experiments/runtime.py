@@ -42,8 +42,13 @@ from .observation import (
 from .plotting import plot_experiment_run
 from .recording import ExperimentRecorder
 from .session import DmSession
-from .tactile import TactileSnapshot, TactileWorker, HardwareTactilePreprocessor
-from .targets import ForceTarget, TargetSource, build_target_source
+from .tactile import (
+    HardwareTactilePreprocessor,
+    TactileSnapshot,
+    TactileWorker,
+)
+from .targets import ForceTarget, TargetSource, UnifiedAdaptiveTargetSource, build_target_source
+from dm_grasp_core.grasp.stiffness_adaptation import StiffnessPreload
 from .terminal import RunSnapshot, TerminalDisplay, format_event_line
 from .trajectory import ClosureTrajectory
 
@@ -204,6 +209,13 @@ def run_experiment(
     fault_resolution: str | None = None
     runtime_secondary_errors: list[str] = []
     try:
+        snapshot_transform = None
+        if (
+            config.unified_adaptive_enabled
+            and config.reference.adaptive.tactile_sampling is not None
+        ):
+            preprocessor = HardwareTactilePreprocessor(config)
+            snapshot_transform = preprocessor
         tactile = tactile_factory(
             PapillArraySerialConfig(
                 port=config.hardware.tactile_port,
@@ -218,10 +230,7 @@ def run_experiment(
             filter_reset_gap_s=config.timing.tactile_filter_reset_gap_s,
             sample_sink=recorder.sample,
             **(
-                {"snapshot_transform": HardwareTactilePreprocessor(config)}
-                if config.unified_adaptive_enabled
-                and config.reference.adaptive.tactile_sampling is not None
-                else {}
+                {"snapshot_transform": snapshot_transform} if snapshot_transform is not None else {}
             ),
         )
         dm = session_factory(
@@ -768,6 +777,7 @@ def _run_control_loop_inner(
     preload_started = 0.0
     preload_start_force_n = 0.0
     preload_ramp_duration_s = 0.0
+    stiffness_preload: StiffnessPreload | None = None
     task_time_s = 0.0
     tracking_begun = False
     reapproach_attempts = 0
@@ -890,6 +900,9 @@ def _run_control_loop_inner(
             continue
         sample = _latest_snapshot(tactile, config)
         axes = _validate_snapshot(sample, now, config)
+        if lifecycle.phase is LifecyclePhase.PRELOAD and stiffness_preload is not None:
+            if max(abs(axes[2]), abs(axes[5])) > stiffness_preload.config.force_ceiling_n:
+                fail("刚度预载原始法向力超过独立保护上限")
         try:
             paired = pair_observation(
                 snapshot=sample,
@@ -1068,10 +1081,24 @@ def _run_control_loop_inner(
                     sample_id=sample.packet_counter,
                 )
                 if lifecycle.phase is LifecyclePhase.PRELOAD:
+                    if stiffness_preload is not None:
+                        locked = stiffness_preload.update(
+                            latest_stiffness, now_s=now - started, closure_m=paired.closure_m
+                        )
+                        if locked:
+                            assert isinstance(target_source, UnifiedAdaptiveTargetSource)
+                            target_source.set_contact_floor(stiffness_preload.goal_n)
+                            emit(
+                                {
+                                    "event": "stiffness_preload_locked",
+                                    **stiffness_preload.trace_fields(),
+                                }
+                            )
                     target_value = target_source.preload_target(task_time_s)
                     minimum_stable_force_n = _minimum_preload_force(target_value, lifecycle_config)
                     stable = (
                         now - preload_started >= preload_ramp_duration_s
+                        and (stiffness_preload is None or stiffness_preload.ready(now - started))
                         and min(left_n, right_n) >= lifecycle_config.contact_on_n
                         and paired.measured_force_n >= minimum_stable_force_n
                     )
@@ -1083,6 +1110,20 @@ def _run_control_loop_inner(
                     if preload_stable_since is not None and (
                         now - preload_stable_since >= lifecycle_config.preload_stable_time_s
                     ):
+                        if (
+                            stiffness_preload is not None
+                            and stiffness_preload.accepted_stiffness is not None
+                        ):
+                            controller.seed_admittance_from_stiffness(
+                                stiffness_preload.accepted_stiffness,
+                                dt=dt,
+                            )
+                            emit(
+                                {
+                                    "event": "admittance_seeded",
+                                    **controller.adaptation_trace_fields(),
+                                }
+                            )
                         target_source.activate()
                         lifecycle.activate(now)
                         phase_started = now
@@ -1119,6 +1160,14 @@ def _run_control_loop_inner(
                     normal_force_n=paired.measured_force_n,
                 )
                 target_source.stabilize_preload()
+                if lifecycle_config.stiffness_preload is not None:
+                    stiffness_preload = StiffnessPreload(
+                        lifecycle_config.stiffness_preload,
+                        now_s=now - started,
+                        closure_m=paired.closure_m,
+                        force_n=paired.measured_force_n,
+                        rate_n_s=lifecycle_config.preload_force_rate_n_s,
+                    )
                 preload_stable_since = None
                 tracking_begun = False
                 enter_phase(LifecyclePhase.PRELOAD, _PHASE_MESSAGES[LifecyclePhase.PRELOAD])
@@ -1195,6 +1244,10 @@ def _run_control_loop_inner(
                 else 0.0,
             )
         else:
+            # 预载辨识期间的瞬态斜率可能很大；只在目标锁定并进入 active 后消费刚度。
+            # preload 仍完整记录原始估计，便于诊断辨识质量。
+            if lifecycle.phase is LifecyclePhase.ACTIVE:
+                controller.adapt_stiffness(latest_stiffness, time_s=now - started, dt=dt)
             if lifecycle.phase is LifecyclePhase.PRELOAD:
                 current_target = _preload_force_target(
                     target_source,
@@ -1203,6 +1256,9 @@ def _run_control_loop_inner(
                     elapsed_s=now - preload_started,
                     duration_s=preload_ramp_duration_s,
                 )
+                if stiffness_preload is not None:
+                    force, rate, acceleration = stiffness_preload.sample(now - started)
+                    current_target = ForceTarget(force, rate, acceleration, source="adaptive")
             else:
                 current_target = target_source.active_reference(task_time_s)
             if not tracking_begun:
@@ -1245,8 +1301,12 @@ def _run_control_loop_inner(
                 emit(event)
 
         # 交互输出／存储也可能延迟；发送前再次检查时限和输入新鲜度。
-        if clock() - last_control > timing.max_control_gap_s:
-            fail("发送前控制计算或事件记录超时")
+        pre_send_gap_s = clock() - last_control
+        if pre_send_gap_s > timing.max_control_gap_s:
+            fail(
+                "发送前控制计算或事件记录超时："
+                f"{pre_send_gap_s:.4f}s > {timing.max_control_gap_s:.4f}s"
+            )
         _validate_snapshot(sample, clock(), config)
         send_started = clock()
         try:
@@ -1277,11 +1337,17 @@ def _run_control_loop_inner(
             latency=latency,
         )
         row.update(target_source.trace_fields())
+        if stiffness_preload is not None:
+            row.update(stiffness_preload.trace_fields())
+        row.update(controller.adaptation_trace_fields())
         if native_slip is not None:
             row.update(native_slip.trace_fields(tactile))
         recorder.write(row)
-        if clock() - last_control > timing.max_control_gap_s:
-            fail("命令反馈或控制记录超时")
+        completed_gap_s = clock() - last_control
+        if completed_gap_s > timing.max_control_gap_s:
+            fail(
+                f"命令反馈或控制记录超时：{completed_gap_s:.4f}s > {timing.max_control_gap_s:.4f}s"
+            )
         if lifecycle.phase is LifecyclePhase.ACTIVE:
             task_time_s += dt
         if lifecycle.phase is LifecyclePhase.APPROACH:

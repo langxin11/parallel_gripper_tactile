@@ -177,6 +177,50 @@ def test_admittance_clips_velocity_before_displacement_integration():
     assert displacement == pytest.approx(0.02)
 
 
+def test_admittance_limits_acceleration_before_asymmetric_velocity() -> None:
+    """外环先限制加速度，再分别约束闭合与张开速度。"""
+    admittance = SecondOrderAdmittance(1.0, 0.0, 0.0)
+
+    for _ in range(10):
+        admittance.step(
+            100.0,
+            0.1,
+            maximum_closing_velocity_m_s=0.2,
+            maximum_opening_velocity_m_s=0.05,
+            maximum_acceleration_m_s2=0.5,
+        )
+
+    assert admittance.velocity_m_s == pytest.approx(0.2)
+    assert admittance.acceleration_m_s2 == pytest.approx(0.0)
+    assert admittance.velocity_limited
+
+    for _ in range(10):
+        admittance.step(
+            -100.0,
+            0.1,
+            maximum_closing_velocity_m_s=0.2,
+            maximum_opening_velocity_m_s=0.05,
+            maximum_acceleration_m_s2=0.5,
+        )
+
+    assert admittance.velocity_m_s == pytest.approx(-0.05)
+    assert admittance.acceleration_limited
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"maximum_closing_velocity_m_s": 0.0},
+        {"maximum_opening_velocity_m_s": -1.0},
+        {"maximum_acceleration_m_s2": float("nan")},
+    ],
+)
+def test_admittance_rejects_invalid_motion_limits(kwargs: dict[str, float]) -> None:
+    """外环速度和加速度边界必须为正有限数值。"""
+    with pytest.raises(ValueError, match="运动上限"):
+        SecondOrderAdmittance(1.0, 1.0, 0.0).step(1.0, 0.01, **kwargs)
+
+
 def test_step_admittance_limits_single_step_displacement_rate():
     """共享导纳步骤以实测雅可比换算虚拟速度上限后再积分位移。"""
     admittance = SecondOrderAdmittance(1.0, 0.0, 0.0)
@@ -617,3 +661,30 @@ def test_closing_torque_limit_backprojects_admittance_without_explicit_feedback(
     assert admittance.displacement_m == pytest.approx(
         K.closure(command.position_rad) - K.closure(0.4)
     )
+
+
+def test_zero_velocity_target_is_not_reported_as_execution_limit():
+    """主动置零 MIT 速度只改变内环阻尼语义，不冒充执行器限幅。"""
+    admittance = SecondOrderAdmittance(1.0, 10.0, 0.0)
+    command = step_admittance(
+        admittance,
+        K,
+        replace(
+            C,
+            zero_velocity_target=True,
+            torque_limit_nm=100.0,
+            feedforward_torque_limit_nm=100.0,
+        ),
+        reference_position_rad=0.4,
+        measured_position_rad=0.4,
+        measured_velocity_rad_s=0.0,
+        left_force_n=0.0,
+        right_force_n=0.0,
+        target_force_n=1.0,
+        dt_s=0.01,
+        saturation_feedback=True,
+    )
+
+    assert command.velocity_rad_s == 0.0
+    assert admittance.velocity_m_s > 0.0
+    assert not admittance.execution_limited
