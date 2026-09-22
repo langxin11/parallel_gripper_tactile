@@ -48,6 +48,7 @@ from ..scenes.custom import (
     build_custom_grasp_model,
 )
 from ..timing import RealtimePacer, SimulationTimer
+from .force_tracking_trace import force_tracking_trace_row
 from .grasp import (
     CUBE_BODY_NAME,
     CUBE_JOINT_NAME,
@@ -81,6 +82,13 @@ CONTROLLER_VARIANTS: tuple[ControllerVariant, ...] = (
 )
 #: 逐帧快照回调：接收本步采样行、模型与数据；默认不启用，不改变仿真与产物。
 FrameCallback = Callable[[dict[str, object], mujoco.MjModel, mujoco.MjData], None]
+
+
+def default_trace_sample_period_s(controller_variant: str, control_period_s: float) -> float:
+    """返回按控制器选择的默认 trace 周期，供组合解析与直接 runner 共用。"""
+    if controller_variant == "admittance":
+        return control_period_s
+    return 0.004 if controller_variant in {"adrc-torque", "adrc-torque-td"} else 0.008
 
 
 def configure_force_controller(
@@ -900,7 +908,6 @@ def run_force_tracking(
                 # 外环状态与控制律仍只在控制时钟触发。
                 force_command = replace(force_command, mit=controller.apply_held_command(data))
                 command_time_s = time_s
-            motor_command = force_command.mit
             mujoco.mj_step(model, data)
             if (
                 data.time <= time_s
@@ -928,176 +935,24 @@ def run_force_tracking(
             position = data.xpos[cube_body_id].copy()
             velocity = data.qvel[cube_dof : cube_dof + 3]
             rows.append(
-                {
-                    "time_s": float(data.time),
-                    "control_time_s": control_time_s,
-                    "command_time_s": command_time_s,
-                    "reference_start_time_s": (
-                        math.nan if tracking_start_time_s is None else tracking_start_time_s
-                    ),
-                    "phase": phase,
-                    "force_semantics": force_semantics,
-                    "multiccd_enabled": str(multiccd_enabled).lower(),
-                    "tracking_time_s": tracking_time_s,
-                    "control_state": force_command.state,
-                    "target_normal_force_n": force_command.target_force_n,
-                    "target_force_rate_n_s": target_force_rate_n_s,
-                    "target_force_acceleration_n_s2": target_force_acceleration_n_s2,
-                    "measured_normal_force_n": force_command.measured_force_n,
-                    "filtered_normal_force_n": force_command.filtered_force_n,
-                    "torque_adrc_measurement_n": (
-                        force_command.torque_adrc_measurement_n
-                        if force_command.torque_adrc_measurement_n is not None
-                        else math.nan
-                    ),
-                    "tracking_error_n": force_command.force_error_n,
-                    "control": motor_command.target_position,
-                    "desired_position_rad": motor_command.target_position,
-                    "desired_velocity_rad_s": motor_command.target_velocity,
-                    "drive_position_rad": motor_command.position,
-                    "drive_velocity_rad_s": motor_command.velocity,
-                    "motor_torque_n_m": motor_command.torque,
-                    "commanded_torque_n_m": motor_command.torque,
-                    "actuator_torque_n_m": float(data.qfrc_actuator[drive_dof]),
-                    "stiffness_valid": str(force_command.stiffness_valid).lower(),
-                    "admittance_displacement_m": (
-                        force_command.admittance_displacement_m
-                        if force_command.admittance_displacement_m is not None
-                        else math.nan
-                    ),
-                    "admittance_velocity_m_s": (
-                        force_command.admittance_velocity_m_s
-                        if force_command.admittance_velocity_m_s is not None
-                        else math.nan
-                    ),
-                    "force_position_adjustment_rad": force_command.position_adjustment,
-                    "pid_position_adjustment_rad": force_command.pid_position_adjustment,
-                    "stiffness_position_limit_rad": (
-                        force_command.stiffness_position_limit_rad
-                        if force_command.stiffness_position_limit_rad is not None
-                        else math.nan
-                    ),
-                    "stiffness_position_limited": str(
-                        force_command.stiffness_position_limited
-                    ).lower(),
-                    "stiffness_rate_force_command_n_s": (
-                        force_command.stiffness_rate_force_command_n_s
-                        if force_command.stiffness_rate_force_command_n_s is not None
-                        else math.nan
-                    ),
-                    "stiffness_rate_joint_velocity_rad_s": (
-                        force_command.stiffness_rate_joint_velocity_rad_s
-                        if force_command.stiffness_rate_joint_velocity_rad_s is not None
-                        else math.nan
-                    ),
-                    "stiffness_rate_force_limited": str(
-                        force_command.stiffness_rate_force_limited
-                    ).lower(),
-                    "stiffness_rate_joint_velocity_limited": str(
-                        force_command.stiffness_rate_joint_velocity_limited
-                    ).lower(),
-                    "force_feedforward_torque_n_m": force_command.force_feedforward_torque,
-                    "mit_feedforward_torque_n_m": motor_command.feedforward_torque,
-                    "torque_adrc_estimated_force_n": (
-                        force_command.torque_adrc_estimated_force_n
-                        if force_command.torque_adrc_estimated_force_n is not None
-                        else math.nan
-                    ),
-                    "torque_adrc_estimated_force_rate_n_s": (
-                        force_command.torque_adrc_estimated_force_rate_n_s
-                        if force_command.torque_adrc_estimated_force_rate_n_s is not None
-                        else math.nan
-                    ),
-                    "torque_adrc_estimated_disturbance_n_s2": (
-                        force_command.torque_adrc_estimated_disturbance_n_s2
-                        if force_command.torque_adrc_estimated_disturbance_n_s2 is not None
-                        else math.nan
-                    ),
-                    "torque_adrc_reference_force_n": (
-                        force_command.torque_adrc_reference_force_n
-                        if force_command.torque_adrc_reference_force_n is not None
-                        else math.nan
-                    ),
-                    "torque_adrc_reference_force_rate_n_s": (
-                        force_command.torque_adrc_reference_force_rate_n_s
-                        if force_command.torque_adrc_reference_force_rate_n_s is not None
-                        else math.nan
-                    ),
-                    "torque_adrc_reference_force_acceleration_n_s2": (
-                        force_command.torque_adrc_reference_force_acceleration_n_s2
-                        if force_command.torque_adrc_reference_force_acceleration_n_s2 is not None
-                        else math.nan
-                    ),
-                    "torque_adrc_raw_torque_n_m": (
-                        force_command.torque_adrc_raw_torque_n_m
-                        if force_command.torque_adrc_raw_torque_n_m is not None
-                        else math.nan
-                    ),
-                    "torque_adrc_limited_torque_n_m": (
-                        force_command.torque_adrc_limited_torque_n_m
-                        if force_command.torque_adrc_limited_torque_n_m is not None
-                        else math.nan
-                    ),
-                    "torque_adrc_residual_torque_n_m": (
-                        force_command.torque_adrc_residual_torque_n_m
-                        if force_command.torque_adrc_residual_torque_n_m is not None
-                        else math.nan
-                    ),
-                    "torque_adrc_input_gain_n_per_n_m_s2": (
-                        force_command.torque_adrc_input_gain_n_per_n_m_s2
-                        if force_command.torque_adrc_input_gain_n_per_n_m_s2 is not None
-                        else math.nan
-                    ),
-                    "torque_adrc_rate_limited": str(force_command.torque_adrc_rate_limited).lower(),
-                    "torque_adrc_amplitude_limited": str(
-                        force_command.torque_adrc_amplitude_limited
-                    ).lower(),
-                    "estimated_contact_stiffness_n_per_m": (
-                        force_command.estimated_contact_stiffness_n_per_m
-                        if force_command.estimated_contact_stiffness_n_per_m is not None
-                        else math.nan
-                    ),
-                    "closure_jacobian_m_per_rad": (
-                        force_command.closure_jacobian_m_per_rad
-                        if force_command.closure_jacobian_m_per_rad is not None
-                        else math.nan
-                    ),
-                    "aperture_m": (
-                        force_command.aperture_m
-                        if force_command.aperture_m is not None
-                        else math.nan
-                    ),
-                    "measured_left_fx": float(tactile_measurement.left_force[0]),
-                    "measured_left_fy": float(tactile_measurement.left_force[1]),
-                    "measured_left_fz": float(tactile_measurement.left_force[2]),
-                    "measured_right_fx": float(tactile_measurement.right_force[0]),
-                    "measured_right_fy": float(tactile_measurement.right_force[1]),
-                    "measured_right_fz": float(tactile_measurement.right_force[2]),
-                    "left_tangential_force_n": float(
-                        np.linalg.norm(tactile_measurement.left_force[:2])
-                    ),
-                    "right_tangential_force_n": float(
-                        np.linalg.norm(tactile_measurement.right_force[:2])
-                    ),
-                    **{
-                        f"{side}_taxel_{component}_{row}_{col}": float(values[axis, row, col])
-                        for side, values in (
-                            ("left", tactile_measurement.left),
-                            ("right", tactile_measurement.right),
-                        )
-                        for axis, component in enumerate(("fx", "fy", "fz"))
-                        for row in range(values.shape[1])
-                        for col in range(values.shape[2])
-                    },
-                    "taxel_normal_force_n": capacity.normal_force_n,
-                    "left_taxel_normal_force_n": capacity.left_normal_force_n,
-                    "right_taxel_normal_force_n": capacity.right_normal_force_n,
-                    "active_taxel_contacts": capacity.active_contacts,
-                    "cube_y": float(position[1]),
-                    "cube_z": float(position[2]),
-                    "cube_vy": float(velocity[1]),
-                    "cube_vz": float(velocity[2]),
-                }
+                force_tracking_trace_row(
+                    time_s=float(data.time),
+                    control_time_s=control_time_s,
+                    command_time_s=command_time_s,
+                    tracking_start_time_s=tracking_start_time_s,
+                    phase=phase,
+                    force_semantics=force_semantics,
+                    multiccd_enabled=multiccd_enabled,
+                    tracking_time_s=tracking_time_s,
+                    force_command=force_command,
+                    target_force_rate_n_s=target_force_rate_n_s,
+                    target_force_acceleration_n_s2=target_force_acceleration_n_s2,
+                    actuator_torque_n_m=float(data.qfrc_actuator[drive_dof]),
+                    tactile_measurement=tactile_measurement,
+                    capacity=capacity,
+                    position=position,
+                    velocity=velocity,
+                )
             )
             if on_frame is not None and float(data.time) + 1e-12 >= next_frame_time_s:
                 on_frame(rows[-1], model, data)

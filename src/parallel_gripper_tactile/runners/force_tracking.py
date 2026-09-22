@@ -9,13 +9,12 @@ from pathlib import Path
 import sys
 from typing import Literal
 
-import yaml
-
 from ..experiments.force_tracking import (
     ControllerVariant,
     ForceTrackingResult,
     ForceTrackingTask,
     configure_force_controller,
+    default_trace_sample_period_s,
     run_force_tracking,
 )
 from ..control import ForceSemantics
@@ -30,6 +29,14 @@ from ..config.profiles import (
 from ..artifacts import RunDirectory
 from ..scenes.custom import ObjectContactModel, ObjectMaterial
 from ..visualization.force_tracking import render_run_artifacts
+
+from .common import (
+    profile_snapshot_source,
+    profile_source_label,
+    run_artifact_lifecycle,
+    write_json_artifact,
+    write_task_snapshot,
+)
 
 
 def execute_force_tracking(
@@ -93,138 +100,78 @@ def execute_force_tracking(
         }
     resolved_trace_sample_period_s = trace_sample_period_s
     if resolved_trace_sample_period_s is None:
-        resolved_trace_sample_period_s = (
-            task.control_period_s
-            if controller_variant == "admittance"
-            else 0.004
-            if controller_variant in {"adrc-torque", "adrc-torque-td"}
-            else 0.008
+        resolved_trace_sample_period_s = default_trace_sample_period_s(
+            controller_variant, task.control_period_s
         )
+    runtime_parameters = {
+        **core_metadata,
+        "viewer": viewer,
+        "render_fps": render_fps,
+        "realtime_factor": realtime_factor,
+        "object_material": object_material,
+        "object_contact_model": object_contact_model,
+        "multiccd_enabled": multiccd_enabled,
+        "force_semantics": force_semantics,
+        "controller_variant": controller_variant,
+        "stiffness_estimator_method": stiffness_estimator_method,
+        "sensor_noise_seed": sensor_noise_seed,
+        "trace_format": "parquet",
+        "trace_compression": "zstd",
+        "trace_schema_version": 2,
+        "tactile_detail": tactile_detail,
+        "plot_mode": plot_mode,
+        "trace_sample_period_s": resolved_trace_sample_period_s,
+        "trace_event_window_s": trace_event_window_s,
+        "torque_adrc_override": None
+        if torque_adrc_override is None
+        else torque_adrc_override.model_dump(mode="json"),
+        "stiffness_rate_override": None
+        if stiffness_rate_override is None
+        else stiffness_rate_override.model_dump(mode="json"),
+    }
     run = RunDirectory.create(
         output_root,
         profile_name=configured.name,
         experiment="force-track",
-        profile_source=(
-            yaml.safe_dump(configured.model_dump(mode="json"), allow_unicode=True, sort_keys=True)
-            if resolved_profile is not None
-            else profile
+        profile_source=profile_snapshot_source(
+            profile, configured, composed=resolved_profile is not None
         ),
         command=tuple(sys.argv),
         parameters={
-            **core_metadata,
+            **runtime_parameters,
             "task": str(task_path),
             "task_name": task.name,
             "tracking_duration_s": task.reference.duration_s,
-            "viewer": viewer,
-            "render_fps": render_fps,
-            "realtime_factor": realtime_factor,
-            "object_material": object_material,
-            "object_contact_model": object_contact_model,
-            "multiccd_enabled": multiccd_enabled,
-            "force_semantics": force_semantics,
-            "controller_variant": controller_variant,
-            "stiffness_estimator_method": stiffness_estimator_method,
-            "sensor_noise_seed": sensor_noise_seed,
-            "trace_format": "parquet",
-            "trace_compression": "zstd",
-            "trace_schema_version": 2,
-            "tactile_detail": tactile_detail,
-            "plot_mode": plot_mode,
-            "trace_sample_period_s": resolved_trace_sample_period_s,
-            "trace_event_window_s": trace_event_window_s,
-            "torque_adrc_override": (
-                None
-                if torque_adrc_override is None
-                else torque_adrc_override.model_dump(mode="json")
-            ),
-            "stiffness_rate_override": (
-                None
-                if stiffness_rate_override is None
-                else stiffness_rate_override.model_dump(mode="json")
-            ),
         },
         run_name=run_name,
         run_prefix=run_prefix,
         run_suffix=run_suffix,
     )
-    try:
-        task_snapshot = run.artifact_path("task.yaml")
-        if tracking_task is None:
-            task_snapshot.write_bytes(task_path.read_bytes())
-        else:
-            task_snapshot.write_text(
-                yaml.safe_dump(
-                    task.model_dump(mode="json"),
-                    allow_unicode=True,
-                    sort_keys=True,
-                ),
-                encoding="utf-8",
-            )
-        run.register_artifact(task_snapshot)
-        effective_parameters_path = run.artifact_path("effective_parameters.json")
-        effective_parameters_path.write_text(
-            json.dumps(
-                {
-                    "schema_version": 1,
-                    "profile": configured.model_dump(mode="json"),
-                    "task": task.model_dump(mode="json"),
-                    "runtime": {
-                        **core_metadata,
-                        "profile_path": (
-                            "composed_profile"
-                            if resolved_profile is not None
-                            else str(profile.resolve())
-                            if isinstance(profile, Path)
-                            else "serialized_profile"
-                        ),
-                        "task_path": str(task_path.resolve()),
-                        "object_material": object_material,
-                        "object_contact_model": object_contact_model,
-                        "multiccd_enabled": multiccd_enabled,
-                        "force_semantics": force_semantics,
-                        "controller_variant": controller_variant,
-                        "stiffness_estimator_method": stiffness_estimator_method,
-                        "sensor_noise_seed": sensor_noise_seed,
-                        "viewer": viewer,
-                        "render_fps": render_fps,
-                        "realtime_factor": realtime_factor,
-                        "trace_format": "parquet",
-                        "trace_compression": "zstd",
-                        "trace_schema_version": 2,
-                        "tactile_detail": tactile_detail,
-                        "plot_mode": plot_mode,
-                        "trace_sample_period_s": resolved_trace_sample_period_s,
-                        "trace_event_window_s": trace_event_window_s,
-                        "torque_adrc_override": (
-                            None
-                            if torque_adrc_override is None
-                            else torque_adrc_override.model_dump(mode="json")
-                        ),
-                        "stiffness_rate_override": (
-                            None
-                            if stiffness_rate_override is None
-                            else stiffness_rate_override.model_dump(mode="json")
-                        ),
-                    },
+    with run_artifact_lifecycle(run):
+        write_task_snapshot(run, task_path, tracking_task)
+        effective_parameters_path = write_json_artifact(
+            run,
+            "effective_parameters.json",
+            {
+                "schema_version": 1,
+                "profile": configured.model_dump(mode="json"),
+                "task": task.model_dump(mode="json"),
+                "runtime": {
+                    **runtime_parameters,
+                    "profile_path": profile_source_label(
+                        profile, composed=resolved_profile is not None
+                    ),
+                    "task_path": str(task_path.resolve()),
                 },
-                indent=2,
-                sort_keys=True,
-            )
-            + "\n",
-            encoding="utf-8",
+            },
         )
-        run.register_artifact(effective_parameters_path)
         parquet_path = run.artifact_path("trace.parquet")
-        metrics_path = run.artifact_path("metrics.json")
         plot_config = json.loads(effective_parameters_path.read_text(encoding="utf-8"))
 
         def render_result(rows: list[dict[str, float | str]], result: ForceTrackingResult) -> None:
             """使用统一指标和未降采样轨迹绘图，并登记实际产物。"""
             metrics = asdict(result)
-            metrics_path.write_text(
-                json.dumps(metrics, indent=2, sort_keys=True) + "\n", encoding="utf-8"
-            )
-            run.register_artifact(metrics_path)
+            write_json_artifact(run, "metrics.json", metrics)
             # 科学失败在完整频率轨迹释放前保留诊断，避免降采样重绘丢失瞬态。
             needs_diagnostic = (
                 not result.passed
@@ -265,12 +212,5 @@ def execute_force_tracking(
             stiffness_rate_override=stiffness_rate_override,
         )
         run.register_artifact(parquet_path)
-        metrics_path.write_text(
-            json.dumps(asdict(result), indent=2, sort_keys=True) + "\n", encoding="utf-8"
-        )
-        run.register_artifact(metrics_path)
-        run.finalize()
-    except Exception:
-        # 保留未完成目录及其快照，便于诊断失败的可复现实验输入。
-        raise
+        write_json_artifact(run, "metrics.json", asdict(result))
     return run, result

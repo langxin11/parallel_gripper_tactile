@@ -3,12 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-import json
 from pathlib import Path
 import sys
 from typing import Callable, Literal
-
-import yaml
 
 from ..experiments.friction_estimation import (
     FrictionEstimationResult,
@@ -17,6 +14,14 @@ from ..experiments.friction_estimation import (
 )
 from ..config.profiles import GripperProfile, load_profile, validate_resolved_profile
 from ..artifacts import RunDirectory
+
+from .common import (
+    profile_snapshot_source,
+    profile_source_label,
+    run_artifact_lifecycle,
+    write_json_artifact,
+    write_task_snapshot,
+)
 
 
 def execute_friction_estimation(
@@ -57,10 +62,8 @@ def execute_friction_estimation(
         output_root,
         profile_name=configured.name,
         experiment="friction-estimate",
-        profile_source=(
-            yaml.safe_dump(configured.model_dump(mode="json"), allow_unicode=True, sort_keys=True)
-            if resolved_profile is not None
-            else profile
+        profile_source=profile_snapshot_source(
+            profile, configured, composed=resolved_profile is not None
         ),
         command=tuple(sys.argv),
         parameters={
@@ -82,29 +85,18 @@ def execute_friction_estimation(
         run_prefix=run_prefix,
         run_suffix=run_suffix,
     )
-    task_snapshot = run.artifact_path("task.yaml")
-    if estimation_task is None:
-        task_snapshot.write_bytes(task_path.read_bytes())
-    else:
-        task_snapshot.write_text(
-            yaml.safe_dump(task.model_dump(mode="json"), allow_unicode=True, sort_keys=True),
-            encoding="utf-8",
-        )
-    run.register_artifact(task_snapshot)
-    effective_parameters_path = run.artifact_path("effective_parameters.json")
-    effective_parameters_path.write_text(
-        json.dumps(
+    with run_artifact_lifecycle(run):
+        write_task_snapshot(run, task_path, estimation_task)
+        write_json_artifact(
+            run,
+            "effective_parameters.json",
             {
                 "schema_version": 1,
                 "profile": configured.model_dump(mode="json"),
                 "task": task.model_dump(mode="json"),
                 "runtime": {
-                    "profile_path": (
-                        "composed_profile"
-                        if resolved_profile is not None
-                        else str(profile.resolve())
-                        if isinstance(profile, Path)
-                        else "serialized_profile"
+                    "profile_path": profile_source_label(
+                        profile, composed=resolved_profile is not None
                     ),
                     "task_path": str(task_path.resolve()),
                     "estimator_kind": "tactile_only_contact_change_score",
@@ -119,55 +111,43 @@ def execute_friction_estimation(
                     "plot_mode": plot_mode,
                 },
             },
-            indent=2,
-            sort_keys=True,
         )
-        + "\n",
-        encoding="utf-8",
-    )
-    run.register_artifact(effective_parameters_path)
-    trace_path = run.artifact_path("trace.csv")
-    plot_path = run.artifact_path("plot.png")
-    taxel_plot_path = run.artifact_path("taxel_plot.png")
+        trace_path = run.artifact_path("trace.csv")
+        plot_path = run.artifact_path("plot.png")
+        taxel_plot_path = run.artifact_path("taxel_plot.png")
 
-    def render_selected_plots(
-        rows: list[dict[str, object]], result: FrictionEstimationResult
-    ) -> None:
-        """在完整轨迹尚在内存时，仅为请求或失败条件渲染图表。"""
-        protocol_passed = (
-            result.passed if diagnostic_on_result is None else not diagnostic_on_result(result)
+        def render_selected_plots(
+            rows: list[dict[str, object]], result: FrictionEstimationResult
+        ) -> None:
+            """在完整轨迹尚在内存时，仅为请求或失败条件渲染图表。"""
+            protocol_passed = (
+                result.passed if diagnostic_on_result is None else not diagnostic_on_result(result)
+            )
+            diagnostic_required = not result.simulation_stable or not protocol_passed
+            selected_mode = "diagnostic" if diagnostic_required else plot_mode
+            if selected_mode == "none":
+                return
+            from ..visualization.friction import plot_summary
+
+            plot_summary(plot_path, rows, task=task)
+            if selected_mode == "diagnostic":
+                from ..visualization.friction import plot_taxel_diagnostics
+
+                plot_taxel_diagnostics(taxel_plot_path, rows, task=task)
+
+        result = run_friction_estimation(
+            configured,
+            task=task,
+            output_csv=trace_path,
+            sensor_noise_seed=sensor_noise_seed,
+            on_result=render_selected_plots,
         )
-        diagnostic_required = not result.simulation_stable or not protocol_passed
-        selected_mode = "diagnostic" if diagnostic_required else plot_mode
-        if selected_mode == "none":
-            return
-        from ..visualization.friction import plot_summary
-
-        plot_summary(plot_path, rows, task=task)
-        if selected_mode == "diagnostic":
-            from ..visualization.friction import plot_taxel_diagnostics
-
-            plot_taxel_diagnostics(taxel_plot_path, rows, task=task)
-
-    result = run_friction_estimation(
-        configured,
-        task=task,
-        output_csv=trace_path,
-        sensor_noise_seed=sensor_noise_seed,
-        on_result=render_selected_plots,
-    )
-    for artifact in (trace_path, plot_path, taxel_plot_path):
-        if not artifact.exists():
-            continue
-        run.register_artifact(artifact)
-    metrics_path = run.artifact_path("metrics.json")
-    metrics_path.write_text(
-        json.dumps(asdict(result), indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
-    )
-    run.register_artifact(metrics_path)
-    run.finalize()
-    return run, result
+        for artifact in (trace_path, plot_path, taxel_plot_path):
+            if not artifact.exists():
+                continue
+            run.register_artifact(artifact)
+        write_json_artifact(run, "metrics.json", asdict(result))
+        return run, result
 
 
 __all__ = ["execute_friction_estimation"]

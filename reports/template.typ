@@ -200,6 +200,77 @@
   )
 }
 
+// ——— 研究级数据表：字面量记录 → 三线表 ———
+//
+// 研究级报告的数字直接写在报告文件里（见 `reports/study_results.typ` 的数据块，
+// 由 `scripts/reports/study_results_data.py` 从产物生成），编译不读取 `outputs/`。
+// 本组件只负责把这些字面量记录渲染成与 `csv-table` 同款的三线表。
+
+// 判断取值是否按数值列处理：字面量 int／float，或产物 CSV 里的十进制、科学计数法字符串。
+#let is-numeric(value) = (
+  type(value) == int
+    or type(value) == float
+    or (type(value) == str and value != "" and value.contains(numeric-regex))
+)
+
+// 渲染三线表：列定义决定列顺序、中文表头与各自的有效数字位数。
+//
+// Args:
+//     records: 记录数组，字段名与 `columns` 中的字段名对应；数值列可给字面量
+//         int／float，也可给 CSV 字符串。
+//     columns: `((字段名, 中文表头), …)` 或 `((字段名, 中文表头, 有效数字), …)`。
+//     caption: 表标题；提供时按模板约定编号。
+//     digits: 未单独指定时的有效数字位数。
+//     span: 是否跨栏浮动到页顶（IEEE 双栏版式用；单栏版式保持 false）。
+//     widths: 可选列宽数组，覆盖默认等宽（span 模式为 auto + 1fr）；用于在栏宽内
+//         加宽长文本列，避免与相邻数值列相碰。
+//     empty: 空串与缺失字段的占位内容。
+#let data-table(
+  records,
+  columns: (),
+  caption: none,
+  digits: 3,
+  span: false,
+  widths: none,
+  empty: [—],
+) = {
+  let specs = columns.map(spec => {
+    if type(spec) == array and spec.len() == 3 { spec } else { (spec.at(0), spec.at(1), digits) }
+  })
+  // 数值列右对齐：该列只要出现过数值即按数值列处理。
+  let aligns = specs.map(spec => {
+    if records.any(r => is-numeric(r.at(spec.at(0), default: ""))) { right } else { left }
+  })
+  let body-cells = records.map(record => specs.map(spec => {
+    let value = record.at(spec.at(0), default: none)
+    if value == none or value == "" { empty } else { cell-value(value, digits: spec.at(2)) }
+  })).flatten()
+  let content = table(
+    columns: if widths != none {
+      widths
+    } else if span {
+      (auto,) + range(specs.len() - 1).map(_ => 1fr)
+    } else {
+      specs.len()
+    },
+    align: aligns,
+    inset: (x: 4pt, y: 3pt),
+    stroke: none,
+    table.hline(stroke: 0.8pt),
+    table.header(..specs.map(spec => header-cell(spec.at(1)))),
+    table.hline(stroke: 0.45pt),
+    ..body-cells,
+    table.hline(stroke: 0.8pt),
+  )
+  if caption == none { return content }
+  let rendered = figure(kind: table, supplement: [表], caption: caption, content)
+  if span {
+    place(top + center, scope: "parent", float: true, rendered)
+  } else {
+    rendered
+  }
+}
+
 // 以网格组合多张图（推荐矢量 PDF）并配总编号标题，子图自动标注 (a)(b)…。
 //
 // Args:

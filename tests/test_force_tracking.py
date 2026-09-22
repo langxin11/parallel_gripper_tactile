@@ -523,7 +523,7 @@ def test_force_tracking_direct_torque_run_tracks_reference(tmp_path: Path) -> No
 def test_force_tracking_adrc_torque_run_writes_observer_diagnostics(
     tmp_path: Path, controller_variant: str
 ) -> None:
-    """直接力矩 ADRC 两种参考路径均稳定完成并写出完整诊断量。"""
+    """ADRC 力跟踪输出完整诊断，失接触重接近时清空观测器输出并恢复测量。"""
     task = ForceTrackingTask(
         schema_version=1,
         name="short_adrc_torque",
@@ -549,17 +549,35 @@ def test_force_tracking_adrc_torque_run_writes_observer_diagnostics(
     assert math.isfinite(result.rmse_n)
     with output_csv.open(newline="", encoding="utf-8") as stream:
         rows = list(csv.DictReader(stream))
-    tracking_rows = [row for row in rows if row["phase"] == "track_reference"]
-    assert tracking_rows
-    assert all(float(row["force_position_adjustment_rad"]) == 0.0 for row in tracking_rows)
-    assert all(float(row["pid_position_adjustment_rad"]) == 0.0 for row in tracking_rows)
+    reference_rows = [row for row in rows if row["phase"] == "track_reference"]
+    assert reference_rows
+    assert all(float(row["force_position_adjustment_rad"]) == 0.0 for row in reference_rows)
+    assert all(float(row["pid_position_adjustment_rad"]) == 0.0 for row in reference_rows)
+    # 参考曲线启动后继续计时，失接触重接近不会把实验 phase 改回初始阶段。
+    tracking_rows = [row for row in reference_rows if row["control_state"] == "force_tracking"]
+    approach_rows = [row for row in reference_rows if row["control_state"] == "approach"]
+    assert tracking_rows and approach_rows
+    assert len(tracking_rows) + len(approach_rows) == len(reference_rows)
     assert all(float(row["force_feedforward_torque_n_m"]) > 0.0 for row in tracking_rows)
-    assert all(math.isfinite(float(row["torque_adrc_measurement_n"])) for row in tracking_rows)
-    assert all(math.isfinite(float(row["torque_adrc_reference_force_n"])) for row in tracking_rows)
-    assert all(math.isfinite(float(row["torque_adrc_estimated_force_n"])) for row in tracking_rows)
-    assert all(
-        math.isfinite(float(row["torque_adrc_input_gain_n_per_n_m_s2"])) for row in tracking_rows
+    observer_diagnostics = (
+        "torque_adrc_reference_force_n",
+        "torque_adrc_estimated_force_n",
+        "torque_adrc_input_gain_n_per_n_m_s2",
     )
+    assert all(
+        math.isfinite(float(row[field])) for row in tracking_rows for field in observer_diagnostics
+    )
+    assert all(
+        math.isnan(float(row[field])) for row in approach_rows for field in observer_diagnostics
+    )
+    assert all(math.isfinite(float(row["torque_adrc_measurement_n"])) for row in tracking_rows)
+    # 失接触先复位测量滤波；后续接近周期继续采样，但尚不运行 ADRC 观测器。
+    assert math.isnan(float(approach_rows[0]["torque_adrc_measurement_n"]))
+    assert math.isfinite(float(approach_rows[-1]["torque_adrc_measurement_n"]))
+    assert all(row["stiffness_valid"] == "false" for row in approach_rows)
+    assert all(float(row["force_feedforward_torque_n_m"]) >= 0.0 for row in approach_rows)
+    assert any(float(row["force_feedforward_torque_n_m"]) == 0.0 for row in approach_rows)
+    assert reference_rows[-1]["control_state"] == "force_tracking"
 
 
 def test_force_tracking_on_frame_receives_monotonic_snapshots() -> None:

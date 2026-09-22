@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 from dataclasses import asdict
-import json
 from pathlib import Path
 import sys
 
-import yaml
 from pydantic import TypeAdapter
 from dm_grasp_core.grasp.unified import UnifiedAdaptiveConfig
 
@@ -19,6 +17,15 @@ from ..experiments.force_scheduling import (
 )
 from ..config.profiles import GripperProfile, load_profile, validate_resolved_profile
 from ..artifacts import RunDirectory
+
+from .common import (
+    profile_snapshot_source,
+    profile_source_label,
+    run_artifact_lifecycle,
+    write_json_artifact,
+    write_task_snapshot,
+    write_yaml_artifact,
+)
 
 
 def execute_force_scheduling(
@@ -45,10 +52,8 @@ def execute_force_scheduling(
         output_root,
         profile_name=configured.name,
         experiment="force-schedule",
-        profile_source=(
-            yaml.safe_dump(configured.model_dump(mode="json"), allow_unicode=True, sort_keys=True)
-            if resolved_profile is not None
-            else profile
+        profile_source=profile_snapshot_source(
+            profile, configured, composed=resolved_profile is not None
         ),
         command=tuple(sys.argv),
         parameters={
@@ -67,28 +72,16 @@ def execute_force_scheduling(
         run_prefix=run_prefix,
         run_suffix=run_suffix,
     )
-    task_snapshot = run.artifact_path("task.yaml")
-    if scheduling_task is None:
-        task_snapshot.write_bytes(task_path.read_bytes())
-    else:
-        task_snapshot.write_text(
-            yaml.safe_dump(task.model_dump(mode="json"), allow_unicode=True, sort_keys=True),
-            encoding="utf-8",
-        )
-    run.register_artifact(task_snapshot)
-    scheduler_snapshot = run.artifact_path("scheduler.yaml")
-    scheduler_snapshot.write_text(
-        yaml.safe_dump(
+    with run_artifact_lifecycle(run):
+        write_task_snapshot(run, task_path, scheduling_task)
+        write_yaml_artifact(
+            run,
+            "scheduler.yaml",
             TypeAdapter(type(scheduler_config)).dump_python(scheduler_config, mode="json"),
-            allow_unicode=True,
-            sort_keys=True,
-        ),
-        encoding="utf-8",
-    )
-    run.register_artifact(scheduler_snapshot)
-    effective_parameters_path = run.artifact_path("effective_parameters.json")
-    effective_parameters_path.write_text(
-        json.dumps(
+        )
+        write_json_artifact(
+            run,
+            "effective_parameters.json",
             {
                 "schema_version": 1,
                 "profile": configured.model_dump(mode="json"),
@@ -97,12 +90,8 @@ def execute_force_scheduling(
                     scheduler_config, mode="json"
                 ),
                 "runtime": {
-                    "profile_path": (
-                        "composed_profile"
-                        if resolved_profile is not None
-                        else str(profile.resolve())
-                        if isinstance(profile, Path)
-                        else "serialized_profile"
+                    "profile_path": profile_source_label(
+                        profile, composed=resolved_profile is not None
                     ),
                     "task_path": str(task_path.resolve()),
                     "scheduler_kind": (
@@ -115,39 +104,28 @@ def execute_force_scheduling(
                     ),
                 },
             },
-            indent=2,
-            sort_keys=True,
         )
-        + "\n",
-        encoding="utf-8",
-    )
-    run.register_artifact(effective_parameters_path)
-    trace_path = run.artifact_path("trace.csv")
-    plot_path = run.artifact_path("plot.png")
-    tactile_path = (
-        run.artifact_path("tactile.jsonl")
-        if task.tactile_sampling is not None and task.tactile_sampling.record_raw
-        else None
-    )
-    result = run_force_scheduling(
-        configured,
-        task=task,
-        scheduler_config=scheduler_config,
-        output_csv=trace_path,
-        output_plot=plot_path,
-        output_tactile=tactile_path,
-    )
-    for artifact in (trace_path, plot_path, plot_path.with_suffix(".pdf")):
-        run.register_artifact(artifact)
-    if tactile_path is not None:
-        run.register_artifact(tactile_path)
-    metrics_path = run.artifact_path("metrics.json")
-    metrics_path.write_text(
-        json.dumps(asdict(result), indent=2, sort_keys=True) + "\n", encoding="utf-8"
-    )
-    run.register_artifact(metrics_path)
-    run.finalize()
-    return run, result
+        trace_path = run.artifact_path("trace.csv")
+        plot_path = run.artifact_path("plot.png")
+        tactile_path = (
+            run.artifact_path("tactile.jsonl")
+            if task.tactile_sampling is not None and task.tactile_sampling.record_raw
+            else None
+        )
+        result = run_force_scheduling(
+            configured,
+            task=task,
+            scheduler_config=scheduler_config,
+            output_csv=trace_path,
+            output_plot=plot_path,
+            output_tactile=tactile_path,
+        )
+        for artifact in (trace_path, plot_path, plot_path.with_suffix(".pdf")):
+            run.register_artifact(artifact)
+        if tactile_path is not None:
+            run.register_artifact(tactile_path)
+        write_json_artifact(run, "metrics.json", asdict(result))
+        return run, result
 
 
 __all__ = ["execute_force_scheduling"]

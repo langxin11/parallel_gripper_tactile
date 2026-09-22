@@ -22,18 +22,6 @@ FLOOR_GEOM_NAME = "floor"
 MAX_PHYSICS_STEPS_PER_UI_TICK = 50
 
 
-def _parse_taxel(value: str) -> tuple[str, int, int]:
-    """解析紧凑的 ``left:11`` 或 ``right:02`` taxel 选择器。"""
-    try:
-        side, index = value.split(":", maxsplit=1)
-        row, column = int(index[0]), int(index[1])
-    except (IndexError, ValueError) as error:
-        raise ValueError("taxel must have the form left:11 or right:02") from error
-    if side not in {"left", "right"} or row not in range(3) or column not in range(3):
-        raise ValueError("taxel must be in left/right:00 through left/right:22")
-    return side, row, column
-
-
 def _taxel_position(profile, side: str, row: int, column: int) -> np.ndarray:
     """从准备好的模型中读取命名触觉 site 的默认位置。"""
     source_model = mujoco.MjModel.from_xml_path(str(profile.model_path))

@@ -101,6 +101,7 @@ def test_execute_force_tracking_writes_complete_run_artifacts(
     )
 
     assert returned == result
+    assert not (run.path / "error.json").exists()
     manifest = json.loads((run.path / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["parameters"]["controller_variant"] == "adrc-torque"
     assert manifest["parameters"]["stiffness_estimator_method"] == "window_quadratic"

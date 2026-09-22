@@ -105,6 +105,7 @@ def test_domain_packages_preserve_top_level_and_legacy_object_identity():
     assert MinimumJerkTrajectory is motion.MinimumJerkTrajectory
     assert ContactTransition is motion.ContactTransition
     assert quintic_blend is motion.quintic_blend
+    assert within_zero_window is motion.within_zero_window
     assert within_zero_window is contact.within_zero_window
     assert ContactDetector is contact.ContactDetector
     assert MITCommand is command.MITCommand

@@ -1,0 +1,154 @@
+# 刚度预载集成测试的固定配置，仅用于假设备；真机配置调参不应改变本用例。
+metadata:
+  task_name: unified-adaptive-particle
+  object_name: object
+  description: 持续在线摩擦、接触刚度与粒子摩擦后验估计，人工释放结束抓取
+  tags:
+  - real
+  - adaptive
+  - friction
+  - online
+  - particle
+hardware:
+  dm_port: /dev/dmj4310_can
+  tactile_port: /dev/papillarray
+timing:
+  control_rate_hz: 100.0
+  max_control_gap_s: 0.15
+  tactile_timeout_s: 0.2
+  tactile_cutoff_hz: 20.0
+lifecycle:
+  verify_zero_force: true
+  contact_on_n: 0.2
+  contact_off_n: 0.1
+  contact_off_stable_s: 0.15
+  contact_transition_s: 0.15
+  lost_contact_scope: any_side
+  lost_contact_action: fault
+  approach_closure_velocity_m_s: 0.015
+  return_closure_velocity_m_s: 0.035
+  preload_min_force_ratio: 0.75
+  preload_stable_time_s: 0.5
+  preload_timeout_s: 30.0
+  preload_force_rate_n_s: 1.0
+  stiffness_preload:
+    indentation_m: 0.002
+    min_force_n: 0.5
+    max_force_n: 4.0
+    force_ceiling_n: 5.0
+    probe_force_n: 0.5
+    max_closure_m: 0.003
+    timeout_s: 3.0
+    consistency: 0.15
+    stable_s: 0.1
+    min_updates: 3
+    max_estimate_age_s: 0.2
+  auto_start: false
+  on_finished: hold
+  own_friction: null
+  native_slip: null
+reference:
+  adaptive:
+    initial_force_n: 0.5
+    duration_s: null
+    max_force_rate_n_s: 10.0
+    experimental_closed_loop: true
+    unified:
+      risk_enabled: true
+      risk_step_enabled: false
+      friction_update_enabled: true
+      depth_friction_prior:
+        min_friction: 0.1
+        max_friction: 0.6
+        onset_depth_m: 0.0002
+        saturation_depth_m: 0.002
+        curvature: 2.0
+        min_contact_taxels: 4
+        stable_time_s: 0.2
+        depth_tolerance_m: 0.0001
+        max_increase_per_s: 0.05
+      friction_quality_min: 0.4
+      friction_discount: 0.8
+      friction_min: 0.05
+      friction_max: 2.0
+      friction_expiry_s: null
+      friction_raise_events: 3
+      friction_consistency: 0.15
+      particle_friction:
+        particle_count: 256
+        min_friction: 0.05
+        max_friction: 2.0
+        prior_std: 0.25
+        process_std_per_sqrt_s: 0.01
+        incipient_utilization: 0.85
+        transition_width: 0.08
+        stable_evidence_time_s: 0.2
+        event_strength: 4.0
+        minimum_event_utilization: 0.15
+        control_quantile: 0.1
+        resample_ratio: 0.5
+        minimum_event_quality: 0.4
+        seed: 23
+      load:
+        left_friction: 0.1
+        right_friction: 0.1
+        safety_factor: 1.2
+        min_force_n: 0.5
+        max_force_n: 30.0
+        max_force_rate_n_s: 10.0
+        max_force_decrease_rate_n_s: 1.0
+        gap_gain_per_s: 8.0
+        load_rate_gain: 1.0
+        filter_tau_s: 0.05
+        allow_target_decrease: true
+      observer:
+        window_s: 0.2
+        confirmation_s: 0.04
+        cooldown_s: 0.3
+        max_gap_s: 0.1
+        min_normal_n: 0.08
+        contact_release_ratio: 0.6666666666666666
+        allow_steady_load_risk: true
+        stable_contact_subset: true
+        tangential_range_n: 4.0
+        normal_range_n: 15.0
+      tracking_error_n: 0.3
+      failure_timeout_s: 0.5
+      max_sample_gap_s: 0.1
+controller:
+  kind: admittance
+  closing_torque_only: true
+  zero_tracking_velocity: false
+  mit_kp: 10.0
+  mit_kd: 2.0
+  admittance:
+    mass_kg: 0.2
+    damping_ns_m: 15.0
+    stiffness_n_m: 1.0
+    force_deadband_n: 0.1
+    prevent_unloading: false
+    feedforward_ratio: 1.0
+    max_closing_velocity_m_s: 0.01
+    max_opening_velocity_m_s: 0.005
+    max_acceleration_m_s2: 0.05
+    stiffness_adaptation:
+      bandwidth_rad_s: 10.0
+      damping_ratio: 1.0
+      filter_tau_s: 0.2
+      relative_rate_per_s: 1.0
+      min_mass_kg: 0.2
+      max_mass_kg: 300.0
+      max_estimate_age_s: 0.2
+estimation:
+  enabled: true
+  method: window_linear
+safety:
+  max_target_force_n: 30.0
+  force_ceiling_n: 40.0
+  approach_feedforward_force_n: 1.0
+output:
+  root: outputs/real
+  plots: true
+terminal:
+  mode: auto
+  refresh_hz: 5.0

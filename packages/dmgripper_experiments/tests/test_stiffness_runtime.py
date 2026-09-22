@@ -15,10 +15,8 @@ from .fakes import FakeTactile, PhaseActions, run_fake_experiment
 
 
 def _config():
-    """加载真实统一入口，不访问设备。"""
-    return load_experiment_config(
-        Path(__file__).resolve().parents[3] / "configs/hardware/dmgripper/unified_adaptive.yaml"
-    )
+    """加载独立的刚度预载测试配置，不依赖真机入口调参。"""
+    return load_experiment_config(Path(__file__).parent / "fixtures/stiffness_preload.yaml")
 
 
 class ReleaseActive(PhaseActions):
@@ -133,7 +131,7 @@ def test_preload_independent_raw_force_ceiling_enters_fault_holding(tmp_path):
             return replace(sample, raw_left_fz_n=5.1) if self.phase.phase == "preload" else sample
 
     with pytest.raises(RuntimeError, match="独立保护"):
-        run_fake_experiment(tmp_path, _config(), tactile_type=Overforce)
+        run_fake_experiment(tmp_path, _config(), tactile_type=Overforce, actions_type=ReleaseActive)
     manifest = json.loads(next(tmp_path.rglob("manifest.json")).read_text())
     assert manifest["fault_holding_entered"]
     assert manifest["fault_resolution"] == "released"

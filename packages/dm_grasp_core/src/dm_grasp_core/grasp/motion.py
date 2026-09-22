@@ -5,6 +5,8 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 
+from ..tactile.contact import within_zero_window as within_zero_window
+
 
 @dataclass(frozen=True, slots=True)
 class MinimumJerkTrajectory:
@@ -115,26 +117,6 @@ def quintic_blend(time_ratio: float) -> float:
         raise ValueError("缓动时间必须是有限数")
     phase = min(max(time_ratio, 0.0), 1.0)
     return 10.0 * phase**3 - 15.0 * phase**4 + 6.0 * phase**5
-
-
-def within_zero_window(left_force_n: float, right_force_n: float, threshold_n: float) -> bool:
-    """判断双侧法向力是否同时落在零力窗口内。
-
-    Args:
-        left_force_n: 左侧法向力 (N)，可为负数（bias 后的残余读数）。
-        right_force_n: 右侧法向力 (N)。
-        threshold_n: 零窗口阈值 (N)，必须为非负数。
-
-    Returns:
-        bool: 两侧绝对值均不超过阈值时为 True。
-
-    Raises:
-        ValueError: 输入非有限或阈值为负时抛出。
-    """
-    values = (left_force_n, right_force_n, threshold_n)
-    if not all(math.isfinite(value) for value in values) or threshold_n < 0.0:
-        raise ValueError("零力窗口参数无效")
-    return abs(left_force_n) <= threshold_n and abs(right_force_n) <= threshold_n
 
 
 @dataclass(frozen=True, slots=True)

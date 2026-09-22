@@ -22,6 +22,7 @@ from ..experiments.force_tracking import (
     ControllerVariant,
     ForceTrackingTask,
     configure_force_controller,
+    default_trace_sample_period_s,
     validate_force_tracking_configuration,
 )
 from ..experiments.force_scheduling import ForceSchedulingTask, OracleForceSchedulerConfig
@@ -658,12 +659,8 @@ def resolve_research_run(
         validate_profile(profile)
         trace_sample_period_s = selection.execution.trace_sample_period_s
         if trace_sample_period_s is None and not isinstance(task, TangentialDisturbanceTask):
-            trace_sample_period_s = (
-                task.control_period_s
-                if selection.controller.name == "admittance"
-                else 0.004
-                if selection.controller.name in {"adrc-torque", "adrc-torque-td"}
-                else 0.008
+            trace_sample_period_s = default_trace_sample_period_s(
+                selection.controller.name, task.control_period_s
             )
         resolved_execution = ExecutionConfig.model_validate(
             {

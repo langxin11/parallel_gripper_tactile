@@ -118,6 +118,10 @@ profile 内的 MJCF 等资源基于该 profile 所在目录，不依赖调用 cw
 Hydra 外层目录保存组合来源、覆盖、Git 状态、领域有效配置及 study 计划与聚合；`RunDirectory`
 拥有内部 run 的 manifest、trace、metrics 和图。单条件异常写入 `failed_conditions.json` 后继续；
 启动前失败仍写入 `setup_failure.json` 和失败状态的生命周期 manifest。
+单次 runner 创建运行目录后，任务快照、实验或绘图的执行异常会尽力写入 `error.json`
+（`error_type`、`message`），并将已生成的输入和部分产物登记到 `manifest.json` 后重新抛出原异常。
+该 manifest 仅说明已有文件，不代表运行完成；`error.json` 表示执行异常，科学验收失败仍看结果中的
+`passed`。磁盘或留档失败作为诊断附加到原异常，不替换首个故障。
 实际运行与 `effective_parameters.json` 使用同一冻结 `GripperProfile` 和 `ForceTrackingTask`，不重读原文件覆盖配置。
 
 科学哈希包含有序条件、完整控制器参数及默认值、任务与 profile 内容摘要、材料、seed、统计／排名／阶段

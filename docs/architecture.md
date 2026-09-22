@@ -84,6 +84,10 @@ Pillar 碰撞几何属于 asset/profile，`scenes.custom` 负责把它装配进�
 4. runner 登记实际产物并完成 manifest；失败也保留输入和异常信息。
 5. study protocol 唯一生成矩阵；公共生命周期处理状态、失败、聚合与登记，不改变科学口径。
 
+`runners/common.py` 统一快照序列化、成功定稿与执行异常留档；各 runner 继续拥有自己的输入字段、
+实验调用和科学失败判定。仿真 `experiments/force_tracking_trace.py` 与真机
+`dmgripper_experiments.trace` 只组装已采样数值的记录字段，不推进循环或改变设备命令与采样时序。
+
 Hydra 拥有调用外层目录和组合来源，`RunDirectory` 拥有单次实验目录。研究的目录、哈希、失败分类、
 并行与恢复规则见[科研配置](research-configuration.md)，各实验的 trace 与指标见对应专题。
 

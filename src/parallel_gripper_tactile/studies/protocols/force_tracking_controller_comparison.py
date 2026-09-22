@@ -796,12 +796,6 @@ def run_study(
     )
 
 
-def _write_failure_records(path: Path, rows: list[dict[str, object]]) -> Path:
-    """保存无法产生正常 run 结果的条件及异常信息。"""
-    path.write_text(json.dumps(rows, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return path
-
-
 def render_existing_study(
     study_dir: Path, *, plot_mode: Literal["summary", "diagnostic"] = "summary"
 ) -> list[Path]:
