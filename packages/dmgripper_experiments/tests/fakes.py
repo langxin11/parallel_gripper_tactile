@@ -15,12 +15,10 @@ from dmgripper_hardware import MotorFeedback, STATUS_DISABLED, STATUS_ENABLED
 
 from dmgripper_experiments.config import (
     AdaptiveReferenceConfig,
-    CurveReferenceConfig,
     ExperimentConfig,
     LifecycleConfig,
-    ReferenceConfig,
     TimingConfig,
-    WaypointConfig,
+    UnifiedHardwareConfig,
 )
 from dmgripper_experiments.tactile import TactileSnapshot
 
@@ -153,8 +151,11 @@ class FakeTactile:
             raw_left_fy_n=tangential_n,
             raw_right_fx_n=0.0,
             raw_right_fy_n=0.0,
-            left_taxel_forces_n=((0.0, 0.0, force_n),),
-            right_taxel_forces_n=((0.0, 0.0, force_n),),
+            # 力集中在三个触点上，使单触点法向高于观察器最小判定阈值；
+            # 切向同样集中，驱动统一策略的承载调度。
+            left_taxel_forces_n=((0.0, tangential_n / 3, force_n / 3),) * 3
+            + ((0.0, 0.0, 0.0),) * 6,
+            right_taxel_forces_n=((0.0, 0.0, force_n / 3),) * 3 + ((0.0, 0.0, 0.0),) * 6,
         )
         if self.sample_sink is not None:
             self.sample_sink(
@@ -186,7 +187,8 @@ class BadTactile(FakeTactile):
         if self.mode == "nan":
             return replace(snapshot, raw_left_fx_n=math.nan)
         if self.mode == "overforce":
-            return replace(snapshot, raw_left_fz_n=3.0)
+            # 默认硬保护线为 40 N；注入值须显著越过当前默认天花板。
+            return replace(snapshot, raw_left_fz_n=45.0)
         if self.mode == "rollback":
             return replace(snapshot, timestamp_us=1)
         if self.mode == "lost":
@@ -316,43 +318,8 @@ class FakeDmSession:
         return self.feedback
 
 
-def curve_config(**lifecycle_overrides) -> ExperimentConfig:
-    """返回可快速执行全部阶段的曲线模式配置。"""
-    lifecycle = LifecycleConfig(
-        zero_force_stable_s=0.01,
-        zero_force_timeout_s=0.2,
-        contact_on_stable_s=0.01,
-        contact_transition_s=0.01,
-        contact_off_stable_s=0.02,
-        preload_stable_time_s=0.02,
-        preload_timeout_s=1.0,
-        approach_endpoint_hold_s=1.0,
-        return_closure_velocity_m_s=0.1,
-        return_closure_acceleration_m_s2=0.5,
-        return_closure_jerk_m_s3=5.0,
-        return_settle_timeout_s=1.0,
-        **lifecycle_overrides,
-    )
-    return ExperimentConfig(
-        timing=TimingConfig(
-            control_rate_hz=100.0,
-            max_control_gap_s=0.05,
-            tactile_timeout_s=0.1,
-        ),
-        lifecycle=lifecycle,
-        reference=ReferenceConfig(
-            curve=CurveReferenceConfig(
-                waypoints=(
-                    WaypointConfig(t_s=0.0, force_n=0.5),
-                    WaypointConfig(t_s=0.03, force_n=0.5),
-                )
-            )
-        ),
-    )
-
-
 def adaptive_config(**lifecycle_overrides) -> ExperimentConfig:
-    """返回可快速执行全部阶段的动态增力配置。"""
+    """返回可快速执行全部阶段的统一自适应配置。"""
     return ExperimentConfig(
         timing=TimingConfig(
             control_rate_hz=100.0,
@@ -360,34 +327,26 @@ def adaptive_config(**lifecycle_overrides) -> ExperimentConfig:
             tactile_timeout_s=0.1,
         ),
         lifecycle=LifecycleConfig(
-            zero_force_stable_s=0.01,
-            zero_force_timeout_s=0.2,
             contact_on_stable_s=0.01,
             contact_transition_s=0.01,
             contact_off_stable_s=0.02,
             preload_stable_time_s=0.02,
             preload_timeout_s=1.0,
-            approach_endpoint_hold_s=1.0,
-            return_closure_velocity_m_s=0.1,
-            return_closure_acceleration_m_s2=0.5,
-            return_closure_jerk_m_s3=5.0,
-            return_settle_timeout_s=1.0,
             **lifecycle_overrides,
         ),
-        reference=ReferenceConfig(
-            adaptive=AdaptiveReferenceConfig(
-                initial_force_n=0.5,
-                duration_s=0.03,
-            )
+        reference=AdaptiveReferenceConfig(
+            initial_force_n=0.5,
+            duration_s=0.03,
+            experimental_closed_loop=True,
+            unified=UnifiedHardwareConfig(estimator="classic"),
         ),
     )
 
 
-def make_config(kind: str = "curve", **lifecycle_overrides) -> ExperimentConfig:
-    """按目标模式返回快速配置。"""
-    if kind == "adaptive":
-        return adaptive_config(**lifecycle_overrides)
-    return curve_config(**lifecycle_overrides)
+def make_config(kind: str = "adaptive", **lifecycle_overrides) -> ExperimentConfig:
+    """返回快速配置；统一自适应是唯一目标来源。"""
+    del kind
+    return adaptive_config(**lifecycle_overrides)
 
 
 def run_fake_experiment(
@@ -412,13 +371,10 @@ def run_fake_experiment(
     session_factory_error: BaseException | None = None,
 ):
     """以注入的纯内存会话和触觉工厂执行一次运行并返回关键替身。"""
-    import dataclasses
-
     from dmgripper_experiments.recording import create_run_directory
     from dmgripper_experiments.runtime import run_experiment
 
-    if not plots:
-        config = dataclasses.replace(config, output=dataclasses.replace(config.output, plots=False))
+    del plots
     clock = FakeClock()
     actions = actions_type()
     session_holder: list[FakeDmSession] = []

@@ -68,8 +68,8 @@ def test_preload_lock_handoff_and_diagnostics(tmp_path, monkeypatch, stiffness, 
     monkeypatch.setattr(StiffnessDiagnostics, "update", estimate)
     config = _config()
     assert config.timing.max_control_gap_s == 0.15
-    assert config.reference.adaptive.unified.load.safety_factor == 1.2
-    assert config.reference.adaptive.unified.observer.min_normal_n == 0.08
+    assert config.reference.unified.friction.safety_factor == 1.2
+    assert config.reference.unified.observer.min_normal_n == 0.08
     assert config.lifecycle.stiffness_preload.min_force_n == 0.5
     assert config.lifecycle.stiffness_preload.probe_force_n == 0.5
     assert config.lifecycle.stiffness_preload.max_closure_m == 0.003
@@ -147,15 +147,7 @@ def test_stiffness_closed_loop_rejects_incompatible_config(change):
         elif change == "authorization":
             replace(
                 config,
-                reference=replace(
-                    config.reference,
-                    adaptive=replace(
-                        config.reference.adaptive,
-                        experimental_closed_loop=False,
-                        risk_validation_passed=True,
-                        friction_validation_passed=True,
-                    ),
-                ),
+                reference=replace(config.reference, experimental_closed_loop=False),
             )
         elif change == "rate":
             replace(config, lifecycle=replace(config.lifecycle, preload_force_rate_n_s=None))
@@ -184,7 +176,7 @@ def test_contact_floor_is_one_shot_and_both_switches_can_be_disabled():
             admittance=replace(config.controller.admittance, stiffness_adaptation=None),
         ),
     )
-    source = UnifiedAdaptiveTargetSource(config.reference.adaptive)
+    source = UnifiedAdaptiveTargetSource(config.reference, config.unified_core_config)
     source.set_contact_floor(4.0)
     assert source.preload_target(0.0) == 4.0
     with pytest.raises(RuntimeError):

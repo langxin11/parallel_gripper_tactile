@@ -2,7 +2,7 @@
 
 默认只验证配置并输出计划（dry-run），不导入运行时、不打开设备；
 ``--execute`` 是访问真机的显式开关。交互执行会按终端能力选择 Rich
-或纯文本展示，非交互执行要求明确的自动启动与自动结束组合。
+或纯文本展示；非交互执行要求有限任务时长与 ``on_finished=return``。
 """
 
 from __future__ import annotations
@@ -20,12 +20,25 @@ from .config import ExperimentConfig, experiment_config_record, load_experiment_
 from .recording import create_run_directory
 
 
-def _bootstrap(argv: Sequence[str]) -> tuple[Path | None, bool, bool, Path | None, list[str]]:
-    """提取不属于 YAML 或 Tyro 配置的操作参数。"""
+_TERMINAL_MODES = ("auto", "rich", "plain", "json")
+
+
+@dataclass(frozen=True, slots=True)
+class _Bootstrap:
+    """不属于 YAML 或 Tyro 配置的操作参数与剩余参数。"""
+
+    remaining: tuple[str, ...] = ()
     config_path: Path | None = None
-    execute = False
-    bias = False
+    execute: bool = False
+    bias: bool = False
     output: Path | None = None
+    terminal_mode: str = "auto"
+    terminal_refresh_hz: float = 5.0
+
+
+def _bootstrap(argv: Sequence[str]) -> _Bootstrap:
+    """提取不属于实验配置的操作参数。"""
+    values: dict[str, object] = {}
     remaining: list[str] = []
     index = 0
     while index < len(argv):
@@ -33,22 +46,29 @@ def _bootstrap(argv: Sequence[str]) -> tuple[Path | None, bool, bool, Path | Non
         if argument in {"--config", "--output"}:
             if index + 1 >= len(argv):
                 raise ValueError(f"{argument} 需要路径")
-            value = Path(argv[index + 1])
-            if argument == "--config":
-                config_path = value
-            else:
-                output = value
+            key = "config_path" if argument == "--config" else "output"
+            values[key] = Path(argv[index + 1])
             index += 2
-        elif argument == "--execute":
-            execute = True
+        elif argument in {"--execute", "--bias"}:
+            values[argument[2:]] = True
             index += 1
-        elif argument == "--bias":
-            bias = True
-            index += 1
+        elif argument == "--terminal":
+            if index + 1 >= len(argv) or argv[index + 1] not in _TERMINAL_MODES:
+                raise ValueError(f"--terminal 必须是 {', '.join(_TERMINAL_MODES)} 之一")
+            values["terminal_mode"] = argv[index + 1]
+            index += 2
+        elif argument == "--terminal-refresh-hz":
+            if index + 1 >= len(argv):
+                raise ValueError("--terminal-refresh-hz 需要数值")
+            try:
+                values["terminal_refresh_hz"] = float(argv[index + 1])
+            except ValueError as error:
+                raise ValueError("--terminal-refresh-hz 必须是数值") from error
+            index += 2
         else:
             remaining.append(argument)
             index += 1
-    return config_path, execute, bias, output, remaining
+    return _Bootstrap(remaining=tuple(remaining), **values)  # type: ignore[arg-type]
 
 
 @dataclass(frozen=True, slots=True)
@@ -188,9 +208,9 @@ def _print_exception_notes(error: BaseException) -> None:
 def run(argv: Sequence[str] | None = None) -> int:
     """解析配置；默认只输出计划，显式 execute 才导入运行时。"""
     try:
-        config_path, execute, bias, output, remaining = _bootstrap(
-            list(sys.argv[1:] if argv is None else argv)
-        )
+        boot = _bootstrap(list(sys.argv[1:] if argv is None else argv))
+        config_path = boot.config_path
+        remaining = list(boot.remaining)
         default = (
             load_experiment_config(config_path) if config_path is not None else ExperimentConfig()
         )
@@ -207,13 +227,13 @@ def run(argv: Sequence[str] | None = None) -> int:
             ),
         )
         record = experiment_config_record(config)
-        if not execute:
+        if not boot.execute:
             _emit(
                 {
                     "mode": "dry-run",
                     "dm_port": config.hardware.dm_port,
                     "tactile_port": config.hardware.tactile_port,
-                    "clear_bias": bias,
+                    "clear_bias": boot.bias,
                     "config": record,
                 }
             )
@@ -223,22 +243,21 @@ def run(argv: Sequence[str] | None = None) -> int:
         if not interactive:
             if config.reference.duration_s is None:
                 raise ValueError("不限时实验必须在交互终端运行，以便人工输入 release")
-            if not config.lifecycle.auto_start or config.lifecycle.on_finished != "return":
+            if config.lifecycle.on_finished != "return":
                 raise ValueError(
-                    "非交互 --execute 要求 lifecycle.auto_start=true 且 on_finished=return；"
-                    "交互实验请在终端运行"
+                    "非交互 --execute 要求 on_finished=return 的有限时长任务；交互实验请在终端运行"
                 )
 
-        output_root = output if output is not None else Path(config.output.root)
+        output_root = boot.output if boot.output is not None else Path("outputs/real")
         output_directory = create_run_directory(output_root, config)
 
         from .runtime import run_experiment
         from .terminal import TerminalDisplay
 
-        terminal_mode = config.terminal.mode
+        terminal_mode = boot.terminal_mode
         if terminal_mode == "auto" and not interactive and not sys.stdout.isatty():
             terminal_mode = "plain"
-        terminal = TerminalDisplay(terminal_mode, refresh_hz=config.terminal.refresh_hz)
+        terminal = TerminalDisplay(terminal_mode, refresh_hz=boot.terminal_refresh_hz)
 
         def event_sink(event: dict[str, object]) -> None:
             """Rich 正常时由面板显示；降级后立即恢复 JSON 事件输出。"""
@@ -259,7 +278,7 @@ def run(argv: Sequence[str] | None = None) -> int:
             result = run_experiment(
                 config,
                 output_directory=output_directory,
-                clear_bias=bias,
+                clear_bias=boot.bias,
                 action_source=action_source,
                 event_sink=event_sink,
                 terminal=terminal,

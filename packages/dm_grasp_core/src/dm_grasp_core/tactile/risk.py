@@ -7,6 +7,9 @@ from numbers import Real
 
 import numpy as np
 
+# PapillArray 单侧触点数；质量分数与整数触点门控共用该基准换算。
+TAXELS_PER_SIDE = 9
+
 
 @dataclass(frozen=True, slots=True)
 class TaxelRiskConfig:

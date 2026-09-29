@@ -15,6 +15,15 @@ SUPPORTED_SAMPLING_RATES = frozenset((100, 250, 500, 1000))
 DEFAULT_PAPILLARRAY_PORT = "/dev/papillarray"
 """本工作区 PapillArray 控制器的默认 udev 串口别名。"""
 
+TACTILE_TANGENTIAL_RANGE_N = 4.0
+"""单 pillar 切向量程边界（N）；达到或超过即视为饱和，不裁剪后继续计算。"""
+
+TACTILE_NORMAL_RANGE_N = 15.0
+"""单 pillar 法向量程边界（N）；达到或超过即视为饱和，不裁剪后继续计算。"""
+
+TAXELS_PER_SIDE = 9
+"""单侧 pillar 数；3×3 阵列，与核心触觉观察器的固定布局一致。"""
+
 _CLEAR_BIAS_COMMAND = b"z\n"
 _START_SLIP_COMMAND = b"S\n"
 _STOP_SLIP_COMMAND = b"s\n"

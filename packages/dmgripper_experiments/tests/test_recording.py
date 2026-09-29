@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+from dataclasses import replace
 import json
 from pathlib import Path
+import threading
+import time
 
 import pytest
 
-from dmgripper_experiments.config import ExperimentConfig
+from dmgripper_experiments.config import ExperimentConfig, RecordingConfig
 from dmgripper_experiments.recording import (
     TRACE_FIELDS,
     ExperimentRecorder,
     create_run_directory,
+    strided_sample_sink,
 )
 
 
@@ -152,3 +156,135 @@ def test_trace_fields_cover_target_stiffness_and_timing_diagnostics():
         "admittance_acceleration_limited",
     }
     assert required <= set(TRACE_FIELDS)
+
+
+def test_strided_sample_sink_samples_by_packet_counter():
+    """按设备包计数抽样；首个、异常与缺计数的包始终保留。"""
+    recorded: list[dict[str, object]] = []
+
+    def sink(record):
+        recorded.append(dict(record))
+
+    def packet(counter, event="consecutive", gap=None):
+        return {"packet_counter": counter, "counter_event": event, "counter_gap": gap}
+
+    assert strided_sample_sink(sink, 1) is sink
+    with pytest.raises(ValueError, match="tactile_stride"):
+        strided_sample_sink(sink, 0)
+    wrapped = strided_sample_sink(sink, 4)
+    for counter in range(12):
+        wrapped(packet(counter))
+    wrapped(packet(5, event="gap"))
+    wrapped(packet(6, gap=2))
+    wrapped({"left_force_n": 0.0})
+    assert [item["packet_counter"] for item in recorded[:5]] == [0, 4, 8, 5, 6]
+    assert recorded[5] == {"left_force_n": 0.0}
+
+
+def test_tactile_samples_are_queued_and_written_in_order(tmp_path: Path):
+    """sample 立即返回，close 前后排空队列并保持包顺序。"""
+    directory = create_run_directory(tmp_path, _config())
+    recorder = ExperimentRecorder(directory, _config())
+    for index in range(50):
+        recorder.sample({"packet_counter": index, "left_force_n": index * 0.1})
+    recorder.close()
+    lines = (directory / "tactile.jsonl").read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 50
+    assert json.loads(lines[0])["packet_counter"] == 0
+    assert json.loads(lines[-1])["packet_counter"] == 49
+
+
+def test_tactile_floats_truncated_and_clock_kept_full_precision(tmp_path: Path):
+    """浮点截断到 float32 可表示精度，received_at_s 保留 float64。"""
+    directory = create_run_directory(tmp_path, _config())
+    recorder = ExperimentRecorder(directory, _config())
+    received_at_s = 1234567.891234
+    left_force_n = 1.234567891234
+    taxel = -0.002029961906373501
+    recorder.sample(
+        {
+            "received_at_s": received_at_s,
+            "left_force_n": left_force_n,
+            "left_taxel_forces_n": [[taxel, 0.1, 2.0]],
+        }
+    )
+    recorder.close()
+    stored = json.loads((directory / "tactile.jsonl").read_text(encoding="utf-8"))
+    assert stored["received_at_s"] == received_at_s
+    assert stored["left_force_n"] == float(f"{left_force_n:.9g}")
+    assert stored["left_taxel_forces_n"][0][0] == float(f"{taxel:.9g}")
+    raw = (directory / "tactile.jsonl").read_text(encoding="utf-8")
+    assert " " not in raw.strip()
+
+
+def test_tactile_queue_overflow_raises_when_writer_stalls(tmp_path: Path):
+    """写线程停顿时队列有界，溢出立即报错而不是阻塞采集线程。"""
+    gate = threading.Event()
+
+    class StalledRecorder(ExperimentRecorder):
+        def _drain_tactile_queue(self) -> None:
+            gate.wait(timeout=10.0)
+
+    directory = create_run_directory(tmp_path, _config())
+    recorder = StalledRecorder(
+        directory, _config(), tactile_queue_capacity=2, tactile_join_timeout_s=0.2
+    )
+    recorder.sample({"packet_counter": 0})
+    recorder.sample({"packet_counter": 1})
+    with pytest.raises(RuntimeError, match="队列已满"):
+        recorder.sample({"packet_counter": 2})
+    recorder.close()
+    gate.set()
+    manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
+    assert any("未在超时内排空" in item for item in manifest["cleanup_errors"])
+
+
+def test_tactile_writer_failure_propagates_and_fails_manifest(tmp_path: Path):
+    """写线程 I/O 失败后，后续写入立即抛错且完成收尾升级为失败。"""
+
+    class FailingHandle:
+        def write(self, _payload):
+            raise OSError("磁盘写入失败")
+
+        def flush(self):
+            return None
+
+        def close(self):
+            return None
+
+    directory = create_run_directory(tmp_path, _config())
+    recorder = ExperimentRecorder(directory, _config())
+    recorder._tactile_handle = FailingHandle()
+    recorder.sample({"packet_counter": 0})
+    deadline = time.monotonic() + 5.0
+    while recorder._tactile_writer_error is None and time.monotonic() < deadline:
+        time.sleep(0.005)
+    with pytest.raises(RuntimeError, match="写线程已失败"):
+        recorder.sample({"packet_counter": 1})
+    recorder.close()
+    manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["status"] == "failed"
+    assert manifest["error"]["type"] == "OSError"
+
+
+def test_tactile_size_limit_stops_writing_and_reports_stop_reason(tmp_path: Path):
+    """体积上限触发后停止写盘，manifest 说明原因且收尾仍为完成。"""
+    capped = replace(_config(), recording=RecordingConfig(max_tactile_mib=1e-4))
+    directory = create_run_directory(tmp_path, capped)
+    recorder = ExperimentRecorder(directory, capped)
+    for index in range(200):
+        recorder.sample({"packet_counter": index, "left_force_n": 1.0})
+    deadline = time.monotonic() + 5.0
+    while recorder.limit_stop_reason is None and time.monotonic() < deadline:
+        time.sleep(0.005)
+    assert recorder.limit_stop_reason is not None
+    assert recorder.limit_stop_reason.startswith("max_tactile_mib=")
+    line_budget = len((directory / "tactile.jsonl").read_text(encoding="utf-8").splitlines()[0])
+    for index in range(200, 400):
+        recorder.sample({"packet_counter": index})
+    recorder.close()
+    manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["status"] == "completed"
+    assert manifest["stop_reason"].startswith("max_tactile_mib=")
+    size = (directory / "tactile.jsonl").stat().st_size
+    assert size <= int(1e-4 * 1024 * 1024) + line_budget

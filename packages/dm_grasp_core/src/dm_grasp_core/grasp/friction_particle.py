@@ -7,6 +7,8 @@ import math
 
 import numpy as np
 
+from ..tactile.risk import TAXELS_PER_SIDE
+
 
 @dataclass(frozen=True, slots=True)
 class ParticleFrictionConfig:
@@ -25,7 +27,8 @@ class ParticleFrictionConfig:
     minimum_event_utilization: float = 0.15
     control_quantile: float = 0.1
     resample_ratio: float = 0.5
-    minimum_event_quality: float = 0.4
+    # 直接支持局部重分配证据的最少受影响触点数；不是统计置信度。
+    minimum_event_taxels: int = 4
     seed: int = 0
 
     def __post_init__(self) -> None:
@@ -36,8 +39,14 @@ class ParticleFrictionConfig:
             raise ValueError("particle_count 至少为 32")
         if not isinstance(self.seed, int) or isinstance(self.seed, bool) or self.seed < 0:
             raise ValueError("seed 必须为非负整数")
+        if not isinstance(self.minimum_event_taxels, int) or isinstance(
+            self.minimum_event_taxels, bool
+        ):
+            raise ValueError("minimum_event_taxels 必须为整数")
+        if not 1 <= self.minimum_event_taxels <= TAXELS_PER_SIDE:
+            raise ValueError("事件触点门槛必须位于 1 与单侧触点数之间")
         for item in fields(self):
-            if item.name in {"particle_count", "seed"}:
+            if item.name in {"particle_count", "seed", "minimum_event_taxels"}:
                 continue
             value = getattr(self, item.name)
             if isinstance(value, bool) or not math.isfinite(value):
@@ -63,8 +72,6 @@ class ParticleFrictionConfig:
             raise ValueError("控制分位数必须位于 (0, 0.5)")
         if not 0 < self.resample_ratio <= 1:
             raise ValueError("重采样比例必须位于 (0, 1]")
-        if not 0 < self.minimum_event_quality <= 1:
-            raise ValueError("事件质量阈值必须位于 (0, 1]")
         if not self.min_friction <= self.minimum_event_utilization <= self.max_friction:
             raise ValueError("事件利用率阈值必须位于摩擦范围内")
 
@@ -152,14 +159,16 @@ class ParticleFrictionEstimator:
         dt_s: float,
         stable: bool,
         event: bool,
-        event_quality: float = 0.0,
+        event_taxels: int = 0,
     ) -> ParticleFrictionSnapshot:
         """粘着帧提供单边约束，可信微滑移事件提供局部锚点。"""
         if (
-            not all(math.isfinite(value) for value in (utilization, dt_s, event_quality))
+            not all(math.isfinite(value) for value in (utilization, dt_s))
             or utilization < 0
             or dt_s <= 0
-            or not 0 <= event_quality <= 1
+            or not isinstance(event_taxels, int)
+            or isinstance(event_taxels, bool)
+            or not 0 <= event_taxels <= TAXELS_PER_SIDE
             or not isinstance(stable, bool)
             or not isinstance(event, bool)
         ):
@@ -169,7 +178,7 @@ class ParticleFrictionEstimator:
         self._particles += self._rng.normal(0.0, diffusion, c.particle_count)
         self._particles = np.clip(self._particles, c.min_friction, c.max_friction)
 
-        quality_qualified = event and event_quality >= c.minimum_event_quality
+        quality_qualified = event and event_taxels >= c.minimum_event_taxels
         qualified_event = quality_qualified and utilization >= c.minimum_event_utilization
         if quality_qualified and not qualified_event:
             return self.snapshot(updated=False, reason="event_below_utilization")
@@ -182,7 +191,7 @@ class ParticleFrictionEstimator:
             # 而是摩擦利用率抵达临界带的局部观测，因此用钟形似然定位 μ。
             standardized = (normalized - c.incipient_utilization) / c.transition_width
             likelihood = np.exp(-0.5 * standardized**2)
-            power = c.event_strength * event_quality
+            power = c.event_strength * event_taxels / TAXELS_PER_SIDE
             reason = "event_update"
         else:
             event_probability = self._sigmoid(

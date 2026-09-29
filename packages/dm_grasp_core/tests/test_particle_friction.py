@@ -29,7 +29,7 @@ def test_incipient_event_localizes_friction_with_conservative_control_value(
         dt_s=0.004,
         stable=False,
         event=True,
-        event_quality=0.9,
+        event_taxels=8,
     )
 
     assert snapshot.mean == pytest.approx(true_friction, rel=0.03)
@@ -46,7 +46,7 @@ def test_unqualified_event_and_reset_do_not_fabricate_evidence() -> None:
         dt_s=0.004,
         stable=False,
         event=True,
-        event_quality=0.2,
+        event_taxels=2,
     )
     reset = estimator.reset()
 
@@ -64,7 +64,7 @@ def test_low_utilization_rebalancing_event_is_rejected() -> None:
         dt_s=0.004,
         stable=False,
         event=True,
-        event_quality=0.8,
+        event_taxels=7,
     )
 
     assert not snapshot.updated
@@ -77,7 +77,7 @@ def test_low_utilization_rebalancing_event_is_rejected() -> None:
         {"particle_count": 31},
         {"min_friction": 0.5, "max_friction": 0.2},
         {"control_quantile": 0.5},
-        {"minimum_event_quality": 0.0},
+        {"minimum_event_taxels": 0},
         {"minimum_event_utilization": 0.01},
         {"seed": -1},
     ],

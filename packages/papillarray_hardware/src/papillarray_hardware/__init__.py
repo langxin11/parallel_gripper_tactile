@@ -9,7 +9,14 @@ from .acquisition import (
     TactileWorker,
 )
 
-from .client import DEFAULT_PAPILLARRAY_PORT, PapillArraySerialClient, PapillArraySerialConfig
+from .client import (
+    DEFAULT_PAPILLARRAY_PORT,
+    TACTILE_NORMAL_RANGE_N,
+    TACTILE_TANGENTIAL_RANGE_N,
+    TAXELS_PER_SIDE,
+    PapillArraySerialClient,
+    PapillArraySerialConfig,
+)
 from .pillar_friction import (
     PillarFrictionConfig,
     PillarFrictionEstimate,
@@ -30,6 +37,9 @@ __all__ = [
     "FirstOrderLowPassFilter",
     "PacketChecksumError",
     "DEFAULT_PAPILLARRAY_PORT",
+    "TACTILE_NORMAL_RANGE_N",
+    "TACTILE_TANGENTIAL_RANGE_N",
+    "TAXELS_PER_SIDE",
     "PapillArraySerialClient",
     "PapillArraySerialConfig",
     "PillarFrictionConfig",

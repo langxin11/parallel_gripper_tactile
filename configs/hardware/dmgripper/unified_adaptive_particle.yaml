@@ -1,5 +1,6 @@
-# 刚度预载集成测试的固定配置，仅用于假设备；真机配置调参不应改变本用例。
-# 本文件只写与主力默认的差异：粒子路线 + 刚度辨识预载，其余由 dataclass 默认承载。
+# 粒子摩擦后验的离线回放／受控试验配置；默认值即主力 unified_adaptive profile，
+# 本文件只写与主力的真差异。先用连续抓取记录回放检查后验、触点门禁和目标变化，
+# 再决定是否进行有人值守的真机试验。
 metadata:
   task_name: unified-adaptive-particle
   object_name: object
@@ -7,26 +8,19 @@ hardware:
   dm_port: /dev/dmj4310_can
   tactile_port: /dev/papillarray
 timing:
+  # 100 Hz 控制；单周期超时容纳已观测的单次 130 ms 主机抖动，仍早于触觉超时。
   control_rate_hz: 100.0
   max_control_gap_s: 0.15
 safety:
-  # 压缩上限与主力粒子配置一致，面向低力受控试验。
+  # 压缩上限较主力收紧：粒子路线面向低力受控试验。
   max_contact_compression_m: 0.020
 lifecycle:
-  # 刚度辨识预载：锁定接触底力；以下边界在本用例内固定，不随真机调参漂移。
+  # 刚度辨识预载：锁定接触底力；以下边界仍需按实际物体耐受验证。
   stiffness_preload:
-    indentation_m: 0.002
     min_force_n: 0.5
-    max_force_n: 4.0
-    force_ceiling_n: 5.0
     probe_force_n: 0.5
-    max_closure_m: 0.003
-    timeout_s: 3.0
-    consistency: 0.15
-    stable_s: 0.1
-    min_updates: 3
-    max_estimate_age_s: 0.2
 reference:
+  # 启动目标低于主力，配合更低的调度下限。
   initial_force_n: 0.5
   experimental_closed_loop: true
   unified:
@@ -52,7 +46,7 @@ reference:
       # 每侧独立 256 个一维摩擦粒子；固定种子便于对同一触觉记录复现后验。
       seed: 23
 controller:
-  # MIT 位置和速度参考均跟随导纳输出（默认为零速阻尼模式）。
+  # MIT 位置和速度参考均跟随导纳输出（主力为零速阻尼模式）。
   zero_tracking_velocity: false
   admittance:
     # 局部模型候选外环参数，不代表已测得内环带宽或通过真机稳定性验收。

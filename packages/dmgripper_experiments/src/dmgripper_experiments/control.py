@@ -2,8 +2,7 @@
 
 生命周期归运行时所有：本模块只提供 ``begin_contact_tracking``／
 ``step_tracking``／``reset``，不自行切回接近或决定释放。导纳路径消费
-外层已滤波的触觉力；PID／一阶 LADRC 路径把原始力交给共享核，由核心
-内部做唯一一次低通，避免双重滤波。
+外层已滤波的触觉力，是唯一控制器。
 """
 
 from __future__ import annotations
@@ -14,14 +13,9 @@ import math
 from dmgripper_hardware import MotorFeedback
 
 from dm_grasp_core import (
-    AdrcConfig,
-    ForceControlObservation,
-    ForceControlReference,
     MITCommand,
     MITCommandConfig,
     MITControlCommand,
-    NormalForceConfig,
-    NormalForceController,
     SecondOrderAdmittance,
     build_mit_command,
     step_admittance,
@@ -164,10 +158,10 @@ class _MitRequestAdapter:
 
 
 class GripController:
-    """导纳、PID 与一阶 LADRC 的统一真机跟踪适配。
+    """二阶导纳的真机跟踪适配。
 
-    只生成受限请求，不打开串口，也不重复定义外环控制律；三种控制器
-    面对同一有效观测时共享运行时提供的刚度快照来源。
+    只生成受限请求，不打开串口，也不重复定义外环控制律；面对同一
+    有效观测时共享运行时提供的刚度快照来源。
     """
 
     def __init__(
@@ -188,40 +182,6 @@ class GripController:
             controller.admittance.stiffness_n_m,
         )
         self._admittance_params = controller.admittance
-        self.normal = NormalForceController(
-            NormalForceConfig(
-                target_n=config.reference.initial_force_n,
-                contact_threshold_n=config.lifecycle.contact_on_n,
-                contact_confirm_steps=1,
-                release_threshold_n=config.lifecycle.contact_off_n,
-                release_confirm_steps=1,
-                kp=controller.pid.kp,
-                ki=controller.pid.ki,
-                kd=controller.pid.kd,
-                max_position_adjustment=(
-                    controller.pid.max_position_adjustment_rad
-                    if controller.kind == "pid"
-                    or controller.pid.max_position_adjustment_rad is not None
-                    else 0.15
-                ),
-                pid_torque_feedforward_gain=(
-                    controller.pid.torque_feedforward_gain if controller.kind == "pid" else None
-                ),
-                filter_cutoff_hz=config.timing.tactile_cutoff_hz,
-                geometry=kinematics,
-                stiffness=None,
-                adrc=(
-                    AdrcConfig(
-                        b0_n_per_m=controller.adrc.b0_n_per_m,
-                        controller_bandwidth_rad_s=controller.adrc.controller_bandwidth_rad_s,
-                        observer_bandwidth_rad_s=controller.adrc.observer_bandwidth_rad_s,
-                        max_closing_velocity_m_s=controller.adrc.max_closing_velocity_m_s,
-                    )
-                    if controller.kind == "adrc"
-                    else None
-                ),
-            )
-        )
         self._inner = _MitRequestAdapter(
             kinematics=kinematics,
             command_config=command_config,
@@ -241,7 +201,6 @@ class GripController:
             self.stiffness_adaptation = StiffnessAdmittance(self.stiffness_adaptation.config)
             self.admittance.mass_kg = self._admittance_params.mass_kg
             self.admittance.damping_ns_m = self._admittance_params.damping_ns_m
-        self.normal.reset()
         self._inner.reset(position_rad)
         self._contact_reference_rad = position_rad
 
@@ -277,38 +236,24 @@ class GripController:
         *,
         paired: PairedObservation,
         target: ForceTarget,
-        time_s: float,
         dt: float,
     ) -> TrackingStep:
         """接触建立后初始化跟踪控制律并生成首个命令。"""
         if self._contact_reference_rad is None:
             self.reset(paired.feedback.position_rad)
         self._inner.bind(paired.feedback, dt)
-        return self._dispatch(
-            paired=paired,
-            target=target,
-            time_s=time_s,
-            dt=dt,
-            begin=True,
-        )
+        return self._dispatch(paired=paired, target=target, dt=dt)
 
     def step_tracking(
         self,
         *,
         paired: PairedObservation,
         target: ForceTarget,
-        time_s: float,
         dt: float,
     ) -> TrackingStep:
         """执行一次跟踪计算。"""
         self._inner.bind(paired.feedback, dt)
-        return self._dispatch(
-            paired=paired,
-            target=target,
-            time_s=time_s,
-            dt=dt,
-            begin=False,
-        )
+        return self._dispatch(paired=paired, target=target, dt=dt)
 
     def _require_contact_reference(self) -> float:
         """返回导纳围绕的接触参考位置。"""
@@ -321,21 +266,11 @@ class GripController:
         *,
         paired: PairedObservation,
         target: ForceTarget,
-        time_s: float,
         dt: float,
-        begin: bool,
     ) -> TrackingStep:
-        """按控制器类型生成受限命令与诊断。"""
+        """生成受限命令与诊断。"""
         _check_target_bounds(target.force_n, self._config)
-        if self._config.controller.kind == "admittance":
-            return self._step_admittance(paired=paired, target=target, dt=dt)
-        return self._step_normal(
-            paired=paired,
-            target=target,
-            time_s=time_s,
-            dt=dt,
-            begin=begin,
-        )
+        return self._step_admittance(paired=paired, target=target, dt=dt)
 
     def _step_admittance(
         self,
@@ -375,54 +310,6 @@ class GripController:
             force_error_n=(
                 target.force_n - (paired.snapshot.left_force_n + paired.snapshot.right_force_n) / 2
             ),
-        )
-
-    def _step_normal(
-        self,
-        *,
-        paired: PairedObservation,
-        target: ForceTarget,
-        time_s: float,
-        dt: float,
-        begin: bool,
-    ) -> TrackingStep:
-        """PID／LADRC 路径：原始力交给共享核，由核心内部唯一滤波。"""
-        observation = ForceControlObservation(
-            time_s=time_s,
-            approach_position=paired.feedback.position_rad,
-            total_normal_force_n=paired.snapshot.raw_left_fz_n + paired.snapshot.raw_right_fz_n,
-            left_normal_force_n=paired.snapshot.raw_left_fz_n,
-            right_normal_force_n=paired.snapshot.raw_right_fz_n,
-            dt=dt,
-        )
-        reference = ForceControlReference(
-            target_force_n=target.force_n,
-            target_force_rate_n_s=target.rate_n_s if target.rate_n_s is not None else 0.0,
-            target_force_acceleration_n_s2=(
-                target.acceleration_n_s2 if target.acceleration_n_s2 is not None else 0.0
-            ),
-        )
-        if begin:
-            result = self.normal.begin_tracking(
-                self._inner,
-                observation=observation,
-                reference=reference,
-            )
-        else:
-            result = self.normal.step_tracking(
-                self._inner,
-                observation=observation,
-                reference=reference,
-            )
-        assert self._inner.last_command is not None, "跟踪计算必须产生 MIT 请求"
-        return TrackingStep(
-            command=self._inner.last_command,
-            force_deadband_active=False,
-            unloading_blocked=False,
-            filtered_force_n=result.filtered_force_n,
-            position_adjustment=result.position_adjustment,
-            stiffness_estimate_n_per_m=None,
-            force_error_n=result.force_error_n,
         )
 
 

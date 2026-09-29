@@ -1,156 +1,29 @@
-# 通用自适应抓取入口：水瓶、舵机、耳机仓、海绵和长方体共用控制与估计流程。
-# 物体名称只用于记录；力限须按物体耐受调整，当前数值不是跨物体验收结论。
-# 正常操作路径为：预检 → 等待 start → 建立抓力 → active 持续估计 → release 回位。
-# 任一使能后的正常阶段均可输入 release；触觉或控制故障会先进入 fault_holding，待人工承接后再 release。
+# 通用自适应抓取主力入口：持续在线摩擦与接触刚度估计，人工释放结束抓取。
+# 默认流程：预检 → 等待 start → 建立抓力 → active 持续估计 → release 回位。
+# 本文件只写实验身份与真差异；稳定参数由 dataclass 默认承载（即本主力 profile），
+# 派生量（调度包络上限、最低力、速率边界）由 safety 与初始目标在构造期生成。
+# 任一使能后的正常阶段均可输入 release；触觉或控制故障先进入 fault_holding。
 metadata:
-  # task_name 与 object_name 只决定运行目录、图表标题和元数据，不参与控制公式。
   task_name: unified-adaptive
   object_name: object
-  description: 持续在线摩擦与接触刚度估计，人工释放结束抓取
-  tags: [real, adaptive, friction, online]
 hardware:
-  # 设备路径必须与当前 udev 配置匹配；仅在 --execute 时才会打开设备。
   dm_port: /dev/dmj4310_can
   tactile_port: /dev/papillarray
-timing:
-  # 力控和状态机的主循环频率；本配置取 250 Hz，多速率触觉采样启用时也固定要求该频率。
-  control_rate_hz: 250.0
-  # 任一控制周期超过此值即按故障处理，避免在主机卡顿时继续发送旧命令。
-  max_control_gap_s: 0.1
-  # 接收时间超过此阈值的触觉包不可用于控制；必须大于 max_control_gap_s。
-  tactile_timeout_s: 0.2
-  # 双侧法向力的外层低通截止频率；原始逐 taxel 力仍用于量程和过力保护。
-  tactile_cutoff_hz: 20.0
-lifecycle:
-  # 使能前要求双侧空载零力窗口通过；不要在物体接触传感器时启动。
-  verify_zero_force: true
-  # 双侧各自达到该法向力才开始接触确认；持续时间使用默认 contact_on_stable_s=0.1 s。
-  contact_on_n: 0.2
-  # 任一侧持续低于此值即判失接触；低于 contact_on_n 形成滞回，避免抖动切换。
-  contact_off_n: 0.1
-  contact_off_stable_s: 0.15
-  # 接触确认后，将接近速度平滑降为零的时间，而非额外静置时间。
-  contact_transition_s: 0.15
-  # 任一侧失接触即故障；统一自适应模式不允许 reapproach，因为重新接触后的摩擦基线语义未定义。
-  lost_contact_scope: any_side
-  lost_contact_action: fault
-  # 机械接近／回位的速度上限；加速度和 jerk 沿用库默认的 0.025 m/s²、0.100 m/s³。
-  # 接近保持较保守以降低首次接触冲击；release 回位可更快，但仍受关节速度和力矩边界约束。
-  approach_closure_velocity_m_s: 0.015
-  return_closure_velocity_m_s: 0.035
-  # 预载只确认可靠建立抓力，不要求精确稳态；最终目标的 75% 持续 0.5 s 即进入 active。
-  preload_min_force_ratio: 0.75
-  preload_stable_time_s: 0.5
-  preload_timeout_s: 30.0
-  # 独立于 active 增力速率，五次曲线首尾平滑、峰值不超过 1 N/s。
-  preload_force_rate_n_s: 1.0
-  # false 强制人工输入 start；duration_s=null 时 on_finished 不会在正常路径触发，仍保留为显式语义。
-  auto_start: false
-  on_finished: hold
-  # 不启动额外的自主旁路摩擦会话或原厂滑移服务；本配置仅使用 unified 在线摩擦估计。
-  own_friction: null
-  native_slip: null
-reference:
-  adaptive:
-    # 所有力均为平均单侧法向力，单位 N；不是双侧总法向力。
-    initial_force_n: 1.0
-    # 不设任务截止时间；输入 release 后受限回位，再失能退出。
-    duration_s: null
-    # 切向承载增大时快速补足法向目标；仍受目标与原始过力上限约束。
-    max_force_rate_n_s: 10.0
-    # 本配置仅授权当前未验收的受控闭环试验，不冒充风险或摩擦真机验收。
-    experimental_closed_loop: true
-    unified:
-      # 风险检测开放后才允许在线摩擦更新；experimental_closed_loop 是未完成真机验收时的受控试验授权。
-      risk_enabled: true
-      # 风险事件只更新摩擦；目标完全由切向承载与在线摩擦之比产生。
-      risk_step_enabled: false
-      friction_update_enabled: true
-      # 允许至少三个共同有效触点形成候选；这是覆盖率门槛，不是统计置信度。
-      friction_quality_min: 0.3
-      friction_discount: 0.8
-      friction_min: 0.05
-      friction_max: 2.0
-      # 同一连续接触段内保留估计；无新事件不等于摩擦回到先验。
-      friction_expiry_s: null
-      friction_raise_events: 3
-      friction_consistency: 0.15
-      load:
-        # 启动先验仅在尚无可信事件时使用，不表示被抓物摩擦已知；左右独立更新。
-        left_friction: 0.3
-        right_friction: 0.3
-        # 目标为 safety_factor × max(T_left/μ_left, T_right/μ_right)，并受以下边界与速率限制。
-        safety_factor: 1.5
-        min_force_n: 1.0
-        # 必须与 safety.max_target_force_n 相等，并始终低于 force_ceiling_n。
-        max_force_n: 30.0
-        # 增力分别受此项和 adaptive.max_force_rate_n_s 的共同边界约束。
-        max_force_rate_n_s: 10.0
-        # 短暂卸载或液体晃动时缓慢退力，避免快速跟随切向波动而松夹。
-        max_force_decrease_rate_n_s: 1.0
-        gap_gain_per_s: 8.0
-        load_rate_gain: 1.0
-        # 切向承载调度的一阶滤波时间常数，不等于触觉法向力低通。
-        filter_tau_s: 0.05
-        # 允许目标缓慢下降；导纳控制器须同时保持 prevent_unloading=false。
-        allow_target_decrease: true
-      observer:
-        # 风险观察窗口、确认时间和事件后的冷却时间，均基于传感器时间戳。
-        window_s: 0.2
-        confirmation_s: 0.04
-        cooldown_s: 0.3
-        max_gap_s: 0.1
-        min_normal_n: 0.15
-        # 有效接触覆盖率降到该比例以下时释放当前观察集合；不是生命周期的 contact_off_n。
-        contact_release_ratio: 0.6666666666666666
-        # 稳态载荷下的局部重分配也可形成风险候选；stable_contact_subset 避免跨接触集合混合估计。
-        allow_steady_load_risk: true
-        stable_contact_subset: true
-        # 单 taxel 量程边界；达到或超过即停止依赖触觉保持，而非裁剪后继续计算。
-        tangential_range_n: 4.0
-        normal_range_n: 15.0
-      # 执行器受限且实际力持续落后目标超过该误差时暂停增力，并计入失败保护。
-      tracking_error_n: 0.3
-      failure_timeout_s: 0.5
-      # 相邻触觉样本超过此间隔立即视为策略采样缺口；与主循环超时独立。
-      max_sample_gap_s: 0.1
-controller:
-  # 统一自适应模式只支持 admittance；它以力误差更新位置参考。
-  kind: admittance
-  # 通过正向合成力矩增减来卸力，允许接触弹性反力推动被动退让。
-  closing_torque_only: true
-  # 跟踪只更新位置参考；MIT 速度项只阻尼实测速度，不追随导纳速度。
-  zero_tracking_velocity: true
-  # 跟踪增益较默认 2.0／0.5 小幅提高；回位增益保持独立。
-  mit_kp: 4.0
-  mit_kd: 1.0
-  admittance:
-    # 二阶虚拟质量、阻尼、刚度；它们是控制器参数，不是物体材料参数。
-    mass_kg: 0.2
-    damping_ns_m: 15.0
-    stiffness_n_m: 1.0
-    force_deadband_n: 0.1
-    # false 允许目标下降时主动卸力；与 load.allow_target_decrease 配套。
-    prevent_unloading: false
-    # 按当前机构雅可比施加的模型前馈比例；1.0 为完整前馈，仍受力矩上限保护。
-    feedforward_ratio: 1.0
-estimation:
-  # 在线估计等效接触刚度；无足够位移激励时如实记录无效。
-  # 当前仅记录 stiffness_n_per_m、有效性和原因，不直接修改控制器增益；请保持开启以积累后续算法数据。
-  enabled: true
-  method: window_linear
 safety:
-  # 目标上限必须等于 unified.load.max_force_n；单位均为平均单侧力 N。
+  # 唯一限幅定义点；所有力均为平均单侧法向力 N，不是双侧总法向力。
   max_target_force_n: 30.0
-  # 原始双侧法向力的硬保护线；任一侧超过即停止闭环并进入故障处理。
   force_ceiling_n: 40.0
-  # 接近轨迹中的正向机构前馈等效力；仅作用于 approach，不是 preload 或 active 的目标力。
+  max_contact_compression_m: 0.040
+  max_force_rate_n_s: 10.0
+  max_force_decrease_rate_n_s: 1.0
   approach_feedforward_force_n: 1.0
-output:
-  # 每次运行在 root/task_name/object_name 下生成独立目录；不要覆盖历史运行记录。
-  root: outputs/real
-  plots: true
-terminal:
-  # auto 在兼容终端使用 Rich 面板，否则使用纯文本；显示刷新不参与控制时钟。
-  mode: auto
-  refresh_hz: 5.0
+reference:
+  # 本配置仅授权当前未验收的受控闭环试验，不冒充风险或摩擦真机验收。
+  experimental_closed_loop: true
+  unified:
+    estimator: depth_prior
+    depth_friction_prior:
+      # 深度由实测关节角换算总闭合量减去首次双侧接触闭合量；左右共用同一压缩量。
+      # 只在 active 可靠接触窗口后锁定一次，随后由摩擦证据更新。
+      max_friction: 0.8
+      max_increase_per_s: null

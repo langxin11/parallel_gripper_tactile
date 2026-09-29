@@ -352,7 +352,7 @@ def test_particle_friction_candidate_recovers_gradual_low_friction_load(tmp_path
             friction_update_enabled=True,
             particle_friction=ParticleFrictionConfig(
                 seed=23,
-                minimum_event_quality=0.3,
+                minimum_event_taxels=3,
             ),
         ),
         output_csv=trace,

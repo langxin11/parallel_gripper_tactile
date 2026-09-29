@@ -16,23 +16,25 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import NoReturn
 
-from papillarray_hardware import PapillArraySerialConfig, StandaloneSlipSession
+from papillarray_hardware import (
+    TACTILE_NORMAL_RANGE_N,
+    TACTILE_TANGENTIAL_RANGE_N,
+    PapillArraySerialConfig,
+)
 
 from dm_grasp_core import (
     ContactTransition,
     CrankSliderKinematics,
-    ForceReferenceCurve,
-    ForceWaypoint,
     MITCommand,
     MITCommandConfig,
     StiffnessSnapshot,
     build_mit_command,
 )
 
+from .compression import ContactCompressionGuard
 from .config import ExperimentConfig, LifecycleConfig
 from .control import GripController
 from .lifecycle import RELEASE_PHASES, Lifecycle, LifecyclePhase
-from .native_slip import NativeSlipSession
 from .observation import (
     PairedObservation,
     StiffnessDiagnostics,
@@ -40,10 +42,9 @@ from .observation import (
     raw_axes,
 )
 from .plotting import plot_experiment_run
-from .recording import ExperimentRecorder
+from .recording import ExperimentRecorder, strided_sample_sink
 from .session import DmSession
 from .tactile import (
-    HardwareTactilePreprocessor,
     TactileSnapshot,
     TactileWorker,
 )
@@ -54,6 +55,24 @@ from .trace import _motor_only_trace_row, _trace_row
 from .trajectory import ClosureTrajectory
 
 EventSink = Callable[[dict[str, object]], None]
+
+# 设备行为与运行保护常数；此前散落在配置 schema，从未按机器分别调整过。
+_TACTILE_STARTUP_TIMEOUT_S = 5.0
+_TACTILE_BIAS_SETTLE_S = 2.0
+_TACTILE_FILTER_RESET_GAP_S = 0.1
+_ZERO_FORCE_THRESHOLD_N = 0.1
+_ZERO_FORCE_STABLE_S = 0.5
+_ZERO_FORCE_TIMEOUT_S = 5.0
+_APPROACH_CLOSURE_ACCELERATION_M_S2 = 0.025
+_APPROACH_CLOSURE_JERK_M_S3 = 0.1
+_APPROACH_ENDPOINT_HOLD_S = 0.5
+_RETURN_CLOSURE_ACCELERATION_M_S2 = 0.025
+_RETURN_CLOSURE_JERK_M_S3 = 0.1
+_RETURN_TIMEOUT_S = 5.0
+_RETURN_SETTLE_TIMEOUT_S = 2.0
+_RETURN_POSITION_TOLERANCE_RAD = 0.02
+# 接近前馈比例的历史有效值；该旋钮已从配置面删除。
+_APPROACH_FEEDFORWARD_RATIO = 0.5
 
 _KINEMATICS = CrankSliderKinematics(
     theta0_rad=math.pi / 4,
@@ -178,8 +197,6 @@ def run_experiment(
         if terminal is not None and stamped.get("event") in {
             "command_received",
             "disabled",
-            "own_friction_estimate",
-            "own_friction_state",
             "state",
             "status",
             "warning",
@@ -210,13 +227,6 @@ def run_experiment(
     fault_resolution: str | None = None
     runtime_secondary_errors: list[str] = []
     try:
-        snapshot_transform = None
-        if (
-            config.unified_adaptive_enabled
-            and config.reference.adaptive.tactile_sampling is not None
-        ):
-            preprocessor = HardwareTactilePreprocessor(config)
-            snapshot_transform = preprocessor
         tactile = tactile_factory(
             PapillArraySerialConfig(
                 port=config.hardware.tactile_port,
@@ -228,11 +238,8 @@ def run_experiment(
             clear_bias=clear_bias,
             clock=clock,
             cutoff_hz=config.timing.tactile_cutoff_hz,
-            filter_reset_gap_s=config.timing.tactile_filter_reset_gap_s,
-            sample_sink=recorder.sample,
-            **(
-                {"snapshot_transform": snapshot_transform} if snapshot_transform is not None else {}
-            ),
+            filter_reset_gap_s=_TACTILE_FILTER_RESET_GAP_S,
+            sample_sink=strided_sample_sink(recorder.sample, config.recording.tactile_stride),
         )
         dm = session_factory(
             config.hardware.dm_port,
@@ -249,11 +256,19 @@ def run_experiment(
                 "message": _PHASE_MESSAGES[LifecyclePhase.PREPARING],
             }
         )
+        emit(
+            {
+                "event": "safety_limits",
+                "phase": LifecyclePhase.PREPARING.value,
+                "message": "最终生效限幅已按 safety 单源派生并开始执行",
+                **_effective_limits(config),
+            }
+        )
         _precheck_motor(config, dm, recorder, emit, clock, sleep, started, devices)
         if config.lifecycle.verify_zero_force:
             _verify_zero(tactile, config, clear_bias, clock, sleep, warning_sink=emit)
         else:
-            first = tactile.wait_for_update(None, config.timing.tactile_startup_timeout_s)
+            first = tactile.wait_for_update(None, _TACTILE_STARTUP_TIMEOUT_S)
             _validate_snapshot(first, clock(), config)
             emit(
                 {
@@ -338,14 +353,18 @@ def run_experiment(
             failure = RuntimeError("退出清理失败：" + "；".join(cleanup_errors))
         post_processing_error: BaseException | None = None
         plots: list[str] = []
-        if failure is None and outcome is not None and outcome.get("status") != "cancelled":
-            if config.output.plots:
-                try:
-                    generated = plot_experiment_run(Path(output_directory))
-                    plots = [str(path) for path in generated]
-                    recorder.register_artifacts({path.name: path.name for path in generated})
-                except BaseException as error:  # noqa: BLE001
-                    post_processing_error = error
+        # 故障前的 trace 是定位保护触发与控制响应的唯一原始证据；只要
+        # 已有可用轨迹，就应与正常运行一样生成诊断图。取消发生在使能前，
+        # 不产生可解释的控制段，仍跳过后处理。
+        if outcome is not None and outcome.get("status") != "cancelled":
+            try:
+                generated = plot_experiment_run(Path(output_directory))
+                plots = [str(path) for path in generated]
+                recorder.register_artifacts({path.name: path.name for path in generated})
+            except BaseException as error:  # noqa: BLE001
+                post_processing_error = error
+                if failure is not None:
+                    cleanup_errors.append(f"故障后绘图失败：{error}")
         if failure is not None:
             try:
                 try:
@@ -381,6 +400,11 @@ def run_experiment(
                 cleanup_errors=cleanup_errors,
                 post_processing_error=post_processing_error,
                 input_config_path=input_config_path,
+                stop_reason=(
+                    str(outcome.get("stop_reason"))
+                    if outcome is not None and outcome.get("stop_reason") is not None
+                    else None
+                ),
             )
     if failure is not None:
         if had_primary_failure and cleanup_errors:
@@ -482,8 +506,8 @@ def _precheck_motor(
     period = 1.0 / config.timing.control_rate_hz
     phase_started = last_control = clock()
     timeout_s = max(
-        config.lifecycle.return_timeout_s,
-        trajectory.duration_s + config.lifecycle.return_settle_timeout_s,
+        _RETURN_TIMEOUT_S,
+        trajectory.duration_s + _RETURN_SETTLE_TIMEOUT_S,
     )
     while True:
         now = clock()
@@ -576,13 +600,14 @@ def _run_ready_and_enabled(
                 }
             )
             break
-        if config.lifecycle.auto_start:
+        if config.reference.duration_s is not None and config.lifecycle.on_finished == "return":
+            # 非交互组合（有限时长且自动回位）由两段配置派生，不再有独立开关。
             emit(
                 {
                     "event": "command_received",
                     "phase": LifecyclePhase.READY.value,
                     "action": "auto_start",
-                    "message": "已按配置自动启动，正在使能电机并进入控制。",
+                    "message": "按非交互组合自动启动，正在使能电机并进入控制。",
                 }
             )
             break
@@ -641,6 +666,16 @@ def _run_ready_and_enabled(
     )
 
 
+def _recording_limit_reason(
+    config: ExperimentConfig, recorder: ExperimentRecorder, elapsed_s: float
+) -> str | None:
+    """返回应提前收尾的记录上限原因；``None`` 表示未触发。"""
+    cap_s = config.recording.max_duration_s
+    if cap_s is not None and elapsed_s >= cap_s:
+        return f"max_duration_s={cap_s:g}"
+    return recorder.limit_stop_reason
+
+
 def _run_control_loop(
     config: ExperimentConfig,
     dm: DmSession,
@@ -683,25 +718,14 @@ def _run_control_loop(
             feedback,
             feedback_state,
         )
-        if config.lifecycle.native_slip is not None:
-            tactile.stop_native_slip("control_exit")
         return outcome
     except FatalHardwareFault as error:
-        if config.lifecycle.native_slip is not None:
-            tactile.stop_native_slip("control_fault")
         if error.phase is None:
             error.phase = lifecycle.phase.value
         raise
     except KeyboardInterrupt:
-        if config.lifecycle.native_slip is not None:
-            tactile.stop_native_slip("interrupted")
         raise
     except Exception as error:
-        if config.lifecycle.native_slip is not None:
-            try:
-                tactile.stop_native_slip("control_fault")
-            except Exception as stop_error:
-                error.add_note(f"停止原生滑动检测失败，继续电机持位：{stop_error}")
         return _run_fault_holding(
             config,
             dm,
@@ -742,24 +766,11 @@ def _run_control_loop_inner(
         zero_velocity_target=config.controller.zero_tracking_velocity,
     )
     controller = GripController(config, kinematics=kinematics, command_config=tracking_config)
-    target_source = build_target_source(
-        curve=_curve_from_config(config),
-        adaptive=config.reference.adaptive,
-        max_target_force_n=config.safety.max_target_force_n,
-        control_rate_hz=timing.control_rate_hz,
-        contact_floor_n=lifecycle_config.contact_off_n,
+    target_source = build_target_source(config.reference, config.unified_core_config)
+    compression = ContactCompressionGuard(
+        kinematics, config.safety.max_contact_compression_m, lifecycle_config.contact_on_n
     )
     stiffness = StiffnessDiagnostics(config.estimation, kinematics)
-    native_slip = (
-        NativeSlipSession(lifecycle_config.native_slip)
-        if lifecycle_config.native_slip is not None
-        else None
-    )
-    own_friction = (
-        StandaloneSlipSession(lifecycle_config.own_friction.to_session_config())
-        if lifecycle_config.own_friction is not None
-        else None
-    )
 
     period = 1.0 / timing.control_rate_hz
     phase_started = last_control = clock()
@@ -781,11 +792,10 @@ def _run_control_loop_inner(
     stiffness_preload: StiffnessPreload | None = None
     task_time_s = 0.0
     tracking_begun = False
-    reapproach_attempts = 0
-    reapproach_total_s = 0.0
     current_target: ForceTarget | None = None
     latest_stiffness: StiffnessSnapshot | None = None
     last_observation_signature: tuple[object, ...] | None = None
+    recording_stop_reason: str | None = None
 
     def fail(reason: str) -> NoReturn:
         """把实验级故障交给外层故障保持状态机。"""
@@ -874,8 +884,8 @@ def _run_control_loop_inner(
                 )
             )
             timeout_s = max(
-                lifecycle_config.return_timeout_s,
-                trajectory.duration_s + lifecycle_config.return_settle_timeout_s,
+                _RETURN_TIMEOUT_S,
+                trajectory.duration_s + _RETURN_SETTLE_TIMEOUT_S,
             )
             if now - phase_started > timeout_s:
                 fail("自动回零轨迹执行超时")
@@ -964,17 +974,47 @@ def _run_control_loop_inner(
                     ),
                 }
             )
-        multirate = (
-            config.unified_adaptive_enabled
-            and config.reference.adaptive.tactile_sampling is not None
-        )
-        if multirate and lifecycle.is_tracking:
+        recording_limit = _recording_limit_reason(config, recorder, now - started)
+        if (
+            recording_limit is not None
+            and recording_stop_reason is None
+            and lifecycle.phase in RELEASE_PHASES
+            and lifecycle.phase is not LifecyclePhase.RETURNING
+        ):
+            recording_stop_reason = recording_limit
+            emit(
+                {
+                    "event": "recording_limit",
+                    "phase": lifecycle.phase.value,
+                    "reason": recording_limit,
+                    "message": f"记录上限触发（{recording_limit}），按 release 语义受限回位收尾。",
+                }
+            )
+            lifecycle.begin_return(now, f"记录上限触发：{recording_limit}")
+            enter_phase(LifecyclePhase.RETURNING, _PHASE_MESSAGES[LifecyclePhase.RETURNING])
+            trajectory = _home_trajectory(config, kinematics, feedback.position_rad)
+            phase_started = now
+        if lifecycle.phase is not LifecyclePhase.RETURNING:
             try:
-                target_source.observe(paired, dt)
-            except (ValueError, RuntimeError) as error:
-                raise RuntimeError(f"多速率观测失败：{error}") from error
-            if target_source.failure_reason is not None:
-                fail(f"统一自适应策略失败：{target_source.failure_reason}")
+                compression.observe(
+                    feedback.position_rad, sample.left_force_n, sample.right_force_n
+                )
+            except RuntimeError as error:
+                emit(
+                    {
+                        "event": "compression_limit",
+                        "phase": lifecycle.phase.value,
+                        "message": str(error),
+                        **compression.trace_fields(),
+                    }
+                )
+                fail(str(error))
+            if (
+                isinstance(target_source, UnifiedAdaptiveTargetSource)
+                and min(sample.left_force_n, sample.right_force_n) >= lifecycle_config.contact_on_n
+            ):
+                # 单侧接触后的物体平移不应抬高摩擦先验；行程保护仍从更早的单侧接触累计。
+                target_source.set_contact_closure(paired.closure_m)
         if paired.is_new_tactile:
             left_n, right_n = sample.left_force_n, sample.right_force_n
             if lifecycle.phase is LifecyclePhase.APPROACH:
@@ -1006,36 +1046,12 @@ def _run_control_loop_inner(
                 LifecyclePhase.RETURNING,
                 LifecyclePhase.COMPLETED,
             }:
-                lost = (
-                    min(left_n, right_n) <= lifecycle_config.contact_off_n
-                    if lifecycle_config.lost_contact_scope == "any_side"
-                    else max(left_n, right_n) <= lifecycle_config.contact_off_n
-                )
+                lost = min(left_n, right_n) <= lifecycle_config.contact_off_n
                 if lost:
                     lost_since = sample.received_at_s if lost_since is None else lost_since
                     if sample.received_at_s - lost_since >= lifecycle_config.contact_off_stable_s:
-                        if lifecycle_config.lost_contact_action == "fault" or (
-                            target_source.kind == "adaptive"
-                        ):
-                            fail("跟踪阶段持续失去接触")
-                        reapproach_attempts += 1
-                        if reapproach_attempts > lifecycle_config.reapproach_max_attempts:
-                            fail("重新接近次数超过上限")
-                        lifecycle.reenter_approach(
-                            now, f"失接触后重新接近（第 {reapproach_attempts} 次）"
-                        )
-                        enter_phase(
-                            LifecyclePhase.APPROACH,
-                            _PHASE_MESSAGES[LifecyclePhase.APPROACH],
-                            attempts=reapproach_attempts,
-                        )
-                        phase_started = now
-                        trajectory = _approach_trajectory(
-                            config, command_config, kinematics, feedback.position_rad
-                        )
-                        controller.reset(feedback.position_rad)
-                        tracking_begun = False
-                        contact_since = None
+                        # 重新接近后的摩擦基线语义未定义，失接触一律进故障保持。
+                        fail("跟踪阶段持续失去接触")
                 else:
                     lost_since = None
             if lifecycle.is_tracking:
@@ -1045,12 +1061,9 @@ def _run_control_loop_inner(
                     else sample.received_at_s - last_sample.received_at_s
                 )
                 try:
-                    if not multirate:
-                        target_source.observe(paired, policy_dt)
+                    target_source.observe(paired, policy_dt)
                 except ValueError as error:
-                    if config.unified_adaptive_enabled:
-                        raise RuntimeError(f"统一策略观测计算失败：{error}") from error
-                    raise
+                    raise RuntimeError(f"统一策略观测计算失败：{error}") from error
                 diagnostics = target_source.trace_fields()
                 signature = tuple(
                     diagnostics.get(key)
@@ -1184,8 +1197,7 @@ def _run_control_loop_inner(
                 f"最低预载力={minimum_stable_force_n:.3f}N"
             )
             if (
-                config.controller.kind == "admittance"
-                and config.controller.admittance.prevent_unloading
+                config.controller.admittance.prevent_unloading
                 and paired.measured_force_n > target_value
             ):
                 detail += "；导纳 prevent_unloading=true，力偏高时不会反向纠偏"
@@ -1225,9 +1237,7 @@ def _run_control_loop_inner(
                 config.safety.approach_feedforward_force_n
                 if lifecycle.phase is LifecyclePhase.APPROACH
                 else 0.0,
-                config.safety.approach_feedforward_ratio
-                if lifecycle.phase is LifecyclePhase.APPROACH
-                else 0.0,
+                _APPROACH_FEEDFORWARD_RATIO if lifecycle.phase is LifecyclePhase.APPROACH else 0.0,
             )
         elif lifecycle.phase is LifecyclePhase.CONTACT_TRANSITION:
             assert transition is not None
@@ -1240,9 +1250,7 @@ def _run_control_loop_inner(
                 config.safety.approach_feedforward_force_n
                 if config.controller.closing_torque_only
                 else 0.0,
-                config.safety.approach_feedforward_ratio
-                if config.controller.closing_torque_only
-                else 0.0,
+                _APPROACH_FEEDFORWARD_RATIO if config.controller.closing_torque_only else 0.0,
             )
         else:
             # 预载辨识期间的瞬态斜率可能很大；只在目标锁定并进入 active 后消费刚度。
@@ -1266,7 +1274,6 @@ def _run_control_loop_inner(
                 controller_step = controller.begin_contact_tracking(
                     paired=paired,
                     target=current_target,
-                    time_s=now - started,
                     dt=dt,
                 )
                 tracking_begun = True
@@ -1280,27 +1287,24 @@ def _run_control_loop_inner(
                 controller_step = controller.step_tracking(
                     paired=paired,
                     target=current_target,
-                    time_s=now - started,
                     dt=dt,
                 )
             command = controller_step.command
             target_source.set_execution_limited(controller.admittance.execution_limited)
 
-        if native_slip is not None:
-            for event in native_slip.update(
-                sample,
-                target_force_n=current_target.force_n
-                if current_target is not None
-                else config.reference.initial_force_n,
-                permitted=lifecycle.phase in {LifecyclePhase.PRELOAD, LifecyclePhase.ACTIVE},
-                now_s=clock(),
-                worker=tactile,
-            ):
-                emit(event)
-        if own_friction is not None:
-            for event in own_friction.update(sample, now_s=clock(), worker=tactile):
-                emit(event)
-
+        if lifecycle.phase is not LifecyclePhase.RETURNING:
+            try:
+                compression.check_command(command.position_rad, command.velocity_rad_s, dt)
+            except RuntimeError as error:
+                emit(
+                    {
+                        "event": "compression_limit",
+                        "phase": lifecycle.phase.value,
+                        "message": str(error),
+                        **compression.trace_fields(),
+                    }
+                )
+                fail(str(error))
         # 交互输出／存储也可能延迟；发送前再次检查时限和输入新鲜度。
         pre_send_gap_s = clock() - last_control
         if pre_send_gap_s > timing.max_control_gap_s:
@@ -1338,11 +1342,10 @@ def _run_control_loop_inner(
             latency=latency,
         )
         row.update(target_source.trace_fields())
+        row.update(compression.trace_fields())
         if stiffness_preload is not None:
             row.update(stiffness_preload.trace_fields())
         row.update(controller.adaptation_trace_fields())
-        if native_slip is not None:
-            row.update(native_slip.trace_fields(tactile))
         recorder.write(row)
         completed_gap_s = clock() - last_control
         if completed_gap_s > timing.max_control_gap_s:
@@ -1352,25 +1355,18 @@ def _run_control_loop_inner(
         if lifecycle.phase is LifecyclePhase.ACTIVE:
             task_time_s += dt
         if lifecycle.phase is LifecyclePhase.APPROACH:
-            if reapproach_attempts:
-                reapproach_total_s += dt
-                if reapproach_total_s > lifecycle_config.reapproach_timeout_s:
-                    fail("重新接近累计时间超过上限")
-            if (
-                now - phase_started
-                > trajectory.duration_s + lifecycle_config.approach_endpoint_hold_s
-            ):
+            if now - phase_started > trajectory.duration_s + _APPROACH_ENDPOINT_HOLD_S:
                 fail("预接触轨迹到达闭合端后仍未检测到双侧接触")
         if lifecycle.phase is LifecyclePhase.RETURNING:
             if now - phase_started > max(
-                lifecycle_config.return_timeout_s,
-                trajectory.duration_s + lifecycle_config.return_settle_timeout_s,
+                _RETURN_TIMEOUT_S,
+                trajectory.duration_s + _RETURN_SETTLE_TIMEOUT_S,
             ):
                 fail("回位轨迹执行超时")
             if (
                 now - phase_started >= trajectory.duration_s
                 and abs(feedback.position_rad - config.hardware.home_position_rad)
-                <= lifecycle_config.return_position_tolerance_rad
+                <= _RETURN_POSITION_TOLERANCE_RAD
             ):
                 lifecycle.complete_return(now)
                 enter_phase(LifecyclePhase.COMPLETED, _PHASE_MESSAGES[LifecyclePhase.COMPLETED])
@@ -1398,6 +1394,7 @@ def _run_control_loop_inner(
         "status": lifecycle.phase.value,
         "final_phase": lifecycle.phase.value,
         "task_time_s": task_time_s,
+        "stop_reason": recording_stop_reason,
     }
 
 
@@ -1730,8 +1727,8 @@ def _run_fault_holding_impl(
                     "secondary_errors": secondary_errors,
                 }
             timeout_s = max(
-                config.lifecycle.return_timeout_s,
-                return_trajectory.duration_s + config.lifecycle.return_settle_timeout_s,
+                _RETURN_TIMEOUT_S,
+                return_trajectory.duration_s + _RETURN_SETTLE_TIMEOUT_S,
             )
             if now - return_started_s > timeout_s:
                 try:
@@ -1802,25 +1799,36 @@ def _preload_force_target(
     )
 
 
+def _effective_limits(config: ExperimentConfig) -> dict[str, object]:
+    """返回启动回显的最终生效限幅表。
+
+    目标上限与速率由 safety 单源派生；统一调度包络展示派生结果，
+    真机启动时即可审计“配置里写的”与“实际执行的”是否一致。
+    """
+    limits: dict[str, object] = {
+        "max_target_force_n": config.safety.max_target_force_n,
+        "force_ceiling_n": config.safety.force_ceiling_n,
+        "max_contact_compression_m": config.safety.max_contact_compression_m,
+        "max_force_rate_n_s": config.safety.max_force_rate_n_s,
+        "max_force_decrease_rate_n_s": config.safety.max_force_decrease_rate_n_s,
+        "approach_closure_velocity_m_s": config.lifecycle.approach_closure_velocity_m_s,
+        "return_closure_velocity_m_s": config.lifecycle.return_closure_velocity_m_s,
+        "joint_velocity_limit_rad_s": config.controller.velocity_limit_rad_s,
+        "tracking_torque_limit_nm": config.controller.torque_limit_nm,
+        "return_torque_limit_nm": config.controller.return_torque_limit_nm,
+    }
+    if config.unified_adaptive_enabled:
+        core = config.unified_core_config
+        limits["unified_min_force_n"] = core.load.min_force_n
+        limits["unified_max_force_n"] = core.load.max_force_n
+        limits["unified_min_event_taxels"] = core.min_event_taxels
+        limits["unified_tracking_error_n"] = core.tracking_error_n
+    return limits
+
+
 def _minimum_preload_force(target_force_n: float, lifecycle: LifecycleConfig) -> float:
     """返回最终预载目标在切换 active 前允许的低侧下界。"""
-    ratio = lifecycle.preload_min_force_ratio
-    if ratio is not None:
-        return target_force_n * ratio
-    return target_force_n - lifecycle.preload_tolerance_n
-
-
-def _curve_from_config(config: ExperimentConfig) -> ForceReferenceCurve | None:
-    """把配置曲线转换为共享核曲线；动态模式返回 ``None``。"""
-    if config.reference.curve is None:
-        return None
-    return ForceReferenceCurve(
-        interpolation=config.reference.curve.interpolation,
-        waypoints=tuple(
-            ForceWaypoint(t_s=waypoint.t_s, force_n=waypoint.force_n)
-            for waypoint in config.reference.curve.waypoints
-        ),
-    )
+    return target_force_n * lifecycle.preload_min_force_ratio
 
 
 def _run_snapshot(
@@ -1910,10 +1918,9 @@ def _validate_snapshot_values(
             if len(vector) != 3 or not all(math.isfinite(value) for value in vector):
                 raise RuntimeError(f"{side} taxel {taxel_index} 三轴数据结构错误或包含非有限数值")
             if config.unified_adaptive_enabled:
-                observer = config.reference.adaptive.unified.observer
                 if (
-                    max(abs(vector[0]), abs(vector[1])) >= observer.tangential_range_n
-                    or abs(vector[2]) >= observer.normal_range_n
+                    max(abs(vector[0]), abs(vector[1])) >= TACTILE_TANGENTIAL_RANGE_N
+                    or abs(vector[2]) >= TACTILE_NORMAL_RANGE_N
                 ):
                     raise RuntimeError(
                         f"{side} taxel {taxel_index} 达到配置量程，无法继续依赖触觉保持"
@@ -1938,12 +1945,12 @@ def _verify_zero(
     双侧不平衡保护仍然是使能前的硬性门禁。
     """
     lifecycle = config.lifecycle
-    sample = tactile.wait_for_update(None, config.timing.tactile_startup_timeout_s)
+    sample = tactile.wait_for_update(None, _TACTILE_STARTUP_TIMEOUT_S)
     if clear_bias:
-        sleep(config.timing.tactile_bias_settle_s)
+        sleep(_TACTILE_BIAS_SETTLE_S)
         settle_boundary = tactile.latest().received_at_s
         sample = tactile.wait_for_update(settle_boundary, config.timing.tactile_timeout_s)
-    deadline = clock() + lifecycle.zero_force_timeout_s
+    deadline = clock() + _ZERO_FORCE_TIMEOUT_S
     previous_timestamp: int | None = None
     previous_counter: int | None = None
     taxel_counts: tuple[int, int] | None = None
@@ -1989,7 +1996,7 @@ def _verify_zero(
         window.append((sample.received_at_s, left_force_n, right_force_n, sample))
         left_sum_n += left_force_n
         right_sum_n += right_force_n
-        cutoff_s = sample.received_at_s - lifecycle.zero_force_stable_s
+        cutoff_s = sample.received_at_s - _ZERO_FORCE_STABLE_S
         while len(window) > 1 and window[1][0] <= cutoff_s:
             _, expired_left_n, expired_right_n, _ = window.popleft()
             left_sum_n -= expired_left_n
@@ -1998,9 +2005,9 @@ def _verify_zero(
         left_mean_n = left_sum_n / len(window)
         right_mean_n = right_sum_n / len(window)
         if (
-            window_duration_s >= lifecycle.zero_force_stable_s
-            and left_mean_n <= lifecycle.zero_force_threshold_n
-            and right_mean_n <= lifecycle.zero_force_threshold_n
+            window_duration_s >= _ZERO_FORCE_STABLE_S
+            and left_mean_n <= _ZERO_FORCE_THRESHOLD_N
+            and right_mean_n <= _ZERO_FORCE_THRESHOLD_N
         ):
             if warning_sink is not None:
                 warning_sink(
@@ -2046,8 +2053,8 @@ def _verify_zero(
             raise
     raise RuntimeError(
         "使能前滤波双侧 Fz 零力验证超时："
-        f"{lifecycle.zero_force_stable_s:.3f}s 窗口均值阈值="
-        f"{lifecycle.zero_force_threshold_n:.3f}N；"
+        f"{_ZERO_FORCE_STABLE_S:.3f}s 窗口均值阈值="
+        f"{_ZERO_FORCE_THRESHOLD_N:.3f}N；"
         f"末窗口={window_duration_s:.3f}s，均值 LEFT={left_mean_n:.3f}N、"
         f"RIGHT={right_mean_n:.3f}N，验证期最大峰值={maximum_peak_n:.3f}N"
         f"（警告阈值={lifecycle.contact_on_n:.3f}N）；"
@@ -2118,8 +2125,8 @@ def _approach_trajectory(
         kinematics.closure(start_position_rad),
         kinematics.closure(goal),
         lifecycle.approach_closure_velocity_m_s,
-        lifecycle.approach_closure_acceleration_m_s2,
-        lifecycle.approach_closure_jerk_m_s3,
+        _APPROACH_CLOSURE_ACCELERATION_M_S2,
+        _APPROACH_CLOSURE_JERK_M_S3,
     )
 
 
@@ -2133,8 +2140,8 @@ def _home_trajectory(
         kinematics.closure(start_position_rad),
         kinematics.closure(config.hardware.home_position_rad),
         config.lifecycle.return_closure_velocity_m_s,
-        config.lifecycle.return_closure_acceleration_m_s2,
-        config.lifecycle.return_closure_jerk_m_s3,
+        _RETURN_CLOSURE_ACCELERATION_M_S2,
+        _RETURN_CLOSURE_JERK_M_S3,
     )
 
 

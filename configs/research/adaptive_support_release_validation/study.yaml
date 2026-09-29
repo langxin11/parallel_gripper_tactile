@@ -74,7 +74,7 @@ study:
             max_force_rate_n_s: 50.0
           risk_enabled: true
           friction_update_enabled: true
-          friction_quality_min: 0.4
+          min_event_taxels: 4
           risk_step_n: 1.0
           risk_rate_n_s: 50.0
           risk_repeat_interval_s: 0.1

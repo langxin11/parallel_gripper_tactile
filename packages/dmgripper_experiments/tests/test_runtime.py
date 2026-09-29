@@ -1,4 +1,4 @@
-"""通用运行时的端到端假设备验证：两类目标 × 三控制器、故障与清理。"""
+"""通用运行时的端到端假设备验证：统一自适应目标、故障与清理。"""
 
 from __future__ import annotations
 
@@ -15,13 +15,11 @@ from .fakes import (
     ClosedInputActions,
     FakeTactile,
     PhaseActions,
+    TransientLostTactile,
     adaptive_config,
-    curve_config,
     make_config,
     run_fake_experiment,
 )
-
-from dmgripper_experiments.config import EstimationConfig
 
 
 def _read_rows(directory: Path) -> list[dict[str, str]]:
@@ -37,20 +35,9 @@ def _read_events(directory: Path) -> list[dict[str, object]]:
     ]
 
 
-@pytest.mark.parametrize("controller", ["admittance", "pid", "adrc"])
-@pytest.mark.parametrize("kind", ["curve", "adaptive"])
-def test_full_lifecycle_completes_for_all_six_combinations(
-    tmp_path: Path, kind: str, controller: str
-) -> None:
-    """两类目标来源与三种控制器的组合都能走完全部阶段并安全失能。"""
-    import dataclasses
-
-    from dmgripper_experiments.config import ControllerConfig
-
-    config = dataclasses.replace(
-        make_config(kind), controller=dataclasses.replace(ControllerConfig(), kind=controller)
-    )
-    result, session, actions, directory = run_fake_experiment(tmp_path, config)
+def test_full_lifecycle_completes(tmp_path: Path) -> None:
+    """统一自适应配置能走完全部阶段并安全失能。"""
+    result, session, actions, directory = run_fake_experiment(tmp_path, make_config())
     assert result["status"] == "completed"
     assert result["disable_confirmed"] is True
     assert session.disable_calls == 1
@@ -90,14 +77,37 @@ def test_online_plots_are_registered_in_final_manifest(
         return paths
 
     monkeypatch.setattr(runtime, "plot_experiment_run", fake_plot)
-    result, _session, _actions, directory = run_fake_experiment(
-        tmp_path,
-        curve_config(),
-        plots=True,
-    )
+    result, _session, _actions, directory = run_fake_experiment(tmp_path, make_config())
     manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
     assert result["status"] == "completed"
     assert set(result["plots"]) == {str(directory / "plot.pdf"), str(directory / "plot.png")}
+    assert manifest["files"]["plot.pdf"] == "plot.pdf"
+    assert manifest["files"]["plot.png"] == "plot.png"
+
+
+def test_failed_run_still_generates_and_registers_diagnostic_plots(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """控制失败后的已记录轨迹仍生成图表，且不掩盖原始故障。"""
+    from dmgripper_experiments import runtime
+
+    def fake_plot(directory: Path) -> tuple[Path, Path]:
+        paths = (directory / "plot.pdf", directory / "plot.png")
+        for path in paths:
+            path.write_bytes(b"failed-run plot")
+        return paths
+
+    monkeypatch.setattr(runtime, "plot_experiment_run", fake_plot)
+    with pytest.raises(RuntimeError, match="交互输入已关闭"):
+        run_fake_experiment(
+            tmp_path,
+            make_config(),
+            actions_type=ClosedInputActions,
+        )
+    directory = next(tmp_path.rglob("manifest.json")).parent
+    manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["status"] == "failed"
+    assert manifest["primary_error"]["message"] == "交互输入已关闭"
     assert manifest["files"]["plot.pdf"] == "plot.pdf"
     assert manifest["files"]["plot.png"] == "plot.png"
 
@@ -112,11 +122,7 @@ def test_online_plot_failure_does_not_replace_control_result(
         raise OSError("模拟绘图失败")
 
     monkeypatch.setattr(runtime, "plot_experiment_run", fail_plot)
-    result, _session, _actions, directory = run_fake_experiment(
-        tmp_path,
-        curve_config(),
-        plots=True,
-    )
+    result, _session, _actions, directory = run_fake_experiment(tmp_path, make_config())
     manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
     assert result["status"] == "completed"
     assert result["plots"] == []
@@ -125,14 +131,94 @@ def test_online_plot_failure_does_not_replace_control_result(
 
 
 def test_adaptive_target_increases_under_tangential_load(tmp_path: Path) -> None:
-    """动态模式在 active 阶段因切向载荷增加目标力并记录触发。"""
+    """active 阶段因切向载荷增加目标力并记录触发。"""
     result, _session, _actions, directory = run_fake_experiment(tmp_path, adaptive_config())
     assert result["status"] == "completed"
     rows = _read_rows(directory)
     active_targets = [float(row["target_force_n"]) for row in rows if row["phase"] == "active"]
     assert active_targets, "active 阶段必须有 trace 记录"
     assert max(active_targets) > 0.5, "切向载荷应当驱动目标力增长"
-    assert any(row["target_trigger_active"] == "True" for row in rows if row["phase"] == "active")
+    # 静态切向不产生重分配风险；承载调度增长由摩擦比目标直接体现。
+    assert any(
+        float(row["adaptive_load_target_n"] or 0.0) > 0.5
+        for row in rows
+        if row["phase"] == "active"
+    )
+
+
+def _nine_taxel_config():
+    """构造九触点链路专用的短时限统一配置。"""
+    from dataclasses import replace
+
+    from dmgripper_experiments.config import UnifiedHardwareConfig, UnifiedObserverConfig
+
+    config = adaptive_config()
+    unified = UnifiedHardwareConfig(
+        estimator="classic",
+        observer=UnifiedObserverConfig(window_s=0.01),
+        failure_timeout_s=0.01,
+    )
+    return replace(
+        config,
+        reference=replace(config.reference, duration_s=0.08, unified=unified),
+        safety=replace(
+            config.safety,
+            max_target_force_n=1.5,
+            force_ceiling_n=2.0,
+            max_force_rate_n_s=0.5,
+        ),
+    )
+
+
+class NineTaxelTactile(FakeTactile):
+    """提供九点真机形状，设备采样间隔与接收间隔刻意不同。"""
+
+    mode = "healthy"
+
+    def latest(self):
+        """按模式注入通信丢失，否则返回正常快照。"""
+        if (self.mode == "communication" and self.phase.phase == "active") or (
+            self.mode == "hold_communication" and self.phase.phase == "fault_holding"
+        ):
+            raise OSError("模拟统一模式触觉通信丢失")
+        return super().latest()
+
+    def _snapshot(self, *, force_n, tangential_n=0.0):
+        from dataclasses import replace
+
+        sink = self.sample_sink
+        self.sample_sink = None
+        try:
+            snapshot = super()._snapshot(force_n=force_n, tangential_n=tangential_n)
+        finally:
+            self.sample_sink = sink
+        # 粘着下界会把采用摩擦抬到量程上限；容量类场景的切向须在 μ=2.0 下
+        # 仍越过目标上限，才能形成持续的 capacity_limited 证据。
+        heavy = self.mode in {"capacity", "hold_communication"}
+        shear = (0.3 if self.mode == "healthy" else 3.0 if heavy else 1.0) if force_n else 0.0
+        if self.mode == "overforce" and self.phase.phase == "active":
+            force_n = 3.0
+        snapshot = replace(
+            snapshot,
+            timestamp_us=self.counter * 5000,
+            raw_left_fy_n=shear,
+            raw_left_fz_n=force_n,
+            left_taxel_forces_n=((0.0, shear / 3, force_n / 3),) * 3 + ((0.0, 0.0, 0.0),) * 6,
+            right_taxel_forces_n=((0.0, 0.0, force_n / 3),) * 3 + ((0.0, 0.0, 0.0),) * 6,
+        )
+        if self.mode == "taxel_saturation" and self.phase.phase == "active":
+            snapshot = replace(snapshot, left_taxel_forces_n=((4.0, 0.0, force_n / 9),) * 9)
+        if self.mode == "invalid_timestamp" and self.phase.phase == "active":
+            snapshot = replace(snapshot, timestamp_us=math.nan)
+        if sink is not None:
+            sink(
+                {
+                    "timestamp_us": snapshot.timestamp_us,
+                    "left_taxel_forces_n": snapshot.left_taxel_forces_n,
+                    "right_taxel_forces_n": snapshot.right_taxel_forces_n,
+                }
+            )
+        return snapshot
 
 
 @pytest.mark.parametrize(
@@ -147,97 +233,22 @@ def test_adaptive_target_increases_under_tangential_load(tmp_path: Path) -> None
         "invalid_timestamp",
     ],
 )
-@pytest.mark.parametrize("multirate", [False, True])
-def test_unified_nine_taxel_lifecycle_and_fault_health_gate(
-    tmp_path: Path, mode: str, multirate: bool
-) -> None:
+def test_unified_nine_taxel_lifecycle_and_fault_health_gate(tmp_path: Path, mode: str) -> None:
     """九点链路按设备时间增力，任务与触觉故障均持位等待人工释放。"""
-    from dataclasses import replace
-
-    from dm_grasp_core.grasp.adaptive import AdaptiveLoadConfig
-    from dm_grasp_core.grasp.unified import UnifiedAdaptiveConfig
-    from dm_grasp_core.tactile.risk import TaxelRiskConfig
-    from dm_grasp_core.tactile.multirate import TactileSamplingConfig
-
-    class NineTaxelTactile(FakeTactile):
-        """提供九点真机形状，设备采样间隔与接收间隔刻意不同。"""
-
-        def __init__(self, *args, snapshot_transform=None, **kwargs):
-            super().__init__(*args, **kwargs)
-            self.transform = snapshot_transform
-
-        def latest(self):
-            if (mode == "communication" and self.phase.phase == "active") or (
-                mode == "hold_communication" and self.phase.phase == "fault_holding"
-            ):
-                raise OSError("模拟统一模式触觉通信丢失")
-            return super().latest()
-
-        def _snapshot(self, *, force_n, tangential_n=0.0):
-            sink = self.sample_sink
-            self.sample_sink = None
-            try:
-                snapshot = super()._snapshot(force_n=force_n, tangential_n=tangential_n)
-            finally:
-                self.sample_sink = sink
-            shear = (0.3 if mode == "healthy" else 1.0) if force_n else 0.0
-            if mode == "overforce" and self.phase.phase == "active":
-                force_n = 3.0
-            snapshot = replace(
-                snapshot,
-                timestamp_us=self.counter * 5000,
-                raw_left_fy_n=shear,
-                raw_left_fz_n=force_n,
-                left_taxel_forces_n=((0.0, shear / 9, force_n / 9),) * 9,
-                right_taxel_forces_n=((0.0, 0.0, force_n / 9),) * 9,
-            )
-            if mode == "taxel_saturation" and self.phase.phase == "active":
-                snapshot = replace(snapshot, left_taxel_forces_n=((4.0, 0.0, force_n / 9),) * 9)
-            if mode == "invalid_timestamp" and self.phase.phase == "active":
-                snapshot = replace(snapshot, timestamp_us=math.nan)
-            if self.transform is not None:
-                snapshot = self.transform(snapshot)
-            if sink is not None:
-                sink(
-                    {
-                        "timestamp_us": snapshot.timestamp_us,
-                        "left_taxel_forces_n": snapshot.left_taxel_forces_n,
-                        "right_taxel_forces_n": snapshot.right_taxel_forces_n,
-                    }
-                )
-            return snapshot
-
-    config = adaptive_config()
-    unified = UnifiedAdaptiveConfig(
-        load=AdaptiveLoadConfig(max_force_n=1.5, max_force_rate_n_s=0.5),
-        observer=TaxelRiskConfig(window_s=0.01),
-        failure_timeout_s=0.01,
-    )
-    config = replace(
-        config,
-        reference=replace(
-            config.reference,
-            adaptive=replace(
-                config.reference.adaptive,
-                duration_s=0.08,
-                unified=unified,
-                tactile_sampling=TactileSamplingConfig(period_s=0.001) if multirate else None,
-            ),
-        ),
-        timing=replace(
-            config.timing, control_rate_hz=250 if multirate else config.timing.control_rate_hz
-        ),
-        safety=replace(config.safety, max_target_force_n=1.5, force_ceiling_n=2.0),
-    )
+    config = _nine_taxel_config()
     if mode == "healthy":
         result, session, actions, directory = run_fake_experiment(
-            tmp_path, config, tactile_type=NineTaxelTactile
+            tmp_path, config, tactile_type=type("Healthy", (NineTaxelTactile,), {"mode": mode})
         )
         assert result["disable_confirmed"] is True
         assert session.disable_calls == 1
     else:
         with pytest.raises(RuntimeError, match="统一"):
-            run_fake_experiment(tmp_path, config, tactile_type=NineTaxelTactile)
+            run_fake_experiment(
+                tmp_path,
+                config,
+                tactile_type=type(mode.title(), (NineTaxelTactile,), {"mode": mode}),
+            )
         directory = next(tmp_path.rglob("manifest.json")).parent
     manifest = json.loads((directory / "manifest.json").read_text())
     events = _read_events(directory)
@@ -249,11 +260,8 @@ def test_unified_nine_taxel_lifecycle_and_fault_health_gate(
         targets = [float(row["target_force_n"]) for row in active]
         assert max(targets) > 0.5
         assert all(0 <= b - a <= 0.5 * 0.005 + 1e-12 for a, b in zip(targets, targets[1:]))
-        assert all(row["adaptive_left_valid_mask"] == "111111111" for row in active)
-        assert all(
-            row["adaptive_left_update_reason"] in {"diagnostic_only", "contact_reset"}
-            for row in active
-        )
+        assert all(row["adaptive_left_valid_mask"] == "111000000" for row in active)
+        assert all(row["adaptive_left_update_reason"] for row in active)
         assert any(
             float(row["adaptive_load_target_n"]) > 0.5
             for row in rows
@@ -290,26 +298,13 @@ def test_preload_accepts_force_above_floor_without_imbalance_fault(tmp_path: Pat
                 raw_right_fz_n=0.2,
             )
 
-    config = adaptive_config()
     result, _session, actions, _directory = run_fake_experiment(
         tmp_path,
-        config,
+        adaptive_config(),
         tactile_type=HighPreloadTactile,
     )
     assert result["status"] == "completed"
     assert "active" in actions.states
-
-
-def test_curve_mode_holds_final_target_in_holding(tmp_path: Path) -> None:
-    """曲线模式任务结束后保持末目标等待释放。"""
-    result, _session, _actions, directory = run_fake_experiment(tmp_path, curve_config())
-    assert result["status"] == "completed"
-    rows = _read_rows(directory)
-    holding = [row for row in rows if row["phase"] == "holding"]
-    assert holding
-    assert all(float(row["target_force_n"]) == pytest.approx(0.5) for row in holding)
-    task_times = [float(row["task_time_s"]) for row in rows if row["task_time_s"]]
-    assert task_times == sorted(task_times)
 
 
 def test_release_before_enable_cancels_without_motion(tmp_path: Path) -> None:
@@ -318,7 +313,7 @@ def test_release_before_enable_cancels_without_motion(tmp_path: Path) -> None:
     DM 串口已在预检阶段打开并确认失能，但不产生任何使能或运动命令。
     """
     result, session, actions, directory = run_fake_experiment(
-        tmp_path, curve_config(), actions_type=CancelActions
+        tmp_path, make_config(), actions_type=CancelActions
     )
     assert result["status"] == "cancelled"
     assert result["disable_confirmed"] == "not_applicable"
@@ -340,7 +335,7 @@ def test_start_command_is_recorded_before_motor_approach(tmp_path: Path) -> None
 
     result, session, _actions, directory = run_fake_experiment(
         tmp_path,
-        curve_config(),
+        make_config(),
         event_observer=observe_event,
     )
     assert result["status"] == "completed"
@@ -368,7 +363,7 @@ def test_start_outside_home_runs_limited_homing_before_approach(
     """预检阶段对不在 home 的残留位置先受限回零再进 ready，目标都在工作范围。"""
     result, session, actions, _directory = run_fake_experiment(
         tmp_path,
-        curve_config(),
+        make_config(),
         initial_position_rad=initial_position_rad,
     )
     assert result["status"] == "completed"
@@ -383,7 +378,7 @@ def test_start_inside_home_skips_homing(tmp_path: Path, initial_position_rad: fl
     """启动位置已在 home 容差内时不发送回零阶段命令。"""
     result, _session, actions, _directory = run_fake_experiment(
         tmp_path,
-        curve_config(),
+        make_config(),
         initial_position_rad=initial_position_rad,
     )
     assert result["status"] == "completed"
@@ -400,7 +395,7 @@ def test_feedback_outside_extended_safety_range_never_moves(tmp_path: Path) -> N
     with pytest.raises(ValueError, match="扩展安全范围"):
         run_fake_experiment(
             tmp_path,
-            curve_config(),
+            make_config(),
             initial_position_rad=-0.051,
             event_observer=observe,
         )
@@ -411,11 +406,10 @@ def test_feedback_outside_extended_safety_range_never_moves(tmp_path: Path) -> N
 
 def test_precheck_homing_timeout_forces_disable_before_ready(tmp_path: Path) -> None:
     """预检回零未到位时直接失能失败退出，不进入故障保持。"""
-    config = curve_config()
     with pytest.raises(RuntimeError, match="预检回零轨迹执行超时"):
         run_fake_experiment(
             tmp_path,
-            config,
+            make_config(),
             initial_position_rad=0.2,
             freeze_phase="homing",
         )
@@ -444,7 +438,7 @@ def test_ready_reports_status_and_unknown_command_before_start(tmp_path: Path) -
 
     result, _session, _actions, directory = run_fake_experiment(
         tmp_path,
-        curve_config(),
+        make_config(),
         actions_type=ReportingActions,
     )
     assert result["status"] == "completed"
@@ -455,8 +449,8 @@ def test_ready_reports_status_and_unknown_command_before_start(tmp_path: Path) -
     assert any(event.get("event") == "status" and event.get("phase") == "ready" for event in events)
 
 
-def test_auto_start_and_return_complete_without_interactive_actions(tmp_path: Path) -> None:
-    """无人值守组合不依赖标准输入，自动启动并在任务结束后回位。"""
+def test_on_finished_return_completes_without_interactive_actions(tmp_path: Path) -> None:
+    """on_finished=return 的有限任务不依赖交互输入，任务计时后自动回位。"""
 
     class PassiveActions(PhaseActions):
         def __call__(self) -> None:
@@ -464,17 +458,14 @@ def test_auto_start_and_return_complete_without_interactive_actions(tmp_path: Pa
 
     result, session, actions, directory = run_fake_experiment(
         tmp_path,
-        curve_config(auto_start=True, on_finished="return"),
+        make_config(on_finished="return"),
         actions_type=PassiveActions,
     )
     assert result["status"] == "completed"
     assert session.disable_calls == 1
     assert actions.states[-3:] == ["holding", "returning", "completed"]
     events = _read_events(directory)
-    assert any(
-        event.get("event") == "command_received" and event.get("action") == "auto_start"
-        for event in events
-    )
+    assert any(event.get("event") == "task_finished" for event in events)
 
 
 @pytest.mark.parametrize("release_phase", ["approach", "contact_transition", "preload"])
@@ -494,7 +485,7 @@ def test_release_before_active_uses_limited_return(tmp_path: Path, release_phase
 
     result, session, actions, directory = run_fake_experiment(
         tmp_path,
-        curve_config(),
+        make_config(),
         actions_type=EarlyReleaseActions,
     )
     assert result["status"] == "completed"
@@ -511,61 +502,8 @@ def test_release_before_active_uses_limited_return(tmp_path: Path, release_phase
     )
 
 
-def test_own_friction_session_runs_inside_automatic_motor_lifecycle(tmp_path: Path) -> None:
-    """完整运行器在闭环夹持期间启动自主估计，且不提交原厂启停请求。"""
-    from dataclasses import replace
-
-    from papillarray_hardware.native_slip import NativeSlipStatus
-
-    from dmgripper_experiments.config import OwnFrictionConfig
-
-    from .fakes import FakeTactile
-
-    class OwnFrictionTactile(FakeTactile):
-        def __init__(self, *args, **kwargs) -> None:
-            super().__init__(*args, **kwargs)
-            self.native_slip_status = NativeSlipStatus()
-            self.native_starts = 0
-            self.native_stops = 0
-
-        def request_native_slip(self, *_args, **_kwargs) -> None:
-            self.native_starts += 1
-
-        def stop_native_slip(self, *_args, **_kwargs) -> None:
-            self.native_stops += 1
-
-    config = curve_config(on_finished="return")
-    config = replace(
-        config,
-        lifecycle=replace(
-            config.lifecycle,
-            own_friction=OwnFrictionConfig(
-                stable_duration_s=0.01,
-                max_force_rate_n_s=1.0,
-                contact_on_n=0.1,
-                contact_off_n=0.05,
-                contact_loss_confirm_s=0.02,
-                sample_timeout_s=0.1,
-            ),
-        ),
-    )
-    result, _session, _actions, directory = run_fake_experiment(
-        tmp_path,
-        config,
-        tactile_type=OwnFrictionTactile,
-    )
-    assert result["status"] == "completed"
-    events = _read_events(directory)
-    assert any(
-        event.get("event") == "own_friction_state" and event.get("phase") == "active"
-        for event in events
-    )
-    assert not any(event.get("event") == "native_slip_state" for event in events)
-
-
 def test_zero_force_peak_warning_is_recorded_without_blocking_start(tmp_path: Path) -> None:
     """零力均值合格时，接触级峰值只记录告警且仍可进入完整生命周期。"""
-    from .fakes import FakeTactile
 
     class PeakThenQuietTactile(FakeTactile):
         """零力验证首帧有峰值，后续帧保持空载。"""
@@ -577,7 +515,7 @@ def test_zero_force_peak_warning_is_recorded_without_blocking_start(tmp_path: Pa
 
     result, _session, _actions, directory = run_fake_experiment(
         tmp_path,
-        curve_config(),
+        make_config(),
         tactile_type=PeakThenQuietTactile,
     )
     assert result["status"] == "completed"
@@ -626,7 +564,7 @@ def test_failures_disable_and_write_failed_manifest(
     with pytest.raises(RuntimeError, match=expected):
         run_fake_experiment(
             tmp_path,
-            curve_config(),
+            make_config(),
             tactile_type=tactile_type,
             enable_error=failure == "enable",
             command_delay_s=0.1 if failure == "latency" else 0.0,
@@ -666,7 +604,7 @@ def test_holdable_fault_waits_for_release_then_keeps_failed_result(
             (BadTactile,),
             {"mode": "lost", "target_phase": "active"},
         )
-        config = curve_config()
+        config = make_config()
     elif failure == "preload":
 
         class PreloadTimeoutTactile(FakeTactile):
@@ -684,8 +622,8 @@ def test_holdable_fault_waits_for_release_then_keeps_failed_result(
 
         tactile_type = PreloadTimeoutTactile
         config = replace(
-            curve_config(),
-            lifecycle=replace(curve_config().lifecycle, preload_timeout_s=0.05),
+            make_config(),
+            lifecycle=replace(make_config().lifecycle, preload_timeout_s=0.05),
         )
     else:
         tactile_type = type(
@@ -693,7 +631,7 @@ def test_holdable_fault_waits_for_release_then_keeps_failed_result(
             (BadTactile,),
             {"mode": failure, "target_phase": "approach"},
         )
-        config = curve_config()
+        config = make_config()
 
     observations: list[tuple[dict[str, object], object]] = []
 
@@ -745,7 +683,7 @@ def test_dm_command_failure_forces_immediate_disable_without_claiming_hold(
     with pytest.raises(RuntimeError, match="DM 命令或反馈失败"):
         run_fake_experiment(
             tmp_path,
-            curve_config(),
+            make_config(),
             command_error_at=1,
             event_observer=observe,
         )
@@ -779,7 +717,7 @@ def test_unsafe_dm_feedback_forces_immediate_disable(
     with pytest.raises(RuntimeError, match=str(hardware_error)):
         run_fake_experiment(
             tmp_path,
-            curve_config(),
+            make_config(),
             command_error_at=1,
             command_error=hardware_error,
             event_observer=observe,
@@ -797,7 +735,7 @@ def test_precheck_recovers_leftover_enabled_state_before_zero_force(tmp_path: Pa
     """上次异常退出的残留使能态由预检显式失能，不影响后续流程。"""
     result, session, _actions, _directory = run_fake_experiment(
         tmp_path,
-        curve_config(),
+        make_config(),
         initial_enabled=True,
     )
     assert result["status"] == "completed"
@@ -809,7 +747,7 @@ def test_precheck_recovers_leftover_enabled_state_before_zero_force(tmp_path: Pa
 def test_enable_confirmation_failure_is_recorded_as_forced_disable(tmp_path: Path) -> None:
     """使能确认丢失后必须尽力失能，并明确记录 forced_disable 处置。"""
     with pytest.raises(RuntimeError, match="使能确认丢失"):
-        run_fake_experiment(tmp_path, curve_config(), enable_error=True)
+        run_fake_experiment(tmp_path, make_config(), enable_error=True)
     manifest = json.loads(next(tmp_path.rglob("manifest.json")).read_text(encoding="utf-8"))
     assert manifest["fault_holding_entered"] is False
     assert manifest["fault_resolution"] == "forced_disable"
@@ -821,7 +759,7 @@ def test_precheck_enable_failure_outside_home_fails_before_ready(tmp_path: Path)
     with pytest.raises(RuntimeError, match="使能确认丢失"):
         run_fake_experiment(
             tmp_path,
-            curve_config(),
+            make_config(),
             initial_position_rad=0.2,
             enable_error=True,
         )
@@ -845,7 +783,7 @@ def test_fault_holding_command_failure_preserves_primary_and_marks_hold_lost(
     with pytest.raises(RuntimeError, match="触觉快照过期"):
         run_fake_experiment(
             tmp_path,
-            curve_config(),
+            make_config(),
             tactile_type=stale_type,
             hold_error_at=2,
         )
@@ -881,7 +819,7 @@ def test_fault_release_planning_failure_preserves_primary_and_holding_metadata(
 
     monkeypatch.setattr(runtime, "_home_trajectory", fail_home_trajectory)
     with pytest.raises(RuntimeError, match="触觉快照过期"):
-        run_fake_experiment(tmp_path, curve_config(), tactile_type=stale_type)
+        run_fake_experiment(tmp_path, make_config(), tactile_type=stale_type)
     manifest = json.loads(next(tmp_path.rglob("manifest.json")).read_text(encoding="utf-8"))
     assert "触觉快照过期" in manifest["primary_error"]["message"]
     assert manifest["fault_holding_entered"] is True
@@ -906,7 +844,7 @@ def test_keyboard_interrupt_is_emergency_exit_and_disables_immediately(tmp_path:
     with pytest.raises(KeyboardInterrupt):
         run_fake_experiment(
             tmp_path,
-            curve_config(),
+            make_config(),
             actions_type=InterruptActions,
             event_observer=observe,
         )
@@ -941,7 +879,7 @@ def test_keyboard_interrupt_during_fault_holding_preserves_first_fault(tmp_path:
     with pytest.raises(RuntimeError, match="触觉快照过期"):
         run_fake_experiment(
             tmp_path,
-            curve_config(),
+            make_config(),
             tactile_type=stale_type,
             actions_type=InterruptHoldingActions,
             event_observer=observe,
@@ -979,7 +917,7 @@ def test_keyboard_interrupt_during_fault_holding_sleep_preserves_first_fault(
     with pytest.raises(RuntimeError, match="触觉快照过期"):
         run_fake_experiment(
             tmp_path,
-            curve_config(),
+            make_config(),
             tactile_type=stale_type,
             event_observer=observe,
             sleep_observer=interrupt_holding_sleep,
@@ -1018,7 +956,7 @@ def test_recorder_failure_enters_safe_hold_before_release(
     with pytest.raises(OSError, match="模拟控制记录失败"):
         run_fake_experiment(
             tmp_path,
-            curve_config(),
+            make_config(),
             event_observer=observe,
         )
     assert holding_observed and holding_observed[0][0] == 0
@@ -1050,7 +988,7 @@ def test_first_emit_error_is_not_overwritten_by_later_output_error(
     with pytest.raises(OSError, match="首个记录错误") as exc_info:
         run_fake_experiment(
             tmp_path,
-            curve_config(),
+            make_config(),
             event_observer=fail_same_event,
         )
     assert any("后续显示错误" in note for note in getattr(exc_info.value, "__notes__", ()))
@@ -1064,7 +1002,7 @@ def test_session_factory_failure_still_finalizes_pre_enable_manifest(tmp_path: P
     with pytest.raises(RuntimeError, match="模拟会话构造失败"):
         run_fake_experiment(
             tmp_path,
-            curve_config(),
+            make_config(),
             session_factory_error=RuntimeError("模拟会话构造失败"),
         )
     manifest = json.loads(next(tmp_path.rglob("manifest.json")).read_text(encoding="utf-8"))
@@ -1078,7 +1016,7 @@ def test_input_closed_and_disable_failure_preserve_original_error(tmp_path: Path
     with pytest.raises(RuntimeError, match="交互输入已关闭") as exc_info:
         run_fake_experiment(
             tmp_path,
-            curve_config(),
+            make_config(),
             actions_type=ClosedInputActions,
             disable_error=True,
         )
@@ -1095,7 +1033,7 @@ def test_input_closed_and_disable_failure_preserve_original_error(tmp_path: Path
 def test_disable_failure_after_completed_control_is_a_run_failure(tmp_path: Path) -> None:
     """控制完成后的失能失败必须写 failed manifest 并向调用者返回失败。"""
     with pytest.raises(RuntimeError, match="退出清理失败.*失能失败"):
-        run_fake_experiment(tmp_path, curve_config(), disable_error=True)
+        run_fake_experiment(tmp_path, make_config(), disable_error=True)
     manifest = json.loads(next(tmp_path.rglob("manifest.json")).read_text(encoding="utf-8"))
     assert manifest["status"] == "failed"
     assert manifest["disable_confirmed"] is False
@@ -1119,37 +1057,40 @@ def test_terminal_stop_failure_does_not_skip_manifest(tmp_path: Path) -> None:
             pass
 
     with pytest.raises(RuntimeError, match="退出清理失败.*终端显示退出失败"):
-        run_fake_experiment(tmp_path, curve_config(), terminal=BrokenTerminal())
+        run_fake_experiment(tmp_path, make_config(), terminal=BrokenTerminal())
     manifest = json.loads(next(tmp_path.rglob("manifest.json")).read_text(encoding="utf-8"))
     assert manifest["status"] == "failed"
     assert manifest["disable_confirmed"] is True
     assert any("终端显示退出失败" in error for error in manifest["cleanup_errors"])
 
 
-def test_contact_loss_reapproach_resumes_task_time(tmp_path: Path) -> None:
-    """曲线模式失接触重接近：接触段递增、任务时间从暂停点继续。"""
-    from .fakes import TransientLostTactile
+def test_contact_loss_enters_fault_holding_and_waits_for_release(tmp_path: Path) -> None:
+    """失接触不再重接近：立即进故障保持，人工释放后保留失败结果。"""
+    phases: list[str] = []
 
-    config = curve_config(
-        lost_contact_action="reapproach",
-        reapproach_max_attempts=2,
-    )
-    result, _session, actions, directory = run_fake_experiment(
-        tmp_path, config, tactile_type=TransientLostTactile
-    )
-    assert result["status"] == "completed"
-    assert actions.states.count("approach") >= 2, "应当出现重接近"
-    events = _read_events(directory)
+    def observe(event: dict[str, object], _session) -> None:
+        if event.get("event") == "state":
+            phases.append(str(event.get("phase")))
+
+    with pytest.raises(RuntimeError, match="跟踪阶段持续失去接触"):
+        run_fake_experiment(
+            tmp_path,
+            make_config(),
+            tactile_type=TransientLostTactile,
+            event_observer=observe,
+        )
+    assert phases.count("approach") == 1, "失接触不得触发重新接近"
+    assert "fault_holding" in phases
+    manifest = json.loads(next(tmp_path.rglob("manifest.json")).read_text(encoding="utf-8"))
+    assert manifest["status"] == "failed"
+    assert manifest["fault_holding_entered"] is True
+    assert manifest["fault_resolution"] == "released"
+    events = _read_events(next(tmp_path.rglob("manifest.json")).parent)
     confirmed = [event for event in events if event["event"] == "contact_confirmed"]
-    assert len(confirmed) >= 2
-    assert confirmed[1]["contact_segment"] == 2
-    rows = _read_rows(directory)
+    assert len(confirmed) == 1
+    rows = _read_rows(next(tmp_path.rglob("manifest.json")).parent)
     segments = {int(row["contact_segment"]) for row in rows if row["contact_segment"]}
-    assert segments == {0, 1, 2}, "重接近后接触段编号应递增"
-    task_times = [
-        (row["phase"], float(row["task_time_s"] or 0.0)) for row in rows if row["task_time_s"]
-    ]
-    assert task_times == sorted(task_times, key=lambda item: item[1])
+    assert segments == {0, 1}, "接触段编号不应在失接触后继续递增"
 
 
 def test_repeated_snapshot_does_not_confirm_contact_before_staleness(tmp_path: Path) -> None:
@@ -1197,10 +1138,12 @@ def test_stiffness_diagnostics_do_not_change_control_commands(tmp_path: Path) ->
     """只诊断模式下，刚度估计开关不改变同一观测序列上的控制命令。"""
     import dataclasses
 
+    from dmgripper_experiments.config import EstimationConfig
+
     disabled = dataclasses.replace(
-        curve_config(), estimation=dataclasses.replace(EstimationConfig(), enabled=False)
+        make_config(), estimation=dataclasses.replace(EstimationConfig(), enabled=False)
     )
-    enabled = curve_config()
+    enabled = make_config()
     result_a, _session_a, _actions_a, directory_a = run_fake_experiment(tmp_path, disabled)
     result_b, _session_b, _actions_b, directory_b = run_fake_experiment(tmp_path, enabled)
     assert result_a["status"] == result_b["status"] == "completed"
@@ -1220,32 +1163,25 @@ def test_stiffness_diagnostics_do_not_change_control_commands(tmp_path: Path) ->
     assert all(row["stiffness_n_per_m"] == "" for row in rows_a)
 
 
-def test_pid_records_control_force_and_raw_inputs(tmp_path: Path) -> None:
-    """PID 路径记录原始力、控制使用力与外层滤波力三层信息。"""
-    import dataclasses
-
-    from dmgripper_experiments.config import ControllerConfig
-
-    config = dataclasses.replace(
-        curve_config(), controller=dataclasses.replace(ControllerConfig(), kind="pid")
-    )
-    _result, _session, _actions, directory = run_fake_experiment(tmp_path, config)
+def test_tracking_records_raw_and_filtered_force_layers(tmp_path: Path) -> None:
+    """跟踪阶段记录原始力与外层滤波力；控制使用力仅由控制器语义决定。"""
+    _result, _session, _actions, directory = run_fake_experiment(tmp_path, make_config())
     rows = _read_rows(directory)
     tracking = [row for row in rows if row["phase"] in {"preload", "active", "holding"}]
     assert tracking
-    assert all(row["control_force_n"] for row in tracking), "控制使用力必须被记录"
     assert all(row["raw_left_fz_n"] for row in tracking)
     assert all(row["left_fz_n"] for row in tracking)
 
 
 def test_holding_phase_keeps_responding_for_adaptive(tmp_path: Path) -> None:
-    """动态模式进入 holding 后策略时钟不冻结，仍按新观测更新。"""
-    _result, _session, _actions, directory = run_fake_experiment(tmp_path, adaptive_config())
+    """进入 holding 后策略时钟不冻结，仍按新观测更新且不越界。"""
+    result, _session, _actions, directory = run_fake_experiment(tmp_path, adaptive_config())
+    assert result["status"] == "completed"
     rows = _read_rows(directory)
     holding = [row for row in rows if row["phase"] == "holding"]
     assert holding
-    # FakeTactile 在 holding 仍施加切向 0（active 才有）；目标保持不超过上限。
-    assert all(0.0 <= float(row["target_force_n"]) <= 1.5 + 1e-9 for row in holding)
+    # FakeTactile 在 holding 仍施加切向 0（active 才有）；目标保持不超过安全上限。
+    assert all(0.0 <= float(row["target_force_n"]) <= 30.0 + 1e-9 for row in holding)
     assert all(row["measured_tangential_force_n"] for row in holding)
 
 
@@ -1266,12 +1202,7 @@ def test_unlimited_adaptive_runs_until_explicit_release(tmp_path: Path) -> None:
             return super().__call__()
 
     config = adaptive_config()
-    config = replace(
-        config,
-        reference=replace(
-            config.reference, adaptive=replace(config.reference.adaptive, duration_s=None)
-        ),
-    )
+    config = replace(config, reference=replace(config.reference, duration_s=None))
     result, session, actions, directory = run_fake_experiment(
         tmp_path, config, actions_type=DelayedReleaseActions
     )
@@ -1303,7 +1234,7 @@ def test_input_errors_during_fault_keep_motor_held_until_recovered_release(tmp_p
 
     with pytest.raises(RuntimeError, match="交互输入已关闭"):
         run_fake_experiment(
-            tmp_path, curve_config(), actions_type=RecoveringInput, event_observer=observe
+            tmp_path, make_config(), actions_type=RecoveringInput, event_observer=observe
         )
     manifest_path = next(tmp_path.rglob("manifest.json"))
     manifest = json.loads(manifest_path.read_text())
@@ -1319,11 +1250,7 @@ def test_input_errors_during_fault_keep_motor_held_until_recovered_release(tmp_p
 
 def test_closing_torque_mode_keeps_transition_feedforward_and_release(tmp_path):
     """接触过渡保留前馈，单向跟踪不影响人工释放回位。"""
-    from dataclasses import replace
-
-    config = adaptive_config()
-    config = replace(config, controller=replace(config.controller, closing_torque_only=True))
-    result, session, _, directory = run_fake_experiment(tmp_path, config)
+    result, session, _, directory = run_fake_experiment(tmp_path, adaptive_config())
     rows = _read_rows(directory)
     transition = [row for row in rows if row["phase"] == "contact_transition"]
     returning = [row for row in rows if row["phase"] == "returning"]
@@ -1335,11 +1262,32 @@ def test_closing_torque_mode_keeps_transition_feedforward_and_release(tmp_path):
 
 def test_zero_tracking_velocity_applies_after_contact_only(tmp_path):
     """接近轨迹保留速度，预载与 active 的 MIT 目标速度固定为零。"""
-    from dataclasses import replace
 
-    config = adaptive_config()
-    config = replace(config, controller=replace(config.controller, zero_tracking_velocity=True))
-    result, _, _, directory = run_fake_experiment(tmp_path, config)
+    class LateContactTactile(FakeTactile):
+        """approach 前若干周期无接触，保留带非零速度的接近样本。"""
+
+        def __init__(self, *args, **kwargs) -> None:
+            super().__init__(*args, **kwargs)
+            self._approach_cycles = 0
+
+        def latest(self):
+            from dataclasses import replace
+
+            snapshot = super().latest()
+            if self.phase.phase == "approach" and self._approach_cycles < 20:
+                self._approach_cycles += 1
+                return replace(
+                    snapshot,
+                    left_force_n=0.0,
+                    right_force_n=0.0,
+                    raw_left_fz_n=0.0,
+                    raw_right_fz_n=0.0,
+                )
+            return snapshot
+
+    result, _, _, directory = run_fake_experiment(
+        tmp_path, adaptive_config(), tactile_type=LateContactTactile
+    )
     rows = _read_rows(directory)
     approach = [row for row in rows if row["phase"] == "approach"]
     tracking = [row for row in rows if row["phase"] in {"preload", "active"}]
@@ -1347,6 +1295,22 @@ def test_zero_tracking_velocity_applies_after_contact_only(tmp_path):
     assert any(abs(float(row["dq_des_rad_s"])) > 0.0 for row in approach)
     assert all(float(row["dq_des_rad_s"]) == 0.0 for row in tracking)
     assert result["status"] == "completed"
+
+
+def test_run_echoes_effective_limits_and_records_config_delta(tmp_path: Path) -> None:
+    """启动即回显最终限幅；config.json 同时保存全量与净差异留档。"""
+    result, _session, _actions, directory = run_fake_experiment(tmp_path, adaptive_config())
+    assert result["status"] == "completed"
+    events = _read_events(directory)
+    limits = next(event for event in events if event["event"] == "safety_limits")
+    assert limits["max_target_force_n"] == pytest.approx(30.0)
+    assert limits["force_ceiling_n"] == pytest.approx(40.0)
+    assert limits["unified_min_force_n"] == pytest.approx(0.5)
+    assert limits["unified_max_force_n"] == pytest.approx(30.0)
+    record = json.loads((directory / "config.json").read_text(encoding="utf-8"))
+    assert record["delta"]["reference"]["initial_force_n"] == pytest.approx(0.5)
+    assert record["delta"]["reference"]["duration_s"] == pytest.approx(0.03)
+    assert record["effective"]["safety"]["max_target_force_n"] == pytest.approx(30.0)
 
 
 def test_preload_ramp_waits_until_final_target_before_activation(tmp_path):
@@ -1397,3 +1361,57 @@ def test_preload_min_force_ratio_allows_coarse_preload_completion(tmp_path):
     assert any(row["phase"] == "preload" for row in rows)
     assert any(row["phase"] == "active" for row in rows)
     assert result["status"] == "completed"
+
+
+def test_recording_duration_limit_finishes_like_release(tmp_path: Path) -> None:
+    """时长上限触发后按 release 语义受限回位，manifest 写明 stop_reason。"""
+    from dataclasses import replace
+
+    from dmgripper_experiments.config import RecordingConfig
+
+    config = replace(
+        make_config(on_finished="return"),
+        reference=replace(make_config().reference, duration_s=None),
+        recording=RecordingConfig(max_duration_s=0.5),
+    )
+    result, session, _actions, directory = run_fake_experiment(tmp_path, config)
+    assert result["status"] == "completed"
+    assert result["stop_reason"] == "max_duration_s=0.5"
+    assert session.disable_calls == 1
+    events = _read_events(directory)
+    assert any(event.get("event") == "recording_limit" for event in events)
+    manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["status"] == "completed"
+    assert manifest["stop_reason"] == "max_duration_s=0.5"
+
+
+def test_recording_tactile_size_limit_finishes_like_release(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """触觉体积上限触发后同样优雅收尾并写明 stop_reason。
+
+    写线程置位上限是真实时序，FakeClock 驱动的假实验可能先结束；
+    这里注入首个样本后即置位的记录器，确定性覆盖控制循环的轮询、
+    受限回位与留档链路。真实置位语义由记录器级测试覆盖。
+    """
+    from dmgripper_experiments import runtime
+    from dmgripper_experiments.recording import ExperimentRecorder
+
+    class SizeLimitRecorder(ExperimentRecorder):
+        limit_seen = False
+
+        def sample(self, record) -> None:
+            super().sample(record)
+            self.limit_seen = True
+
+        @property
+        def limit_stop_reason(self) -> str | None:
+            return "max_tactile_mib=0.000488281" if self.limit_seen else None
+
+    monkeypatch.setattr(runtime, "ExperimentRecorder", SizeLimitRecorder)
+    result, _session, _actions, directory = run_fake_experiment(tmp_path, make_config())
+    assert result["status"] == "completed"
+    assert result["stop_reason"] == "max_tactile_mib=0.000488281"
+    manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
+    assert manifest["stop_reason"] == result["stop_reason"]
+    assert any(event.get("event") == "recording_limit" for event in _read_events(directory))

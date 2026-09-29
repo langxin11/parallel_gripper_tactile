@@ -6,7 +6,7 @@ from numbers import Real
 
 import numpy as np
 
-from ..tactile.risk import TaxelRiskConfig, TaxelRiskObservation, TaxelRiskObserver
+from ..tactile.risk import TAXELS_PER_SIDE, TaxelRiskConfig, TaxelRiskObservation, TaxelRiskObserver
 from ..tactile.multirate import FilteredTangentialLoad, TactileState
 from .adaptive import AdaptiveLoadCommand, AdaptiveLoadConfig, AdaptiveLoadScheduler
 from .friction_depth import DepthFrictionPrior, DepthFrictionPriorConfig
@@ -24,7 +24,6 @@ class UnifiedAdaptiveConfig:
     load: AdaptiveLoadConfig = field(default_factory=AdaptiveLoadConfig)
     observer: TaxelRiskConfig = field(default_factory=TaxelRiskConfig)
     particle_friction: ParticleFrictionConfig | None = None
-    depth_friction_prior: DepthFrictionPriorConfig | None = None
     risk_enabled: bool = False
     risk_step_enabled: bool = True
     friction_update_enabled: bool = False
@@ -34,7 +33,8 @@ class UnifiedAdaptiveConfig:
     risk_max_events: int = 4
     risk_duration_s: float = 10.0
     risk_repeat_interval_s: float | None = None
-    friction_quality_min: float = 0.8
+    # 事件摩擦候选至少需要的受影响触点数；这是工程覆盖率门槛，不是统计置信度。
+    min_event_taxels: int = 8
     friction_discount: float = 0.8
     friction_min: float = 0.05
     friction_max: float = 2.0
@@ -45,6 +45,7 @@ class UnifiedAdaptiveConfig:
     tracking_error_n: float = 0.5
     failure_timeout_s: float = 0.5
     max_sample_gap_s: float = 0.1
+    depth_friction_prior: DepthFrictionPriorConfig | None = None
 
     def __post_init__(self) -> None:
         """验证权限类型、数值范围和计数上限。"""
@@ -68,9 +69,11 @@ class UnifiedAdaptiveConfig:
                 or value <= 0
             ):
                 raise ValueError(f"{item.name} 必须为正有限数值")
-        for value in (self.risk_max_events, self.friction_raise_events):
+        for value in (self.risk_max_events, self.friction_raise_events, self.min_event_taxels):
             if not isinstance(value, int):
                 raise ValueError("事件计数必须为整数")
+        if not 1 <= self.min_event_taxels <= TAXELS_PER_SIDE:
+            raise ValueError("事件触点门槛必须位于 1 与单侧触点数之间")
         if self.friction_update_enabled and not self.risk_enabled:
             raise ValueError("摩擦更新要求先开放局部风险权限")
         if self.depth_friction_prior is not None:
@@ -106,8 +109,8 @@ class UnifiedAdaptiveConfig:
                 or self.particle_friction.max_friction > self.friction_max
             ):
                 raise ValueError("粒子摩擦范围必须位于统一策略允许范围内")
-        if not 0 < self.friction_quality_min <= 1 or not 0 < self.friction_discount <= 1:
-            raise ValueError("质量阈值和折减必须位于 (0, 1]")
+        if not 0 < self.friction_discount <= 1:
+            raise ValueError("事件折减必须位于 (0, 1]")
         if not self.friction_min < self.friction_max or self.friction_consistency >= 1:
             raise ValueError("摩擦范围或一致性容差无效")
         if not all(
@@ -263,6 +266,7 @@ class UnifiedAdaptivePolicy:
                 estimator.snapshot(updated=False, reason="initialized")
                 for estimator in self._particle_filters
             )
+        self._prior_evidence = [False, False]
         self._applied_friction = [config.load.left_friction, config.load.right_friction]
         self._depth_priors = (
             None
@@ -303,7 +307,7 @@ class UnifiedAdaptivePolicy:
         self,
         side: int,
         candidate: float | None,
-        quality: float,
+        event_taxels: int,
         event: bool,
         changed: bool,
         utilization: float,
@@ -358,7 +362,7 @@ class UnifiedAdaptivePolicy:
             state.pending, state.pending_s, state.count = None, None, 0
         if not event:
             return "lower_bound_accepted" if lower_bound_accepted else "unchanged"
-        if candidate is None or not math.isfinite(candidate) or quality < c.friction_quality_min:
+        if candidate is None or not math.isfinite(candidate) or event_taxels < c.min_event_taxels:
             state.pending, state.count = None, 0
             return "insufficient_quality"
         value = candidate * c.friction_discount
@@ -414,37 +418,37 @@ class UnifiedAdaptivePolicy:
         if dt_s <= 0:
             return
         snapshots: list[ParticleFrictionSnapshot] = []
-        for side, estimator, utilization, candidate, quality in (
+        for side, estimator, utilization, candidate, event_taxels in (
             (
                 0,
                 self._particle_filters[0],
                 observation.left_utilization,
                 observation.left_candidate,
-                observation.left_quality,
+                int(round(observation.left_quality * TAXELS_PER_SIDE)),
             ),
             (
                 1,
                 self._particle_filters[1],
                 observation.right_utilization,
                 observation.right_candidate,
-                observation.right_quality,
+                int(round(observation.right_quality * TAXELS_PER_SIDE)),
             ),
         ):
             physics_event = event and actionable and candidate is not None
             qualified_event = physics_event
             event_observation = candidate if physics_event else utilization
-            event_quality = quality if physics_event else 0.0
             snapshot = estimator.update(
                 event_observation if qualified_event else utilization,
                 dt_s=dt_s,
                 stable=stable,
                 event=qualified_event,
-                event_quality=event_quality if qualified_event else 0.0,
+                event_taxels=event_taxels if qualified_event else 0,
             )
             snapshots.append(snapshot)
             # 粘着帧只能说明摩擦下界，不能据此乐观地减小夹持力；只有经质量
             # 门控的微滑移事件才允许将控制摩擦向保守低分位下调。
             if qualified_event and snapshot.reason.startswith("event_update"):
+                self._prior_evidence[side] = True
                 state = self._friction[side]
                 conservative = max(
                     snapshot.control_value,
@@ -470,6 +474,7 @@ class UnifiedAdaptivePolicy:
         observation: TaxelRiskObservation | None = None,
         filtered_load: FilteredTangentialLoad | None = None,
         freeze_increase: bool = False,
+        contact_depth_m: float | None = None,
         left_displacements_m=None,
         right_displacements_m=None,
     ) -> UnifiedAdaptiveCommand:
@@ -538,26 +543,38 @@ class UnifiedAdaptivePolicy:
                 )
                 if depth_reset or expired:
                     prior.reset()
+                    self._prior_evidence[side] = False
                 locked_now = prior.observe(
                     (left_displacements_m, right_displacements_m)[side],
                     arrays[side],
                     (observation.left_valid_mask, observation.right_valid_mask)[side],
                     eligible=lower_bound_eligible and not depth_reset and not expired,
                     time_s=time_s,
+                    contact_depth_m=contact_depth_m,
                 )
                 depth_ready[side] = prior.locked and prior.depth_m is not None
                 # 先验只初始化无证据状态；已接受的低摩擦不能被压入深度抬高。
-                if locked_now and state.updated_s is None and self._particle_filters is not None:
+                if (
+                    locked_now
+                    and state.updated_s is None
+                    and not self._prior_evidence[side]
+                    and self._particle_filters is not None
+                ):
                     estimator = self._particle_filters[side]
                     estimator.config = replace(estimator.config, prior_mean=prior.value)
                     estimator.reset()
-                if depth_ready[side] and state.updated_s is None and lower_bound_eligible:
+                if (
+                    depth_ready[side]
+                    and state.updated_s is None
+                    and not self._prior_evidence[side]
+                    and lower_bound_eligible
+                ):
                     state.value = prior.value
         reasons = [
             self._update_friction(
                 side,
                 candidate,
-                quality,
+                event_taxels,
                 event and actionable and c.particle_friction is None,
                 observation.contact_changed or gap or not observation.valid,
                 utilization,
@@ -566,11 +583,11 @@ class UnifiedAdaptivePolicy:
                 lower_bound_eligible and depth_ready[side],
                 time_s,
             )
-            for side, candidate, quality, utilization, taxel_utilization, valid_mask in (
+            for side, candidate, event_taxels, utilization, taxel_utilization, valid_mask in (
                 (
                     0,
                     observation.left_candidate,
-                    observation.left_quality,
+                    int(round(observation.left_quality * TAXELS_PER_SIDE)),
                     observation.left_utilization,
                     observation.left_taxel_utilization,
                     observation.left_valid_mask,
@@ -578,13 +595,16 @@ class UnifiedAdaptivePolicy:
                 (
                     1,
                     observation.right_candidate,
-                    observation.right_quality,
+                    int(round(observation.right_quality * TAXELS_PER_SIDE)),
                     observation.right_utilization,
                     observation.right_taxel_utilization,
                     observation.right_valid_mask,
                 ),
             )
         ]
+        for side, reason in enumerate(reasons):
+            if reason in {"lower_accepted", "raise_pending", "raise_accepted"}:
+                self._prior_evidence[side] = True
         self._update_particle_friction(
             observation,
             dt_s=dt,
@@ -604,15 +624,14 @@ class UnifiedAdaptivePolicy:
         if self._depth_priors is not None:
             for side, state in enumerate(self._friction):
                 if state.value > previous_friction[side]:
-                    # 接触可靠才允许提高采用值；所有上调统一限速，负向证据立即保留。
-                    allowance = (
-                        c.depth_friction_prior.max_increase_per_s * dt
-                        if lower_bound_eligible and depth_ready[side] and not depth_reset
-                        else 0.0
-                    )
-                    self._applied_friction[side] = min(
-                        state.value, previous_friction[side] + allowance
-                    )
+                    # 关闭速率限制仍须通过接触门控，负向证据立即保留。
+                    rate = c.depth_friction_prior.max_increase_per_s
+                    if not (lower_bound_eligible and depth_ready[side] and not depth_reset):
+                        self._applied_friction[side] = previous_friction[side]
+                    elif rate is not None:
+                        self._applied_friction[side] = min(
+                            state.value, previous_friction[side] + rate * dt
+                        )
         if not enabled or not observation.valid or blocked or gap or observation.risk < 1:
             self._risk_confirmed_since = None
         elif actionable and self._risk_confirmed_since is None:
@@ -738,6 +757,7 @@ class UnifiedAdaptivePolicy:
         measured_force_n: float,
         execution_limited: bool = False,
         enabled: bool = True,
+        contact_depth_m: float | None = None,
         left_displacements_m=None,
         right_displacements_m=None,
     ) -> UnifiedAdaptiveCommand:
@@ -803,6 +823,7 @@ class UnifiedAdaptivePolicy:
             observation=observation,
             filtered_load=state.load,
             freeze_increase=not fresh or not new or unseen_invalid,
+            contact_depth_m=contact_depth_m,
             left_displacements_m=left_displacements_m,
             right_displacements_m=right_displacements_m,
         )

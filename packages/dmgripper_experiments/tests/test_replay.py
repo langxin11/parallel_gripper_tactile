@@ -34,3 +34,27 @@ def test_replay_is_diagnostic_deduplicated_and_exclusive(tmp_path) -> None:
     for output in (source, destination):
         with pytest.raises(FileExistsError):
             replay_tactile(source, output, config)
+
+
+def test_replay_reads_gzipped_tactile_transparently(tmp_path) -> None:
+    """gzip 迁移后的 tactile.jsonl.gz 可直接回放，行为与未压缩一致。"""
+    import gzip
+
+    source_gz, destination = tmp_path / "tactile.jsonl.gz", tmp_path / "diagnostic.csv"
+    samples = [
+        {
+            "timestamp_us": timestamp,
+            "left_force_n": 0.9,
+            "right_force_n": 0.9,
+            "left_taxel_forces_n": [[0.1, 0, 0.1]] * 9,
+            "right_taxel_forces_n": [[0.1, 0, 0.1]] * 9,
+        }
+        for timestamp in (0, 10000, 20000)
+    ]
+    payload = "\n".join(json.dumps(sample) for sample in samples) + "\n"
+    with gzip.open(source_gz, "wt", encoding="utf-8") as handle:
+        handle.write(payload)
+    config = UnifiedAdaptiveConfig()
+    assert replay_tactile(source_gz, destination, config) == 3
+    with destination.open() as handle:
+        assert len(list(csv.DictReader(handle))) == 3

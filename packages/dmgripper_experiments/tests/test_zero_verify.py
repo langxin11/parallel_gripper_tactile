@@ -1,4 +1,4 @@
-"""噪声感知零力窗口验证的行为锚点（自根目录 cup 测试迁移）。"""
+"""零力窗口验证的行为锚点：设备常数下的空载门禁与告警。"""
 
 from __future__ import annotations
 
@@ -6,29 +6,33 @@ from dataclasses import replace
 
 import pytest
 
-from .fakes import FakeClock, FakeTactile, PhaseActions, curve_config
+from .fakes import FakeClock, FakeTactile, PhaseActions, make_config
 
-from dmgripper_experiments.runtime import _verify_zero
+from dmgripper_experiments.config import ExperimentConfig
+from dmgripper_experiments.runtime import (
+    _TACTILE_BIAS_SETTLE_S,
+    _ZERO_FORCE_STABLE_S,
+    _ZERO_FORCE_THRESHOLD_N,
+    _verify_zero,
+)
 from dmgripper_experiments.tactile import TactileSnapshot
 
 
-def _zero_config(**lifecycle_overrides):
-    """返回零力验证用的短时限配置。"""
-    config = curve_config()
-    lifecycle = replace(config.lifecycle, **lifecycle_overrides)
-    return replace(config, lifecycle=lifecycle)
+def _zero_config() -> ExperimentConfig:
+    """返回零力验证用的统一自适应配置。"""
+    return make_config()
 
 
 def test_verify_zero_uses_filtered_fz_and_tolerates_raw_noise() -> None:
-    """零力门禁与 ROS 一致使用滤波 Fz，原始三轴噪声不应反复清空窗口。"""
+    """零力门禁使用滤波 Fz，原始三轴噪声尖峰不应阻断验证。"""
     clock = FakeClock()
     actions = PhaseActions()
 
     class NoisyTactile(FakeTactile):
-        """持续返回滤波力为零、原始三轴合力超过零力阈值的快照。"""
+        """持续返回滤波力为零、原始三轴合力非零的快照。"""
 
         def wait_for_update(self, _previous_received_at_s, _timeout_s) -> TactileSnapshot:
-            """推进时钟并构造含原始噪声尖峰的触觉帧。"""
+            """推进时钟并构造含原始噪声的触觉帧。"""
             self.clock.advance(0.01)
             snapshot = self._snapshot(force_n=0.0)
             return replace(snapshot, raw_left_fz_n=0.2, raw_right_fz_n=0.2)
@@ -53,22 +57,13 @@ def test_verify_zero_waits_for_a_new_packet_after_bias_settle() -> None:
             return self._snapshot(force_n=0.0)
 
     tactile = BoundaryTactile(None, clock=clock, phase=actions)
-    config = _zero_config(zero_force_stable_s=0.02)
-    _verify_zero(
-        tactile,
-        config,
-        True,
-        clock,
-        clock.sleep,
-    )
+    _verify_zero(tactile, _zero_config(), True, clock, clock.sleep)
     assert tactile.previous_boundaries[0] is None
-    assert tactile.previous_boundaries[1] == pytest.approx(
-        0.01 + config.timing.tactile_bias_settle_s
-    )
+    assert tactile.previous_boundaries[1] == pytest.approx(0.01 + _TACTILE_BIAS_SETTLE_S)
 
 
-def test_verify_zero_accepts_noise_crossing_mean_threshold() -> None:
-    """滤波噪声可越过均值阈值，但窗口均值合格且未达接触峰值时应通过。"""
+def test_verify_zero_accepts_window_mean_below_threshold() -> None:
+    """滤波噪声在窗口均值阈值以下时应通过验证。"""
     clock = FakeClock()
     actions = PhaseActions()
 
@@ -82,20 +77,15 @@ def test_verify_zero_accepts_noise_crossing_mean_threshold() -> None:
             return self._snapshot(force_n=force_n)
 
     tactile = MeanStableTactile(None, clock=clock, phase=actions)
-    _verify_zero(
-        tactile,
-        _zero_config(zero_force_stable_s=0.04),
-        False,
-        clock,
-        clock.sleep,
-    )
+    _verify_zero(tactile, _zero_config(), False, clock, clock.sleep)
 
 
-def test_verify_zero_contact_peak_emits_warning_without_resetting_window() -> None:
-    """接触级峰值只告警，合格的窗口均值仍可通过零力验证。"""
+def test_verify_zero_contact_peak_emits_warning_without_blocking() -> None:
+    """接触级峰值只告警，合格的窗口均值仍通过零力验证。"""
     clock = FakeClock()
     actions = PhaseActions()
     warnings: list[dict[str, object]] = []
+    threshold = _zero_config().lifecycle.contact_on_n
 
     class ContactPeakTactile(FakeTactile):
         """每三个采样注入一次达到接触阈值的双侧峰值。"""
@@ -103,34 +93,28 @@ def test_verify_zero_contact_peak_emits_warning_without_resetting_window() -> No
         def wait_for_update(self, _previous_received_at_s, _timeout_s) -> TactileSnapshot:
             """推进时钟并构造周期性接触峰值。"""
             self.clock.advance(0.01)
-            force_n = 0.2 if self.counter % 3 == 0 else 0.0
+            force_n = threshold if self.counter % 3 == 0 else 0.0
             return self._snapshot(force_n=force_n)
 
     tactile = ContactPeakTactile(None, clock=clock, phase=actions)
     _verify_zero(
         tactile,
-        _zero_config(zero_force_stable_s=0.04, zero_force_timeout_s=0.12),
+        _zero_config(),
         False,
         clock,
         clock.sleep,
         warning_sink=warnings.append,
     )
     assert warnings[0]["event"] == "zero_force_diagnostics"
-    assert warnings[0]["taxels"]["left"]["maximum_abs_residual_n"] == pytest.approx(0.2)
-    assert warnings[0]["taxels"]["left"]["maximum_residual_taxel_index"] == 0
-    assert warnings[1:] == [
-        {
-            "event": "warning",
-            "code": "zero_force_peak",
-            "message": (
-                "使能前零力均值验证通过，但滤波双侧 Fz 峰值为 0.200N（双侧），达到 "
-                "0.200N 警告阈值；请确认传感器无持续受力"
-            ),
-            "maximum_peak_n": pytest.approx(0.2),
-            "peak_side": "both",
-            "peak_warning_threshold_n": pytest.approx(0.2),
-        }
-    ]
+    peak_warning = next(warning for warning in warnings[1:] if warning.get("event") == "warning")
+    assert peak_warning["code"] == "zero_force_peak"
+    assert peak_warning["peak_side"] == "both"
+    assert peak_warning["maximum_peak_n"] == pytest.approx(threshold)
+    assert peak_warning["peak_warning_threshold_n"] == pytest.approx(threshold)
+    diagnostics = warnings[0]
+    taxels = diagnostics["taxels"]
+    assert taxels["left"]["taxel_count"] == 9
+    assert taxels["left"]["maximum_abs_residual_n"] == pytest.approx(threshold / 3)
 
 
 def test_verify_zero_rejects_contact_peak_when_window_mean_is_high() -> None:
@@ -150,7 +134,7 @@ def test_verify_zero_rejects_contact_peak_when_window_mean_is_high() -> None:
     with pytest.raises(RuntimeError, match=r"均值 LEFT=0\.200N"):
         _verify_zero(
             tactile,
-            _zero_config(zero_force_stable_s=0.04, zero_force_timeout_s=0.12),
+            _zero_config(),
             False,
             clock,
             clock.sleep,
@@ -177,6 +161,12 @@ def test_verify_zero_reports_filtered_force_timeout_instead_of_snapshot_timeout(
         _verify_zero(tactile, _zero_config(), False, clock, clock.sleep)
 
 
+def test_verify_zero_window_constants_are_device_behavior() -> None:
+    """零力窗口参数已固化为运行时常数，不再来自配置。"""
+    assert _ZERO_FORCE_THRESHOLD_N == pytest.approx(0.1)
+    assert _ZERO_FORCE_STABLE_S == pytest.approx(0.5)
+
+
 @pytest.mark.parametrize("bad_value", [float("nan"), float("inf")])
 def test_verify_zero_rejects_nonfinite_taxel(bad_value: float) -> None:
     """任一逐 taxel 分量非有限时必须阻断使能前验证。"""
@@ -188,7 +178,7 @@ def test_verify_zero_rejects_nonfinite_taxel(bad_value: float) -> None:
             self.clock.advance(0.01)
             return replace(
                 self._snapshot(force_n=0.0),
-                left_taxel_forces_n=((bad_value, 0.0, 0.0),),
+                left_taxel_forces_n=((bad_value, 0.0, 0.0),) * 9,
             )
 
     tactile = BadTaxelTactile(None, clock=clock, phase=actions)
@@ -213,12 +203,13 @@ def test_verify_zero_rejects_taxel_count_change() -> None:
             return snapshot
 
     tactile = ChangingTaxelTactile(None, clock=clock, phase=actions)
+    # 九触点数量约束属统一策略保护；这里用未启用统一的配置隔离窗口行为。
     with pytest.raises(RuntimeError, match="taxel 数量变化"):
-        _verify_zero(tactile, _zero_config(), False, clock, clock.sleep)
+        _verify_zero(tactile, ExperimentConfig(), False, clock, clock.sleep)
 
 
 def test_local_taxel_residual_is_diagnostic_not_zero_gate() -> None:
-    """未配置逐 taxel 幅值门限时，局部残余只诊断且全局均值仍决定通过。"""
+    """局部残余只进入诊断事件，全局窗口均值仍决定通过。"""
     clock = FakeClock()
     actions = PhaseActions()
     events: list[dict[str, object]] = []
@@ -228,13 +219,13 @@ def test_local_taxel_residual_is_diagnostic_not_zero_gate() -> None:
             self.clock.advance(0.01)
             return replace(
                 self._snapshot(force_n=0.0),
-                left_taxel_forces_n=((0.0, 0.0, 5.0),),
+                left_taxel_forces_n=((0.0, 0.0, 5.0),) * 9,
             )
 
     tactile = ResidualTaxelTactile(None, clock=clock, phase=actions)
     _verify_zero(
         tactile,
-        _zero_config(zero_force_stable_s=0.02),
+        _zero_config(),
         False,
         clock,
         clock.sleep,

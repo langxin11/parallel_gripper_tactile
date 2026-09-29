@@ -105,7 +105,7 @@ def test_dry_run_outputs_plan_without_runtime(capsys: pytest.CaptureFixture[str]
     from dmgripper_experiments import cli
 
     modules_before = set(sys.modules)
-    exit_code = cli.run(["--controller.kind", "pid"])
+    exit_code = cli.run(["--metadata.task-name", "dry-run-检查"])
     assert exit_code == 0
     payload = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
     assert payload["mode"] == "dry-run"
@@ -117,9 +117,8 @@ def test_dry_run_with_yaml_config(capsys: pytest.CaptureFixture[str], tmp_path: 
     """--config 加载 YAML 后仍保持 dry-run。"""
     document = """
 reference:
-  adaptive:
-    initial_force_n: 0.6
-    duration_s: 5.0
+  initial_force_n: 0.6
+  duration_s: 5.0
 """
     path = tmp_path / "adaptive.yaml"
     path.write_text(document, encoding="utf-8")
@@ -128,7 +127,7 @@ reference:
     modules_before = set(sys.modules)
     assert cli.run(["--config", str(path)]) == 0
     payload = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
-    assert payload["config"]["reference"]["adaptive"]["initial_force_n"] == pytest.approx(0.6)
+    assert payload["config"]["reference"]["initial_force_n"] == pytest.approx(0.6)
     newly_imported = set(sys.modules) - modules_before
     assert not any(name.startswith("dmgripper_experiments.runtime") for name in newly_imported)
 
@@ -153,8 +152,8 @@ def test_execute_without_terminal_requires_unattended_combination(
     from dmgripper_experiments import cli
 
     modules_before = set(sys.modules)
-    assert cli.run(["--execute"]) == 1
-    assert "auto_start" in capsys.readouterr().err
+    assert cli.run(["--execute", "--reference.duration-s", "5"]) == 1
+    assert "on_finished=return" in capsys.readouterr().err
     newly_imported = set(sys.modules) - modules_before
     assert not any(name.startswith("dmgripper_experiments.runtime") for name in newly_imported)
 
@@ -180,10 +179,11 @@ def test_unattended_execute_does_not_start_stdin_reader(
         cli.run(
             [
                 "--execute",
-                "--lifecycle.auto-start",
+                "--reference.duration-s",
+                "5",
                 "--lifecycle.on-finished",
                 "return",
-                "--terminal.mode",
+                "--terminal",
                 "plain",
                 "--output",
                 str(tmp_path),
@@ -219,7 +219,7 @@ def test_plain_execute_prints_preflight_warning(
         cli.run(
             [
                 "--execute",
-                "--terminal.mode",
+                "--terminal",
                 "plain",
                 "--output",
                 str(tmp_path),
@@ -253,7 +253,7 @@ def test_rich_execute_prints_final_safety_summary(
         cli.run(
             [
                 "--execute",
-                "--terminal.mode",
+                "--terminal",
                 "rich",
                 "--output",
                 str(tmp_path),
@@ -287,7 +287,7 @@ def test_keyboard_interrupt_prints_cleanup_warning_and_run_directory(
         cli.run(
             [
                 "--execute",
-                "--terminal.mode",
+                "--terminal",
                 "plain",
                 "--output",
                 str(tmp_path),
@@ -311,31 +311,12 @@ def test_help_lists_task_and_object_names(capsys: pytest.CaptureFixture[str]) ->
     assert "task-name" in capsys.readouterr().out
 
 
-def test_legacy_entry_points_reject_with_migration_hint(capsys: pytest.CaptureFixture[str]) -> None:
-    """旧入口明确拒绝执行并给出新命令。"""
-    from dmgripper_experiments import legacy
-
-    with pytest.raises(SystemExit) as cup_exit:
-        legacy.cup_main()
-    assert cup_exit.value.code == 2
-    assert "dmgripper-run" in capsys.readouterr().err
-
-    with pytest.raises(SystemExit) as demo_exit:
-        legacy.force_demo_main()
-    assert demo_exit.value.code == 2
-    assert "dmgripper-run" in capsys.readouterr().err
-
-
 def test_unlimited_execute_requires_terminal(tmp_path: Path, capsys, monkeypatch):
     """不限时模式即便配置自动回位，也不能启动无人值守运行。"""
     from dmgripper_experiments import cli
 
     monkeypatch.setattr(sys.stdin, "isatty", lambda: False)
     path = tmp_path / "unlimited.yaml"
-    path.write_text(
-        "reference:\n  adaptive:\n    duration_s: null\nlifecycle:\n"
-        "  auto_start: true\n  on_finished: return\n",
-        encoding="utf-8",
-    )
+    path.write_text("lifecycle:\n  on_finished: return\n", encoding="utf-8")
     assert cli.run(["--config", str(path), "--execute"]) == 1
     assert "不限时实验必须在交互终端运行" in capsys.readouterr().err

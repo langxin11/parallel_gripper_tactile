@@ -107,7 +107,7 @@ def test_particle_posterior_controls_from_stick_history_and_event_candidate() ->
         risk_step_enabled=False,
         friction_update_enabled=True,
         friction_discount=0.8,
-        friction_quality_min=0.4,
+        min_event_taxels=4,
         friction_expiry_s=0.05,
         particle_friction=ParticleFrictionConfig(seed=19),
     )
@@ -249,7 +249,7 @@ def test_candidate_below_observed_no_slip_lower_bound_is_rejected() -> None:
         risk_enabled=True,
         friction_update_enabled=True,
         friction_discount=1.0,
-        friction_quality_min=0.4,
+        min_event_taxels=4,
     )
     policy = UnifiedAdaptivePolicy(config)
     frame = np.tile([0, 0, 0.1], (9, 1))

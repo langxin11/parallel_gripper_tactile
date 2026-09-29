@@ -3,12 +3,20 @@
 import argparse
 import csv
 from dataclasses import replace
+import gzip
 import json
 from pathlib import Path
 
 from dm_grasp_core.grasp.unified import UnifiedAdaptiveConfig, UnifiedAdaptivePolicy
 
 from .config import load_experiment_config
+
+
+def open_tactile_lines(path: Path):
+    """按扩展名透明打开触觉记录；``.gz`` 为旧数据压缩迁移格式。"""
+    if path.suffix == ".gz":
+        return gzip.open(path, mode="rt", encoding="utf-8")
+    return path.open(encoding="utf-8")
 
 
 def replay_tactile(source: Path, destination: Path, config: UnifiedAdaptiveConfig) -> int:
@@ -18,12 +26,18 @@ def replay_tactile(source: Path, destination: Path, config: UnifiedAdaptiveConfi
     核对坐标与符号的一段连续抓取记录；新抓取须单独回放。返回消费的新样本数。
     """
     policy = UnifiedAdaptivePolicy(
-        replace(config, risk_enabled=False, friction_update_enabled=False)
+        replace(
+            config,
+            risk_enabled=False,
+            friction_update_enabled=False,
+            particle_friction=None,
+            depth_friction_prior=None,
+        )
     )
     count = 0
     previous_us = None
     with (
-        source.open(encoding="utf-8") as incoming,
+        open_tactile_lines(source) as incoming,
         destination.open("x", encoding="utf-8", newline="") as outgoing,
     ):
         writer = None
@@ -64,13 +78,13 @@ def main() -> None:
     parser.add_argument("source", type=Path, help="连续抓取段的 tactile.jsonl")
     parser.add_argument("destination", type=Path, help="尚不存在的诊断 CSV")
     parser.add_argument(
-        "--config", type=Path, required=True, help="包含 adaptive.unified 的硬件配置"
+        "--config", type=Path, required=True, help="包含 reference.unified 的硬件配置"
     )
     args = parser.parse_args()
     experiment = load_experiment_config(args.config)
     if not experiment.unified_adaptive_enabled:
-        parser.error("配置必须启用 reference.adaptive.unified")
-    count = replay_tactile(args.source, args.destination, experiment.reference.adaptive.unified)
+        parser.error("配置必须启用 reference.unified")
+    count = replay_tactile(args.source, args.destination, experiment.unified_core_config)
     print(f"已旁路回放 {count} 个新样本；未运行硬件或开放控制权限。")
 
 

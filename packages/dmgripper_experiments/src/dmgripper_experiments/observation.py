@@ -22,6 +22,16 @@ from dm_grasp_core import (
 from .config import EstimationConfig
 from .tactile import TactileSnapshot
 
+# 刚度估计的内部界限与平滑系数；沿用仿真验证起点，不是真机辨识值。
+_INITIAL_N_PER_M = 3000.0
+_MIN_N_PER_M = 250.0
+_MAX_N_PER_M = 25000.0
+_FILTER_ALPHA = 0.15
+_MIN_DELTA_CLOSURE_M = 0.00005
+_MIN_DELTA_FORCE_N = 0.025
+_WINDOW_SIZE = 25
+_MIN_SAMPLES = 8
+
 
 def raw_axes(snapshot: TactileSnapshot) -> tuple[float, ...]:
     """取得完整双侧三轴力，缺失或非有限数据立即拒绝。"""
@@ -123,22 +133,26 @@ class StiffnessDiagnostics:
         config: EstimationConfig,
         kinematics: CrankSliderKinematics,
     ) -> None:
-        """创建估计器或保持禁用。"""
+        """创建估计器或保持禁用。
+
+        估计方法固定为滑动窗口线性拟合；界限与平滑系数沿用仿真验证
+        起点，属内部常数而非实验参数。
+        """
         self._enabled = config.enabled
         self._kinematics = kinematics
         self._estimator = (
             ContactStiffnessEstimator(
                 ContactStiffnessConfig(
                     enabled=True,
-                    initial_n_per_m=config.initial_n_per_m,
-                    min_n_per_m=config.min_n_per_m,
-                    max_n_per_m=config.max_n_per_m,
-                    filter_alpha=config.filter_alpha,
-                    min_delta_closure_m=config.min_delta_closure_m,
-                    min_delta_force_n=config.min_delta_force_n,
-                    method=config.method,
-                    window_size=config.window_size,
-                    min_samples=config.min_samples,
+                    initial_n_per_m=_INITIAL_N_PER_M,
+                    min_n_per_m=_MIN_N_PER_M,
+                    max_n_per_m=_MAX_N_PER_M,
+                    filter_alpha=_FILTER_ALPHA,
+                    min_delta_closure_m=_MIN_DELTA_CLOSURE_M,
+                    min_delta_force_n=_MIN_DELTA_FORCE_N,
+                    method="window_linear",
+                    window_size=_WINDOW_SIZE,
+                    min_samples=_MIN_SAMPLES,
                 ),
                 kinematics,
             )
