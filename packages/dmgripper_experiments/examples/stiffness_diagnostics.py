@@ -1,6 +1,6 @@
 """读取既有运行目录，打印刚度估计诊断摘要。
 
-示例默认离线：只读取 trace.csv，不接触设备。
+示例默认离线：只读取 recording.mcap，不接触设备。
 """
 
 from __future__ import annotations

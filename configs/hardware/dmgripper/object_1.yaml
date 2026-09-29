@@ -1,0 +1,13 @@
+# 物体 1：奶龙玩偶，0.5 N／侧是首次预载候选，尚未人工标定。
+stage: preload
+metadata:
+  task_name: object-1-preload
+  object_name: 奶龙玩偶
+  condition: 抓取位置与姿态待现场固定记录
+reference:
+  initial_force_n: 0.5
+safety:
+  max_target_force_n: 1.0
+  force_ceiling_n: 2.0
+  max_contact_compression_m: 0.025
+  approach_feedforward_force_n: 0.5

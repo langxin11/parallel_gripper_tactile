@@ -9,10 +9,11 @@ import pytest
 from papillarray_hardware import TactileSnapshot
 from papillarray_hardware.native_slip import NativeSlipStatus
 from papillarray_hardware.record_cli import (
-    JsonlRunRecorder,
+    McapRunRecorder,
     _manual_stop_requested,
     build_parser,
 )
+from papillarray_hardware.recording import iter_records
 from papillarray_hardware.standalone import StandaloneSlipConfig, StandaloneSlipSession
 
 
@@ -254,16 +255,28 @@ def test_invalid_configuration_is_rejected(changes: dict[str, object]) -> None:
 def test_recorder_writes_independent_run_artifacts(tmp_path) -> None:
     """独立记录目录保存快照、事件、配置和最终状态且拒绝覆盖。"""
     directory = tmp_path / "run"
-    recorder = JsonlRunRecorder(directory, {"bias": True})
-    recorder.sample({"packet_counter": 1})
+    recorder = McapRunRecorder(directory, {"bias": True}, started_monotonic_s=0.0, epoch_ns=0)
+    recorder.sample({"received_at_s": 0.1, "packet_counter": 1})
     recorder.event({"event": "native_slip_state", "phase": "active"})
     recorder.close(status="completed")
     assert json.loads((directory / "config.json").read_text())["bias"] is True
-    assert json.loads((directory / "tactile.jsonl").read_text())["packet_counter"] == 1
-    assert json.loads((directory / "events.jsonl").read_text())["phase"] == "active"
+    assert list(iter_records(directory / "recording.mcap", "/tactile"))[0]["packet_counter"] == 1
+    assert list(iter_records(directory / "recording.mcap", "/events"))[0]["phase"] == "active"
     assert json.loads((directory / "manifest.json").read_text())["status"] == "completed"
     with pytest.raises(FileExistsError):
-        JsonlRunRecorder(directory, {})
+        McapRunRecorder(directory, {}, started_monotonic_s=0.0)
+
+
+def test_recorder_reports_background_failure_after_manifest(tmp_path) -> None:
+    """末批编码失败会写 failed 清单并向命令行传播。"""
+    directory = tmp_path / "failed"
+    recorder = McapRunRecorder(directory, {}, started_monotonic_s=0.0, epoch_ns=0)
+    recorder.sample({"received_at_s": 0.1, "invalid": object()})
+    with pytest.raises(RuntimeError, match="写线程已失败"):
+        recorder.close(status="completed")
+    manifest = json.loads((directory / "manifest.json").read_text())
+    assert manifest["status"] == "failed"
+    assert "TypeError" in manifest["error"]
 
 
 def test_cli_requires_explicit_bias_and_estimation_modes() -> None:

@@ -1,4 +1,4 @@
-"""绘制通用抓取实验的控制 trace，并兼容历史 cup 记录。
+"""绘制通用抓取实验的控制 trace。
 
 图只呈现记录中实际存在的控制量、触觉量与估计诊断；刚度估计在
 未有效确认的区间留空，不伪造曲线。离线重绘写入独占重绘目录，
@@ -7,7 +7,6 @@
 
 from __future__ import annotations
 
-import csv
 import json
 import math
 import uuid
@@ -15,6 +14,8 @@ from contextlib import contextmanager
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from papillarray_hardware.recording import RECORDING_NAME, iter_records
 
 from .lifecycle import LifecyclePhase
 
@@ -29,7 +30,7 @@ def plot_experiment_run(
     """从通用抓取实验 trace 生成力控诊断图。
 
     Args:
-        directory: 包含 ``trace.csv`` 的实验输出目录。
+        directory: 包含 ``recording.mcap`` 的实验输出目录。
         output_directory: 离线重绘的独占输出目录；``None`` 时在源目录
             内生成 ``plot.pdf``／``plot.png``。
         phases: 可选阶段白名单，仅绘制这些阶段的行。
@@ -44,7 +45,7 @@ def plot_experiment_run(
         ValueError: 阶段名未知，或任务时间窗口不是 ``0 ≤ 起 ≤ 止`` 的有限区间。
     """
     directory = Path(directory)
-    rows = _read_rows(directory / "trace.csv")
+    rows = read_trace_rows(directory)
     if not rows:
         return ()
     rows, x_field = _select_window(rows, phases, task_time_range)
@@ -99,7 +100,7 @@ def repaint_run(
     """对历史或既有运行目录执行离线重绘，返回独占重绘目录。
 
     Args:
-        directory: 包含 ``trace.csv`` 的源运行目录；源文件不会被修改。
+        directory: 包含 ``recording.mcap`` 的源运行目录；源文件不会被修改。
         phases: 可选阶段白名单，透传给绘图。
         task_time_range: 可选任务时间窗口，透传给绘图。
 
@@ -119,28 +120,12 @@ def repaint_run(
     return output
 
 
-def read_trace_rows(directory: Path) -> list[dict[str, str]]:
+def read_trace_rows(directory: Path) -> list[dict[str, Any]]:
     """读取运行目录的控制 trace 行；供离线分析复用。"""
-    return _read_rows(Path(directory) / "trace.csv")
-
-
-def _read_rows(trace_path: Path) -> list[dict[str, str]]:
-    """读取非空 CSV 行；损坏或缺失文件视为没有可绘制数据。
-
-    历史兼容：新 schema 使用 ``phase`` 列；旧 cup trace 使用 ``state``，
-    缺失 ``phase`` 时回填同值。
-    """
-    if not trace_path.is_file() or trace_path.stat().st_size == 0:
+    path = Path(directory) / RECORDING_NAME
+    if not path.is_file():
         return []
-    try:
-        with trace_path.open(encoding="utf-8", newline="") as handle:
-            rows = list(csv.DictReader(handle))
-    except (csv.Error, OSError, UnicodeError):
-        return []
-    for row in rows:
-        if not row.get("phase") and row.get("state"):
-            row["phase"] = row["state"]
-    return rows
+    return list(iter_records(path, "/trace"))
 
 
 def _plotting_api() -> tuple[Any, Any]:
@@ -182,7 +167,7 @@ def _plotting_api() -> tuple[Any, Any]:
     return plt, style_context
 
 
-def _plot_normal_force(axis: Any, time_s: list[float], rows: list[dict[str, str]]) -> None:
+def _plot_normal_force(axis: Any, time_s: list[float], rows: list[dict[str, Any]]) -> None:
     """绘制平均单侧法向实际力与目标力。"""
     left = _values(rows, "left_fz_n")
     right = _values(rows, "right_fz_n")
@@ -202,35 +187,17 @@ def _plot_normal_force(axis: Any, time_s: list[float], rows: list[dict[str, str]
     _legend(axis)
 
 
-def _plot_tangential_force(axis: Any, time_s: list[float], rows: list[dict[str, str]]) -> None:
-    """绘制左右触觉切向力模和触发状态。"""
+def _plot_tangential_force(axis: Any, time_s: list[float], rows: list[dict[str, Any]]) -> None:
+    """绘制左右触觉切向力模。"""
     left = _magnitude(_values(rows, "raw_left_fx_n"), _values(rows, "raw_left_fy_n"))
     right = _magnitude(_values(rows, "raw_right_fx_n"), _values(rows, "raw_right_fy_n"))
     _line_if_data(axis, time_s, left, "Left", "C0")
     _line_if_data(axis, time_s, right, "Right", "C1")
     axis.set_ylabel(r"$F_T$ (N)")
-    trigger = _values(rows, "target_trigger_active", boolean=True)
-    if not any(math.isfinite(value) for value in trigger):
-        trigger = _values(rows, "trigger_active", boolean=True)
-    if any(math.isfinite(value) for value in trigger):
-        active = [math.isfinite(value) and value > 0.5 for value in trigger]
-        axis.fill_between(
-            time_s,
-            0.0,
-            1.0,
-            where=active,
-            step="post",
-            transform=axis.get_xaxis_transform(),
-            color="#009E73",
-            alpha=0.14,
-            linewidth=0.0,
-            zorder=0.1,
-            label="Trigger",
-        )
     _legend(axis)
 
 
-def _plot_joint_command(axis: Any, time_s: list[float], rows: list[dict[str, str]]) -> None:
+def _plot_joint_command(axis: Any, time_s: list[float], rows: list[dict[str, Any]]) -> None:
     """绘制关节位置与电机力矩，并明确标注各自单位。"""
     _line_if_data(axis, time_s, _values(rows, "position_rad"), r"$q$", "C0")
     _line_if_data(axis, time_s, _values(rows, "q_des_rad"), r"$q_d$", "C2", linestyle="--")
@@ -243,95 +210,18 @@ def _plot_joint_command(axis: Any, time_s: list[float], rows: list[dict[str, str
     _legend(axis, torque_axis)
 
 
-def _plot_friction_estimate(axis: Any, time_s: list[float], rows: list[dict[str, str]]) -> None:
-    """绘制控制采用值、无滑移观测下界及原始候选接受结果。"""
+def _plot_friction_estimate(axis: Any, time_s: list[float], rows: list[dict[str, Any]]) -> None:
+    """绘制自适应阶段人工冻结的双侧有效摩擦先验。"""
+    _line_if_data(axis, time_s, _values(rows, "adaptive_left_mu"), r"Left $\mu$", "C0")
     _line_if_data(
-        axis,
-        time_s,
-        _values(rows, "adaptive_left_mu"),
-        r"Left $\hat{\mu}$",
-        "C0",
-        drawstyle="steps-post",
+        axis, time_s, _values(rows, "adaptive_right_mu"), r"Right $\mu$", "C1", linestyle="--"
     )
-    _line_if_data(
-        axis,
-        time_s,
-        _values(rows, "adaptive_left_mu_lower_bound"),
-        r"Left observed lower bound",
-        "C0",
-        linestyle=":",
-        drawstyle="steps-post",
-    )
-    _line_if_data(
-        axis,
-        time_s,
-        _values(rows, "adaptive_right_mu_lower_bound"),
-        r"Right observed lower bound",
-        "C1",
-        linestyle=":",
-        drawstyle="steps-post",
-    )
-    _line_if_data(
-        axis,
-        time_s,
-        _values(rows, "adaptive_right_mu"),
-        r"Right $\hat{\mu}$",
-        "C1",
-        linestyle="--",
-        drawstyle="steps-post",
-    )
-    for side, color in (("left", "C0"), ("right", "C1")):
-        candidates = _values(rows, f"adaptive_{side}_candidate")
-        reasons = [row.get(f"adaptive_{side}_update_reason", "") for row in rows]
-        accepted_x = [
-            x
-            for x, value, reason in zip(time_s, candidates, reasons, strict=True)
-            if math.isfinite(value) and reason.endswith("_accepted")
-        ]
-        accepted_y = [
-            value
-            for value, reason in zip(candidates, reasons, strict=True)
-            if math.isfinite(value) and reason.endswith("_accepted")
-        ]
-        rejected_x = [
-            x
-            for x, value, reason in zip(time_s, candidates, reasons, strict=True)
-            if math.isfinite(value) and not reason.endswith("_accepted")
-        ]
-        rejected_y = [
-            value
-            for value, reason in zip(candidates, reasons, strict=True)
-            if math.isfinite(value) and not reason.endswith("_accepted")
-        ]
-        side_label = "Left" if side == "left" else "Right"
-        if accepted_x:
-            axis.scatter(
-                accepted_x,
-                accepted_y,
-                s=22,
-                facecolors="white",
-                edgecolors=color,
-                linewidths=1.0,
-                zorder=3,
-                label=f"{side_label} candidate accepted",
-            )
-        if rejected_x:
-            axis.scatter(
-                rejected_x,
-                rejected_y,
-                s=18,
-                marker="x",
-                color=color,
-                linewidths=0.9,
-                zorder=3,
-                label=f"{side_label} candidate rejected",
-            )
-    axis.set_ylabel(r"$\mu$")
+    axis.set_ylabel(r"Frozen $\mu$")
     axis.set_ylim(bottom=0.0)
     _legend(axis)
 
 
-def _plot_stiffness(axis: Any, time_s: list[float], rows: list[dict[str, str]]) -> None:
+def _plot_stiffness(axis: Any, time_s: list[float], rows: list[dict[str, Any]]) -> None:
     """绘制等效接触刚度估计；未有效确认的区间留空。"""
     values = _values(rows, "stiffness_n_per_m")
     valid = _values(rows, "stiffness_valid", boolean=True)
@@ -344,40 +234,29 @@ def _plot_stiffness(axis: Any, time_s: list[float], rows: list[dict[str, str]]) 
     _legend(axis)
 
 
-def _values(rows: list[dict[str, str]], field: str, *, boolean: bool = False) -> list[float]:
+def _values(rows: list[dict[str, Any]], field: str, *, boolean: bool = False) -> list[float]:
     """解析一列；空值或异常值保持为 NaN，绝不补为零。"""
     if boolean:
         return [_parse_boolean(row.get(field, "")) for row in rows]
     return [_parse_number(row.get(field, "")) for row in rows]
 
 
-def _has_friction_estimation(directory: Path, rows: list[dict[str, str]]) -> bool:
-    """优先按运行配置识别在线摩擦场景，并兼容只有 trace 的记录。"""
+def _has_friction_estimation(directory: Path, rows: list[dict[str, Any]]) -> bool:
+    """仅为冻结先验自适应运行显示双侧 μ。"""
     config_path = directory / "config.json"
     try:
         config = json.loads(config_path.read_text(encoding="utf-8"))
         config = config.get("effective", config)
-        adaptive = config.get("reference", {}).get("adaptive") or {}
-        unified = adaptive.get("unified") or {}
-        if unified.get("friction_update_enabled") is True:
-            return True
+        return config.get("stage") == "adaptive"
     except (AttributeError, OSError, json.JSONDecodeError):
-        pass
-    return any(
-        math.isfinite(value)
-        for field in (
-            "adaptive_left_mu",
-            "adaptive_right_mu",
-            "adaptive_left_candidate",
-            "adaptive_right_candidate",
-            "adaptive_left_mu_lower_bound",
-            "adaptive_right_mu_lower_bound",
+        return any(
+            math.isfinite(value)
+            for field in ("adaptive_left_mu", "adaptive_right_mu")
+            for value in _values(rows, field)
         )
-        for value in _values(rows, field)
-    )
 
 
-def _parse_number(value: str) -> float:
+def _parse_number(value: object) -> float:
     """解析有限浮点数，失败时返回 NaN。"""
     try:
         result = float(value)
@@ -386,14 +265,9 @@ def _parse_number(value: str) -> float:
     return result if math.isfinite(result) else math.nan
 
 
-def _parse_boolean(value: str) -> float:
-    """解析常用布尔文本；非布尔值保持为 NaN。"""
-    normalized = value.strip().lower()
-    if normalized in {"1", "true", "yes", "on"}:
-        return 1.0
-    if normalized in {"0", "false", "no", "off"}:
-        return 0.0
-    return math.nan
+def _parse_boolean(value: object) -> float:
+    """将原类型布尔值转成图形纵坐标；缺失值保留为 NaN。"""
+    return float(value) if isinstance(value, bool) else math.nan
 
 
 def _mean_pair(left: list[float], right: list[float]) -> list[float]:
@@ -437,10 +311,10 @@ def _legend(*axes: Any) -> None:
 
 
 def _select_window(
-    rows: list[dict[str, str]],
+    rows: list[dict[str, Any]],
     phases: tuple[str, ...] | None,
     task_time_range: tuple[float, float] | None,
-) -> tuple[list[dict[str, str]], str]:
+) -> tuple[list[dict[str, Any]], str]:
     """按阶段白名单与任务时间窗口截取行，返回剩余行与横轴字段名。
 
     任务时间窗口天然只保留 active 及其后冻结任务时钟的行；此时横轴
@@ -530,7 +404,7 @@ def _write_repaint_manifest(
     manifest = {
         "schema": "dmgripper-experiment/repaint/v1",
         "source_directory": str(source_directory),
-        "source_trace": str(source_directory / "trace.csv"),
+        "source_trace": str(source_directory / RECORDING_NAME),
         "created_at": datetime.now(timezone.utc).isoformat(),
         "files": {path.name: path.name for path in plots},
     }

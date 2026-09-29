@@ -18,7 +18,7 @@ from dmgripper_experiments.config import (
     ExperimentConfig,
     LifecycleConfig,
     TimingConfig,
-    UnifiedHardwareConfig,
+    FrozenFrictionConfig,
 )
 from dmgripper_experiments.tactile import TactileSnapshot
 
@@ -161,6 +161,7 @@ class FakeTactile:
             self.sample_sink(
                 {
                     "counter": self.counter,
+                    "received_at_s": snapshot.received_at_s,
                     "timestamp_us": snapshot.timestamp_us,
                     "left_taxel_forces_n": snapshot.left_taxel_forces_n,
                     "right_taxel_forces_n": snapshot.right_taxel_forces_n,
@@ -334,11 +335,12 @@ def adaptive_config(**lifecycle_overrides) -> ExperimentConfig:
             preload_timeout_s=1.0,
             **lifecycle_overrides,
         ),
+        stage="adaptive",
         reference=AdaptiveReferenceConfig(
             initial_force_n=0.5,
             duration_s=0.03,
-            experimental_closed_loop=True,
-            unified=UnifiedHardwareConfig(estimator="classic"),
+            preload_source="test-preload-run",
+            friction=FrozenFrictionConfig(left_mu=0.5, right_mu=0.5, source="test-friction-run"),
         ),
     )
 

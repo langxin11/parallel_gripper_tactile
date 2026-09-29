@@ -48,8 +48,7 @@ from .tactile import (
     TactileSnapshot,
     TactileWorker,
 )
-from .targets import ForceTarget, TargetSource, UnifiedAdaptiveTargetSource, build_target_source
-from dm_grasp_core.grasp.stiffness_adaptation import StiffnessPreload
+from .targets import ForceTarget, TargetSource, build_target_source
 from .terminal import RunSnapshot, TerminalDisplay, format_event_line
 from .trace import _motor_only_trace_row, _trace_row
 from .trajectory import ClosureTrajectory
@@ -175,13 +174,24 @@ def run_experiment(
     Raises:
         BaseException: 运行失败时在完成清理后重新抛出原始错误。
     """
-    recorder = ExperimentRecorder(output_directory, config, input_config_path=input_config_path)
     started = clock()
+    recording_epoch_ns = time.time_ns()
+    recorder = ExperimentRecorder(
+        output_directory,
+        config,
+        input_config_path=input_config_path,
+        started_monotonic_s=started,
+        epoch_ns=recording_epoch_ns,
+    )
     devices = _DeviceState()
+    capacity_limited_ever = False
 
     def emit(event: dict[str, object]) -> None:
         """为事件附加与控制 trace 共用的相对时间并落盘。"""
+        nonlocal capacity_limited_ever
         stamped = {"time_s": clock() - started, **event}
+        if stamped.get("adaptive_capacity_limited") is True:
+            capacity_limited_ever = True
         if event.get("event") == "state" and event.get("phase") is not None:
             devices.phase = str(event["phase"])
         errors: list[BaseException] = []
@@ -351,6 +361,20 @@ def run_experiment(
                 cleanup_errors.append(f"终端显示退出失败：{error}")
         if failure is None and cleanup_errors:
             failure = RuntimeError("退出清理失败：" + "；".join(cleanup_errors))
+        if failure is not None:
+            try:
+                recorder.append(
+                    {"time_s": clock() - started, "event": "fault", "error": str(failure)}
+                )
+            except BaseException as error:  # noqa: BLE001
+                cleanup_errors.append(f"最终故障事件记录失败：{error}")
+        try:
+            recorder.finish_recording()
+        except BaseException as error:  # noqa: BLE001
+            if failure is None:
+                failure = error
+            else:
+                cleanup_errors.append(f"记录数据最终化失败：{error}")
         post_processing_error: BaseException | None = None
         plots: list[str] = []
         # 故障前的 trace 是定位保护触发与控制响应的唯一原始证据；只要
@@ -367,12 +391,6 @@ def run_experiment(
                     cleanup_errors.append(f"故障后绘图失败：{error}")
         if failure is not None:
             try:
-                try:
-                    recorder.append(
-                        {"time_s": clock() - started, "event": "fault", "error": str(failure)}
-                    )
-                except BaseException as error:  # noqa: BLE001
-                    cleanup_errors.append(f"最终故障事件记录失败：{error}")
                 recorder.close(
                     status="failed",
                     error=failure,
@@ -383,12 +401,14 @@ def run_experiment(
                     fault_holding_entered=fault_holding_entered,
                     fault_holding_duration_s=fault_holding_duration_s,
                     fault_resolution=fault_resolution,
+                    capacity_limited_ever=capacity_limited_ever,
                 )
             except BaseException as error:  # noqa: BLE001
                 failure.add_note(f"运行记录最终化失败：{error}")
         elif outcome is not None and outcome.get("status") == "cancelled":
             recorder.close(
                 status="cancelled",
+                capacity_limited_ever=capacity_limited_ever,
                 disable_confirmed="not_applicable",
                 cleanup_errors=cleanup_errors,
                 input_config_path=input_config_path,
@@ -396,6 +416,7 @@ def run_experiment(
         else:
             recorder.close(
                 status="completed",
+                capacity_limited_ever=capacity_limited_ever,
                 disable_confirmed=disable_confirmed,
                 cleanup_errors=cleanup_errors,
                 post_processing_error=post_processing_error,
@@ -766,7 +787,7 @@ def _run_control_loop_inner(
         zero_velocity_target=config.controller.zero_tracking_velocity,
     )
     controller = GripController(config, kinematics=kinematics, command_config=tracking_config)
-    target_source = build_target_source(config.reference, config.unified_core_config)
+    target_source = build_target_source(config)
     compression = ContactCompressionGuard(
         kinematics, config.safety.max_contact_compression_m, lifecycle_config.contact_on_n
     )
@@ -789,7 +810,6 @@ def _run_control_loop_inner(
     preload_started = 0.0
     preload_start_force_n = 0.0
     preload_ramp_duration_s = 0.0
-    stiffness_preload: StiffnessPreload | None = None
     task_time_s = 0.0
     tracking_begun = False
     current_target: ForceTarget | None = None
@@ -911,9 +931,6 @@ def _run_control_loop_inner(
             continue
         sample = _latest_snapshot(tactile, config)
         axes = _validate_snapshot(sample, now, config)
-        if lifecycle.phase is LifecyclePhase.PRELOAD and stiffness_preload is not None:
-            if max(abs(axes[2]), abs(axes[5])) > stiffness_preload.config.force_ceiling_n:
-                fail("刚度预载原始法向力超过独立保护上限")
         try:
             paired = pair_observation(
                 snapshot=sample,
@@ -923,9 +940,7 @@ def _run_control_loop_inner(
                 kinematics=kinematics,
             )
         except Exception as error:
-            if config.unified_adaptive_enabled:
-                raise RuntimeError(f"统一策略触觉配对失败：{error}") from error
-            raise
+            raise RuntimeError(f"触觉配对失败：{error}") from error
         action = action_source()
         if action == "release" and lifecycle.phase in RELEASE_PHASES:
             emit(
@@ -940,6 +955,32 @@ def _run_control_loop_inner(
             enter_phase(LifecyclePhase.RETURNING, _PHASE_MESSAGES[LifecyclePhase.RETURNING])
             trajectory = _home_trajectory(config, kinematics, feedback.position_rad)
             phase_started = now
+        elif action in {"slip-left", "slip-right", "slip-both"}:
+            if config.stage == "friction" and lifecycle.phase in {
+                LifecyclePhase.ACTIVE,
+                LifecyclePhase.HOLDING,
+            }:
+                emit(
+                    {
+                        "event": "manual_slip_mark",
+                        "phase": lifecycle.phase.value,
+                        "action": action,
+                        "side": action.removeprefix("slip-"),
+                        "tactile_timestamp_us": sample.timestamp_us,
+                        "contact_segment": lifecycle.contact_segment,
+                        "message": "操作者标记物体相对滑动；仅用于定位候选取样窗口。",
+                    }
+                )
+            else:
+                emit(
+                    {
+                        "event": "warning",
+                        "code": "command_not_available",
+                        "phase": lifecycle.phase.value,
+                        "action": action,
+                        "message": "仅 friction 的 active／holding 阶段可标记起滑。",
+                    }
+                )
         elif action == "status":
             emit(
                 {
@@ -1009,12 +1050,6 @@ def _run_control_loop_inner(
                     }
                 )
                 fail(str(error))
-            if (
-                isinstance(target_source, UnifiedAdaptiveTargetSource)
-                and min(sample.left_force_n, sample.right_force_n) >= lifecycle_config.contact_on_n
-            ):
-                # 单侧接触后的物体平移不应抬高摩擦先验；行程保护仍从更早的单侧接触累计。
-                target_source.set_contact_closure(paired.closure_m)
         if paired.is_new_tactile:
             left_n, right_n = sample.left_force_n, sample.right_force_n
             if lifecycle.phase is LifecyclePhase.APPROACH:
@@ -1063,21 +1098,13 @@ def _run_control_loop_inner(
                 try:
                     target_source.observe(paired, policy_dt)
                 except ValueError as error:
-                    raise RuntimeError(f"统一策略观测计算失败：{error}") from error
+                    raise RuntimeError(f"自适应目标计算失败：{error}") from error
                 diagnostics = target_source.trace_fields()
-                signature = tuple(
-                    diagnostics.get(key)
-                    for key in (
-                        "adaptive_observation_reason",
-                        "adaptive_left_update_reason",
-                        "adaptive_right_update_reason",
-                        "adaptive_failure_reason",
-                        "adaptive_capacity_limited",
-                    )
+                signature = (
+                    diagnostics.get("adaptive_capacity_limited"),
+                    diagnostics.get("adaptive_execution_limited"),
                 )
-                if diagnostics and (
-                    signature != last_observation_signature or diagnostics.get("adaptive_event_id")
-                ):
+                if diagnostics and signature != last_observation_signature:
                     emit(
                         {
                             "event": "adaptive_observation",
@@ -1086,8 +1113,6 @@ def _run_control_loop_inner(
                         }
                     )
                     last_observation_signature = signature
-                if target_source.failure_reason is not None:
-                    fail(f"统一自适应策略失败：{target_source.failure_reason}")
                 latest_stiffness = stiffness.update(
                     position_rad=feedback.position_rad,
                     normal_force_n=paired.measured_force_n,
@@ -1095,24 +1120,10 @@ def _run_control_loop_inner(
                     sample_id=sample.packet_counter,
                 )
                 if lifecycle.phase is LifecyclePhase.PRELOAD:
-                    if stiffness_preload is not None:
-                        locked = stiffness_preload.update(
-                            latest_stiffness, now_s=now - started, closure_m=paired.closure_m
-                        )
-                        if locked:
-                            assert isinstance(target_source, UnifiedAdaptiveTargetSource)
-                            target_source.set_contact_floor(stiffness_preload.goal_n)
-                            emit(
-                                {
-                                    "event": "stiffness_preload_locked",
-                                    **stiffness_preload.trace_fields(),
-                                }
-                            )
                     target_value = target_source.preload_target(task_time_s)
                     minimum_stable_force_n = _minimum_preload_force(target_value, lifecycle_config)
                     stable = (
                         now - preload_started >= preload_ramp_duration_s
-                        and (stiffness_preload is None or stiffness_preload.ready(now - started))
                         and min(left_n, right_n) >= lifecycle_config.contact_on_n
                         and paired.measured_force_n >= minimum_stable_force_n
                     )
@@ -1124,20 +1135,6 @@ def _run_control_loop_inner(
                     if preload_stable_since is not None and (
                         now - preload_stable_since >= lifecycle_config.preload_stable_time_s
                     ):
-                        if (
-                            stiffness_preload is not None
-                            and stiffness_preload.accepted_stiffness is not None
-                        ):
-                            controller.seed_admittance_from_stiffness(
-                                stiffness_preload.accepted_stiffness,
-                                dt=dt,
-                            )
-                            emit(
-                                {
-                                    "event": "admittance_seeded",
-                                    **controller.adaptation_trace_fields(),
-                                }
-                            )
                         target_source.activate()
                         lifecycle.activate(now)
                         phase_started = now
@@ -1174,14 +1171,6 @@ def _run_control_loop_inner(
                     normal_force_n=paired.measured_force_n,
                 )
                 target_source.stabilize_preload()
-                if lifecycle_config.stiffness_preload is not None:
-                    stiffness_preload = StiffnessPreload(
-                        lifecycle_config.stiffness_preload,
-                        now_s=now - started,
-                        closure_m=paired.closure_m,
-                        force_n=paired.measured_force_n,
-                        rate_n_s=lifecycle_config.preload_force_rate_n_s,
-                    )
                 preload_stable_since = None
                 tracking_begun = False
                 enter_phase(LifecyclePhase.PRELOAD, _PHASE_MESSAGES[LifecyclePhase.PRELOAD])
@@ -1253,10 +1242,6 @@ def _run_control_loop_inner(
                 _APPROACH_FEEDFORWARD_RATIO if config.controller.closing_torque_only else 0.0,
             )
         else:
-            # 预载辨识期间的瞬态斜率可能很大；只在目标锁定并进入 active 后消费刚度。
-            # preload 仍完整记录原始估计，便于诊断辨识质量。
-            if lifecycle.phase is LifecyclePhase.ACTIVE:
-                controller.adapt_stiffness(latest_stiffness, time_s=now - started, dt=dt)
             if lifecycle.phase is LifecyclePhase.PRELOAD:
                 current_target = _preload_force_target(
                     target_source,
@@ -1265,9 +1250,6 @@ def _run_control_loop_inner(
                     elapsed_s=now - preload_started,
                     duration_s=preload_ramp_duration_s,
                 )
-                if stiffness_preload is not None:
-                    force, rate, acceleration = stiffness_preload.sample(now - started)
-                    current_target = ForceTarget(force, rate, acceleration, source="adaptive")
             else:
                 current_target = target_source.active_reference(task_time_s)
             if not tracking_begun:
@@ -1343,8 +1325,6 @@ def _run_control_loop_inner(
         )
         row.update(target_source.trace_fields())
         row.update(compression.trace_fields())
-        if stiffness_preload is not None:
-            row.update(stiffness_preload.trace_fields())
         row.update(controller.adaptation_trace_fields())
         recorder.write(row)
         completed_gap_s = clock() - last_control
@@ -1817,12 +1797,10 @@ def _effective_limits(config: ExperimentConfig) -> dict[str, object]:
         "tracking_torque_limit_nm": config.controller.torque_limit_nm,
         "return_torque_limit_nm": config.controller.return_torque_limit_nm,
     }
-    if config.unified_adaptive_enabled:
-        core = config.unified_core_config
-        limits["unified_min_force_n"] = core.load.min_force_n
-        limits["unified_max_force_n"] = core.load.max_force_n
-        limits["unified_min_event_taxels"] = core.min_event_taxels
-        limits["unified_tracking_error_n"] = core.tracking_error_n
+    if config.stage == "adaptive":
+        core = config.adaptive_load_config
+        limits["adaptive_min_force_n"] = core.min_force_n
+        limits["adaptive_max_force_n"] = core.max_force_n
     return limits
 
 
@@ -1880,8 +1858,8 @@ def _validate_snapshot(
     try:
         return _validate_snapshot_values(snapshot, now_s, config)
     except Exception as error:
-        if config.unified_adaptive_enabled:
-            raise RuntimeError(f"统一策略触觉保护失败：{error}") from error
+        if config.stage == "adaptive":
+            raise RuntimeError(f"触觉保护失败：{error}") from error
         raise
 
 
@@ -1890,8 +1868,8 @@ def _latest_snapshot(tactile: TactileWorker, config: ExperimentConfig) -> Tactil
     try:
         return tactile.latest()
     except Exception as error:
-        if config.unified_adaptive_enabled:
-            raise RuntimeError(f"统一策略触觉采集失败：{error}") from error
+        if config.stage == "adaptive":
+            raise RuntimeError(f"触觉采集失败：{error}") from error
         raise
 
 
@@ -1912,19 +1890,16 @@ def _validate_snapshot_values(
     ):
         if not taxels:
             raise RuntimeError(f"{side} 逐 taxel 数据缺失")
-        if config.unified_adaptive_enabled and len(taxels) != 9:
-            raise RuntimeError(f"{side} 统一策略要求恰好九个触点")
+        if len(taxels) != 9:
+            raise RuntimeError(f"{side} 自适应阶段要求恰好九个触点")
         for taxel_index, vector in enumerate(taxels):
             if len(vector) != 3 or not all(math.isfinite(value) for value in vector):
                 raise RuntimeError(f"{side} taxel {taxel_index} 三轴数据结构错误或包含非有限数值")
-            if config.unified_adaptive_enabled:
-                if (
-                    max(abs(vector[0]), abs(vector[1])) >= TACTILE_TANGENTIAL_RANGE_N
-                    or abs(vector[2]) >= TACTILE_NORMAL_RANGE_N
-                ):
-                    raise RuntimeError(
-                        f"{side} taxel {taxel_index} 达到配置量程，无法继续依赖触觉保持"
-                    )
+            if (
+                max(abs(vector[0]), abs(vector[1])) >= TACTILE_TANGENTIAL_RANGE_N
+                or abs(vector[2]) >= TACTILE_NORMAL_RANGE_N
+            ):
+                raise RuntimeError(f"{side} taxel {taxel_index} 达到配置量程，无法继续依赖触觉保持")
     if max(abs(axes[2]), abs(axes[5])) > config.safety.force_ceiling_n:
         raise RuntimeError("原始法向力超过保护上限")
     return axes

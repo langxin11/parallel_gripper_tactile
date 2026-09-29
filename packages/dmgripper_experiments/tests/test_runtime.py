@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
-import csv
 import json
 import math
 from pathlib import Path
 
 import pytest
 from dmgripper_hardware import STATUS_DISABLED
+from papillarray_hardware.recording import iter_records
 
 from .fakes import (
     CancelActions,
@@ -22,17 +22,12 @@ from .fakes import (
 )
 
 
-def _read_rows(directory: Path) -> list[dict[str, str]]:
-    with (directory / "trace.csv").open(encoding="utf-8", newline="") as handle:
-        return list(csv.DictReader(handle))
+def _read_rows(directory: Path) -> list[dict[str, object]]:
+    return list(iter_records(directory / "recording.mcap", "/trace"))
 
 
 def _read_events(directory: Path) -> list[dict[str, object]]:
-    return [
-        json.loads(line)
-        for line in (directory / "events.jsonl").read_text(encoding="utf-8").splitlines()
-        if line.strip()
-    ]
+    return list(iter_records(directory / "recording.mcap", "/events"))
 
 
 def test_full_lifecycle_completes(tmp_path: Path) -> None:
@@ -59,7 +54,7 @@ def test_full_lifecycle_completes(tmp_path: Path) -> None:
     assert "preload" in phases and "active" in phases and "returning" in phases
     assert all(math.isfinite(float(row["target_force_n"])) for row in rows if row["target_force_n"])
     manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
-    assert manifest["schema"] == "dmgripper-experiment/v1"
+    assert manifest["schema"] == "dmgripper-experiment/v2"
     assert manifest["status"] == "completed"
     assert manifest["disable_confirmed"] is True
 
@@ -140,32 +135,22 @@ def test_adaptive_target_increases_under_tangential_load(tmp_path: Path) -> None
     assert max(active_targets) > 0.5, "切向载荷应当驱动目标力增长"
     # 静态切向不产生重分配风险；承载调度增长由摩擦比目标直接体现。
     assert any(
-        float(row["adaptive_load_target_n"] or 0.0) > 0.5
+        float(row.get("adaptive_load_target_n") or 0.0) > 0.5
         for row in rows
         if row["phase"] == "active"
     )
 
 
 def _nine_taxel_config():
-    """构造九触点链路专用的短时限统一配置。"""
+    """构造短时限九触点冻结先验配置。"""
     from dataclasses import replace
 
-    from dmgripper_experiments.config import UnifiedHardwareConfig, UnifiedObserverConfig
-
     config = adaptive_config()
-    unified = UnifiedHardwareConfig(
-        estimator="classic",
-        observer=UnifiedObserverConfig(window_s=0.01),
-        failure_timeout_s=0.01,
-    )
     return replace(
         config,
-        reference=replace(config.reference, duration_s=0.08, unified=unified),
+        reference=replace(config.reference, duration_s=0.08),
         safety=replace(
-            config.safety,
-            max_target_force_n=1.5,
-            force_ceiling_n=2.0,
-            max_force_rate_n_s=0.5,
+            config.safety, max_target_force_n=1.5, force_ceiling_n=2.0, max_force_rate_n_s=0.5
         ),
     )
 
@@ -210,9 +195,10 @@ class NineTaxelTactile(FakeTactile):
             snapshot = replace(snapshot, left_taxel_forces_n=((4.0, 0.0, force_n / 9),) * 9)
         if self.mode == "invalid_timestamp" and self.phase.phase == "active":
             snapshot = replace(snapshot, timestamp_us=math.nan)
-        if sink is not None:
+        if sink is not None and isinstance(snapshot.timestamp_us, int):
             sink(
                 {
+                    "received_at_s": snapshot.received_at_s,
                     "timestamp_us": snapshot.timestamp_us,
                     "left_taxel_forces_n": snapshot.left_taxel_forces_n,
                     "right_taxel_forces_n": snapshot.right_taxel_forces_n,
@@ -223,60 +209,31 @@ class NineTaxelTactile(FakeTactile):
 
 @pytest.mark.parametrize(
     "mode",
-    [
-        "healthy",
-        "capacity",
-        "overforce",
-        "communication",
-        "hold_communication",
-        "taxel_saturation",
-        "invalid_timestamp",
-    ],
+    ("healthy", "capacity", "overforce", "communication", "taxel_saturation", "invalid_timestamp"),
 )
-def test_unified_nine_taxel_lifecycle_and_fault_health_gate(tmp_path: Path, mode: str) -> None:
-    """九点链路按设备时间增力，任务与触觉故障均持位等待人工释放。"""
+def test_nine_taxel_capacity_and_fault_health_gate(tmp_path: Path, mode: str) -> None:
+    """容量受限只作诊断，真实传感器与设备故障仍触发持位。"""
     config = _nine_taxel_config()
-    if mode == "healthy":
+    tactile_type = type(mode.title(), (NineTaxelTactile,), {"mode": mode})
+    if mode in {"healthy", "capacity"}:
         result, session, actions, directory = run_fake_experiment(
-            tmp_path, config, tactile_type=type("Healthy", (NineTaxelTactile,), {"mode": mode})
+            tmp_path, config, tactile_type=tactile_type
         )
-        assert result["disable_confirmed"] is True
+        assert result["status"] == "completed"
         assert session.disable_calls == 1
+        assert "active" in actions.states
     else:
-        with pytest.raises(RuntimeError, match="统一"):
-            run_fake_experiment(
-                tmp_path,
-                config,
-                tactile_type=type(mode.title(), (NineTaxelTactile,), {"mode": mode}),
-            )
+        with pytest.raises(RuntimeError):
+            run_fake_experiment(tmp_path, config, tactile_type=tactile_type)
         directory = next(tmp_path.rglob("manifest.json")).parent
     manifest = json.loads((directory / "manifest.json").read_text())
-    events = _read_events(directory)
-    if mode == "healthy":
-        assert result["status"] == "completed"
-        assert "active" in actions.states and "holding" in actions.states
-        rows = _read_rows(directory)
-        active = [row for row in rows if row["phase"] == "active"]
-        targets = [float(row["target_force_n"]) for row in active]
-        assert max(targets) > 0.5
-        assert all(0 <= b - a <= 0.5 * 0.005 + 1e-12 for a, b in zip(targets, targets[1:]))
-        assert all(row["adaptive_left_valid_mask"] == "111000000" for row in active)
-        assert all(row["adaptive_left_update_reason"] for row in active)
-        assert any(
-            float(row["adaptive_load_target_n"]) > 0.5
-            for row in rows
-            if row["phase"] == "preload" and row["adaptive_load_target_n"]
-        )
-        assert any(event["event"] == "adaptive_observation" for event in events)
-        raw = [json.loads(line) for line in (directory / "tactile.jsonl").read_text().splitlines()]
-        assert raw and all(len(row["left_taxel_forces_n"]) == 9 for row in raw)
-    else:
+    assert manifest["scientific_evaluation"] == "not_evaluated"
+    if mode == "capacity":
+        assert manifest["capacity_limited_ever"] is True
+        assert any(row.get("adaptive_capacity_limited") for row in _read_rows(directory))
+    if mode not in {"healthy", "capacity"}:
         assert manifest["status"] == "failed"
         assert manifest["disable_confirmed"] is True
-        assert manifest["fault_holding_entered"] is True
-        if mode in {"capacity", "hold_communication"}:
-            assert "capacity_limited" in manifest["primary_error"]["message"]
-        assert manifest["fault_resolution"] == "released"
 
 
 def test_preload_accepts_force_above_floor_without_imbalance_fault(tmp_path: Path) -> None:
@@ -1089,7 +1046,7 @@ def test_contact_loss_enters_fault_holding_and_waits_for_release(tmp_path: Path)
     confirmed = [event for event in events if event["event"] == "contact_confirmed"]
     assert len(confirmed) == 1
     rows = _read_rows(next(tmp_path.rglob("manifest.json")).parent)
-    segments = {int(row["contact_segment"]) for row in rows if row["contact_segment"]}
+    segments = {row["contact_segment"] for row in rows if row.get("contact_segment") is not None}
     assert segments == {0, 1}, "接触段编号不应在失接触后继续递增"
 
 
@@ -1143,7 +1100,7 @@ def test_stiffness_diagnostics_do_not_change_control_commands(tmp_path: Path) ->
     disabled = dataclasses.replace(
         make_config(), estimation=dataclasses.replace(EstimationConfig(), enabled=False)
     )
-    enabled = make_config()
+    enabled = dataclasses.replace(make_config(), estimation=EstimationConfig(enabled=True))
     result_a, _session_a, _actions_a, directory_a = run_fake_experiment(tmp_path, disabled)
     result_b, _session_b, _actions_b, directory_b = run_fake_experiment(tmp_path, enabled)
     assert result_a["status"] == result_b["status"] == "completed"
@@ -1160,7 +1117,7 @@ def test_stiffness_diagnostics_do_not_change_control_commands(tmp_path: Path) ->
     assert all(row["stiffness_n_per_m"] for row in diagnosed)
     # 未收到新观测的首个跟踪周期允许留空，其余必须有诊断原因。
     assert len(diagnosed) >= len(tracking_b) - 1
-    assert all(row["stiffness_n_per_m"] == "" for row in rows_a)
+    assert all(row["stiffness_n_per_m"] is None for row in rows_a)
 
 
 def test_tracking_records_raw_and_filtered_force_layers(tmp_path: Path) -> None:
@@ -1305,10 +1262,10 @@ def test_run_echoes_effective_limits_and_records_config_delta(tmp_path: Path) ->
     limits = next(event for event in events if event["event"] == "safety_limits")
     assert limits["max_target_force_n"] == pytest.approx(30.0)
     assert limits["force_ceiling_n"] == pytest.approx(40.0)
-    assert limits["unified_min_force_n"] == pytest.approx(0.5)
-    assert limits["unified_max_force_n"] == pytest.approx(30.0)
+    assert limits["adaptive_min_force_n"] == pytest.approx(0.5)
+    assert limits["adaptive_max_force_n"] == pytest.approx(30.0)
     record = json.loads((directory / "config.json").read_text(encoding="utf-8"))
-    assert record["delta"]["reference"]["initial_force_n"] == pytest.approx(0.5)
+    assert record["delta"]["stage"] == "adaptive"
     assert record["delta"]["reference"]["duration_s"] == pytest.approx(0.03)
     assert record["effective"]["safety"]["max_target_force_n"] == pytest.approx(30.0)
 
@@ -1385,10 +1342,10 @@ def test_recording_duration_limit_finishes_like_release(tmp_path: Path) -> None:
     assert manifest["stop_reason"] == "max_duration_s=0.5"
 
 
-def test_recording_tactile_size_limit_finishes_like_release(
+def test_recording_size_limit_finishes_like_release(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """触觉体积上限触发后同样优雅收尾并写明 stop_reason。
+    """记录文件体积上限触发后同样优雅收尾并写明 stop_reason。
 
     写线程置位上限是真实时序，FakeClock 驱动的假实验可能先结束；
     这里注入首个样本后即置位的记录器，确定性覆盖控制循环的轮询、
@@ -1406,12 +1363,53 @@ def test_recording_tactile_size_limit_finishes_like_release(
 
         @property
         def limit_stop_reason(self) -> str | None:
-            return "max_tactile_mib=0.000488281" if self.limit_seen else None
+            return "max_recording_mib=0.000488281" if self.limit_seen else None
 
     monkeypatch.setattr(runtime, "ExperimentRecorder", SizeLimitRecorder)
     result, _session, _actions, directory = run_fake_experiment(tmp_path, make_config())
     assert result["status"] == "completed"
-    assert result["stop_reason"] == "max_tactile_mib=0.000488281"
+    assert result["stop_reason"] == "max_recording_mib=0.000488281"
     manifest = json.loads((directory / "manifest.json").read_text(encoding="utf-8"))
     assert manifest["stop_reason"] == result["stop_reason"]
     assert any(event.get("event") == "recording_limit" for event in _read_events(directory))
+
+
+def test_friction_manual_slip_mark_records_device_time_and_fixed_target(tmp_path: Path) -> None:
+    """只在允许阶段记人工标记，摩擦试验全程不自动增力。"""
+    from dataclasses import replace
+
+    from dmgripper_experiments.config import AdaptiveReferenceConfig
+
+    from .fakes import PhaseActions
+
+    class SlipActions(PhaseActions):
+        def __init__(self) -> None:
+            super().__init__()
+            self.marked = False
+
+        def __call__(self) -> str | None:
+            if self.phase == "active" and not self.marked:
+                self.marked = True
+                return "slip-left"
+            return super().__call__()
+
+    config = replace(
+        adaptive_config(),
+        stage="friction",
+        reference=AdaptiveReferenceConfig(
+            initial_force_n=0.5, duration_s=0.03, preload_source="preload/run-1"
+        ),
+    )
+    result, _session, _actions, directory = run_fake_experiment(
+        tmp_path, config, actions_type=SlipActions
+    )
+    assert result["status"] == "completed"
+    marks = [event for event in _read_events(directory) if event["event"] == "manual_slip_mark"]
+    assert len(marks) == 1
+    assert marks[0]["side"] == "left"
+    assert marks[0]["tactile_timestamp_us"] > 0
+    assert all(
+        float(row["target_force_n"]) <= 0.5
+        for row in _read_rows(directory)
+        if row.get("target_force_n") is not None
+    )

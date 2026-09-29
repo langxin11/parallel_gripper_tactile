@@ -21,6 +21,7 @@ dependencies = [
 
 [project.scripts]
 dmgripper-run = "dmgripper_experiments.cli:main"
+dmgripper-calibrate-friction = "dmgripper_experiments.calibrate_friction:main"
 dmgripper-plot = "dmgripper_experiments.plot_cli:main"
 
 [tool.setuptools.packages.find]

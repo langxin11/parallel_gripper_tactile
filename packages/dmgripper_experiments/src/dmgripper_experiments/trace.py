@@ -51,8 +51,6 @@ def _trace_row(
         target_raw_force_n=target.raw_force_n if target is not None else None,
         target_force_rate_n_s=target.rate_n_s if target is not None else None,
         target_force_acceleration_n_s2=(target.acceleration_n_s2 if target is not None else None),
-        target_trigger_active=target.trigger_active if target is not None else None,
-        target_increase_count=target.increase_count if target is not None else None,
         measured_tangential_force_n=(
             target.measured_tangential_force_n
             if target is not None and target.source == "adaptive"

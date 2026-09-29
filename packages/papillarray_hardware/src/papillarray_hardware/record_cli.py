@@ -21,6 +21,7 @@ from .client import (
     PapillArraySerialConfig,
     SUPPORTED_SAMPLING_RATES,
 )
+from .recording import RECORDING_NAME, RecordingWriter
 from .standalone import StandaloneSlipConfig, StandaloneSlipSession
 
 
@@ -110,43 +111,62 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-class JsonlRunRecorder:
-    """线程安全地保存触觉包、事件、配置与最终状态。"""
+class McapRunRecorder:
+    """保存压缩 MCAP 触觉包、事件、配置与最终状态。"""
 
-    def __init__(self, directory: Path, config: dict[str, object]) -> None:
-        """独占创建运行目录并打开两个 JSON Lines 文件。"""
+    def __init__(
+        self,
+        directory: Path,
+        config: dict[str, object],
+        *,
+        started_monotonic_s: float,
+        epoch_ns: int | None = None,
+    ) -> None:
+        """独占创建运行目录并启动异步 MCAP 写线程。"""
         directory.mkdir(parents=True, exist_ok=False)
         self.directory = directory
         self._lock = threading.Lock()
-        self._tactile = (directory / "tactile.jsonl").open("x", encoding="utf-8")
-        self._events = (directory / "events.jsonl").open("x", encoding="utf-8")
         (directory / "config.json").write_text(
             json.dumps(config, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
             encoding="utf-8",
+        )
+        self._writer = RecordingWriter(
+            directory / RECORDING_NAME,
+            started_monotonic_s=started_monotonic_s,
+            epoch_ns=epoch_ns,
         )
         self._closed = False
 
     def sample(self, record: dict[str, object]) -> None:
         """从采集线程追加一个完整快照。"""
-        self._write(self._tactile, record)
+        self._write("/tactile", record, float(record["received_at_s"]))
 
     def event(self, record: dict[str, object]) -> None:
         """从主线程追加一个生命周期或逐触点估计事件。"""
-        self._write(self._events, record)
+        self._write(
+            "/events",
+            record,
+            float(record.get("received_at_s", record.get("host_monotonic_s", time.monotonic()))),
+        )
 
     def close(self, *, status: str, error: BaseException | None = None) -> None:
         """刷新并关闭数据文件，再原子语义地写入最终清单。"""
+        writer_error: RuntimeError | None = None
         with self._lock:
             if self._closed:
                 return
-            self._tactile.close()
-            self._events.close()
+            try:
+                self._writer.close()
+            except RuntimeError as failure:
+                writer_error = failure
+                status = "failed"
+                if error is None:
+                    error = failure
             self._closed = True
         manifest: dict[str, object] = {
-            "schema": "papillarray-standalone/v2",
+            "schema": "papillarray-standalone/v3",
             "status": status,
-            "tactile": "tactile.jsonl",
-            "events": "events.jsonl",
+            "recording": RECORDING_NAME,
         }
         if error is not None:
             manifest["error"] = f"{type(error).__name__}: {error}"
@@ -154,16 +174,15 @@ class JsonlRunRecorder:
             json.dumps(manifest, ensure_ascii=False, indent=2, allow_nan=False) + "\n",
             encoding="utf-8",
         )
+        if writer_error is not None:
+            raise writer_error
 
-    def _write(self, handle: TextIO, record: dict[str, object]) -> None:
-        """锁内写入并立即刷新；进程退出后即可读，不保证断电与内核崩溃。"""
+    def _write(self, topic: str, record: dict[str, object], monotonic_s: float) -> None:
+        """锁内提交消息，磁盘写入由后台线程执行。"""
         with self._lock:
             if self._closed:
                 raise RuntimeError("记录器已经关闭")
-            handle.write(
-                json.dumps(record, ensure_ascii=False, sort_keys=True, allow_nan=False) + "\n"
-            )
-            handle.flush()
+            self._writer.submit(topic, record, monotonic_s=monotonic_s)
 
 
 def _default_output() -> Path:
@@ -248,11 +267,14 @@ def run(argv: list[str] | None = None) -> int:
         ),
         "max_seconds": args.max_seconds,
     }
-    recorder = JsonlRunRecorder(directory, config_record)
+    started_s = time.monotonic()
+    epoch_ns = time.time_ns()
+    recorder = McapRunRecorder(
+        directory, config_record, started_monotonic_s=started_s, epoch_ns=epoch_ns
+    )
     worker = TactileWorker(serial_config, clear_bias=args.bias, sample_sink=recorder.sample)
     policy = StandaloneSlipSession(slip_config) if slip_config is not None else None
     failure: BaseException | None = None
-    started_s = time.monotonic()
     previous_received_at_s: float | None = None
     first_sample = True
     manual_stop_announced = False
@@ -263,7 +285,12 @@ def run(argv: list[str] | None = None) -> int:
     worker.start()
     try:
         while args.max_seconds is None or time.monotonic() - started_s < args.max_seconds:
-            sample = worker.wait_for_update(previous_received_at_s, args.packet_timeout + 0.1)
+            wait_s = (
+                max(3.0, args.packet_timeout + 0.1)
+                if previous_received_at_s is None
+                else args.packet_timeout + 0.1
+            )
+            sample = worker.wait_for_update(previous_received_at_s, wait_s)
             previous_received_at_s = sample.received_at_s
             if first_sample:
                 print(
@@ -353,7 +380,11 @@ def run(argv: list[str] | None = None) -> int:
         except BaseException as error:  # noqa: BLE001
             if failure is None:
                 failure = error
-        recorder.close(status="failed" if failure is not None else "completed", error=failure)
+        try:
+            recorder.close(status="failed" if failure is not None else "completed", error=failure)
+        except RuntimeError as error:
+            if failure is None:
+                failure = error
     if failure is not None:
         print(f"PapillArray 独立记录失败：{failure}；记录目录：{directory}", file=sys.stderr)
         return 1

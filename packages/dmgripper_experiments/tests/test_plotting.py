@@ -1,4 +1,4 @@
-"""通用绘图：新 schema 渲染、历史 cup trace 兼容与离线重绘。"""
+"""通用绘图：MCAP trace 渲染与离线重绘。"""
 
 from __future__ import annotations
 
@@ -41,7 +41,6 @@ def _adaptive_rows(count: int = 20) -> list[dict[str, object]]:
                 "raw_left_fy_n": 0.1,
                 "raw_right_fx_n": 0.0,
                 "raw_right_fy_n": 0.1,
-                "target_trigger_active": index % 3 == 0,
                 "position_rad": 0.4,
                 "q_des_rad": 0.4,
                 "torque_nm": 0.1,
@@ -83,7 +82,7 @@ def test_plot_without_stiffness_omits_panel(tmp_path: Path):
 
 
 def test_tangential_trigger_is_background_and_axes_use_math_symbols():
-    """Trigger 在切向力曲线下层，坐标轴使用标准物理量符号。"""
+    """切向力左右分侧显示，坐标轴使用标准物理量符号。"""
     import matplotlib.pyplot as plt
 
     from dmgripper_experiments.plotting import (
@@ -93,21 +92,14 @@ def test_tangential_trigger_is_background_and_axes_use_math_symbols():
         _plot_tangential_force,
     )
 
-    rows = [
-        {key: str(value) for key, value in row.items() if value is not None}
-        for row in _adaptive_rows()
-    ]
-    time_s = [float(row["time_s"]) for row in rows]
+    rows = _adaptive_rows()
+    time_s = [row["time_s"] for row in rows]
     figure, axes = plt.subplots(4, 1)
     _plot_normal_force(axes[0], time_s, rows)
     _plot_tangential_force(axes[1], time_s, rows)
     _plot_joint_command(axes[2], time_s, rows)
     _plot_stiffness(axes[3], time_s, rows)
 
-    trigger = next(
-        collection for collection in axes[1].collections if collection.get_label() == "Trigger"
-    )
-    assert trigger.get_zorder() < min(line.get_zorder() for line in axes[1].lines)
     assert [line.get_label() for line in axes[0].lines] == [r"$F_z$", r"$F_z^{\mathrm{ref}}$"]
     assert [line.get_label() for line in axes[1].lines] == ["Left", "Right"]
     assert [line.get_label() for line in axes[2].lines] == [r"$q$", r"$q_d$"]
@@ -120,68 +112,32 @@ def test_tangential_trigger_is_background_and_axes_use_math_symbols():
     plt.close(figure)
 
 
-def test_friction_panel_distinguishes_state_and_candidate_outcome() -> None:
-    """摩擦面板显示采用值，并以不同标记区分接受与拒绝候选。"""
+def test_friction_panel_shows_frozen_side_values() -> None:
+    """冻结先验在整段运行中按左右分侧绘制。"""
     import matplotlib.pyplot as plt
 
     from dmgripper_experiments.plotting import _plot_friction_estimate
 
-    rows = [
-        {
-            "adaptive_left_mu": "0.3",
-            "adaptive_right_mu": "0.3",
-            "adaptive_left_candidate": "",
-            "adaptive_right_candidate": "",
-            "adaptive_left_update_reason": "unchanged",
-            "adaptive_right_update_reason": "unchanged",
-        },
-        {
-            "adaptive_left_mu": "0.1",
-            "adaptive_right_mu": "0.3",
-            "adaptive_left_candidate": "0.125",
-            "adaptive_right_candidate": "0.2",
-            "adaptive_left_update_reason": "lower_accepted",
-            "adaptive_right_update_reason": "insufficient_quality",
-        },
-    ]
+    rows = [{"adaptive_left_mu": 0.3, "adaptive_right_mu": 0.4}] * 2
     figure, axis = plt.subplots()
     _plot_friction_estimate(axis, [0.0, 1.0], rows)
-
-    assert [line.get_label() for line in axis.lines] == [
-        r"Left $\hat{\mu}$",
-        r"Right $\hat{\mu}$",
-    ]
-    labels = [collection.get_label() for collection in axis.collections]
-    assert labels == ["Left candidate accepted", "Right candidate rejected"]
-    assert axis.get_ylabel() == r"$\mu$"
+    assert [line.get_label() for line in axis.lines] == [r"Left $\mu$", r"Right $\mu$"]
+    assert all(line.get_ydata()[0] == line.get_ydata()[1] for line in axis.lines)
     plt.close(figure)
 
 
-def test_friction_detection_reads_effective_config_without_candidates(tmp_path: Path) -> None:
-    """有效配置包裹在 effective 下且尚无起滑候选时仍保留摩擦面板。"""
+def test_friction_panel_requires_adaptive_stage_or_frozen_trace(tmp_path: Path) -> None:
+    """预载阶段不显示不存在的在线摩擦估计。"""
     from dmgripper_experiments.plotting import _has_friction_estimation
 
     (tmp_path / "config.json").write_text(
-        json.dumps(
-            {
-                "effective": {
-                    "reference": {"adaptive": {"unified": {"friction_update_enabled": True}}}
-                }
-            }
-        ),
-        encoding="utf-8",
+        json.dumps({"effective": {"stage": "preload"}}), encoding="utf-8"
     )
-    rows = [{"adaptive_left_mu": "0.3", "adaptive_right_mu": "0.3"}]
-
-    assert _has_friction_estimation(tmp_path, rows)
-
-
-def test_friction_detection_falls_back_to_state_and_lower_bound_columns(tmp_path: Path) -> None:
-    """缺少配置时，采用值或无滑移下界也足以证明摩擦诊断存在。"""
-    from dmgripper_experiments.plotting import _has_friction_estimation
-
-    assert _has_friction_estimation(tmp_path, [{"adaptive_left_mu": "0.3"}])
-    assert _has_friction_estimation(tmp_path, [{"adaptive_right_mu_lower_bound": "0.32"}])
+    assert not _has_friction_estimation(tmp_path, [])
+    (tmp_path / "config.json").write_text(
+        json.dumps({"effective": {"stage": "adaptive"}}), encoding="utf-8"
+    )
+    assert _has_friction_estimation(tmp_path, [])
 
 
 def test_math_text_uses_stix_without_fonttools_timestamp_noise(tmp_path: Path):
@@ -328,49 +284,6 @@ def test_plot_cli_requires_repaint_for_window(tmp_path: Path, capsys) -> None:
     assert run([str(directory), "--phase", "active", "--repaint"]) == 0
     assert run([str(directory), "--task-time", "abc"]) == 2
     assert run([str(directory), "--unknown"]) == 2
-
-
-def test_legacy_cup_trace_with_state_column_renders(tmp_path: Path):
-    """历史 cup v2 trace（``state`` 列、31 字段）可以重绘。"""
-    legacy_fields = [
-        "time_s",
-        "state",
-        "left_fz_n",
-        "right_fz_n",
-        "measured_force_n",
-        "target_force_n",
-        "trigger_active",
-        "position_rad",
-        "q_des_rad",
-        "torque_nm",
-    ]
-    directory = tmp_path / "legacy_cup"
-    directory.mkdir()
-    lines = [",".join(legacy_fields)]
-    for index in range(12):
-        lines.append(
-            ",".join(
-                str(value)
-                for value in (
-                    0.05 * index,
-                    "pour",
-                    0.5,
-                    0.5,
-                    0.5,
-                    0.6,
-                    index % 2,
-                    0.4,
-                    0.4,
-                    0.1,
-                )
-            )
-        )
-    (directory / "trace.csv").write_text("\n".join(lines) + "\n", encoding="utf-8")
-    rows = read_trace_rows(directory)
-    assert len(rows) == 12
-    assert rows[0]["phase"] == "pour"
-    plots = plot_experiment_run(directory)
-    assert len(plots) == 2
 
 
 def test_stiffness_invalid_segment_is_left_blank(tmp_path: Path):

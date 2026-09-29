@@ -3,12 +3,12 @@
 仓库里有两条互不相干的摩擦估计路径：
 
 1. 抓取回路：``dm_grasp_core.tactile.risk.TaxelRiskObserver`` 产出候选，
-   ``grasp.unified`` 消费为分侧摩擦状态，写进 ``trace.csv`` 的 ``adaptive_*_mu``。
+   ``grasp.unified`` 消费为分侧摩擦状态，写进 ``recording.mcap`` 的 ``/trace``。
 2. 独立记录器：``papillarray_hardware.pillar_friction.PillarFrictionEstimator``
    在 ``StandaloneSlipSession`` 的稳定接触门禁后启动，写 ``own_friction_estimate`` 事件。
 
 路径 2 从未在真机上跑过（``outputs/real/pillar-friction/`` 为空），因此本脚本把
-路径 2 重放到路径 1 已有的 ``tactile.jsonl`` 上，用**同一份触觉数据**回答：换一个
+路径 2 重放到路径 1 已有的 ``recording.mcap`` 触觉流上，用**同一份触觉数据**回答：换一个
 估计量，会得出什么数。
 
 重放刻意直接复用 ``StandaloneSlipSession`` 而不是重写门禁，保证接触滞回、稳定窗口、
@@ -35,8 +35,6 @@ uv run python scripts/analysis/replay_pillar_friction.py --run <产物目录> --
 from __future__ import annotations
 
 import argparse
-import csv
-import gzip
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -44,18 +42,16 @@ from typing import Any
 
 from papillarray_hardware.acquisition import TactileSnapshot
 from papillarray_hardware.pillar_friction import PillarFrictionEstimator
+from papillarray_hardware.recording import iter_records
 from papillarray_hardware.standalone import StandaloneSlipConfig, StandaloneSlipSession
 
-TACTILE_NAMES = ("tactile.jsonl", "tactile.jsonl.gz")
+RECORDING_NAME = "recording.mcap"
 
 
-def find_tactile(run_directory: Path) -> Path | None:
-    """返回运行目录下的触觉记录，优先未压缩版本。"""
-    for name in TACTILE_NAMES:
-        candidate = run_directory / name
-        if candidate.is_file():
-            return candidate
-    return None
+def find_recording(run_directory: Path) -> Path | None:
+    """返回运行目录下的 MCAP 记录。"""
+    candidate = run_directory / RECORDING_NAME
+    return candidate if candidate.is_file() else None
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -115,30 +111,25 @@ class ReplayOutcome:
 
 
 def iter_snapshots(path: Path) -> Any:
-    """把 ``tactile.jsonl`` 逐行还原为 ``TactileSnapshot``，供会话门禁消费。"""
-    opener = gzip.open if path.suffix == ".gz" else Path.open
-    with opener(path, mode="rt", encoding="utf-8") as handle:
-        for line in handle:
-            if not line.strip():
-                continue
-            record = json.loads(line)
-            left = record.get("left_taxel_forces_n")
-            right = record.get("right_taxel_forces_n")
-            if not left or not right:
-                continue
-            yield TactileSnapshot(
-                received_at_s=float(record["received_at_s"]),
-                packet_counter=int(record["packet_counter"]),
-                timestamp_us=int(record["timestamp_us"]),
-                left_force_n=float(record["left_force_n"]),
-                right_force_n=float(record["right_force_n"]),
-                raw_left_fz_n=float(record["raw_left_fz_n"]),
-                raw_right_fz_n=float(record["raw_right_fz_n"]),
-                left_taxel_forces_n=tuple(tuple(row) for row in left),
-                right_taxel_forces_n=tuple(tuple(row) for row in right),
-                counter_event=record.get("counter_event", "ok"),
-                counter_gap=record.get("counter_gap"),
-            )
+    """把 MCAP 触觉流还原为 ``TactileSnapshot``，供会话门禁消费。"""
+    for record in iter_records(path, "/tactile"):
+        left = record.get("left_taxel_forces_n")
+        right = record.get("right_taxel_forces_n")
+        if not left or not right:
+            continue
+        yield TactileSnapshot(
+            received_at_s=record["received_at_s"],
+            packet_counter=record["packet_counter"],
+            timestamp_us=record["timestamp_us"],
+            left_force_n=record["left_force_n"],
+            right_force_n=record["right_force_n"],
+            raw_left_fz_n=record["raw_left_fz_n"],
+            raw_right_fz_n=record["raw_right_fz_n"],
+            left_taxel_forces_n=tuple(tuple(row) for row in left),
+            right_taxel_forces_n=tuple(tuple(row) for row in right),
+            counter_event=record.get("counter_event", "ok"),
+            counter_gap=record.get("counter_gap"),
+        )
 
 
 PHASE_ORDER = (
@@ -152,24 +143,21 @@ PHASE_ORDER = (
 
 
 def phase_ranges(run_directory: Path) -> list[tuple[str, float, float]]:
-    """从 trace.csv 汇总各相位的触觉设备时间区间，供估计时刻归位。
+    """从 ``/trace`` 汇总各相位的触觉设备时间区间，供估计时刻归位。
 
-    独立记录器不写 ``trace.csv``（它不跑抓取生命周期），此时返回空表，
+    独立记录器不写 ``/trace``（它不跑抓取生命周期），此时返回空表，
     由调用方退化为按设备时间直接报告而不做相位归位。
     """
-    if not (run_directory / "trace.csv").exists():
-        return []
     spans: dict[str, list[float]] = {}
-    with (run_directory / "trace.csv").open(encoding="utf-8") as handle:
-        for row in csv.DictReader(handle):
-            raw = row.get("tactile_timestamp_us") or ""
-            if raw:
-                spans.setdefault(row["phase"], []).append(float(raw) * 1e-6)
+    for row in iter_records(run_directory / RECORDING_NAME, "/trace"):
+        stamp = row.get("tactile_timestamp_us")
+        if stamp is not None:
+            spans.setdefault(row["phase"], []).append(stamp * 1e-6)
     return [(name, min(spans[name]), max(spans[name])) for name in PHASE_ORDER if name in spans]
 
 
 def locate(spans: list[tuple[str, float, float]], stamp_s: float) -> str:
-    """把一个触觉设备时刻归入相位；无 trace.csv 时显式说明相位不可用。"""
+    """把一个触觉设备时刻归入相位；无 ``/trace`` 时显式说明相位不可用。"""
     if not spans:
         return "无相位信息"
     for name, low, high in spans:
@@ -179,7 +167,7 @@ def locate(spans: list[tuple[str, float, float]], stamp_s: float) -> str:
 
 
 def phase_window(run_directory: Path, phase: str) -> tuple[float, float] | None:
-    """从 trace.csv 取指定相位的触觉设备时间范围。"""
+    """从 ``/trace`` 取指定相位的触觉设备时间范围。"""
     for name, low, high in phase_ranges(run_directory):
         if name == phase:
             return low, high
@@ -239,7 +227,7 @@ def replay(run_directory: Path) -> ReplayOutcome:
     stop_time_s: float | None = None
     armed: tuple[tuple[bool, ...], ...] = ()
     detected: tuple[tuple[bool, ...], ...] = ()
-    tactile_path = find_tactile(run_directory)
+    tactile_path = find_recording(run_directory)
     assert tactile_path is not None, f"{run_directory} 下没有触觉记录"
     for sample in iter_snapshots(tactile_path):
         snapshots += 1
@@ -277,14 +265,14 @@ def replay_forced(run_directory: Path, *, phase: str) -> ReplayOutcome:
     """跳过门禁，在指定相位起点用当时的接触集合直接启动估计器。"""
     window = phase_window(run_directory, phase)
     if window is None:
-        raise SystemExit(f"{run_directory.name} 的 trace.csv 中没有相位 {phase}")
+        raise SystemExit(f"{run_directory.name} 的 /trace 中没有相位 {phase}")
     estimator = PillarFrictionEstimator(SESSION.own_friction)
     estimates: list[dict[str, Any]] = []
     snapshots = 0
     started = False
     start_masks: tuple[tuple[bool, ...], ...] = ()
     previous: tuple[tuple[bool, ...], ...] = ()
-    tactile_path = find_tactile(run_directory)
+    tactile_path = find_recording(run_directory)
     assert tactile_path is not None, f"{run_directory} 下没有触觉记录"
     snapshot_iter = iter_snapshots(tactile_path)
     for sample in snapshot_iter:
@@ -335,9 +323,7 @@ def _group(estimates: list[Any]) -> tuple[list[tuple[int, float, float, float, f
 
 
 def online_friction(run_directory: Path) -> dict[str, tuple[float, float, int]]:
-    """读取路径 1 实际写入 trace 的摩擦状态与候选区间；无 trace 时返回空表。"""
-    if not (run_directory / "trace.csv").exists():
-        return {}
+    """读取路径 1 实际写入 ``/trace`` 的摩擦状态与候选区间；无该主题时返回空表。"""
     columns = {
         "left": ("adaptive_left_mu", "adaptive_left_candidate"),
         "right": ("adaptive_right_mu", "adaptive_right_candidate"),
@@ -345,13 +331,12 @@ def online_friction(run_directory: Path) -> dict[str, tuple[float, float, int]]:
     gathered: dict[str, dict[str, list[float]]] = {
         side: {"mu": [], "candidate": []} for side in columns
     }
-    with (run_directory / "trace.csv").open(encoding="utf-8") as handle:
-        for row in csv.DictReader(handle):
-            for side, (mu_key, candidate_key) in columns.items():
-                for target, key in (("mu", mu_key), ("candidate", candidate_key)):
-                    raw = row.get(key) or ""
-                    if raw:
-                        gathered[side][target].append(float(raw))
+    for row in iter_records(run_directory / RECORDING_NAME, "/trace"):
+        for side, (mu_key, candidate_key) in columns.items():
+            for target, key in (("mu", mu_key), ("candidate", candidate_key)):
+                value = row.get(key)
+                if value is not None:
+                    gathered[side][target].append(value)
     summary: dict[str, tuple[float, float, int]] = {}
     for side, values in gathered.items():
         mu = values["mu"]
@@ -408,7 +393,7 @@ def report(
             f"  [{locate(spans, stamp)} {stamp:.2f}s]"
         )
     if not online:
-        print("  路径 1 对照：无 trace.csv，本次记录不含抓取回路的摩擦状态")
+        print("  路径 1 对照：无 /trace，本次记录不含抓取回路的摩擦状态")
     for side, (low, high, candidate_count) in sorted(online.items()):
         if low == high:
             span = f"{low:.4f}（全程未变）"
@@ -437,7 +422,7 @@ def main() -> None:
     runs = arguments.run or sorted(
         path
         for path in arguments.root.iterdir()
-        if path.is_dir() and find_tactile(path) is not None
+        if path.is_dir() and find_recording(path) is not None
     )
     if not runs:
         raise SystemExit(f"未在 {arguments.root} 找到可用产物目录")
@@ -448,7 +433,7 @@ def main() -> None:
         if arguments.mode in ("session", "both"):
             outcomes.append(replay(run_directory))
         if arguments.mode in ("forced", "both"):
-            # forced 需要相位锚点；独立记录器没有 trace.csv，此时只能走 session。
+            # forced 需要相位锚点；独立记录器没有 /trace，此时只能走 session。
             if phase_window(run_directory, arguments.phase) is None:
                 print(f"\n{run_directory.name}：无相位 {arguments.phase}，跳过 forced 模式")
             else:

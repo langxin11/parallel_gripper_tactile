@@ -7,6 +7,25 @@
 
 ## [Unreleased]
 
+### 变更
+
+- 真机实验按物体 1 奶龙玩偶、物体 2 水瓶、物体 3 硬质方盒重排为人工预载试选、
+  人为滑移标定、冻结分侧摩擦先验的自适应三阶段；参数与来源随运行留档。
+- `capacity_limited` 保留为模型需求触及力上限的诊断，不再自动等同真实滑落；
+  正常释放收尾与未完成的人工抓取评价分开记录，独立硬件保护不变。
+
+### 新增
+
+- `object_1.yaml`、`object_2.yaml`、`object_3.yaml` 候选模板、人工分侧起滑标记与
+  `dmgripper-calibrate-friction` 离线候选工具；未标记侧不生成摩擦值，候选须人工审阅。
+- 文献报告新增本轮真机模块证据审查，说明原始研究支持的原理与当前具体实现的差异。
+
+### 移除
+
+- 真机公开配置与运行链移除深度摩擦映射、粒子后验、启发式在线改摩擦、
+  刚度自动选预载与导纳变参；相关仿真研究和历史报告保留，不改写既有结论。
+- 退役真机 `unified_adaptive`、粒子及玩偶临时 YAML，改由三物体分阶段配置承载试验。
+
 ### 移除
 
 - 真机配置 schema 重构退役一批入口：删除 `configs/hardware/dmgripper/adaptive_grip.yaml`、
@@ -53,27 +72,23 @@
 
 ### 变更
 
-- 真机触觉记录改为异步批量落盘：`sample()` 只做有限性校验并入队，序列化与写盘由专用写线程
-  每 256 行或 0.25 s 提交，磁盘延迟不再进入触觉观测链路；写线程失败按记录失败向上传播，
-  收尾本为成功时升级为失败。进程被杀死时的丢失窗口不超过一个提交周期。
-
-- `tactile.jsonl` 每行浮点截断到 9 位有效数字（float32 可表示精度），`received_at_s` 保留
-  float64；分隔符收紧为无空格。行数与体积明显下降，读取端按行 `json.loads` 不变，旧记录可直接混用。
-
-- 新增 `recording` 配置节：`tactile_stride` 按设备包计数抽样正常包（首个与异常包始终保留），
-  真机配置取 4（约 250 Hz）；`max_duration_s`（默认 600 s）与 `max_tactile_mib`（默认
-  512 MiB）触发后按 release 语义受限回位正常收尾，manifest 新增 `stop_reason` 字段并记录
-  `recording_limit` 事件。记录器版本升至 1.12.0。
-
-- 新增 `scripts/maintenance/reencode_compress_tactile.py`：把存量 `tactile.jsonl` 就地重编码
-  （新编码语义）并 gzip 压缩为 `.gz`，逐行校验与 MD5 全量比对后原子替换；回放工具按扩展名
-  透明读取 `.gz`。
+- 真机实验与 PapillArray 独立采集统一写入带时间索引、内嵌字段定义和 ZSTD 压缩的
+  `recording.mcap`，可直接拖入 Foxglove 按时间查看触觉、控制与事件。所有时序流由有界队列
+  交给单个后台写线程，不再逐行刷新或截断浮点，也不双写 CSV／JSONL。
+- 重绘、旁路回放和曲线视频直接读取 MCAP；删除旧 JSONL／gzip／CSV 运行数据兼容和
+  `reencode_compress_tactile.py` 迁移工具。既有数据不自动转换。
+- `recording.max_tactile_mib` 改名为 `max_recording_mib`，限制压缩 MCAP 的实际写入体积，
+  默认 512 MiB；按块检测并允许结束索引和收尾记录超出。`max_duration_s` 默认 600 s，
+  `tactile_stride` 默认 4，触发上限后仍按 release 语义正常收尾并保留停止原因。
 
 - 深度先验支持 `max_increase_per_s: null` 关闭实际 μ 上调限速，当前 `unified_adaptive.yaml` 启用；接触确认、风险门控及目标力下降限速保持有效。
 
 - 当前真机 `unified_adaptive.yaml` 的深度摩擦先验范围调整为 `0.1–0.8`，曲率和实际采用速率保持原值。
 
 ### 修复
+
+- PapillArray 新会话配置采样率前清空串口输入与协议半包缓存，避免上次会话的旧包被记为
+  本次数据并造成起点时间跳变；独立录制等待首包时允许 3 秒启动窗口，连续采样超时仍按原设置处理。
 
 - 补齐报告模板已被冒烟测试引用的 `data-table`，修复干净检出的报告编译失败。
 

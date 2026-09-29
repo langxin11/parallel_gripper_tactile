@@ -10,7 +10,7 @@ from dmgripper_hardware import MotorFeedback, STATUS_ENABLED
 
 from dmgripper_experiments.config import ControllerConfig, ExperimentConfig, TimingConfig
 from dmgripper_experiments.control import GripController
-from dmgripper_experiments.observation import PairedObservation, pair_observation
+from dmgripper_experiments.observation import pair_observation
 from dmgripper_experiments.runtime import _KINEMATICS as KINEMATICS
 from dmgripper_experiments.tactile import TactileSnapshot
 from dmgripper_experiments.targets import ForceTarget
@@ -154,54 +154,38 @@ def test_admittance_holds_position_for_deadband_and_overforce() -> None:
     assert held.unloading_blocked
 
 
-def test_unified_source_activates_only_after_preload_observation() -> None:
-    """统一来源在 preload 仅观测、activate 后才衔接调度并允许增长。"""
-    from .fakes import FakeClock, FakeTactile, PhaseActions
+def test_stage_target_source_keeps_fixed_force_and_freezes_mu() -> None:
+    """固定阶段不增力，自适应仅使用已冻结双侧先验。"""
+    from types import SimpleNamespace
 
-    from dmgripper_experiments.config import AdaptiveReferenceConfig, UnifiedHardwareConfig
-    from dmgripper_experiments.targets import UnifiedAdaptiveTargetSource
-
-    config = replace(
-        _config(),
-        reference=AdaptiveReferenceConfig(
-            experimental_closed_loop=True,
-            unified=UnifiedHardwareConfig(estimator="classic"),
-        ),
+    from dmgripper_experiments.config import (
+        AdaptiveReferenceConfig,
+        ExperimentConfig,
+        FrozenFrictionConfig,
     )
-    source = UnifiedAdaptiveTargetSource(config.reference, config.unified_core_config)
-    clock = FakeClock()
-    actions = PhaseActions()
-    FakeTactile(None, clock=clock, phase=actions)
-    feedback = MotorFeedback(0.4, 0.0, 0.0, STATUS_ENABLED)
+    from dmgripper_experiments.targets import build_target_source
 
-    def observe(force_tangential: float, counter: int) -> PairedObservation:
-        snapshot = _tactile(0.5, 0.5)
-        snapshot = replace(
-            snapshot,
-            raw_left_fy_n=force_tangential,
-            left_taxel_forces_n=((0.0, force_tangential / 3, 0.5 / 3),) * 3
-            + ((0.0, 0.0, 0.0),) * 6,
-            right_taxel_forces_n=((0.0, 0.0, 0.5 / 3),) * 3 + ((0.0, 0.0, 0.0),) * 6,
-            received_at_s=clock.now_s,
-            packet_counter=counter,
-            timestamp_us=counter * 10_000,
+    paired = SimpleNamespace(
+        snapshot=SimpleNamespace(
+            left_taxel_forces_n=((1.0, 0.0, 0.5),),
+            right_taxel_forces_n=((0.0, 1.0, 0.5),),
         )
-        clock.advance(0.01)
-        return pair_observation(
-            snapshot=snapshot,
-            feedback=feedback,
-            previous=None,
-            now_s=snapshot.received_at_s,
-            kinematics=KINEMATICS,
+    )
+    fixed = build_target_source(ExperimentConfig())
+    fixed.activate()
+    fixed.observe(paired, 0.1)
+    assert fixed.active_reference(0).force_n == 0.5
+    adaptive = build_target_source(
+        ExperimentConfig(
+            stage="adaptive",
+            reference=AdaptiveReferenceConfig(
+                preload_source="run-1",
+                friction=FrozenFrictionConfig(left_mu=0.5, right_mu=0.4, source="run-2"),
+            ),
         )
-
-    for index in range(5):
-        source.observe(observe(0.0, index + 1), 0.01)
-    assert source.policy.latest is not None
-    assert source.preload_target(0.0) == pytest.approx(1.0)
-
-    source.activate()
-    for index in range(20):
-        source.observe(observe(1.0, 10 + index), 0.01)
-    grown = source.active_reference(0.2)
-    assert grown.force_n > 1.0
+    )
+    adaptive.activate()
+    adaptive.observe(paired, 0.1)
+    assert adaptive.active_reference(0).force_n > 0.5
+    assert adaptive.trace_fields()["adaptive_left_mu"] == 0.5
+    assert adaptive.trace_fields()["adaptive_right_mu"] == 0.4

@@ -1,4 +1,4 @@
-r"""把一次 dmgripper run 的 ``trace.csv`` 导出为高清数据曲线动画视频。
+r"""把一次 dmgripper run 的 ``recording.mcap`` 控制曲线导出为高清数据曲线动画视频。
 
 用 Matplotlib ``FuncAnimation`` + ``FFMpegWriter`` 按真实时间 1:1 逐帧渲染并直出
 视频：五块面板（法向力、切向力、摩擦系数估计、估计刚度、位置与力矩）的曲线
@@ -13,10 +13,10 @@ r"""把一次 dmgripper run 的 ``trace.csv`` 导出为高清数据曲线动画�
 加 ``--alpha`` 额外输出 Apple ProRes 4444 带透明通道的 ``.mov``（面板带半透明
 白底，深浅背景都可读；H.264 不支持透明通道，故透明版只能用 ProRes 封装）。
 
-时间轴从控制回路启动（``trace.csv`` 首行）重基为 0，与相机录像对齐时用
+时间轴从控制回路启动（``/trace`` 首条）重基为 0，与相机录像对齐时用
 脚本打印的阶段边界锚点（如接触过渡起点）。
 
-不修改数据本身：不做平滑、不删异常点，字符串列按数值解析，缺口保持断线。
+不修改数据本身：不做平滑、不删异常点，缺口保持断线。
 
 用法：
 
@@ -48,6 +48,7 @@ from pathlib import Path
 
 import numpy as np
 import polars as pl
+from papillarray_hardware.recording import iter_records
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_RUN = (
@@ -90,25 +91,20 @@ def _nice_upper(values: list[np.ndarray], step: float, padding: float = 1.1) -> 
 
 
 def _column(df: pl.DataFrame, name: str) -> np.ndarray:
-    """取一列为 float64 数组；字符串列先转数值，空串/缺失变 NaN。"""
-    col = df[name]
-    if col.dtype == pl.String:
-        col = col.str.strip_chars().replace("", None).cast(pl.Float64, strict=False)
-    else:
-        col = col.cast(pl.Float64, strict=False)
+    """取一列为 float64 数组；未记录的可选字段与缺失值变 NaN。"""
+    if name not in df.columns:
+        return np.full(df.height, np.nan)
+    col = df[name].cast(pl.Float64)
     arr = col.to_numpy(allow_copy=True).astype(np.float64)
     arr[np.isinf(arr)] = np.nan
     return arr
 
 
 def _flag(df: pl.DataFrame, name: str) -> np.ndarray:
-    """取布尔列；字符串列按字面 True 解析。"""
-    col = df[name]
-    if col.dtype == pl.String:
-        return (col.str.strip_chars().str.to_lowercase() == "true").to_numpy()
-    if col.dtype == pl.Boolean:
-        return col.fill_null(False).to_numpy()
-    return col.to_numpy().astype(bool)
+    """取布尔列；未记录的可选字段与缺失值视为未触发。"""
+    if name not in df.columns:
+        return np.zeros(df.height, dtype=bool)
+    return df[name].fill_null(False).to_numpy()
 
 
 def _spans(active: np.ndarray, t: np.ndarray) -> list[tuple[float, float]]:
@@ -157,7 +153,7 @@ class CurveVideo:
         """读取运行数据并初始化视频画布。
 
         Args:
-            run_dir: 包含 ``trace.csv`` 的运行产物目录。
+            run_dir: 包含 ``recording.mcap`` 的运行产物目录。
             width: 画布宽度（像素）。
             height: 画布高度（像素）。
             fps: 视频帧率。
@@ -172,7 +168,10 @@ class CurveVideo:
 
     # ------------------------------------------------------------------ 数据
     def _load(self) -> None:
-        df = pl.read_csv(self.run_dir / "trace.csv")
+        df = pl.from_dicts(
+            list(iter_records(self.run_dir / "recording.mcap", "/trace")),
+            infer_schema_length=None,
+        )
         t = _column(df, "time_s")
         t = t - t[0]
         self.t = t
@@ -590,7 +589,11 @@ def main() -> None:
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     parser.add_argument(
-        "run_dir", nargs="?", type=Path, default=DEFAULT_RUN, help="包含 trace.csv 的 run 产物目录"
+        "run_dir",
+        nargs="?",
+        type=Path,
+        default=DEFAULT_RUN,
+        help="包含 recording.mcap 的 run 产物目录",
     )
     parser.add_argument("--fps", type=int, default=30, help="视频帧率，默认 30")
     parser.add_argument(
@@ -613,8 +616,8 @@ def main() -> None:
     args = parser.parse_args()
 
     run_dir: Path = args.run_dir
-    if not (run_dir / "trace.csv").exists():
-        parser.error(f"{run_dir} 下没有 trace.csv")
+    if not (run_dir / "recording.mcap").exists():
+        parser.error(f"{run_dir} 下没有 recording.mcap")
     out_dir: Path = args.out_dir or run_dir
 
     try:

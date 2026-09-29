@@ -9,7 +9,7 @@ description = "Contactile PapillArray PTS v2.0 纯 Python 串口采集边界"
 readme = "README.md"
 requires-python = ">=3.12"
 license = { text = "Proprietary" }
-dependencies = ["numpy>=2.0", "pyserial>=3.5,<4"]
+dependencies = ["numpy>=2.0", "pyserial>=3.5,<4", "mcap>=1.3,<2", "zstandard>=0.23"]
 
 [project.scripts]
 papillarray-probe = "papillarray_hardware.cli:main"

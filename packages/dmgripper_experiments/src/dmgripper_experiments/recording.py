@@ -1,22 +1,12 @@
-"""通用抓取实验的运行目录、trace、事件与 manifest。
+"""通用抓取实验的运行目录、压缩 MCAP 时序流与 manifest。
 
-记录器刻意不对控制时钟与触觉时钟作同步推断：每个控制周期只写入
-调用方提供的实际值，缺失量保持为空。数据写入失败必须向上传播，
-不得为了保护终端显示而吞掉。
-
-触觉流由专用写线程异步落盘：``sample()`` 只做有限性校验并入队，
-序列化（浮点截断到 float32 可表示精度）与写盘在后台完成，使磁盘
-延迟不进入触觉观测链路。flush 只保证进程退出（含异常收尾）后已
-提交数据可见；进程被杀死时丢失一个提交周期内的队列与缓冲，断电
-与内核崩溃不在保证范围内。
+三个 topic 共用有界队列及写线程，保留原数值与各自采样时间。
+正常关闭会排空队列并完成索引；写线程失败向运行时传播。
 """
 
 from __future__ import annotations
 
-import csv
 import json
-import math
-import queue
 import threading
 import time
 import uuid
@@ -24,6 +14,8 @@ from collections.abc import Callable, Mapping
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Self
+
+from papillarray_hardware.recording import QUEUE_CAPACITY, RECORDING_NAME, RecordingWriter
 
 from .config import (
     ExperimentConfig,
@@ -55,8 +47,6 @@ TRACE_FIELDS = (
     "target_raw_force_n",
     "target_force_rate_n_s",
     "target_force_acceleration_n_s2",
-    "target_trigger_active",
-    "target_increase_count",
     "measured_tangential_force_n",
     "stiffness_n_per_m",
     "stiffness_valid",
@@ -75,80 +65,15 @@ TRACE_FIELDS = (
     "control_dt_s",
     "tactile_age_s",
     "command_latency_s",
-    "adaptive_risk",
-    "adaptive_event_id",
-    "adaptive_increase_count",
-    "adaptive_risk_budget_exhausted",
-    "depth_prior_contact_closure_m",
     "contact_closure_m",
     "contact_compression_m",
     "contact_compression_limit_m",
-    "adaptive_left_depth_prior_depth_m",
-    "adaptive_left_depth_prior_candidate",
-    "adaptive_left_depth_prior_value",
-    "adaptive_left_depth_prior_locked",
-    "adaptive_left_depth_prior_reason",
-    "adaptive_right_depth_prior_depth_m",
-    "adaptive_right_depth_prior_candidate",
-    "adaptive_right_depth_prior_value",
-    "adaptive_right_depth_prior_locked",
-    "adaptive_right_depth_prior_reason",
     "adaptive_left_mu",
     "adaptive_right_mu",
-    "adaptive_left_candidate",
-    "adaptive_right_candidate",
-    "adaptive_left_quality",
-    "adaptive_right_quality",
-    "adaptive_left_mu_lower_bound",
-    "adaptive_right_mu_lower_bound",
-    "adaptive_left_taxel_mu_lower_bound",
-    "adaptive_right_taxel_mu_lower_bound",
-    "adaptive_left_update_reason",
-    "adaptive_right_update_reason",
-    "adaptive_observation_reason",
-    "adaptive_left_valid_mask",
-    "adaptive_right_valid_mask",
     "adaptive_load_target_n",
     "adaptive_schedule_gap_n",
-    "adaptive_track_error_n",
     "adaptive_capacity_limited",
     "adaptive_execution_limited",
-    "adaptive_failure_reason",
-    "adaptive_left_particle_mu_mean",
-    "adaptive_left_particle_mu_control",
-    "adaptive_left_particle_mu_lower",
-    "adaptive_left_particle_mu_upper",
-    "adaptive_left_particle_mu_ess",
-    "adaptive_left_particle_mu_updated",
-    "adaptive_left_particle_mu_reason",
-    "adaptive_right_particle_mu_mean",
-    "adaptive_right_particle_mu_control",
-    "adaptive_right_particle_mu_lower",
-    "adaptive_right_particle_mu_upper",
-    "adaptive_right_particle_mu_ess",
-    "adaptive_right_particle_mu_updated",
-    "adaptive_right_particle_mu_reason",
-    "sensor_sequence_id",
-    "sensor_device_time_s",
-    "sensor_received_at_s",
-    "sensor_age_s",
-    "sensor_stale",
-    "sensor_dropped_samples",
-    "sensor_observed_events",
-    "native_session_id",
-    "native_session_phase",
-    "native_session_reason",
-    "native_left_estimate_count",
-    "native_right_estimate_count",
-    "stiffness_preload_stage",
-    "stiffness_preload_reason",
-    "contact_force_goal_n",
-    "preload_stiffness_used_n_per_m",
-    "admittance_stiffness_used_n_per_m",
-    "admittance_adaptation_reason",
-    "admittance_mass_kg",
-    "admittance_damping_ns_m",
-    "admittance_stiffness_n_m",
     "admittance_displacement_m",
     "admittance_velocity_m_s",
     "admittance_acceleration_m_s2",
@@ -156,66 +81,61 @@ TRACE_FIELDS = (
     "admittance_acceleration_limited",
 )
 
-SCHEMA_NAME = "dmgripper-experiment/v1"
-RECORDER_VERSION = "1.12.0"
 
-# 触觉异步写线程的队列容量（约 10 s 的 1000 Hz 积压）与提交节奏。
-TACTILE_QUEUE_CAPACITY = 10_000
-_TACTILE_BATCH_ROWS = 256
-_TACTILE_FLUSH_INTERVAL_S = 0.25
-_TACTILE_DRAIN_TIMEOUT_S = 10.0
-
-# 这些字段是主机单调钟或展开时间，float32 的 24 位尾数保不住微秒
-# 分辨率，必须保留 float64 全精度；其余浮点源自传感器 float32 读数。
-_FLOAT64_FIELDS = frozenset({"received_at_s"})
-
-
-def _ensure_json_finite(value: object, key: str = "") -> None:
-    """递归拒绝 NaN 与无穷大，保证不产生非标准 JSON 数字。
-
-    Args:
-        value: 待写入的记录（dict、序列或标量的任意嵌套）。
-        key: 当前字段名，仅用于错误信息。
-
-    Raises:
-        ValueError: 任一浮点不是有限数值。
-    """
-    if isinstance(value, float):
-        if not math.isfinite(value):
-            where = f"字段 {key}" if key else "记录"
-            raise ValueError(f"触觉记录 {where} 包含非有限数值，不符合 JSON 规范")
-    elif isinstance(value, Mapping):
-        for name, item in value.items():
-            _ensure_json_finite(item, str(name))
-    elif isinstance(value, (list, tuple)):
-        for item in value:
-            _ensure_json_finite(item, key)
+def _trace_schema(properties: Mapping[str, object]) -> bytes:
+    """将全部 trace 字段写入 Foxglove 可读取的 JSON Schema。"""
+    return json.dumps(
+        {
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "type": "object",
+            "properties": dict(properties),
+            "additionalProperties": False,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
 
 
-def _truncate_float32(value: object) -> object:
-    """把浮点截断到 9 位有效数字（float32 可表示精度）。
+_NUMBER = {"type": ["number", "null"]}
+_INTEGER = {"type": ["integer", "null"]}
+_STRING = {"type": ["string", "null"]}
+_BOOLEAN = {"type": ["boolean", "null"]}
 
-    传感器上行数据在协议层即 float32；更高的十进制位数只复制滤波
-    运算的舍入噪声。实现为先格式化为 9 位有效数字再解析回
-    float64，使 ``json.dumps`` 输出短文本且解析值与原值之差不超过
-    一个 float32 精度。
 
-    Args:
-        value: 完整触觉记录或其任意嵌套子结构。
-
-    Returns:
-        同结构的新对象；``_FLOAT64_FIELDS`` 中的顶层标量原样保留。
-    """
-    if isinstance(value, float):
-        return float(f"{value:.9g}")
-    if isinstance(value, Mapping):
-        return {
-            name: (item if name in _FLOAT64_FIELDS else _truncate_float32(item))
-            for name, item in value.items()
+def _trace_fields_schema(fields: tuple[str, ...]) -> bytes:
+    """返回全部控制 trace 字段的固定 JSON Schema。"""
+    strings = {"phase", "target_source", "stiffness_reason"}
+    booleans = {
+        "stiffness_valid",
+        "stiffness_updated",
+        "force_deadband_active",
+        "unloading_blocked",
+        "adaptive_capacity_limited",
+        "adaptive_execution_limited",
+        "admittance_velocity_limited",
+        "admittance_acceleration_limited",
+    }
+    integers = {"contact_segment", "tactile_timestamp_us", "packet_counter"}
+    return _trace_schema(
+        {
+            field: (
+                _STRING
+                if field in strings
+                else _BOOLEAN
+                if field in booleans
+                else _INTEGER
+                if field in integers
+                else _NUMBER
+            )
+            for field in fields
         }
-    if isinstance(value, (list, tuple)):
-        return [_truncate_float32(item) for item in value]
-    return value
+    )
+
+
+SCHEMA_NAME = "dmgripper-experiment/v2"
+RECORDER_VERSION = "2.0.0"
+
+TACTILE_QUEUE_CAPACITY = QUEUE_CAPACITY
 
 
 def strided_sample_sink(
@@ -303,8 +223,9 @@ class ExperimentRecorder:
         *,
         input_config_path: Path | None = None,
         code_version: str = RECORDER_VERSION,
-        tactile_queue_capacity: int = TACTILE_QUEUE_CAPACITY,
-        tactile_join_timeout_s: float = _TACTILE_DRAIN_TIMEOUT_S,
+        queue_capacity: int = TACTILE_QUEUE_CAPACITY,
+        started_monotonic_s: float | None = None,
+        epoch_ns: int | None = None,
     ) -> None:
         """构造记录器并立即创建基础文件。
 
@@ -313,8 +234,9 @@ class ExperimentRecorder:
             config: 本趟实验使用的冻结配置。
             input_config_path: 原始 YAML 路径；Python 构造可为 ``None``。
             code_version: 记录代码版本标识。
-            tactile_queue_capacity: 触觉异步写队列容量。
-            tactile_join_timeout_s: 关闭时等待写线程排空的超时秒数。
+            queue_capacity: 三个 topic 共用的异步写队列容量。
+            started_monotonic_s: 与控制时钟共用的实验起始单调时间。
+            epoch_ns: 实验起点对应的 UTC 纳秒时间。
         """
         self.directory = Path(directory)
         self.directory.mkdir(parents=True, exist_ok=True)
@@ -325,25 +247,18 @@ class ExperimentRecorder:
         self._lock = threading.RLock()
         self._extra_artifacts: dict[str, str] = {}
         self._config_path = self.directory / "config.json"
-        self._events_path = self.directory / "events.jsonl"
-        self._trace_path = self.directory / "trace.csv"
-        self._tactile_path = self.directory / "tactile.jsonl"
+        self._recording_path = self.directory / RECORDING_NAME
         self._manifest_path = self.directory / "manifest.json"
-        self._tactile_queue: queue.Queue[Mapping[str, object]] = queue.Queue(
-            maxsize=tactile_queue_capacity
+        self._started_monotonic_s = (
+            time.monotonic() if started_monotonic_s is None else started_monotonic_s
         )
-        self._tactile_state_lock = threading.Lock()
-        self._tactile_stop_event = threading.Event()
-        self._tactile_accepting = True
-        self._tactile_stop_reason: str | None = None
-        self._tactile_writer_error: BaseException | None = None
-        self._tactile_written_bytes = 0
-        self._tactile_max_bytes = (
+        self._recording_finished = False
+        self._recording_max_bytes = (
             None
-            if config.recording.max_tactile_mib is None
-            else config.recording.max_tactile_mib * 1024 * 1024
+            if config.recording.max_recording_mib is None
+            else config.recording.max_recording_mib * 1024 * 1024
         )
-        self._tactile_join_timeout_s = tactile_join_timeout_s
+        self._recording_stop_reason: str | None = None
         record: dict[str, Any] = {
             "schema": SCHEMA_NAME,
             "input_config_path": (
@@ -357,17 +272,14 @@ class ExperimentRecorder:
         with self._config_path.open("w", encoding="utf-8") as handle:
             json.dump(record, handle, ensure_ascii=False, indent=2, sort_keys=True, default=str)
             handle.write("\n")
-        self._events_handle = self._events_path.open("a", encoding="utf-8")
-        self._tactile_handle = self._tactile_path.open("a", encoding="utf-8")
-        self._trace_handle = self._trace_path.open("w", encoding="utf-8", newline="")
-        self._writer = csv.DictWriter(self._trace_handle, fieldnames=TRACE_FIELDS)
-        self._writer.writeheader()
-        self._trace_handle.flush()
-        self._code_version = code_version
-        self._tactile_thread = threading.Thread(
-            target=self._drain_tactile_queue, name="tactile-recorder", daemon=True
+        self._writer = RecordingWriter(
+            self._recording_path,
+            started_monotonic_s=self._started_monotonic_s,
+            epoch_ns=epoch_ns,
+            trace_schema=_trace_fields_schema(TRACE_FIELDS),
+            queue_capacity=queue_capacity,
         )
-        self._tactile_thread.start()
+        self._code_version = code_version
 
     def __enter__(self) -> Self:
         """返回当前记录器。"""
@@ -387,125 +299,70 @@ class ExperimentRecorder:
         return False
 
     def append(self, event: Mapping[str, Any]) -> None:
-        """追加一个结构化事件并立即刷新；进程退出后即可读，不保证断电。
-
-        Raises:
-            RuntimeError: 记录器已经关闭。
-        """
+        """把事件按生产端单调时间提交给异步记录器。"""
         with self._lock:
-            self._ensure_open()
-            json.dump(dict(event), self._events_handle, ensure_ascii=False, sort_keys=True)
-            self._events_handle.write("\n")
-            self._events_handle.flush()
+            self._ensure_recording_open()
+            relative = event.get("time_s")
+            monotonic_s = (
+                self._started_monotonic_s + float(relative)
+                if relative is not None
+                else float(event.get("received_at_s", time.monotonic()))
+            )
+            self._writer.submit("/events", event, monotonic_s=monotonic_s)
+            self._update_recording_limit()
 
     def sample(self, record: Mapping[str, Any]) -> None:
-        """校验并把一个原始触觉包交给后台写线程异步落盘。
-
-        有限性在调用线程同步校验以立即拒绝非有限数值；序列化与写盘
-        延迟到写线程，磁盘延迟因此不进入触觉观测链路。写线程已失败
-        或队列已满时立即向上抛错；体积上限触发后静默丢弃，由控制
-        循环经 ``limit_stop_reason`` 正常收尾。
-
-        Raises:
-            ValueError: 记录包含 NaN 或无穷大。
-            RuntimeError: 记录器已关闭、写队列已满或写线程先前已失败。
-        """
-        self._ensure_open()
-        self._raise_tactile_writer_failure()
-        if self._tactile_stop_reason is not None:
+        """将完整触觉快照入队，保持采集线程不做序列化与磁盘 I/O。"""
+        self._ensure_recording_open()
+        self._writer._raise_error()
+        if self._recording_stop_reason is not None:
             return
-        _ensure_json_finite(record)
-        payload = dict(record)
-        with self._tactile_state_lock:
-            if not self._tactile_accepting:
-                raise RuntimeError("ExperimentRecorder 已关闭。")
-            try:
-                self._tactile_queue.put_nowait(payload)
-            except queue.Full as error:
-                raise RuntimeError("触觉写队列已满，磁盘写入速度不足") from error
+        self._writer.submit("/tactile", record, monotonic_s=float(record["received_at_s"]))
+        self._update_recording_limit()
 
     @property
     def limit_stop_reason(self) -> str | None:
-        """返回写线程设置的触觉体积上限原因；``None`` 表示未触发。"""
-        return self._tactile_stop_reason
+        """返回压缩 MCAP 文件达到体积上限时的正常收尾原因。"""
+        self._update_recording_limit()
+        return self._recording_stop_reason
 
-    def _raise_tactile_writer_failure(self) -> None:
-        """把写线程锁存的失败以链式异常抛给调用方。"""
-        error = self._tactile_writer_error
-        if error is not None:
-            raise RuntimeError("触觉写线程已失败") from error
-
-    def _drain_tactile_queue(self) -> None:
-        """后台序列化并批量提交触觉行；异常被锁存待调用方收取。
-
-        每 256 行或 0.25 s 提交一次；达到体积上限后设置停止原因并
-        丢弃后续样本，使生产端不被阻塞。停机由事件驱动：排空队列后
-        才退出，避免关闭路径向已满队列投递哨兵造成死锁。
-        """
-        pending_rows = 0
-        last_flush_s = time.monotonic()
-        try:
-            while True:
-                try:
-                    record = self._tactile_queue.get(timeout=0.05)
-                except queue.Empty:
-                    if self._tactile_stop_event.is_set():
-                        break
-                    continue
-                if self._tactile_stop_reason is not None:
-                    continue
-                payload = json.dumps(
-                    _truncate_float32(dict(record)),
-                    ensure_ascii=False,
-                    sort_keys=True,
-                    allow_nan=False,
-                    separators=(",", ":"),
-                )
-                self._tactile_handle.write(payload + "\n")
-                self._tactile_written_bytes += len(payload) + 1
-                pending_rows += 1
-                if (
-                    self._tactile_max_bytes is not None
-                    and self._tactile_written_bytes >= self._tactile_max_bytes
-                ):
-                    self._tactile_handle.flush()
-                    with self._tactile_state_lock:
-                        self._tactile_stop_reason = (
-                            f"max_tactile_mib={self._tactile_max_bytes / 1048576:g}"
-                        )
-                    continue
-                now_s = time.monotonic()
-                if pending_rows < _TACTILE_BATCH_ROWS and now_s - last_flush_s < (
-                    _TACTILE_FLUSH_INTERVAL_S
-                ):
-                    continue
-                self._tactile_handle.flush()
-                pending_rows = 0
-                last_flush_s = now_s
-        except BaseException as error:  # noqa: BLE001
-            with self._tactile_state_lock:
-                self._tactile_writer_error = error
-        finally:
-            try:
-                self._tactile_handle.flush()
-            except BaseException:  # noqa: BLE001
-                pass
+    def _update_recording_limit(self) -> None:
+        if (
+            self._recording_stop_reason is None
+            and self._recording_max_bytes is not None
+            and self._writer.written_bytes >= self._recording_max_bytes
+        ):
+            self._recording_stop_reason = (
+                f"max_recording_mib={self._recording_max_bytes / 1048576:g}"
+            )
 
     def write(self, row: Mapping[str, Any]) -> None:
-        """写入一个控制周期 trace 并立即刷新；进程退出后即可读，不保证断电。
-
-        Raises:
-            KeyError: 行中包含未定义的字段。
-            RuntimeError: 记录器已经关闭。
-        """
+        """按实验起始单调时间写入一个控制周期的原类型 trace。"""
         with self._lock:
-            self._ensure_open()
+            self._ensure_recording_open()
             unknown = set(row).difference(TRACE_FIELDS)
             if unknown:
-                unknown_names = ", ".join(sorted(unknown))
-                raise KeyError(f"trace 包含未定义字段：{unknown_names}")
-            self._writer.writerow({field: row.get(field, "") for field in TRACE_FIELDS})
-            self._trace_handle.flush()
+                raise KeyError(f"trace 包含未定义字段：{', '.join(sorted(unknown))}")
+            self._writer.submit(
+                "/trace",
+                row,
+                monotonic_s=self._started_monotonic_s + float(row["time_s"]),
+            )
+            self._update_recording_limit()
+
+    def finish_recording(self) -> None:
+        """排空三个 topic 并完成 MCAP 索引，供后处理立即读取。"""
+        with self._lock:
+            if self._recording_finished:
+                return
+            self._writer.close()
+            self._recording_finished = True
+            self._update_recording_limit()
+
+    def _ensure_recording_open(self) -> None:
+        self._ensure_open()
+        if self._recording_finished:
+            raise RuntimeError("MCAP 数据流已完成。")
 
     def register_artifacts(self, names: Mapping[str, str]) -> None:
         """登记后处理产物（如绘图文件）的名称与路径。"""
@@ -528,6 +385,7 @@ class ExperimentRecorder:
         fault_holding_duration_s: float = 0.0,
         fault_resolution: str | None = None,
         stop_reason: str | None = None,
+        capacity_limited_ever: bool = False,
     ) -> None:
         """关闭数据文件并写入最终 manifest。
 
@@ -547,41 +405,30 @@ class ExperimentRecorder:
             fault_holding_duration_s: 故障保持持续时间。
             fault_resolution: ``released``／``forced_disable``／``hold_lost`` 等处置结果。
             stop_reason: 正常收尾时提前停止的原因（如记录上限）。
+            capacity_limited_ever: 自适应目标曾受容量上限约束。
         """
         with self._lock:
             if self._closed:
                 return
-            with self._tactile_state_lock:
-                self._tactile_accepting = False
-            self._tactile_stop_event.set()
-            self._tactile_thread.join(timeout=self._tactile_join_timeout_s)
-            writer_error = self._tactile_writer_error
-            if self._tactile_thread.is_alive():
-                cleanup_errors = [
-                    *(cleanup_errors or []),
-                    "触觉写线程未在超时内排空，末批数据可能缺失",
-                ]
-            if writer_error is not None:
-                if error is None and status == "completed":
+            try:
+                self.finish_recording()
+            except RuntimeError as writer_error:
+                if error is None:
                     status = "failed"
                     error = writer_error
                 else:
-                    cleanup_errors = [
-                        *(cleanup_errors or []),
-                        f"触觉写线程失败：{writer_error}",
-                    ]
-            self._events_handle.close()
-            self._tactile_handle.close()
-            self._trace_handle.close()
+                    cleanup_errors = [*(cleanup_errors or []), f"MCAP 写线程失败：{writer_error}"]
             manifest: dict[str, Any] = {
                 "schema": SCHEMA_NAME,
                 "version": self._code_version,
                 "created_at": self._started_at,
                 "ended_at": _utc_now(),
                 "status": status,
+                "scientific_evaluation": "not_evaluated",
+                "capacity_limited_ever": capacity_limited_ever,
                 "stop_reason": stop_reason
                 if stop_reason is not None
-                else self._tactile_stop_reason,
+                else self._recording_stop_reason,
                 "disable_confirmed": disable_confirmed,
                 "fault_phase": fault_phase,
                 "fault_holding_entered": fault_holding_entered,
@@ -595,9 +442,7 @@ class ExperimentRecorder:
                     path.name: path.name
                     for path in (
                         self._config_path,
-                        self._events_path,
-                        self._tactile_path,
-                        self._trace_path,
+                        self._recording_path,
                     )
                     if path.is_file()
                 },

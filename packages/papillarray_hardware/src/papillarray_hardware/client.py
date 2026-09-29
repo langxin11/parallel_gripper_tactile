@@ -174,7 +174,9 @@ class PapillArraySerialClient:
             serial_port.close()
 
     def configure_stream(self) -> None:
-        """向控制器发送配置中的采样率命令。"""
+        """丢弃上次串口会话积压的输入，再发送本次采样率命令。"""
+        self._require_open().reset_input_buffer()
+        self._require_reader().reset_buffer()
         self._write_command(f"f{self._config.sampling_rate}\n".encode("ascii"))
 
     def clear_bias(self) -> None:

@@ -24,6 +24,7 @@ class FakeSerial:
         self.flush_count = 0
         self.reset_input_buffer_count = 0
         self.close_count = 0
+        self.operations: list[str] = []
 
     def read(self, _size: int) -> bytes:
         """返回预置读取分片。"""
@@ -31,6 +32,7 @@ class FakeSerial:
 
     def write(self, data: bytes) -> int:
         """记录完整写入。"""
+        self.operations.append(f"write:{data!r}")
         self.writes.append(bytes(data))
         return len(data)
 
@@ -40,7 +42,9 @@ class FakeSerial:
 
     def reset_input_buffer(self) -> None:
         """记录接收队列清空调用。"""
+        self.operations.append("reset_input_buffer")
         self.reset_input_buffer_count += 1
+        self.read_chunks.clear()
 
     def close(self) -> None:
         """关闭 fake 串口。"""
@@ -104,8 +108,23 @@ def test_open_and_commands_are_explicit_and_use_expected_wire_values() -> None:
     assert calls == [(DEFAULT_PAPILLARRAY_PORT, 115200, 1.0)]
     assert serial_port.writes == [b"f1000\n", b"z\n", b"S\n", b"s\n"]
     assert serial_port.flush_count == 4
-    assert serial_port.reset_input_buffer_count == 1
+    assert serial_port.reset_input_buffer_count == 2
+    assert serial_port.operations[:2] == ["reset_input_buffer", "write:b'f1000\\n'"]
     assert serial_port.close_count == 1
+
+
+def test_configure_stream_discards_bytes_from_previous_serial_session() -> None:
+    """新流配置前清空串口与协议缓存，不把旧包标作本次观测。"""
+    port = FakeSerial(read_chunks=[b"previous-session-packet"])
+    client = PapillArraySerialClient(PapillArraySerialConfig(), lambda *_: port)
+    client.open()
+    assert client._reader is not None
+    client._reader._buffer.extend(b"previous-partial-packet")
+    client.configure_stream()
+    assert port.read_chunks == []
+    assert client._reader._buffer == b""
+    assert port.operations[:2] == ["reset_input_buffer", "write:b'f1000\\n'"]
+    client.close()
 
 
 def test_client_rejects_implicit_io_and_unopened_factory_result() -> None:

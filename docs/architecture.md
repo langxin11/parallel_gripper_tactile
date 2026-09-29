@@ -77,10 +77,10 @@ Pillar 碰撞几何属于 asset/profile，`scenes.custom` 负责把它装配进�
 [模型与测量验证](control-comparison-ablation.md#collision-geometry-conclusions)。
 
 
-深度条件摩擦先验由 `dm_grasp_core.grasp.friction_depth` 维护曲线与接触段锁定，统一策略负责
-证据优先级和最终采用速率。真机运行时用首次双侧接触角度建立先验总闭合量基线，
-目标适配将实测关节角换算的总压缩量传给策略；独立压缩保护从首次单侧接触累计，并检查测量及命令边界。
-共享核保留可选逐点位移兼容入口，该输入扩展不改变既有三轴触觉力契约。
+深度条件摩擦先验与粒子后验仍属于共享核的仿真研究实现，本轮真机运行时不消费它们。
+真机按人工预载试选、滑移标定、冻结分侧先验的自适应三阶段执行；标定工具只从已记录的
+人工事件窗口产生候选，不自动改写配置。独立压缩保护从首次单侧接触累计，检查实测及命令边界，
+不将压缩量转换成摩擦。公共三轴触觉力契约不变。
 
 ## 运行产物流
 
@@ -93,9 +93,10 @@ Pillar 碰撞几何属于 asset/profile，`scenes.custom` 负责把它装配进�
 `runners/common.py` 统一快照序列化、成功定稿与执行异常留档；各 runner 继续拥有自己的输入字段、
 实验调用和科学失败判定。仿真 `experiments/force_tracking_trace.py` 与真机
 `dmgripper_experiments.trace` 只组装已采样数值的记录字段，不推进循环或改变设备命令与采样时序。
-真机 `dmgripper_experiments.recording` 的触觉流由专用写线程消费有界队列异步落盘，
-`sample()` 只做有限性校验并入队；序列化、float32 截断与批量提交都在控制与观测链路之外，
-写线程失败仍按记录失败向上传播。
+真机 `dmgripper_experiments.recording` 管理实验配置、manifest 与时序记录生命周期；
+`papillarray_hardware.recording` 提供 MCAP 写入和读取，由真机实验及独立采集共同使用。
+触觉、控制与事件通过有界队列交给单个写线程，序列化、ZSTD 压缩及写盘均在采集与控制链路之外；
+三个主题共享启动时钟基准，写线程失败按记录失败向上传播。绘图前先排空并完成 MCAP 索引。
 
 Hydra 拥有调用外层目录和组合来源，`RunDirectory` 拥有单次实验目录。研究的目录、哈希、失败分类、
 并行与恢复规则见[科研配置](research-configuration.md)，各实验的 trace 与指标见对应专题。
@@ -105,14 +106,14 @@ Hydra 拥有调用外层目录和组合来源，`RunDirectory` 拥有单次实�
 DM 的 PID、ADRC、导纳、刚度估计、运动学、目标曲线与触觉增力由 `dm_grasp_core` 提供纯计算。
 `dm_grasp_core.grasp.adaptive` 提供固定分侧摩擦先验的承载需求与连续单调增力，
 由目标力调度仿真实验适配实测切向力；不读取场景重量、真实摩擦或外加载荷。
-`grasp.unified` 组合 `tactile.risk` 的逐触点观测、分侧摩擦状态和受限目标调度；
-仿真、真机与旁路回放共用计算与诊断字段，运行时仍各自拥有生命周期和故障保护。
+`grasp.unified` 组合 `tactile.risk` 的逐触点观测、分侧摩擦状态和受限目标调度，保留在仿真研究中；
+真机不再接入其在线摩擦、深度先验和启发式风险决策，只复用 `grasp.adaptive` 的固定分侧先验调度。
 逐触点局部比值定位重分配区域，并单独记录连续有效触点的局部下界；整侧摩擦候选由稳定
 接触子集的合力利用率生成。统一策略累计低风险稳定样本的整侧利用率下界，并拒绝与同一
 接触段整侧下界矛盾的候选；异质接触下不以局部最大比值否决整侧等效摩擦。
 仿真 `control.py`／`dm_admittance.py` 负责配置与执行器适配，真机运行时负责设备生命周期。
-`grasp.stiffness_adaptation` 提供不访问设备的刚度预载与导纳参数调度，硬件运行时在预载及跟踪
-阶段消费同一估计快照；调度不修改 MIT 内环增益，不拥有设备循环或故障动作。
+`grasp.stiffness_adaptation` 的刚度预载与导纳参数调度保留供仿真研究，退出本轮真机链路。
+真机刚度估计仅作可选诊断，默认关闭，不用于选预载或改变控制器。
 两层控制周期、请求量化和验证边界见[DMgripper 共享控制核](dm-shared-control.md)。
 
 ### 多速率触觉与控制边界
@@ -133,24 +134,24 @@ DM 的 PID、ADRC、导纳、刚度估计、运动学、目标曲线与触觉增
 
 多速率预处理只属于仿真侧：真机曾有的采集线程内多速率预处理（`HardwareTactilePreprocessor`）
 已随配置重构删除，真机触觉不再使用多速率快照管线；硬件协议包不依赖抓取策略，
-原始过力与逐触点量程异常仍按统一模式失能。
+原始过力与逐触点量程异常仍由真机运行时按设备是否可控决定故障保持或尽力失能。
 
 真机旁路会话已随配置重构删除：`native_slip.py` 与 `legacy.py` 不再存在，
-`dmgripper-run` 的在线链路只保留统一摩擦估计，实验层控制器适配只剩导纳，目标来源只剩统一自适应。
+`dmgripper-run` 使用固定预载目标或冻结分侧先验的自适应目标，实验层控制器适配使用固定参数导纳。
 原厂滑移状态与自主逐 pillar 摩擦估计仅由独立 `papillarray-record` 的记录路径旁路留档，
 不进入夹爪目标调度，见[DMgripper 通用抓取实验](dmgripper-experiments.md)。
 
-重复或短期陈旧快照不允许目标增长，恢复时不补算历史增力；持续无效沿用统一策略失败超时。
+仿真的多速率路径中，重复或短期陈旧快照不允许目标增长，恢复时不补算历史增力；持续无效沿用统一策略失败超时。
 非法或超量程帧不能被中值滤波隐藏，缓冲必须发布无效状态而不是继续展示旧好帧。
 快照还保留累计坏帧计数，即使中间坏帧在下个控制 tick 前被好帧覆盖，消费者仍冻结该次增力并记录无效观测。
-新核心只报告状态，不决定保持或失能；真机统一模式的非法数据／硬超时失能规则保持不变。
+共享核只报告状态，不决定保持或失能；真机的设备健康判定、故障保持与人工释放由运行时负责。
 
 | 包 | 拥有的职责 | 不拥有的职责 |
 | --- | --- | --- |
 | `papillarray_hardware` | PapillArray 串口与 PTS v2.0 协议、原始包、bias 基础命令、可复用采集会话，以及包级、传感器级和逐 taxel 完整性诊断 | 接触、预载、零力是否通过、实验阶段、运行目录或 manifest |
 | `dmgripper_hardware` | USB2CAN 与 DM 协议、反馈状态与命令／反馈范围校验，以及显式 `open`、`inspect`、`require_disabled`、`enable`、`command`、`hold`、`disable`、`close` 会话 | 自动回零、实验故障分类、何时保持或释放、实验记录 |
 | `dm_grasp_core` | 曲柄滑块运动学、受限轨迹与 MIT 请求，以及导纳、PID、LADRC 和刚度估计等纯计算 | 设备访问、实验生命周期和文件记录 |
-| `dmgripper_experiments` | 冻结配置、人工命令、零力门禁、接触／预载／动态任务、自动回零、故障分类与故障保持，以及 `config.json`、`events.jsonl`、`tactile.jsonl`、`trace.csv`、manifest 和绘图 | 重新实现 PTS、USB2CAN、DM 协议或共享控制公式 |
+| `dmgripper_experiments` | 冻结配置、人工命令、零力门禁、接触／预载／动态任务、自动回零、故障分类与故障保持，以及 `config.json`、`recording.mcap`、manifest 和绘图 | 重新实现 PTS、USB2CAN、DM 协议或共享控制公式 |
 
 Robotiq 使用独立的 `robotiq_grasp_core` 与 `robotiq_hardware`，不与 DM 共用命令类型或控制状态机。
 Robotiq 的可选 `robotiq-teleop` 入口通过显式启动的单线程会话连接 USB／RS485，

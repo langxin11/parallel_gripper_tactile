@@ -204,7 +204,7 @@ def test_verify_zero_rejects_taxel_count_change() -> None:
 
     tactile = ChangingTaxelTactile(None, clock=clock, phase=actions)
     # 九触点数量约束属统一策略保护；这里用未启用统一的配置隔离窗口行为。
-    with pytest.raises(RuntimeError, match="taxel 数量变化"):
+    with pytest.raises(RuntimeError, match="恰好九个触点"):
         _verify_zero(tactile, ExperimentConfig(), False, clock, clock.sleep)
 
 

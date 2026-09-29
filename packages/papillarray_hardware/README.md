@@ -10,7 +10,8 @@ Contactile PapillArray 的 PTS v2.0 纯 Python 同步串口采集边界。它只
   创建串口。测试可注入内存 fake serial。
 - 默认串口配置为 udev 别名 `/dev/papillarray`、`115200 baud`、`1000 Hz`。可选采样率严格限于
   `100`、`250`、`500`、`1000 Hz`；默认要求每包报告 `2` 个传感器，数量不符时拒绝上送。
-- `configure_stream()` 才会写入采样率命令；`clear_bias()` 会写入设备清零／偏置清除命令
+- `configure_stream()` 在写入采样率命令前清空串口接收队列和协议半包缓存，避免上次串口
+  会话积压的旧包被标记为本次接收时间；`clear_bias()` 会写入设备清零／偏置清除命令
   `z\n`，调用前必须确保传感器无负载。该包不会自动执行清零。
 - `PtsStreamReader` 处理半包、前导噪声、坏校验和和异常长度，并保留控制器的 `packet_counter`
   与 `timestamp_us`。Type 1／3／4／5／6 被解码；未定义布局的 Type 7 仅以原始 `bytes`
@@ -84,7 +85,10 @@ PapillArray 探针超时：等待有效 PTS 包超过总时限。协议诊断：
 ## 独立记录与手柄实验
 
 `papillarray-record` 不依赖夹爪控制进程，可与 `dmgripper-teleop` 分别运行在两个终端。
-记录器以独占目录保存 `tactile.jsonl`、`events.jsonl`、`config.json` 和 `manifest.json`。
+记录器以独占目录保存 `recording.mcap`、`config.json` 和 `manifest.json`。
+`recording.mcap` 可直接拖入 Foxglove，`/tactile` 与 `/events` 共享时间轴，采用 ZSTD 分块压缩。
+`--packet-timeout` 控制连续采样阶段的单包等待；首次连接允许至少 3 秒取得首个有效包，
+避免设备冷启动时将短暂无数据误判为采集中断。
 显式传入 `--bias` 时，采集线程在首个完整包后发送一次清零命令；启动时传感器必须完全无负载。
 
 显式传入 `--estimate-friction` 后，记录器根据双侧逐触点接触集合和全局法向力变化率判断稳定接触，
@@ -97,7 +101,7 @@ PapillArray 探针超时：等待有效 PTS 包超过总时限。协议诊断：
 pillar 计算 `rho=hypot(Fx,Fy)/Fz`，只在比值先上升、随后饱和或发生剪切重分配并持续确认时，
 冻结候选开始前 `0.2 s` 窗口的 80% 分位数。`raw_mu` 保留未经安全折减的实验估计，
 `conservative_mu=clip(0.8*raw_mu,0.05,2.0)` 预留控制裕量。普通粘着阶段的 `rho` 只表示已用
-摩擦比例，不产生估计。`events.jsonl` 保存 `own_friction_state` 和 `own_friction_estimate`；
+摩擦比例，不产生估计。MCAP 的 `/events` 主题 保存 `own_friction_state` 和 `own_friction_estimate`；
 当前命令只记录候选，不向夹爪发送目标力。
 
 ```sh
