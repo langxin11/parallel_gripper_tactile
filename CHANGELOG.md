@@ -7,6 +7,72 @@
 
 ## [Unreleased]
 
+### 移除
+
+- 真机配置 schema 重构退役一批入口：删除 `configs/hardware/dmgripper/adaptive_grip.yaml`、
+  `force_curve.yaml`、`unified_adaptive_fast.yaml` 三份旧真机配置与 `legacy.py` 入口，
+  risk_step 阶梯增力族随 fast 配置一并退役；历史复现回退对应 git 版本。
+- 删除曲线目标、切向增量（shear）策略与 `controller.kind` 下的 pid／adrc 控制器路径：
+  导纳成为唯一真机控制器，目标来源只剩统一自适应。
+- 删除 `lifecycle.native_slip`／`own_friction` 旁路会话与硬件多速率预处理
+  （`HardwareTactilePreprocessor`）；独立记录器 `papillarray-record` 的原厂滑移与自主摩擦
+  记录路径保留。
+- 删除 `terminal`／`output` 配置节：终端模式与输出根目录改由 CLI 参数提供。
+- 删除全部“必须相等”重复旋钮及其三条一致性校验：统一调度包络的上限、最低力与速率不再
+  作为独立输入出现，由 `safety` 与初始目标在构造期派生。
+- 删除 `risk_validation_passed`／`friction_validation_passed` 门禁、`auto_start` 独立开关与
+  reapproach 重接近分支（任一侧失接触恒为故障）；`estimation` 删除方法枚举与全部调参字段，
+  只保留 `enabled`；零力验证窗口、回位保护等 17 项隐藏参数沉为运行时常数。
+
+### 变更
+
+- `safety` 成为真机限幅的唯一定义点：目标上限、原始过力线、增／退力速率与压缩行程只在
+  `safety` 定义一次，统一调度包络（最低力、上限与速率边界）由 `safety` 与初始目标在构造期
+  派生（`ExperimentConfig.unified_core_config`），YAML 中不存在第二个旋钮。
+- 触点门控统一为整数触点数：`friction_quality_min`（`0.3`／`0.4`）更名为 `min_event_taxels`
+  （`3`／`4`），粒子 `minimum_event_quality` 更名为 `minimum_event_taxels`，行为等价；
+  仿真 `study.yaml` 的 `friction_quality_min` 同步改名。传感器切向 `4 N`／法向 `15 N` 量程与
+  每侧 `9` 触点数下沉为 `papillarray_hardware` 设备常量。
+- 配置默认值下沉为主力 profile：dataclass 默认即 `unified_adaptive` 的取值，
+  `unified_adaptive.yaml` 收敛为只写身份与真差异的 delta 形态，
+  `unified_adaptive_particle.yaml` 只写与主力的差异。
+- 非交互自动启动不再提供独立开关：由“任务时长有限且 `on_finished=return`”的组合派生。
+- 终端模式与刷新率、输出根目录改为 CLI 参数 `--terminal`／`--terminal-refresh-hz`／`--output`
+  （默认 `outputs/real`），不再写入 YAML。
+
+### 新增
+
+- 真机启动事件流首先输出 `safety_limits`：最终生效限幅表（目标上限、原始过力线、增／退力
+  速率、压缩行程、关节速度／力矩限幅与派生的统一调度包络、触点门槛），启动即可审计
+  “配置里写的”与“实际执行的”是否一致。
+- `config.json` 新增 `delta` 小节：只记录与默认配置的净差异（diff-only 形态），便于留档与评审。
+- `dmgripper-run` 新增 `--terminal`／`--terminal-refresh-hz` CLI 参数，接管原 `terminal`
+  配置节的终端模式与刷新率设置。
+- 行为等价已验证：重构前后两份配置对 70699 样本历史触觉记录的回放输出逐字节一致
+  （MD5 相同），双包测试 599 项全部通过。
+
+### 变更
+
+- 真机触觉记录改为异步批量落盘：`sample()` 只做有限性校验并入队，序列化与写盘由专用写线程
+  每 256 行或 0.25 s 提交，磁盘延迟不再进入触觉观测链路；写线程失败按记录失败向上传播，
+  收尾本为成功时升级为失败。进程被杀死时的丢失窗口不超过一个提交周期。
+
+- `tactile.jsonl` 每行浮点截断到 9 位有效数字（float32 可表示精度），`received_at_s` 保留
+  float64；分隔符收紧为无空格。行数与体积明显下降，读取端按行 `json.loads` 不变，旧记录可直接混用。
+
+- 新增 `recording` 配置节：`tactile_stride` 按设备包计数抽样正常包（首个与异常包始终保留），
+  真机配置取 4（约 250 Hz）；`max_duration_s`（默认 600 s）与 `max_tactile_mib`（默认
+  512 MiB）触发后按 release 语义受限回位正常收尾，manifest 新增 `stop_reason` 字段并记录
+  `recording_limit` 事件。记录器版本升至 1.12.0。
+
+- 新增 `scripts/maintenance/reencode_compress_tactile.py`：把存量 `tactile.jsonl` 就地重编码
+  （新编码语义）并 gzip 压缩为 `.gz`，逐行校验与 MD5 全量比对后原子替换；回放工具按扩展名
+  透明读取 `.gz`。
+
+- 深度先验支持 `max_increase_per_s: null` 关闭实际 μ 上调限速，当前 `unified_adaptive.yaml` 启用；接触确认、风险门控及目标力下降限速保持有效。
+
+- 当前真机 `unified_adaptive.yaml` 的深度摩擦先验范围调整为 `0.1–0.8`，曲率和实际采用速率保持原值。
+
 ### 修复
 
 - 补齐报告模板已被冒烟测试引用的 `data-table`，修复干净检出的报告编译失败。
@@ -15,6 +81,9 @@
 
 - 单次仿真 runner 在任务快照、实验执行或绘图异常后统一保存 `error.json`、已有输入和部分产物清单，
   并继续抛出原始异常；留档自身失败不会覆盖首个故障。科学验收失败仍由原有结果字段表达。
+
+- 深度摩擦先验按曲线有效区间内的深度确认稳定性，修复超过饱和点后候选已恒定、原始深度
+  继续变化却无限重置确认的问题。覆盖率、风险与执行门控、摩擦上调速率、力与压缩上限保持原值。
 
 - 通用实验绘图正确读取运行快照的 `effective` 配置，并在尚无起滑候选、但已有摩擦采用值或无滑移
   下界时保留摩擦面板，避免统一自适应成功运行的摩擦诊断图被错误省略。
@@ -58,6 +127,24 @@
   避免与 `pid-only` 的黑色实线在图例、曲线及灰度打印中混淆。
 
 ### 新增
+
+- 新增 `scripts/analysis/export_curve_video.py`：把 dmgripper run 的 `trace.csv` 用
+  Matplotlib `FuncAnimation` 导出为实时 1:1 数据曲线动画视频，样式复用
+  `plotstyle` 论文版式、图例与轴标以数学符号标注。默认输出 1440x1080（4:3）
+  @ 30 fps 白底 H.264 MP4，`--size` 支持 16:9、竖屏与 4K；`--alpha` 可选输出
+  ProRes 4444 透明 MOV（面板半透明白底，可叠加在实拍素材上合成）；打印重基时间
+  轴的阶段边界供剪辑对位。曲线不做平滑、不删异常点。
+
+- 真机深度先验改用首次双侧接触后实测关节角经非线性运动学换算的两指总闭合增量，不再消费
+  pillar 位移；增加 `safety.max_contact_compression_m`，统一配置取从首次单侧接触累计 `20 mm`。
+  实测达到边界或待发命令越界时进入故障保持，释放回位仍可执行；记录器升级为 `1.11.0`，
+  追加接触闭合基线、总压缩量和限值。通用 MIT 跟踪增益改为 `kp=10`、`kd=2`，回位独立。
+
+- 统一自适应入口及粒子配置新增可关闭的深度条件对数摩擦先验：接触压缩量生成
+  `0.1–0.6` 曲线，active 内每侧至少四点且深度稳定 `0.2 s` 后锁定本段先验，
+  不覆盖已消费的有效摩擦事件；控制 μ 上调限制为 `0.05/s`，接触或深度不可靠时禁止退力。
+  初始化和接触重置使用 `0.1`；记录器升级为 `1.10.0`，追加分侧深度、候选、锁定值与门控原因。
+  深度阈值与位移方向仍需传感器标定；经验先验不构成摩擦下界或真机验收结论。
 
 - 统一自适应导纳在预载刚度锁定后可直接初始化外环质量／阻尼，并可配置独立的闭合／张开速度与
   虚拟加速度边界。记录器升级为 1.9.0，追加导纳位移、速度、加速度及限幅状态。

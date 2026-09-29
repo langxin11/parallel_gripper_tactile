@@ -76,6 +76,12 @@ Pillar 碰撞几何属于 asset/profile，`scenes.custom` 负责把它装配进�
 `multiccd`。碰撞近似的当前默认、五条件因果对照与适用范围见
 [模型与测量验证](control-comparison-ablation.md#collision-geometry-conclusions)。
 
+
+深度条件摩擦先验由 `dm_grasp_core.grasp.friction_depth` 维护曲线与接触段锁定，统一策略负责
+证据优先级和最终采用速率。真机运行时用首次双侧接触角度建立先验总闭合量基线，
+目标适配将实测关节角换算的总压缩量传给策略；独立压缩保护从首次单侧接触累计，并检查测量及命令边界。
+共享核保留可选逐点位移兼容入口，该输入扩展不改变既有三轴触觉力契约。
+
 ## 运行产物流
 
 1. 组合服务校验并冻结 profile、task 与运行参数；runner 不重读原始片段。
@@ -87,6 +93,9 @@ Pillar 碰撞几何属于 asset/profile，`scenes.custom` 负责把它装配进�
 `runners/common.py` 统一快照序列化、成功定稿与执行异常留档；各 runner 继续拥有自己的输入字段、
 实验调用和科学失败判定。仿真 `experiments/force_tracking_trace.py` 与真机
 `dmgripper_experiments.trace` 只组装已采样数值的记录字段，不推进循环或改变设备命令与采样时序。
+真机 `dmgripper_experiments.recording` 的触觉流由专用写线程消费有界队列异步落盘，
+`sample()` 只做有限性校验并入队；序列化、float32 截断与批量提交都在控制与观测链路之外，
+写线程失败仍按记录失败向上传播。
 
 Hydra 拥有调用外层目录和组合来源，`RunDirectory` 拥有单次实验目录。研究的目录、哈希、失败分类、
 并行与恢复规则见[科研配置](research-configuration.md)，各实验的 trace 与指标见对应专题。
@@ -122,21 +131,14 @@ DM 的 PID、ADRC、导纳、刚度估计、运动学、目标曲线与触觉增
 接触变化、坏帧和间断撤销锁存；消费者按事件编号去重，续增不得冒充独立摩擦证据。
 高频日志保留逐事件候选，控制日志记录累计事件编号，不能用瞬时布尔量代替事件交付。
 
-真机通过显式 `reference.adaptive.tactile_sampling` 接入：硬件采集器提供可选快照转换回调，
-实验层 `HardwareTactilePreprocessor` 在采集线程处理完整包，并一次发布包含原始／预处理状态的
-`MultirateSnapshot`；硬件协议包不依赖抓取策略。设备时间用于滤波，主机单调接收时间用于新鲜度，
-控制侧只将已完成滤波的快照时间映射为接收时间，不用设备时间与主机时间直接相减。
-采集侧原始过力／逐触点量程异常先于中值处理，异常在采集线程锁存，运行时仍按统一模式失能。
-当前同步日志写入与串口吞吐仍需设备侧验证；软件接入不保证实测 1000 Hz 或硬实时 deadline。
+多速率预处理只属于仿真侧：真机曾有的采集线程内多速率预处理（`HardwareTactilePreprocessor`）
+已随配置重构删除，真机触觉不再使用多速率快照管线；硬件协议包不依赖抓取策略，
+原始过力与逐触点量程异常仍按统一模式失能。
 
-原厂短时滑移服务通过可选 `lifecycle.native_slip` 门控。实验层负责连续稳定接触、会话预算、
-结果有效期和冷却；硬件采集线程负责有界租期、串口启停与后续双侧反馈确认。控制线程只提交请求，
-不能直接写触觉串口。原始快照保留逐点原厂状态与估计，原厂结果当前仅旁路记录；
-具体参数、停止确认和软件时限边界见[真机短时辨识会话](dmgripper-experiments.md#native-slip-session)。
-独立 `papillarray-record --estimate-friction` 在稳定接触后运行只读取 `Fx/Fy/Fz` 的逐 pillar
-初始滑移估计，不发送原厂滑移服务命令；估计只写事件，尚不进入夹爪目标调度。显式原厂路径仅保留
-给复现实验与可选对照。完整 `dmgripper-run` 生命周期也可通过 `lifecycle.own_friction` 复用同一估计
-会话，使电机闭环、触觉采集和自主估计由一个运行目录统一拥有；该估计仍只记录，不修改目标力。
+真机旁路会话已随配置重构删除：`native_slip.py` 与 `legacy.py` 不再存在，
+`dmgripper-run` 的在线链路只保留统一摩擦估计，实验层控制器适配只剩导纳，目标来源只剩统一自适应。
+原厂滑移状态与自主逐 pillar 摩擦估计仅由独立 `papillarray-record` 的记录路径旁路留档，
+不进入夹爪目标调度，见[DMgripper 通用抓取实验](dmgripper-experiments.md)。
 
 重复或短期陈旧快照不允许目标增长，恢复时不补算历史增力；持续无效沿用统一策略失败超时。
 非法或超量程帧不能被中值滤波隐藏，缓冲必须发布无效状态而不是继续展示旧好帧。
