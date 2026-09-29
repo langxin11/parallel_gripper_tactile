@@ -156,7 +156,7 @@ class JsonlRunRecorder:
         )
 
     def _write(self, handle: TextIO, record: dict[str, object]) -> None:
-        """锁内写入并立即刷新，保留异常发生前的数据。"""
+        """锁内写入并立即刷新；进程退出后即可读，不保证断电与内核崩溃。"""
         with self._lock:
             if self._closed:
                 raise RuntimeError("记录器已经关闭")

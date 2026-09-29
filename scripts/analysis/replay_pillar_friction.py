@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import argparse
 import csv
+import gzip
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -44,6 +45,17 @@ from typing import Any
 from papillarray_hardware.acquisition import TactileSnapshot
 from papillarray_hardware.pillar_friction import PillarFrictionEstimator
 from papillarray_hardware.standalone import StandaloneSlipConfig, StandaloneSlipSession
+
+TACTILE_NAMES = ("tactile.jsonl", "tactile.jsonl.gz")
+
+
+def find_tactile(run_directory: Path) -> Path | None:
+    """返回运行目录下的触觉记录，优先未压缩版本。"""
+    for name in TACTILE_NAMES:
+        candidate = run_directory / name
+        if candidate.is_file():
+            return candidate
+    return None
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -104,7 +116,8 @@ class ReplayOutcome:
 
 def iter_snapshots(path: Path) -> Any:
     """把 ``tactile.jsonl`` 逐行还原为 ``TactileSnapshot``，供会话门禁消费。"""
-    with path.open(encoding="utf-8") as handle:
+    opener = gzip.open if path.suffix == ".gz" else Path.open
+    with opener(path, mode="rt", encoding="utf-8") as handle:
         for line in handle:
             if not line.strip():
                 continue
@@ -226,7 +239,9 @@ def replay(run_directory: Path) -> ReplayOutcome:
     stop_time_s: float | None = None
     armed: tuple[tuple[bool, ...], ...] = ()
     detected: tuple[tuple[bool, ...], ...] = ()
-    for sample in iter_snapshots(run_directory / "tactile.jsonl"):
+    tactile_path = find_tactile(run_directory)
+    assert tactile_path is not None, f"{run_directory} 下没有触觉记录"
+    for sample in iter_snapshots(tactile_path):
         snapshots += 1
         for event in session.update(sample, now_s=sample.received_at_s, worker=worker):
             name = event.get("event")
@@ -269,7 +284,9 @@ def replay_forced(run_directory: Path, *, phase: str) -> ReplayOutcome:
     started = False
     start_masks: tuple[tuple[bool, ...], ...] = ()
     previous: tuple[tuple[bool, ...], ...] = ()
-    snapshot_iter = iter_snapshots(run_directory / "tactile.jsonl")
+    tactile_path = find_tactile(run_directory)
+    assert tactile_path is not None, f"{run_directory} 下没有触觉记录"
+    snapshot_iter = iter_snapshots(tactile_path)
     for sample in snapshot_iter:
         if sample.timestamp_us * 1e-6 < window[0]:
             continue
@@ -420,7 +437,7 @@ def main() -> None:
     runs = arguments.run or sorted(
         path
         for path in arguments.root.iterdir()
-        if path.is_dir() and (path / "tactile.jsonl").exists()
+        if path.is_dir() and find_tactile(path) is not None
     )
     if not runs:
         raise SystemExit(f"未在 {arguments.root} 找到可用产物目录")
