@@ -1,7 +1,9 @@
 """不带子进程或旧版脚本导入的 CLI 集成测试。"""
 
+import re
 from pathlib import Path
 
+from click.testing import Result
 from typer.testing import CliRunner
 
 from parallel_gripper_tactile.cli import app
@@ -10,6 +12,16 @@ from parallel_gripper_tactile.cli import app
 ROOT = Path(__file__).resolve().parents[1]
 RUNNER = CliRunner()
 
+# typer/rich 在强制着色的终端（如 GitHub Actions 会设 GITHUB_ACTIONS 触发
+# typer 的 FORCE_TERMINAL）下会把 "--profile" 拆成 "-" 与 "-profile" 两段
+# 分别上色，两个连字符之间被 ANSI 转义码隔开，因此断言前先剥离颜色码。
+_ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def _plain(result: Result) -> str:
+    """返回去除 ANSI 颜色码后的命令输出。"""
+    return _ANSI_ESCAPE_RE.sub("", result.output)
+
 
 def test_root_and_subcommand_help_are_available() -> None:
     """规范 CLI 暴露所有公开的命令组。"""
@@ -17,20 +29,20 @@ def test_root_and_subcommand_help_are_available() -> None:
 
     assert result.exit_code == 0
     for command in ("validate", "assets", "run", "compare", "view", "runs"):
-        assert command in result.output
+        assert command in _plain(result)
     assert RUNNER.invoke(app, ["run", "grasp", "--help"]).exit_code == 0
     force_schedule_help = RUNNER.invoke(
         app, ["run", "force-schedule", "--help"], terminal_width=160
     )
     assert force_schedule_help.exit_code == 0
     for option in ("--profile", "--task", "--output-root", "--run-prefix", "--run-suffix"):
-        assert option in force_schedule_help.output
+        assert option in _plain(force_schedule_help)
     friction_estimate_help = RUNNER.invoke(
         app, ["run", "friction-estimate", "--help"], terminal_width=160
     )
     assert friction_estimate_help.exit_code == 0
     for option in ("--profile", "--task", "--output-root", "--run-prefix", "--run-suffix"):
-        assert option in friction_estimate_help.output
+        assert option in _plain(friction_estimate_help)
     discrete_force_help = RUNNER.invoke(
         app, ["run", "discrete-force", "--help"], terminal_width=180
     )
@@ -43,7 +55,7 @@ def test_root_and_subcommand_help_are_available() -> None:
         "--force-noise-std",
         "--noise-seed",
     ):
-        assert option in discrete_force_help.output
+        assert option in _plain(discrete_force_help)
     force_track_help = RUNNER.invoke(app, ["run", "force-track", "--help"], terminal_width=160)
     assert force_track_help.exit_code == 0
     for option in (
@@ -58,7 +70,7 @@ def test_root_and_subcommand_help_are_available() -> None:
         "--event-window",
         "--disable-multiccd",
     ):
-        assert option in force_track_help.output
+        assert option in _plain(force_track_help)
     assert RUNNER.invoke(app, ["run", "force-track-ablation", "--help"]).exit_code != 0
     assert RUNNER.invoke(app, ["compare", "tactile", "--help"]).exit_code == 0
 
@@ -72,7 +84,7 @@ def test_validate_profile_and_invalid_yaml_exit_codes(tmp_path: Path) -> None:
     invalid.write_text("schema_version: 9\n", encoding="utf-8")
     result = RUNNER.invoke(app, ["validate", str(invalid)])
     assert result.exit_code == 2
-    assert "Profile validation failed" in result.output
+    assert "Profile validation failed" in _plain(result)
 
 
 def test_runs_list_and_clean_are_safe_when_output_root_is_absent(tmp_path: Path) -> None:
@@ -81,4 +93,4 @@ def test_runs_list_and_clean_are_safe_when_output_root_is_absent(tmp_path: Path)
     assert RUNNER.invoke(app, ["runs", "list", "--output-root", str(output_root)]).exit_code == 0
     result = RUNNER.invoke(app, ["runs", "clean", "--all", "--output-root", str(output_root)])
     assert result.exit_code == 0
-    assert "Would remove 0" in result.output
+    assert "Would remove 0" in _plain(result)
